@@ -45,6 +45,9 @@
             pkgs.firecracker
             pkgs.iproute2
             pkgs.iptables
+            pkgs.busybox
+            pkgs.curl
+            pkgs.e2fsprogs
           ] ++ pkgs.lib.optionals isLinux [
             pkgs.mold
           ];

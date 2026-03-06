@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T15:36:01.259594441-08:00
+mode: manual
+---
+SRS-06 verification phase covers the in-repo guest-image pipeline, guest-image docs, and launch proof using the built artifact pair.

@@ -236,28 +236,33 @@ fn doctor(format: OutputFormat, config_path: Option<&std::path::Path>) -> Result
 fn run_artifacts(command: ArtifactCommand, config: &PortConfig) -> Result<()> {
     match command {
         ArtifactCommand::Build { artifact } => {
-            let spec = config
-                .artifacts
-                .kernels
-                .get(&artifact)
-                .or_else(|| config.artifacts.guest_images.get(&artifact))
-                .with_context(|| format!("unknown artifact '{artifact}'"))?;
-            println!("planned build command: {}", spec.build);
-            println!("artifact path: {}", spec.path.display());
+            let metadata = port_runtime::build_artifact(config, &artifact)?;
+            println!(
+                "built {} artifact '{}' at {}",
+                render_artifact_kind(metadata.kind),
+                metadata.name,
+                metadata.path.display()
+            );
         }
         ArtifactCommand::Validate { artifact } => {
-            let spec = config
-                .artifacts
-                .kernels
-                .get(&artifact)
-                .or_else(|| config.artifacts.guest_images.get(&artifact))
-                .with_context(|| format!("unknown artifact '{artifact}'"))?;
-            println!("planned validate command: {}", spec.validate);
-            println!("artifact path: {}", spec.path.display());
+            let metadata = port_runtime::validate_artifact(config, &artifact)?;
+            println!(
+                "validated {} artifact '{}' at {}",
+                render_artifact_kind(metadata.kind),
+                metadata.name,
+                metadata.path.display()
+            );
         }
     }
 
     Ok(())
+}
+
+fn render_artifact_kind(kind: port_model::ArtifactKind) -> &'static str {
+    match kind {
+        port_model::ArtifactKind::Kernel => "kernel",
+        port_model::ArtifactKind::GuestImage => "guest-image",
+    }
 }
 
 fn run_machine(command: MachineCommand, config: &PortConfig) -> Result<()> {

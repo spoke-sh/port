@@ -132,9 +132,18 @@ pub struct ArtifactCatalog {
 
 impl ArtifactCatalog {
     pub fn lookup(&self, name: &str) -> Option<&ArtifactSpec> {
+        self.lookup_named(name).map(|(_, spec)| spec)
+    }
+
+    pub fn lookup_named(&self, name: &str) -> Option<(ArtifactKind, &ArtifactSpec)> {
         self.kernels
             .get(name)
-            .or_else(|| self.guest_images.get(name))
+            .map(|spec| (ArtifactKind::Kernel, spec))
+            .or_else(|| {
+                self.guest_images
+                    .get(name)
+                    .map(|spec| (ArtifactKind::GuestImage, spec))
+            })
     }
 
     pub fn all(&self) -> impl Iterator<Item = (&str, &ArtifactSpec)> {
@@ -143,6 +152,12 @@ impl ArtifactCatalog {
             .chain(self.guest_images.iter())
             .map(|(name, spec)| (name.as_str(), spec))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactKind {
+    Kernel,
+    GuestImage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,5 +240,22 @@ mod tests {
         assert!(encoded.contains("[artifacts.kernels.demo-kernel]"));
         assert!(encoded.contains("[hosts.local]"));
         assert!(encoded.contains("[machines.demo.guest]"));
+    }
+
+    #[test]
+    fn artifact_catalog_reports_kernel_and_guest_image_kinds() {
+        let config = PortConfig::sample();
+
+        let (kernel_kind, _) = config
+            .artifacts
+            .lookup_named("demo-kernel")
+            .expect("kernel artifact should exist");
+        let (guest_kind, _) = config
+            .artifacts
+            .lookup_named("demo-guest")
+            .expect("guest image artifact should exist");
+
+        assert_eq!(kernel_kind, super::ArtifactKind::Kernel);
+        assert_eq!(guest_kind, super::ArtifactKind::GuestImage);
     }
 }

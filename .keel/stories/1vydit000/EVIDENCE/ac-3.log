@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-03-06T15:35:58.431977922-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && nix develop -c cargo run -p port-cli -- --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts validate --artifact demo-kernel && nix develop -c cargo run -p port-cli -- --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts validate --artifact demo-guest'
+---
+validated kernel: artifacts/kernel/demo/vmlinux
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel bytes: 44278288
+validated kernel artifact 'demo-kernel' at artifacts/kernel/demo/vmlinux
+validated guest image: artifacts/guest/demo/rootfs.ext4
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' at artifacts/guest/demo/rootfs.ext4
+
+--- stderr ---
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts validate --artifact demo-kernel`
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts validate --artifact demo-guest`
+e2fsck 1.47.3 (8-Jul-2025)

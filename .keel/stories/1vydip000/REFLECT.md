@@ -6,19 +6,7 @@ created_at: 2026-03-06T15:21:32
 
 ## Knowledge
 
-### 1vyeM0000: Prefer In-Process Daemons For Workspace CLI Integration Tests
-| Field | Value |
-|-------|-------|
-| **Category** | testing |
-| **Context** | When a CLI crate needs an integration test against a daemon implemented in another workspace crate |
-| **Insight** | Spawning the daemon crate in-process through a dev-dependency is more reliable than discovering a sibling workspace binary from the test harness |
-| **Suggested Action** | Prefer `thread::spawn` plus the daemon library entrypoint for workspace-local CLI integration tests unless the binary packaging itself is under test |
-| **Applies To** | `crates/*/tests/*.rs`, workspace daemons, CLI integration tests |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-06T23:24:00Z |
-| **Score** | 0.78 |
-| **Confidence** | 0.90 |
-| **Applied** | yes |
+- [1vyeM0000](../../knowledge/1vyeM0000.md) Prefer In-Process Daemons For Workspace CLI Integration Tests
 
 ## Observations
 

@@ -1,0 +1,41 @@
+---
+recorded_at: 2026-03-06T15:36:39.816672669-08:00
+command: bash /tmp/port-proof-artifacts/verify-built-guest-launch.sh
+---
+guest image artifact: artifacts/guest/demo/rootfs.ext4
+guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent
+built guest-image artifact 'demo-guest' at artifacts/guest/demo/rootfs.ext4
+validated guest image: artifacts/guest/demo/rootfs.ext4
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' at artifacts/guest/demo/rootfs.ext4
+launched machine: demo
+pid: 131664
+runtime dir: /tmp/port-artifact-proof-1772840193/demo
+firecracker binary: /nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker
+config path: /tmp/port-artifact-proof-1772840193/demo/firecracker-config.json
+firecracker log: /tmp/port-artifact-proof-1772840193/demo/firecracker.log
+console stdout: /tmp/port-artifact-proof-1772840193/demo/console.stdout.log
+console stderr: /tmp/port-artifact-proof-1772840193/demo/console.stderr.log
+manifest: /tmp/port-artifact-proof-1772840193/demo/manifest.json
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:5:pipelines to `demo-kernel` and `demo-guest`.
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:23:## Guest Image Artifact
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:26:  `port --config examples/port.toml artifacts build --artifact demo-guest`
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:30:  release build of `port-guest-agent`, BusyBox userspace from the development
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:36:  `/usr/bin/port-guest-agent`
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:40:  `/bin/busybox`, and `/usr/bin/port-guest-agent` exist and that `/init`
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:41:  launches `port-guest-agent`
+/home/alex/workspace/spoke-sh/port/README.md:92:nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
+/home/alex/workspace/spoke-sh/port/README.md:93:nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
+/home/alex/workspace/spoke-sh/port/README.md:100:- `demo-guest` builds a deterministic ext4 rootfs containing BusyBox userspace,
+/home/alex/workspace/spoke-sh/port/README.md:101:  `/init`, and the `port-guest-agent` binary, then validates the filesystem
+
+--- stderr ---
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts build --artifact demo-guest`
+    Finished `release` profile [optimized] target(s) in 0.04s
+e2fsck 1.47.3 (8-Jul-2025)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts validate --artifact demo-guest`
+e2fsck 1.47.3 (8-Jul-2025)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /home/alex/workspace/spoke-sh/port/examples/port.toml machine launch --machine demo --runtime-root /tmp/port-artifact-proof-1772840193 --boot-wait-secs 5`

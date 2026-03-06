@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T15:35:30.350937634-08:00
+mode: manual
+---
+SRS-05 verification phase covers the in-repo kernel pipeline, kernel docs, and shared validation commands for the MVP artifact flow.

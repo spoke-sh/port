@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
     GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
 };
-use port_model::{HostConnection, HostPlatform, PortConfig};
+use port_model::{ArtifactKind, HostConnection, HostPlatform, PortConfig};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,6 +100,19 @@ pub struct GuestRequest<'a> {
     pub operation: GuestOperation,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactAction {
+    Build,
+    Validate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactMetadata {
+    pub name: String,
+    pub kind: ArtifactKind,
+    pub path: PathBuf,
+}
+
 pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
     let host_os = env::consts::OS.to_string();
     let local_firecracker_supported = host_os == "linux";
@@ -130,9 +143,17 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
         "firecracker",
         local_firecracker_supported,
     ));
-    checks.push(binary_check("iproute2", "ip", local_firecracker_supported));
-    checks.push(binary_check(
+    checks.push(versioned_binary_check(
+        "iproute2",
+        "ip",
+        &["-V"],
+        "iproute2",
+        local_firecracker_supported,
+    ));
+    checks.push(versioned_binary_check(
         "iptables",
+        "iptables",
+        &["--version"],
         "iptables",
         local_firecracker_supported,
     ));
@@ -165,6 +186,14 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
         checks,
         notes,
     }
+}
+
+pub fn build_artifact(config: &PortConfig, name: &str) -> Result<ArtifactMetadata> {
+    run_artifact_pipeline(config, name, ArtifactAction::Build)
+}
+
+pub fn validate_artifact(config: &PortConfig, name: &str) -> Result<ArtifactMetadata> {
+    run_artifact_pipeline(config, name, ArtifactAction::Validate)
 }
 
 pub fn launch_local_machine(
@@ -366,12 +395,126 @@ fn binary_check(name: &str, binary: &str, required: bool) -> DoctorCheck {
     }
 }
 
+fn versioned_binary_check(
+    name: &str,
+    binary: &str,
+    args: &[&str],
+    needle: &str,
+    required: bool,
+) -> DoctorCheck {
+    match find_binary(binary) {
+        Some(path) => match Command::new(&path).args(args).output() {
+            Ok(output) => {
+                let combined = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if combined.contains(needle) {
+                    DoctorCheck {
+                        name: name.to_string(),
+                        ok: true,
+                        required,
+                        detail: format!(
+                            "Found '{binary}' at '{}' with expected identity.",
+                            path.display()
+                        ),
+                    }
+                } else {
+                    DoctorCheck {
+                        name: name.to_string(),
+                        ok: false,
+                        required,
+                        detail: format!(
+                            "Found '{binary}' at '{}', but version output did not contain '{needle}'.",
+                            path.display()
+                        ),
+                    }
+                }
+            }
+            Err(source) => DoctorCheck {
+                name: name.to_string(),
+                ok: false,
+                required,
+                detail: format!(
+                    "Found '{binary}' at '{}', but failed to inspect it: {source}.",
+                    path.display()
+                ),
+            },
+        },
+        None => DoctorCheck {
+            name: name.to_string(),
+            ok: false,
+            required,
+            detail: format!("Missing '{binary}' on PATH."),
+        },
+    }
+}
+
 fn find_binary(binary: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
 
     env::split_paths(&path)
         .map(|entry| entry.join(binary))
         .find(|candidate| candidate.is_file())
+}
+
+fn run_artifact_pipeline(
+    config: &PortConfig,
+    name: &str,
+    action: ArtifactAction,
+) -> Result<ArtifactMetadata> {
+    let (kind, spec) = config
+        .artifacts
+        .lookup_named(name)
+        .with_context(|| format!("unknown artifact '{name}'"))?;
+    let script = artifact_script(kind, action)?;
+
+    let status = Command::new(&script)
+        .arg(&spec.path)
+        .current_dir(repo_root()?)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("failed to start artifact pipeline '{}'", script.display()))?;
+
+    if !status.success() {
+        bail!(
+            "artifact pipeline '{}' exited with status {status}",
+            script.display()
+        );
+    }
+
+    Ok(ArtifactMetadata {
+        name: name.to_string(),
+        kind,
+        path: spec.path.clone(),
+    })
+}
+
+fn artifact_script(kind: ArtifactKind, action: ArtifactAction) -> Result<PathBuf> {
+    let script_name = match (kind, action) {
+        (ArtifactKind::Kernel, ArtifactAction::Build) => "build-kernel.sh",
+        (ArtifactKind::Kernel, ArtifactAction::Validate) => "validate-kernel.sh",
+        (ArtifactKind::GuestImage, ArtifactAction::Build) => "build-guest-image.sh",
+        (ArtifactKind::GuestImage, ArtifactAction::Validate) => "validate-guest-image.sh",
+    };
+    let path = repo_root()?.join("scripts/artifacts").join(script_name);
+    if path.is_file() {
+        Ok(path)
+    } else {
+        bail!("artifact pipeline script '{}' is missing", path.display())
+    }
+}
+
+fn repo_root() -> Result<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("failed to derive repository root from CARGO_MANIFEST_DIR"))
 }
 
 pub fn execute_guest_operation(request: GuestRequest<'_>) -> Result<OperationResult> {
@@ -505,7 +648,11 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{DoctorCheck, RuntimePaths, build_firecracker_config, path_check};
+    use super::{
+        ArtifactAction, DoctorCheck, RuntimePaths, artifact_script, build_firecracker_config,
+        path_check, repo_root,
+    };
+    use port_model::ArtifactKind;
 
     #[test]
     fn runtime_paths_are_deterministic() {
@@ -567,5 +714,21 @@ mod tests {
             }
         );
         assert!(!missing_check.ok);
+    }
+
+    #[test]
+    fn artifact_scripts_resolve_from_repository_root() {
+        let root = repo_root().expect("repo root should resolve");
+
+        assert_eq!(
+            artifact_script(ArtifactKind::Kernel, ArtifactAction::Build)
+                .expect("kernel build script should resolve"),
+            root.join("scripts/artifacts/build-kernel.sh")
+        );
+        assert_eq!(
+            artifact_script(ArtifactKind::GuestImage, ArtifactAction::Validate)
+                .expect("guest image validate script should resolve"),
+            root.join("scripts/artifacts/validate-guest-image.sh")
+        );
     }
 }

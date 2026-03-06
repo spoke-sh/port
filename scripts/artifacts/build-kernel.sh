@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <output-path>" >&2
+  exit 2
+fi
+
+output_path="$1"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+
+arch="$(uname -m)"
+case "$arch" in
+  x86_64)
+    kernel_key="firecracker-ci/v1.14/x86_64/vmlinux-6.1.155"
+    kernel_sha256="e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53"
+    ;;
+  aarch64)
+    kernel_key="firecracker-ci/v1.14/aarch64/vmlinux-6.1.155"
+    kernel_sha256="61baeae1ac6197be4fc5c71fa78df266acdc33c54570290d2f611c2b42c105be"
+    ;;
+  *)
+    echo "unsupported architecture for demo kernel pipeline: $arch" >&2
+    exit 1
+    ;;
+esac
+
+kernel_url="http://spec.ccfc.min.s3.amazonaws.com/${kernel_key}"
+tmp_file="$(mktemp)"
+trap 'rm -f "$tmp_file"' EXIT
+
+mkdir -p "$(dirname "$output_path")"
+curl -fsSL "$kernel_url" -o "$tmp_file"
+actual_sha256="$(sha256sum "$tmp_file" | awk '{print $1}')"
+
+if [[ "$actual_sha256" != "$kernel_sha256" ]]; then
+  echo "kernel sha256 mismatch: expected $kernel_sha256 got $actual_sha256" >&2
+  exit 1
+fi
+
+install -m 0644 "$tmp_file" "$output_path"
+printf 'kernel source: %s\n' "$kernel_url"
+printf 'kernel sha256: %s\n' "$actual_sha256"
+printf 'kernel artifact: %s\n' "$output_path"

@@ -1,0 +1,19 @@
+---
+recorded_at: 2026-03-06T15:35:53.500438158-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && nix develop -c cargo run -p port-cli -- --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts build --artifact demo-kernel && rg -n "demo-kernel|Kernel Artifact" /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/artifacts.md'
+---
+kernel source: http://spec.ccfc.min.s3.amazonaws.com/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel artifact: artifacts/kernel/demo/vmlinux
+built kernel artifact 'demo-kernel' at artifacts/kernel/demo/vmlinux
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:5:pipelines to `demo-kernel` and `demo-guest`.
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:7:## Kernel Artifact
+/home/alex/workspace/spoke-sh/port/docs/artifacts.md:10:  `port --config examples/port.toml artifacts build --artifact demo-kernel`
+/home/alex/workspace/spoke-sh/port/README.md:90:nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+/home/alex/workspace/spoke-sh/port/README.md:91:nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
+/home/alex/workspace/spoke-sh/port/README.md:98:- `demo-kernel` fetches a pinned Firecracker-compatible kernel from the official
+/home/alex/workspace/spoke-sh/port/README.md:157:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+
+--- stderr ---
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /home/alex/workspace/spoke-sh/port/examples/port.toml artifacts build --artifact demo-kernel`

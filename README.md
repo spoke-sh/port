@@ -45,8 +45,9 @@ machine, a lab environment, or cloud-hosted Linux capacity.
 
 Port is early-stage and under active development. The repository now contains
 the canonical Rust workspace, a working local Linux Firecracker launch path,
-and the first guest-agent-backed CLI workflows. Artifact production and cloud
-host support are still being implemented story by story.
+the first guest-agent-backed CLI workflows, and in-repo kernel plus guest-image
+artifact pipelines. Cloud host support and cross-platform operator guidance are
+still being implemented story by story.
 
 ## CLI Surface
 
@@ -69,6 +70,8 @@ model and examples.
 
 Current behavior:
 
+- `port artifacts build` and `port artifacts validate` now run real in-repo
+  kernel and guest-image pipelines for the MVP sample config.
 - `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
   `ip`, and `iptables`. When you pass `--config`, it also validates referenced
   artifact paths.
@@ -78,6 +81,28 @@ Current behavior:
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
   guest-agent protocol through the canonical CLI and return structured results
   rendered as human-readable CLI output.
+
+## Artifact Workflow
+
+Build the sample artifacts through the canonical CLI:
+
+```bash
+nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
+nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
+nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
+```
+
+Artifact contracts:
+
+- `demo-kernel` fetches a pinned Firecracker-compatible kernel from the official
+  Firecracker CI bucket and validates its architecture-specific sha256 digest.
+- `demo-guest` builds a deterministic ext4 rootfs containing BusyBox userspace,
+  `/init`, and the `port-guest-agent` binary, then validates the filesystem
+  layout with `e2fsck` and `debugfs`.
+
+Detailed contracts, inputs, outputs, and validation expectations live in
+[`docs/artifacts.md`](docs/artifacts.md).
 
 ## Guest Agent Workflow
 
@@ -129,13 +154,14 @@ You can inspect the current surface with:
 
 ```bash
 cargo run -p port-cli -- --help
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
 cargo run -p port-cli -- doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 ```
 
-The checked-in example config still points at placeholder artifact paths.
-Supplying real kernel and rootfs paths is enough to exercise the local launch
-workflow today; the in-repo artifact pipeline lands in the next story.
+The checked-in example config points at deterministic artifact output paths.
+Build the sample kernel and guest image first, then use the same config to run
+`port doctor` and `port machine launch`.
 
 ## Current Platform Boundary
 
@@ -158,7 +184,8 @@ nix develop
 Repository automation and planning workflow live in [AGENTS.md](AGENTS.md).
 
 On Linux, `nix develop` now includes Firecracker plus the host networking tools
-needed by the local launch path.
+needed by the local launch path, along with the artifact-tooling dependencies
+used by the sample kernel and guest-image pipelines.
 
 The current Rust verification command is:
 
