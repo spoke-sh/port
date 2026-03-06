@@ -1,11 +1,16 @@
 use std::env;
 use std::fs::{self, File};
+use std::io::{BufReader, BufWriter};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use port_agent_protocol::{
+    GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
+};
 use port_model::{HostConnection, HostPlatform, PortConfig};
 use serde::Serialize;
 
@@ -66,6 +71,7 @@ pub struct RuntimePaths {
     pub manifest_path: PathBuf,
     pub pid_path: PathBuf,
     pub vsock_path: PathBuf,
+    pub guest_agent_socket: PathBuf,
 }
 
 impl RuntimePaths {
@@ -81,9 +87,17 @@ impl RuntimePaths {
             manifest_path: runtime_dir.join("manifest.json"),
             pid_path: runtime_dir.join("firecracker.pid"),
             vsock_path: runtime_dir.join("guest.vsock"),
+            guest_agent_socket: runtime_dir.join("guest-agent.sock"),
             runtime_dir,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct GuestRequest<'a> {
+    pub machine_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub operation: GuestOperation,
 }
 
 pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
@@ -358,6 +372,60 @@ fn find_binary(binary: &str) -> Option<PathBuf> {
     env::split_paths(&path)
         .map(|entry| entry.join(binary))
         .find(|candidate| candidate.is_file())
+}
+
+pub fn execute_guest_operation(request: GuestRequest<'_>) -> Result<OperationResult> {
+    let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
+    if !paths.guest_agent_socket.exists() {
+        bail!(
+            "guest agent socket '{}' does not exist for machine '{}'",
+            paths.guest_agent_socket.display(),
+            request.machine_name
+        );
+    }
+
+    let stream = UnixStream::connect(&paths.guest_agent_socket).with_context(|| {
+        format!(
+            "failed to connect to guest agent socket '{}'",
+            paths.guest_agent_socket.display()
+        )
+    })?;
+    let writer_stream = stream
+        .try_clone()
+        .context("failed to clone guest agent socket")?;
+    let mut writer = BufWriter::new(writer_stream);
+    let mut reader = BufReader::new(stream);
+
+    write_frame(
+        &mut writer,
+        &RequestEnvelope {
+            id: 1,
+            operation: request.operation,
+        },
+    )
+    .map_err(|error| anyhow!("protocol error: {error}"))?;
+
+    let response: ResponseEnvelope =
+        read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+
+    match response {
+        ResponseEnvelope::Completed {
+            exit_code: 0,
+            result,
+            ..
+        } => Ok(result),
+        ResponseEnvelope::Completed {
+            exit_code, result, ..
+        } => {
+            bail!("guest operation failed with exit code {exit_code}: {result:?}")
+        }
+        ResponseEnvelope::Failed { message, .. } => {
+            bail!("guest agent returned an error: {message}")
+        }
+        ResponseEnvelope::Accepted { .. } => {
+            bail!("streaming guest operations are not implemented yet")
+        }
+    }
 }
 
 fn build_firecracker_config(

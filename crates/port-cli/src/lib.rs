@@ -3,8 +3,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use port_agent_protocol::{
+    CopyDirection, CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest,
+    OperationResult, PtyRequest,
+};
 use port_model::PortConfig;
-use port_runtime::{DoctorReport, LaunchRequest};
+use port_runtime::{DoctorReport, GuestRequest, LaunchRequest};
 use serde::Serialize;
 
 const EXAMPLES: &str = "\
@@ -12,7 +16,10 @@ Examples:
   port doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel
   port --config examples/port.toml machine launch --machine demo
-  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'";
+  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
+  port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -54,6 +61,12 @@ pub enum Command {
 pub enum OutputFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CopyDirectionArg {
+    HostToGuest,
+    GuestToHost,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -98,6 +111,8 @@ pub enum GuestCommand {
     Exec {
         #[arg(long)]
         machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
@@ -105,6 +120,10 @@ pub enum GuestCommand {
     Copy {
         #[arg(long)]
         machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, value_enum)]
+        direction: CopyDirectionArg,
         #[arg(long)]
         source: String,
         #[arg(long)]
@@ -114,15 +133,21 @@ pub enum GuestCommand {
     Pty {
         #[arg(long)]
         machine: String,
-        #[arg(long, default_value = "/bin/sh")]
-        command: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
     },
     #[command(about = "Stream guest logs exposed by the agent")]
     Logs {
         #[arg(long)]
         machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
         #[arg(long, default_value = "/var/log/port-agent.log")]
         path: String,
+        #[arg(long)]
+        tail_lines: Option<u32>,
         #[arg(long)]
         follow: bool,
     },
@@ -130,6 +155,8 @@ pub enum GuestCommand {
     Forward {
         #[arg(long)]
         machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
         #[arg(long)]
         listen: String,
         #[arg(long)]
@@ -268,40 +295,116 @@ fn run_machine(command: MachineCommand, config: &PortConfig) -> Result<()> {
 
 fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
     match command {
-        GuestCommand::Exec { machine, command } => {
+        GuestCommand::Exec {
+            machine,
+            runtime_root,
+            command,
+        } => {
             ensure_machine_exists(config, &machine)?;
-            println!(
-                "planned guest exec: machine={machine} command={}",
-                command.join(" ")
-            );
+            match port_runtime::execute_guest_operation(GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Exec(ExecRequest {
+                    command,
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            })? {
+                OperationResult::Exec(result) => {
+                    print!("{}", result.stdout);
+                    eprint!("{}", result.stderr);
+                }
+                other => bail!("unexpected guest exec result: {other:?}"),
+            }
         }
         GuestCommand::Copy {
             machine,
+            runtime_root,
+            direction,
             source,
             destination,
         } => {
             ensure_machine_exists(config, &machine)?;
-            println!("planned guest copy: machine={machine} {source} -> {destination}");
+            match port_runtime::execute_guest_operation(GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Copy(CopyRequest {
+                    source,
+                    destination,
+                    direction: direction.into(),
+                }),
+            })? {
+                OperationResult::Copy(result) => {
+                    println!(
+                        "copied {} bytes via {:?} to {}",
+                        result.bytes_copied, result.direction, result.path
+                    );
+                }
+                other => bail!("unexpected guest copy result: {other:?}"),
+            }
         }
-        GuestCommand::Pty { machine, command } => {
+        GuestCommand::Pty {
+            machine,
+            runtime_root,
+            command,
+        } => {
             ensure_machine_exists(config, &machine)?;
-            println!("planned guest pty: machine={machine} command={command}");
+            match port_runtime::execute_guest_operation(GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Pty(PtyRequest {
+                    command,
+                    cols: 80,
+                    rows: 24,
+                }),
+            })? {
+                OperationResult::Pty(result) => {
+                    print!("{}", result.transcript);
+                }
+                other => bail!("unexpected guest pty result: {other:?}"),
+            }
         }
         GuestCommand::Logs {
             machine,
+            runtime_root,
             path,
+            tail_lines,
             follow,
         } => {
             ensure_machine_exists(config, &machine)?;
-            println!("planned guest logs: machine={machine} path={path} follow={follow}");
+            match port_runtime::execute_guest_operation(GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Logs(LogsRequest {
+                    path,
+                    follow,
+                    tail_lines,
+                }),
+            })? {
+                OperationResult::Logs(result) => {
+                    print!("{}", result.contents);
+                }
+                other => bail!("unexpected guest logs result: {other:?}"),
+            }
         }
         GuestCommand::Forward {
             machine,
+            runtime_root,
             listen,
             target,
         } => {
             ensure_machine_exists(config, &machine)?;
-            println!("planned guest forward: machine={machine} listen={listen} target={target}");
+            match port_runtime::execute_guest_operation(GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Forward(ForwardRequest { listen, target }),
+            })? {
+                OperationResult::Forward(result) => {
+                    println!("forward listening: {}", result.listen);
+                    println!("forward target: {}", result.target);
+                }
+                other => bail!("unexpected guest forward result: {other:?}"),
+            }
         }
     }
 
@@ -345,7 +448,10 @@ pub fn render_subcommand_help(name: &str) -> Option<String> {
 mod tests {
     use clap::Parser;
 
-    use super::{Cli, Command, GuestCommand, MachineCommand, render_help, render_subcommand_help};
+    use super::{
+        Cli, Command, CopyDirectionArg, GuestCommand, MachineCommand, render_help,
+        render_subcommand_help,
+    };
 
     #[test]
     fn help_includes_primary_surfaces() {
@@ -411,9 +517,50 @@ mod tests {
         ]);
 
         match cli.command {
-            Command::Guest(GuestCommand::Exec { machine, command }) => {
+            Command::Guest(GuestCommand::Exec {
+                machine,
+                runtime_root,
+                command,
+            }) => {
                 assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("runtime"));
                 assert_eq!(command, ["/bin/sh", "-lc", "uname -a"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_guest_copy_direction_and_runtime_root() {
+        let cli = Cli::parse_from([
+            "port",
+            "guest",
+            "copy",
+            "--machine",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--direction",
+            "guest-to-host",
+            "--source",
+            "/tmp/in-guest.txt",
+            "--destination",
+            "./copied.txt",
+        ]);
+
+        match cli.command {
+            Command::Guest(GuestCommand::Copy {
+                machine,
+                runtime_root,
+                direction,
+                source,
+                destination,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(direction, CopyDirectionArg::GuestToHost);
+                assert_eq!(source, "/tmp/in-guest.txt");
+                assert_eq!(destination, "./copied.txt");
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -436,6 +583,15 @@ impl From<DoctorReport> for RenderedDoctorReport {
                     detail: check.detail,
                 })
                 .collect(),
+        }
+    }
+}
+
+impl From<CopyDirectionArg> for CopyDirection {
+    fn from(value: CopyDirectionArg) -> Self {
+        match value {
+            CopyDirectionArg::HostToGuest => Self::HostToGuest,
+            CopyDirectionArg::GuestToHost => Self::GuestToHost,
         }
     }
 }

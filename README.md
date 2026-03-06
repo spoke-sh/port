@@ -44,9 +44,9 @@ machine, a lab environment, or cloud-hosted Linux capacity.
 ## Project Status
 
 Port is early-stage and under active development. The repository now contains
-the canonical Rust workspace, shared model, and the first public CLI surface,
-but Firecracker launch, guest-agent behavior, and artifact production are still
-being implemented story by story.
+the canonical Rust workspace, a working local Linux Firecracker launch path,
+and the first guest-agent-backed CLI workflows. Artifact production and cloud
+host support are still being implemented story by story.
 
 ## CLI Surface
 
@@ -58,9 +58,9 @@ port artifacts build --artifact <name>
 port artifacts validate --artifact <name>
 port machine launch --machine <name>
 port guest exec --machine <name> -- <command...>
-port guest copy --machine <name> --source <path> --destination <path>
-port guest pty --machine <name>
-port guest logs --machine <name>
+port guest copy --machine <name> --direction <host-to-guest|guest-to-host> --source <path> --destination <path>
+port guest pty --machine <name> -- <command...>
+port guest logs --machine <name> --path <path> [--tail-lines <n>] [--follow]
 port guest forward --machine <name> --listen <addr> --target <addr>
 ```
 
@@ -75,6 +75,42 @@ Current behavior:
 - `port machine launch` now writes a Firecracker config plus runtime metadata
   and console/log files under the chosen runtime root before invoking
   Firecracker with `--config-file`.
+- `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
+  guest-agent protocol through the canonical CLI and return structured results
+  rendered as human-readable CLI output.
+
+## Guest Agent Workflow
+
+The current MVP guest-agent transport is a Unix socket at
+`<runtime-root>/<machine>/guest-agent.sock`. The `port guest ...` commands use
+that path by default with `--runtime-root runtime`.
+
+Example flows:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml guest exec \
+  --machine demo --runtime-root /tmp/port-runtime -- \
+  /bin/sh -lc 'uname -a'
+
+cargo run -p port-cli -- --config examples/port.toml guest copy \
+  --machine demo --runtime-root /tmp/port-runtime \
+  --direction host-to-guest \
+  --source ./host.txt --destination /workspace/host.txt
+
+cargo run -p port-cli -- --config examples/port.toml guest logs \
+  --machine demo --runtime-root /tmp/port-runtime \
+  --path /var/log/port-agent.log --tail-lines 50
+
+cargo run -p port-cli -- --config examples/port.toml guest forward \
+  --machine demo --runtime-root /tmp/port-runtime \
+  --listen 127.0.0.1:8080 --target 127.0.0.1:80
+```
+
+Current limitation:
+
+- The CLI/runtime protocol and host-side agent socket are implemented now.
+- The artifact/image pipeline that embeds and launches the guest agent inside
+  the Firecracker guest is still separate MVP work.
 
 ## Model And Example Config
 

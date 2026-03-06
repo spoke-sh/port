@@ -1,16 +1,19 @@
 [package]
-name = "port-runtime"
+name = "port-guest-agent"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "port-guest-agent"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
+portable-pty.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
 serde.workspace = true
 serde_json.workspace = true
-port-model = { path = "../port-model" }
-
-[dev-dependencies]
 tempfile.workspace = true

@@ -1,0 +1,33 @@
+---
+recorded_at: 2026-03-06T15:21:19.191229050-08:00
+command: bash -lc 'cargo run -p port-cli -- guest --help && cargo test -p port-cli --test guest_commands'
+---
+Reach guest agent capabilities
+
+Usage: port guest [OPTIONS] <COMMAND>
+
+Commands:
+  exec     Run a non-interactive command in the guest
+  copy     Copy files between host and guest
+  pty      Open an interactive PTY-backed session in the guest
+  logs     Stream guest logs exposed by the agent
+  forward  Forward a local listener into the guest through the agent
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>  Load a Port model from a TOML file instead of using the built-in sample
+  -h, --help           Print help
+
+running 1 test
+test cli_guest_commands_cover_all_capabilities ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+
+--- stderr ---
+   Compiling port-cli v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.59s
+     Running `/home/alex/.cache/cargo-target/port/debug/port guest --help`
+   Compiling port-cli v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.60s
+     Running tests/guest_commands.rs (/home/alex/.cache/cargo-target/port/debug/deps/guest_commands-01e35c5876c4d372)

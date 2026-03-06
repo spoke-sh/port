@@ -6,19 +6,7 @@ created_at: 2026-03-06T14:59:11
 
 ## Knowledge
 
-### 1vye8L000: Firecracker 1.14 Uses `smt` In `machine-config`
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | Generating Firecracker JSON config files for `--config-file` launch on Firecracker 1.14.x |
-| **Insight** | Current Firecracker 1.14 rejects the older `machine-config.ht_enabled` field and expects `machine-config.smt` instead. Using the older field fails fast during JSON parsing before the microVM starts. |
-| **Suggested Action** | Match generated config fields to the live Firecracker binary in the dev shell and confirm with an executable launch proof before trusting older examples. |
-| **Applies To** | `crates/port-runtime/*`, Firecracker config generation, local launch proofs |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-06T22:58:00Z |
-| **Score** | 0.88 |
-| **Confidence** | 0.97 |
-| **Applied** | yes |
+- [1vye8L000](../../knowledge/1vye8L000.md) Firecracker 1.14 Uses `smt` In `machine-config`
 
 ## Observations
 

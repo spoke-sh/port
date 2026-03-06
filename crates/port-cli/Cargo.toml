@@ -18,3 +18,8 @@ toml.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
 port-model = { path = "../port-model" }
 port-runtime = { path = "../port-runtime" }
+
+[dev-dependencies]
+assert_cmd = "2.0.16"
+port-guest-agent = { path = "../port-guest-agent" }
+tempfile.workspace = true
