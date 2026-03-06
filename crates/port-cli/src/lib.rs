@@ -19,14 +19,19 @@ Examples:
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
-  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80";
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
+
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host; local Firecracker launch requires Linux and /dev/kvm.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.";
 
 #[derive(Debug, Parser)]
 #[command(
     name = "port",
     version,
     about = "CLI-first Firecracker orchestration for local and cloud Linux hosts",
-    long_about = "Port manages Firecracker-backed Linux workloads through one canonical CLI and shared machine model.",
+    long_about = "Port manages Firecracker-backed Linux workloads through one canonical CLI and shared machine model. Local Firecracker launch is supported on Linux hosts; macOS and Windows operators use Linux or WSL-backed workflows.",
     after_help = EXAMPLES
 )]
 pub struct Cli {
@@ -463,7 +468,15 @@ mod tests {
         let help = render_help();
         let guest_help = render_subcommand_help("guest").expect("guest help should exist");
 
-        for keyword in ["doctor", "artifacts", "machine", "guest"] {
+        for keyword in [
+            "doctor",
+            "artifacts",
+            "machine",
+            "guest",
+            "Linux",
+            "macOS",
+            "Windows",
+        ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }
 

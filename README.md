@@ -31,23 +31,27 @@ Port is intended to manage Firecracker microVMs that can be used to:
 
 ## Platform Support
 
-Port is being designed for Linux-based Firecracker execution and for operator
-workflows from:
+Port currently supports one real Firecracker execution lane and two documented
+operator lanes around it:
 
-- Linux
-- macOS
-- Windows via WSL
+- Linux: run the full local MVP workflow, including artifact build, `port doctor`,
+  and `port machine launch`, on a host where `port doctor` passes.
+- macOS: work locally if you want, but run the canonical `port` commands on a
+  Linux host because Firecracker local launch requires Linux and `/dev/kvm`.
+- Windows: use WSL for the repository and CLI if helpful, but treat `port doctor`
+  as the gate for whether local Firecracker launch is actually available in that
+  Linux environment. Otherwise run the same `port` commands on a remote Linux
+  host.
 
-The goal is a consistent CLI experience whether you are managing a local
-machine, a lab environment, or cloud-hosted Linux capacity.
+Detailed operator workflows live in [`docs/operators.md`](docs/operators.md).
 
 ## Project Status
 
 Port is early-stage and under active development. The repository now contains
 the canonical Rust workspace, a working local Linux Firecracker launch path,
 the first guest-agent-backed CLI workflows, and in-repo kernel plus guest-image
-artifact pipelines. Cloud host support and cross-platform operator guidance are
-still being implemented story by story.
+artifact pipelines. Cloud host support is still being implemented story by
+story.
 
 ## CLI Surface
 
@@ -81,6 +85,30 @@ Current behavior:
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
   guest-agent protocol through the canonical CLI and return structured results
   rendered as human-readable CLI output.
+
+## Linux Local Workflow
+
+The supported end-to-end Linux MVP workflow is:
+
+```bash
+nix develop
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
+cargo run -p port-cli -- --config examples/port.toml doctor
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+```
+
+What that produces:
+
+- deterministic artifacts under `artifacts/`
+- host validation through `port doctor`
+- Firecracker runtime state, logs, and manifest files under the chosen runtime root
+
+The current guest-command workflow is still separate from the launched VM path:
+`port guest ...` targets the runtime guest-agent socket at
+`<runtime-root>/<machine>/guest-agent.sock`. The built guest image now embeds
+`port-guest-agent`, but the canonical host-side guest CLI transport is still the
+runtime socket workflow until the host/guest transport is unified.
 
 ## Artifact Workflow
 
@@ -133,9 +161,9 @@ cargo run -p port-cli -- --config examples/port.toml guest forward \
 
 Current limitation:
 
-- The CLI/runtime protocol and host-side agent socket are implemented now.
-- The artifact/image pipeline that embeds and launches the guest agent inside
-  the Firecracker guest is still separate MVP work.
+- The guest image now embeds and launches `port-guest-agent`.
+- The canonical host-side `port guest ...` commands still target the runtime
+  socket workflow rather than a launched Firecracker guest transport.
 
 ## Model And Example Config
 
@@ -166,9 +194,10 @@ Build the sample kernel and guest image first, then use the same config to run
 ## Current Platform Boundary
 
 - Linux is the only platform expected to run Firecracker locally.
-- macOS operators are expected to target remote Linux hosts.
-- Windows operators are expected to use a Linux or WSL-backed workflow when a
-  local Linux environment is required.
+- macOS operators are expected to target Linux hosts for actual Firecracker
+  execution.
+- Windows operators are expected to use Linux or WSL-backed workflows and let
+  `port doctor` confirm whether local launch is available in that environment.
 
 `port doctor` is the canonical entrypoint for surfacing those support
 boundaries in the CLI.

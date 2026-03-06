@@ -1,0 +1,21 @@
+---
+recorded_at: 2026-03-06T15:42:19.429990510-08:00
+command: rg -n 'Windows|WSL|/dev/kvm|remote Linux host' /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/operators.md
+---
+/home/alex/workspace/spoke-sh/port/docs/operators.md:4:Windows operators.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:10:| Linux host with `/dev/kvm` and Firecracker | Run the full local Port workflow directly through the `port` CLI | n/a | Firecracker local launch requires Linux and KVM |
+/home/alex/workspace/spoke-sh/port/docs/operators.md:11:| macOS workstation | Edit or inspect the repo locally, then run `port` on a Linux host | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm` |
+/home/alex/workspace/spoke-sh/port/docs/operators.md:12:| Windows workstation | Use WSL or a remote Linux host for the Linux-side `port` workflow | Native Windows Firecracker launch | Firecracker local launch requires a Linux environment with `/dev/kvm`; not every WSL setup exposes that capability |
+/home/alex/workspace/spoke-sh/port/docs/operators.md:51:  MVP launch path requires Linux and `/dev/kvm`.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:53:## Windows Workflow
+/home/alex/workspace/spoke-sh/port/docs/operators.md:55:The supported Windows workflow is a Linux-backed one:
+/home/alex/workspace/spoke-sh/port/docs/operators.md:57:1. Use WSL if you want a local Linux shell for the repository and CLI.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:59:3. If `port doctor` reports missing `/dev/kvm`, Firecracker, or other required
+/home/alex/workspace/spoke-sh/port/docs/operators.md:60:   Linux host capabilities, switch to a remote Linux host and run the same `port`
+/home/alex/workspace/spoke-sh/port/docs/operators.md:65:- WSL or remote Linux is valid for editing the model, building artifacts, and
+/home/alex/workspace/spoke-sh/port/docs/operators.md:70:- Native Windows is not a supported Firecracker execution environment for the
+/home/alex/workspace/spoke-sh/port/docs/operators.md:71:  MVP, and WSL availability of the required Linux virtualization features is an
+/home/alex/workspace/spoke-sh/port/README.md:40:  Linux host because Firecracker local launch requires Linux and `/dev/kvm`.
+/home/alex/workspace/spoke-sh/port/README.md:41:- Windows: use WSL for the repository and CLI if helpful, but treat `port doctor`
+/home/alex/workspace/spoke-sh/port/README.md:79:- `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
+/home/alex/workspace/spoke-sh/port/README.md:199:- Windows operators are expected to use Linux or WSL-backed workflows and let

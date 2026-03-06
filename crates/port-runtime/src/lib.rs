@@ -176,7 +176,10 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
     let notes = vec![
         String::from("port doctor reports the host state without mutating runtime directories."),
         String::from(
-            "macOS and Windows operators should target remote Linux hosts for Firecracker execution.",
+            "macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.",
+        ),
+        String::from(
+            "Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.",
         ),
     ];
 

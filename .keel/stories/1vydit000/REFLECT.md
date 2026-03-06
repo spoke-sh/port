@@ -6,19 +6,7 @@ created_at: 2026-03-06T15:37:00
 
 ## Knowledge
 
-### 1vyeN0000: Build Firecracker Rootfs Images Without Privileged Mounts
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | When Port needs to build a minimal guest image inside the repository or CI without root-only mount steps |
-| **Insight** | `mkfs.ext4 -d` plus `ldd`-discovered shared libraries is enough to assemble a bootable ext4 guest image carrying dynamic binaries like BusyBox and `port-guest-agent` |
-| **Suggested Action** | Prefer staging-directory image assembly with `mkfs.ext4 -d`, `e2fsck`, and `debugfs` before introducing mount-based image mutation tooling |
-| **Applies To** | `scripts/artifacts/*.sh`, guest image pipelines, future cloud image assembly |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-06T23:37:00Z |
-| **Score** | 0.86 |
-| **Confidence** | 0.93 |
-| **Applied** | yes |
+- [1vyeN0000](../../knowledge/1vyeN0000.md) Build Firecracker Rootfs Images Without Privileged Mounts
 
 ## Observations
 

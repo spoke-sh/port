@@ -25,7 +25,7 @@ started_at: 2026-03-06T14:40:38
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/5 stories complete
+**Progress:** 4/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -33,5 +33,5 @@ started_at: 2026-03-06T14:40:38
 | [Document Operator Workflows](../../../../stories/1vydgm000/README.md) | feat | backlog |
 | [Implement Local Firecracker Launch](../../../../stories/1vydim000/README.md) | feat | done |
 | [Deliver Guest Agent Capabilities](../../../../stories/1vydip000/README.md) | feat | done |
-| [Build Artifact Pipelines And Docs](../../../../stories/1vydit000/README.md) | feat | backlog |
+| [Build Artifact Pipelines And Docs](../../../../stories/1vydit000/README.md) | feat | done |
 <!-- END GENERATED -->

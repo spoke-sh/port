@@ -1,0 +1,12 @@
+---
+recorded_at: 2026-03-06T15:42:09.513191613-08:00
+command: rg -n 'Linux Local Workflow|artifacts build --artifact demo-kernel|machine launch --machine demo' /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/operators.md
+---
+/home/alex/workspace/spoke-sh/port/docs/operators.md:20:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+/home/alex/workspace/spoke-sh/port/docs/operators.md:25:cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+/home/alex/workspace/spoke-sh/port/README.md:89:## Linux Local Workflow
+/home/alex/workspace/spoke-sh/port/README.md:95:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+/home/alex/workspace/spoke-sh/port/README.md:98:cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+/home/alex/workspace/spoke-sh/port/README.md:118:nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+/home/alex/workspace/spoke-sh/port/README.md:185:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+/home/alex/workspace/spoke-sh/port/README.md:187:cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo

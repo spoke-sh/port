@@ -1,0 +1,60 @@
+---
+recorded_at: 2026-03-06T15:42:30.585051453-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && nix develop -c cargo run -p port-cli -- --help && nix develop -c cargo run -p port-cli -- doctor'
+---
+Port manages Firecracker-backed Linux workloads through one canonical CLI and shared machine model.
+Local Firecracker launch is supported on Linux hosts; macOS and Windows operators use Linux or
+WSL-backed workflows.
+
+Usage: port [OPTIONS] <COMMAND>
+
+Commands:
+  doctor     Inspect platform support and host requirements
+  artifacts  Build and validate kernel or guest artifacts
+  machine    Launch and inspect Port-managed machines
+  guest      Reach guest agent capabilities
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>
+          Load a Port model from a TOML file instead of using the built-in sample
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Examples:
+  port doctor
+  port --config examples/port.toml artifacts build --artifact demo-kernel
+  port --config examples/port.toml machine launch --machine demo
+  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
+  port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source
+  ./host.txt --destination /workspace/host.txt
+  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log
+  --tail-lines 50
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target
+  127.0.0.1:80
+
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host; local Firecracker launch requires Linux and /dev/kvm.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch
+  is supported.
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+
+--- stderr ---
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --help`
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `/home/alex/.cache/cargo-target/port/debug/port doctor`

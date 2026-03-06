@@ -1,0 +1,19 @@
+---
+recorded_at: 2026-03-06T15:42:14.746614218-08:00
+command: rg -n 'macOS|Linux host|unsupported' /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/operators.md
+---
+/home/alex/workspace/spoke-sh/port/docs/operators.md:3:This document explains the supported MVP workflows for Linux, macOS, and
+/home/alex/workspace/spoke-sh/port/docs/operators.md:10:| Linux host with `/dev/kvm` and Firecracker | Run the full local Port workflow directly through the `port` CLI | n/a | Firecracker local launch requires Linux and KVM |
+/home/alex/workspace/spoke-sh/port/docs/operators.md:11:| macOS workstation | Edit or inspect the repo locally, then run `port` on a Linux host | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm` |
+/home/alex/workspace/spoke-sh/port/docs/operators.md:12:| Windows workstation | Use WSL or a remote Linux host for the Linux-side `port` workflow | Native Windows Firecracker launch | Firecracker local launch requires a Linux environment with `/dev/kvm`; not every WSL setup exposes that capability |
+/home/alex/workspace/spoke-sh/port/docs/operators.md:16:Use this workflow when `port doctor` passes on a Linux host.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:38:## macOS Workflow
+/home/alex/workspace/spoke-sh/port/docs/operators.md:40:The supported macOS workflow is to run the actual Port commands on a Linux host.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:44:1. Keep the repository on the Linux host directly, or SSH into that host from macOS.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:45:2. On the Linux host, run the same canonical commands shown in the Linux workflow.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:46:3. Use `port doctor` on that Linux host before attempting local Firecracker launch.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:50:- Running local Firecracker launch directly on macOS is unsupported because the
+/home/alex/workspace/spoke-sh/port/docs/operators.md:60:   Linux host capabilities, switch to a remote Linux host and run the same `port`
+/home/alex/workspace/spoke-sh/port/README.md:39:- macOS: work locally if you want, but run the canonical `port` commands on a
+/home/alex/workspace/spoke-sh/port/README.md:40:  Linux host because Firecracker local launch requires Linux and `/dev/kvm`.
+/home/alex/workspace/spoke-sh/port/README.md:197:- macOS operators are expected to target Linux hosts for actual Firecracker
