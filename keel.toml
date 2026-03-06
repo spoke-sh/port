@@ -1,0 +1,6 @@
+board_dir = ".keel"
+
+[scoring]
+mode = "constrained"
+
+[scoring.modes]

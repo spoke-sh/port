@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "weekly": [
+    {
+      "week_start": "2026-03-02",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-02-23",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-02-16",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-02-09",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-02-02",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-01-26",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-01-19",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-01-12",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2026-01-05",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2025-12-29",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2025-12-22",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    },
+    {
+      "week_start": "2025-12-15",
+      "stories_done": 0,
+      "voyages_done": 0,
+      "cycle_min_hours": null,
+      "cycle_median_hours": null,
+      "cycle_max_hours": null,
+      "acceptance_wait_median_hours": null
+    }
+  ]
+}
