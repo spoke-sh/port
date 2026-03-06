@@ -2,11 +2,13 @@
 id: 1vydgm000
 title: Document Operator Workflows
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-06T14:30:32
-updated_at: 2026-03-06T15:39:25
+updated_at: 2026-03-06T15:43:41
 scope: 1vydg7000/1vydgL000
 started_at: 2026-03-06T15:39:25
+submitted_at: 2026-03-06T15:43:39
+completed_at: 2026-03-06T15:43:41
 ---
 
 # Document Operator Workflows

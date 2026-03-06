@@ -6,19 +6,7 @@ created_at: 2026-03-06T15:42:35
 
 ## Knowledge
 
-### 1vyeP0000: Anchor Platform Guidance On `port doctor`
-| Field | Value |
-|-------|-------|
-| **Category** | process |
-| **Context** | When documenting or exposing macOS and Windows operator workflows for a Linux-only runtime |
-| **Insight** | The most stable support contract is to document the intended workflow and then use `port doctor` as the runtime gate instead of promising environment capabilities that vary across hosts, especially in WSL-backed setups |
-| **Suggested Action** | Keep README, platform docs, and CLI help centered on the exact `port doctor` boundary when platform support depends on Linux host capabilities |
-| **Applies To** | README, `docs/operators.md`, CLI help text, diagnostics |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-06T23:43:00Z |
-| **Score** | 0.74 |
-| **Confidence** | 0.91 |
-| **Applied** | yes |
+- [1vyeP0000](../../knowledge/1vyeP0000.md) Anchor Platform Guidance On `port doctor`
 
 ## Observations
 
