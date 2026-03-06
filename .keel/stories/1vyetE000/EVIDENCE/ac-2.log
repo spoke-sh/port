@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T15:56:55.341412629-08:00
+mode: manual
+---
+Verified with a CLI proof that /tmp/port-target/debug/port --config examples/port.toml machine launch --machine cloud-aws exits with AWS-specific guidance: remote launch is not implemented in the MVP and Port should run on the AWS Linux host itself.

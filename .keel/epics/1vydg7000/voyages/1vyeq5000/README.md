@@ -25,11 +25,11 @@ started_at: 2026-03-06T15:49:47
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Publish Cloud Support Matrix](../../../../stories/1vyerX000/README.md) | feat | backlog |
-| [Model Cloud Linux Providers](../../../../stories/1vyerj000/README.md) | feat | backlog |
+| [Model Cloud Linux Providers](../../../../stories/1vyerj000/README.md) | feat | done |
 | [Implement Remote Linux Diagnostics](../../../../stories/1vyetE000/README.md) | feat | backlog |
 <!-- END GENERATED -->

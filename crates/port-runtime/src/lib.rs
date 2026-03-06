@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
     GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
 };
-use port_model::{ArtifactKind, HostConnection, HostPlatform, PortConfig};
+use port_model::{ArtifactKind, HostConnection, HostPlatform, HostProvider, PortConfig};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -171,9 +171,15 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
                 ),
             ));
         }
+
+        for (name, host) in &config.hosts {
+            if let Some(check) = provider_check(name, host.provider, &host.connection) {
+                checks.push(check);
+            }
+        }
     }
 
-    let notes = vec![
+    let mut notes = vec![
         String::from("port doctor reports the host state without mutating runtime directories."),
         String::from(
             "macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.",
@@ -182,6 +188,11 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
             "Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.",
         ),
     ];
+    if config.is_some() {
+        notes.push(String::from(
+            "Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.",
+        ));
+    }
 
     DoctorReport {
         host_os,
@@ -203,17 +214,6 @@ pub fn launch_local_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
 ) -> Result<LaunchMetadata> {
-    let report = collect_doctor_report(Some(config));
-    let failures = report.blocking_failures();
-    if !failures.is_empty() {
-        let details = failures
-            .into_iter()
-            .map(|failure| format!("{}: {}", failure.name, failure.detail))
-            .collect::<Vec<_>>()
-            .join("; ");
-        bail!("host preflight failed: {details}");
-    }
-
     let machine = config
         .machines
         .get(request.machine_name)
@@ -234,10 +234,20 @@ pub fn launch_local_machine(
 
     if !matches!(host.connection, HostConnection::Local) {
         bail!(
-            "machine '{}' targets host '{}' via a remote connection; local launch requires connection.mode = local",
-            request.machine_name,
-            machine.host
+            "{}",
+            remote_launch_guidance(request.machine_name, &machine.host, host.provider)
         );
+    }
+
+    let report = collect_doctor_report(Some(config));
+    let failures = report.blocking_failures();
+    if !failures.is_empty() {
+        let details = failures
+            .into_iter()
+            .map(|failure| format!("{}: {}", failure.name, failure.detail))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!("host preflight failed: {details}");
     }
 
     let kernel = config
@@ -378,6 +388,76 @@ fn path_check(
         } else {
             fail_detail.to_string()
         },
+    }
+}
+
+fn provider_check(
+    host_name: &str,
+    provider: HostProvider,
+    connection: &HostConnection,
+) -> Option<DoctorCheck> {
+    if matches!(connection, HostConnection::Local) {
+        return None;
+    }
+
+    let (ok, detail) = match provider {
+        HostProvider::Local => (
+            false,
+            String::from(
+                "provider 'local' is reserved for local Linux hosts; remote configs should use an explicit remote provider.",
+            ),
+        ),
+        HostProvider::GenericLinux => (
+            true,
+            String::from(
+                "provider 'generic-linux' is modeled for a future remote Linux control lane, but remote launch is not implemented in the MVP.",
+            ),
+        ),
+        HostProvider::Aws => (
+            true,
+            String::from(
+                "provider 'aws' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP.",
+            ),
+        ),
+        HostProvider::Gcp => (
+            true,
+            String::from(
+                "provider 'gcp' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP.",
+            ),
+        ),
+        HostProvider::Azure => (
+            false,
+            String::from(
+                "provider 'azure' is explicitly unsupported for the Firecracker MVP; do not expect a working launch path.",
+            ),
+        ),
+    };
+
+    Some(DoctorCheck {
+        name: format!("host:{host_name}"),
+        ok,
+        required: false,
+        detail,
+    })
+}
+
+fn remote_launch_guidance(machine_name: &str, host_name: &str, provider: HostProvider) -> String {
+    match provider {
+        HostProvider::Local => format!(
+            "machine '{machine_name}' targets host '{host_name}' through a remote connection, but provider 'local' is reserved for direct local Linux launch"
+        ),
+        HostProvider::GenericLinux => format!(
+            "machine '{machine_name}' targets remote Linux host '{host_name}' (provider 'generic-linux'); the MVP only launches locally. Run Port on that Linux host directly or wait for the remote control lane."
+        ),
+        HostProvider::Aws => format!(
+            "machine '{machine_name}' targets AWS host '{host_name}'; AWS remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the AWS Linux host itself."
+        ),
+        HostProvider::Gcp => format!(
+            "machine '{machine_name}' targets GCP host '{host_name}'; GCP remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the GCP Linux host itself."
+        ),
+        HostProvider::Azure => format!(
+            "machine '{machine_name}' targets Azure host '{host_name}'; Azure is explicitly unsupported for the Firecracker MVP. Move the workload to a generic Linux, AWS, or GCP host."
+        ),
     }
 }
 
@@ -648,14 +728,16 @@ struct VsockConfig {
 mod tests {
     use std::fs;
     use std::path::Path;
+    use std::time::Duration;
 
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, DoctorCheck, RuntimePaths, artifact_script, build_firecracker_config,
-        path_check, repo_root,
+        ArtifactAction, DoctorCheck, LaunchRequest, RuntimePaths, artifact_script,
+        build_firecracker_config, collect_doctor_report, launch_local_machine, path_check,
+        repo_root,
     };
-    use port_model::ArtifactKind;
+    use port_model::{ArtifactKind, PortConfig};
 
     #[test]
     fn runtime_paths_are_deterministic() {
@@ -733,5 +815,66 @@ mod tests {
                 .expect("guest image validate script should resolve"),
             root.join("scripts/artifacts/validate-guest-image.sh")
         );
+    }
+
+    #[test]
+    fn doctor_report_includes_provider_aware_remote_host_checks() {
+        let report = collect_doctor_report(Some(&PortConfig::sample()));
+
+        let generic = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:generic-linux")
+            .expect("generic remote host check should exist");
+        let aws = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:aws-linux")
+            .expect("aws host check should exist");
+        let gcp = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:gcp-linux")
+            .expect("gcp host check should exist");
+        let azure = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:azure-linux")
+            .expect("azure host check should exist");
+
+        assert!(generic.ok);
+        assert!(generic.detail.contains("generic-linux"));
+        assert!(aws.ok);
+        assert!(aws.detail.contains("future Firecracker lane"));
+        assert!(gcp.ok);
+        assert!(gcp.detail.contains("future Firecracker lane"));
+        assert!(!azure.ok);
+        assert!(azure.detail.contains("unsupported"));
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains("local Linux only"))
+        );
+    }
+
+    #[test]
+    fn remote_launch_rejects_aws_hosts_with_provider_guidance() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let error = launch_local_machine(
+            &PortConfig::sample(),
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("remote AWS launch should fail fast");
+
+        let message = error.to_string();
+        assert!(message.contains("cloud-aws"));
+        assert!(message.contains("AWS"));
+        assert!(message.contains("not implemented"));
+        assert!(message.contains("Run Port on the AWS Linux host itself"));
     }
 }

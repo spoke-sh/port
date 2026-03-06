@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T15:56:55.354006220-08:00
+mode: manual
+---
+Verified with cargo test -p port-runtime -p port-cli and a CLI proof: /tmp/port-target/debug/port --config examples/port.toml doctor reports provider-aware checks for generic-linux, aws, gcp, and azure plus an explicit local-only MVP note.
