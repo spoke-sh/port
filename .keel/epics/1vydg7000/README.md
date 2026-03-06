@@ -23,5 +23,5 @@ created_at: 2026-03-06T14:29:51
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Local Linux CLI Runtime](voyages/1vydgL000/) | done | 5/5 |
-| [Cloud Linux Control Lane](voyages/1vyeq5000/) | planned | 0/3 |
+| [Cloud Linux Control Lane](voyages/1vyeq5000/) | in-progress | 0/3 |
 <!-- END GENERATED -->

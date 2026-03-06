@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T15:53:08.182687853-08:00
+mode: manual
+---
+Verified explicit provider modeling with cargo test -p port-model and provider entries for local, generic-linux, aws, gcp, and azure in examples/port.toml.

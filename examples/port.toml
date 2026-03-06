@@ -10,6 +10,7 @@ validate = "port artifacts validate --artifact demo-guest"
 
 [hosts.local]
 platform = "linux"
+provider = "local"
 
 [hosts.local.connection]
 mode = "local"
@@ -17,6 +18,62 @@ mode = "local"
 [hosts.local.firecracker]
 local_launch = true
 notes = ["Requires /dev/kvm and the firecracker binary"]
+
+[hosts.generic-linux]
+platform = "linux"
+provider = "generic-linux"
+
+[hosts.generic-linux.connection]
+mode = "ssh"
+address = "linux.example.internal"
+user = "port"
+port = 22
+
+[hosts.generic-linux.firecracker]
+local_launch = false
+notes = ["Remote Linux host reserved for the future cloud/control lane."]
+
+[hosts.aws-linux]
+platform = "linux"
+provider = "aws"
+
+[hosts.aws-linux.connection]
+mode = "ssh"
+address = "aws.example.internal"
+user = "ec2-user"
+port = 22
+
+[hosts.aws-linux.firecracker]
+local_launch = false
+notes = ["AWS is a justified future Firecracker provider lane for Port."]
+
+[hosts.gcp-linux]
+platform = "linux"
+provider = "gcp"
+
+[hosts.gcp-linux.connection]
+mode = "ssh"
+address = "gcp.example.internal"
+user = "port"
+port = 22
+
+[hosts.gcp-linux.firecracker]
+local_launch = false
+notes = ["GCP is a justified future Firecracker provider lane for Port."]
+
+[hosts.azure-linux]
+platform = "linux"
+provider = "azure"
+
+[hosts.azure-linux.connection]
+mode = "ssh"
+address = "azure.example.internal"
+user = "port"
+port = 22
+
+[hosts.azure-linux.firecracker]
+local_launch = false
+notes = ["Azure is modeled explicitly so diagnostics can report it as unsupported."]
 
 [machines.demo]
 host = "local"
@@ -31,3 +88,59 @@ rootfs_read_only = false
 vsock_cid = 52
 control_port = 7000
 console_log = "runtime/demo/console.log"
+
+[machines.cloud-generic]
+host = "generic-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-generic.guest]
+vsock_cid = 60
+control_port = 7000
+console_log = "runtime/cloud-generic/console.log"
+
+[machines.cloud-aws]
+host = "aws-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-aws.guest]
+vsock_cid = 61
+control_port = 7000
+console_log = "runtime/cloud-aws/console.log"
+
+[machines.cloud-gcp]
+host = "gcp-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-gcp.guest]
+vsock_cid = 62
+control_port = 7000
+console_log = "runtime/cloud-gcp/console.log"
+
+[machines.cloud-azure]
+host = "azure-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-azure.guest]
+vsock_cid = 63
+control_port = 7000
+console_log = "runtime/cloud-azure/console.log"

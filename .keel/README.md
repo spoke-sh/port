@@ -16,5 +16,5 @@
 | Voyage | Status |
 |--------|--------|
 | [Local Linux CLI Runtime](epics/1vydg7000/voyages/1vydgL000/) | done |
-| [Cloud Linux Control Lane](epics/1vydg7000/voyages/1vyeq5000/) | planned |
+| [Cloud Linux Control Lane](epics/1vydg7000/voyages/1vyeq5000/) | in-progress |
 

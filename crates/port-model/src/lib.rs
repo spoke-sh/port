@@ -32,37 +32,84 @@ impl PortConfig {
             )]),
         };
 
-        let hosts = BTreeMap::from([(
-            String::from("local"),
-            HostSpec {
-                platform: HostPlatform::Linux,
-                connection: HostConnection::Local,
-                firecracker: FirecrackerSupport {
-                    local_launch: true,
-                    notes: vec![String::from("Requires /dev/kvm and the firecracker binary")],
+        let hosts = BTreeMap::from([
+            (
+                String::from("local"),
+                HostSpec {
+                    platform: HostPlatform::Linux,
+                    provider: HostProvider::Local,
+                    connection: HostConnection::Local,
+                    firecracker: FirecrackerSupport {
+                        local_launch: true,
+                        notes: vec![String::from("Requires /dev/kvm and the firecracker binary")],
+                    },
                 },
-            },
-        )]);
-
-        let machines = BTreeMap::from([(
-            String::from("demo"),
-            MachineSpec {
-                host: String::from("local"),
-                kernel: String::from("demo-kernel"),
-                guest_image: String::from("demo-guest"),
-                vcpu_count: 2,
-                memory_mib: 512,
-                kernel_args: String::from(
-                    "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw",
+            ),
+            (
+                String::from("generic-linux"),
+                ssh_host(
+                    HostProvider::GenericLinux,
+                    "linux.example.internal",
+                    "port",
+                    vec![String::from(
+                        "Remote Linux host reserved for the future cloud/control lane.",
+                    )],
                 ),
-                rootfs_read_only: false,
-                guest: GuestControl {
-                    vsock_cid: 52,
-                    control_port: 7000,
-                    console_log: PathBuf::from("runtime/demo/console.log"),
-                },
-            },
-        )]);
+            ),
+            (
+                String::from("aws-linux"),
+                ssh_host(
+                    HostProvider::Aws,
+                    "aws.example.internal",
+                    "ec2-user",
+                    vec![String::from(
+                        "AWS is a justified future Firecracker provider lane for Port.",
+                    )],
+                ),
+            ),
+            (
+                String::from("gcp-linux"),
+                ssh_host(
+                    HostProvider::Gcp,
+                    "gcp.example.internal",
+                    "port",
+                    vec![String::from(
+                        "GCP is a justified future Firecracker provider lane for Port.",
+                    )],
+                ),
+            ),
+            (
+                String::from("azure-linux"),
+                ssh_host(
+                    HostProvider::Azure,
+                    "azure.example.internal",
+                    "port",
+                    vec![String::from(
+                        "Azure is modeled explicitly so diagnostics can report it as unsupported.",
+                    )],
+                ),
+            ),
+        ]);
+
+        let machines = BTreeMap::from([
+            (String::from("demo"), sample_machine("local", "demo", 52)),
+            (
+                String::from("cloud-generic"),
+                sample_machine("generic-linux", "cloud-generic", 60),
+            ),
+            (
+                String::from("cloud-aws"),
+                sample_machine("aws-linux", "cloud-aws", 61),
+            ),
+            (
+                String::from("cloud-gcp"),
+                sample_machine("gcp-linux", "cloud-gcp", 62),
+            ),
+            (
+                String::from("cloud-azure"),
+                sample_machine("azure-linux", "cloud-azure", 63),
+            ),
+        ]);
 
         Self {
             artifacts,
@@ -94,6 +141,39 @@ impl PortConfig {
 
     pub fn artifact(&self, name: &str) -> Option<&ArtifactSpec> {
         self.artifacts.lookup(name)
+    }
+}
+
+fn ssh_host(provider: HostProvider, address: &str, user: &str, notes: Vec<String>) -> HostSpec {
+    HostSpec {
+        platform: HostPlatform::Linux,
+        provider,
+        connection: HostConnection::Ssh {
+            address: address.to_string(),
+            user: user.to_string(),
+            port: 22,
+        },
+        firecracker: FirecrackerSupport {
+            local_launch: false,
+            notes,
+        },
+    }
+}
+
+fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
+    MachineSpec {
+        host: host.to_string(),
+        kernel: String::from("demo-kernel"),
+        guest_image: String::from("demo-guest"),
+        vcpu_count: 2,
+        memory_mib: 512,
+        kernel_args: String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
+        rootfs_read_only: false,
+        guest: GuestControl {
+            vsock_cid,
+            control_port: 7000,
+            console_log: PathBuf::from(format!("runtime/{name}/console.log")),
+        },
     }
 }
 
@@ -176,8 +256,19 @@ pub enum HostPlatform {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostProvider {
+    Local,
+    GenericLinux,
+    Aws,
+    Gcp,
+    Azure,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostSpec {
     pub platform: HostPlatform,
+    pub provider: HostProvider,
     pub connection: HostConnection,
     pub firecracker: FirecrackerSupport,
 }
@@ -220,7 +311,9 @@ pub struct GuestControl {
 
 #[cfg(test)]
 mod tests {
-    use super::PortConfig;
+    use std::path::PathBuf;
+
+    use super::{HostProvider, PortConfig};
 
     #[test]
     fn sample_config_round_trips_through_toml() {
@@ -239,7 +332,13 @@ mod tests {
 
         assert!(encoded.contains("[artifacts.kernels.demo-kernel]"));
         assert!(encoded.contains("[hosts.local]"));
+        assert!(encoded.contains("provider = \"local\""));
+        assert!(encoded.contains("provider = \"generic-linux\""));
+        assert!(encoded.contains("provider = \"aws\""));
+        assert!(encoded.contains("provider = \"gcp\""));
+        assert!(encoded.contains("provider = \"azure\""));
         assert!(encoded.contains("[machines.demo.guest]"));
+        assert!(encoded.contains("[machines.cloud-aws]"));
     }
 
     #[test]
@@ -257,5 +356,39 @@ mod tests {
 
         assert_eq!(kernel_kind, super::ArtifactKind::Kernel);
         assert_eq!(guest_kind, super::ArtifactKind::GuestImage);
+    }
+
+    #[test]
+    fn sample_config_models_all_remote_provider_lanes() {
+        let config = PortConfig::sample();
+
+        assert_eq!(config.hosts["local"].provider, HostProvider::Local);
+        assert_eq!(
+            config.hosts["generic-linux"].provider,
+            HostProvider::GenericLinux
+        );
+        assert_eq!(config.hosts["aws-linux"].provider, HostProvider::Aws);
+        assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
+        assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
+        assert_eq!(config.machines["cloud-aws"].host, "aws-linux");
+    }
+
+    #[test]
+    fn checked_in_example_models_all_provider_variants() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/port.toml")
+            .canonicalize()
+            .expect("example config path should resolve");
+        let config = PortConfig::from_path(&path).expect("example config should parse");
+
+        assert_eq!(config.hosts["local"].provider, HostProvider::Local);
+        assert_eq!(
+            config.hosts["generic-linux"].provider,
+            HostProvider::GenericLinux
+        );
+        assert_eq!(config.hosts["aws-linux"].provider, HostProvider::Aws);
+        assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
+        assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
+        assert_eq!(config.machines["cloud-azure"].host, "azure-linux");
     }
 }
