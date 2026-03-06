@@ -1,0 +1,20 @@
+---
+recorded_at: 2026-03-06T14:56:23.814887793-08:00
+command: nix develop -c cargo run -p port-cli -- --config /tmp/port-proof/port.toml doctor
+---
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip'.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables'.
+check[ok]: artifact:demo-kernel (required=true) - Artifact path '/tmp/port-proof/hello-vmlinux.bin' exists.
+check[ok]: artifact:demo-guest (required=true) - Artifact path '/tmp/port-proof/hello-rootfs.ext4' exists.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS and Windows operators should target remote Linux hosts for Firecracker execution.
+
+--- stderr ---
+path '/home/alex/workspace/spoke-sh/port/.keel' does not contain a 'flake.nix', searching up
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-proof/port.toml doctor`

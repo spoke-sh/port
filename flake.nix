@@ -42,6 +42,9 @@
             pkgs.just
             pkgs.cargo-nextest
             keelPkg
+            pkgs.firecracker
+            pkgs.iproute2
+            pkgs.iptables
           ] ++ pkgs.lib.optionals isLinux [
             pkgs.mold
           ];

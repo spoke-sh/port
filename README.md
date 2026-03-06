@@ -67,6 +67,15 @@ port guest forward --machine <name> --listen <addr> --target <addr>
 Use `port --help` or any nested `--help` command to inspect the current command
 model and examples.
 
+Current behavior:
+
+- `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
+  `ip`, and `iptables`. When you pass `--config`, it also validates referenced
+  artifact paths.
+- `port machine launch` now writes a Firecracker config plus runtime metadata
+  and console/log files under the chosen runtime root before invoking
+  Firecracker with `--config-file`.
+
 ## Model And Example Config
 
 Port keeps one canonical machine model for artifacts, hosts, and machines. The
@@ -77,13 +86,20 @@ The workspace crates are:
 - `port-model`: serializable artifact, host, and machine definitions
 - `port-agent-protocol`: shared guest-agent request and response types
 - `port-cli`: the `port` binary and help/argument parsing layer
+- `port-runtime`: host preflight, runtime layout, Firecracker config generation,
+  and local launch orchestration
 
 You can inspect the current surface with:
 
 ```bash
 cargo run -p port-cli -- --help
+cargo run -p port-cli -- doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 ```
+
+The checked-in example config still points at placeholder artifact paths.
+Supplying real kernel and rootfs paths is enough to exercise the local launch
+workflow today; the in-repo artifact pipeline lands in the next story.
 
 ## Current Platform Boundary
 
@@ -104,6 +120,9 @@ nix develop
 ```
 
 Repository automation and planning workflow live in [AGENTS.md](AGENTS.md).
+
+On Linux, `nix develop` now includes Firecracker plus the host networking tools
+needed by the local launch path.
 
 The current Rust verification command is:
 

@@ -1,20 +1,15 @@
 [package]
-name = "port-cli"
+name = "port-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "port"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-toml.workspace = true
-port-agent-protocol = { path = "../port-agent-protocol" }
 port-model = { path = "../port-model" }
-port-runtime = { path = "../port-runtime" }
+
+[dev-dependencies]
+tempfile.workspace = true

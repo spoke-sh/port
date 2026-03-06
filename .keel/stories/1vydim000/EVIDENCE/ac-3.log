@@ -1,0 +1,4 @@
+---
+recorded_at: 2026-03-06T14:58:21.441294849-08:00
+command: bash -lc 'set -euo pipefail; runtime_root=/tmp/port-proof/runtime-fail-$(date +%s); out=${runtime_root}-command.log; set +e; nix develop -c cargo run -p port-cli -- --config /home/alex/workspace/spoke-sh/port/examples/port.toml machine launch --machine demo --runtime-root "$runtime_root" --boot-wait-secs 1 >"$out" 2>&1; code=$?; set -e; test "$code" -ne 0; grep -q "host preflight failed" "$out"; grep -q "Artifact path" "$out"'
+---

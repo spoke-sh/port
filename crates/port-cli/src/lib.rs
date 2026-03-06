@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use port_model::PortConfig;
+use port_runtime::{DoctorReport, LaunchRequest};
 use serde::Serialize;
 
 const EXAMPLES: &str = "\
@@ -83,6 +85,10 @@ pub enum MachineCommand {
     Launch {
         #[arg(long)]
         machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        boot_wait_secs: u64,
     },
 }
 
@@ -132,15 +138,24 @@ pub enum GuestCommand {
 }
 
 #[derive(Debug, Serialize)]
-struct DoctorReport {
+struct RenderedDoctorReport {
     host_os: String,
     local_firecracker_supported: bool,
     notes: Vec<String>,
+    checks: Vec<RenderedDoctorCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct RenderedDoctorCheck {
+    name: String,
+    ok: bool,
+    required: bool,
+    detail: String,
 }
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Doctor { format } => doctor(format),
+        Command::Doctor { format } => doctor(format, cli.config.as_deref()),
         Command::Artifacts(command) => {
             let config = load_config(cli.config)?;
             run_artifacts(command, &config)
@@ -156,41 +171,34 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn doctor(format: OutputFormat) -> Result<()> {
-    let host_os = std::env::consts::OS.to_string();
-    let local_firecracker_supported = cfg!(target_os = "linux");
-    let notes = if local_firecracker_supported {
-        vec![
-            String::from("Linux operators can target local Firecracker hosts."),
-            String::from("macOS and Windows operators are expected to target remote Linux hosts."),
-        ]
-    } else {
-        vec![String::from(
-            "Local Firecracker launch is Linux-only; use a Linux host or WSL-backed workflow.",
-        )]
-    };
-
-    let report = DoctorReport {
-        host_os,
-        local_firecracker_supported,
-        notes,
-    };
+fn doctor(format: OutputFormat, config_path: Option<&std::path::Path>) -> Result<()> {
+    let config = load_config_if_present(config_path)?;
+    let report = port_runtime::collect_doctor_report(config.as_ref());
+    let rendered = RenderedDoctorReport::from(report);
 
     match format {
         OutputFormat::Text => {
-            println!("host_os: {}", report.host_os);
+            println!("host_os: {}", rendered.host_os);
             println!(
                 "local_firecracker_supported: {}",
-                report.local_firecracker_supported
+                rendered.local_firecracker_supported
             );
-            for note in report.notes {
+            for check in rendered.checks {
+                let status = if check.ok { "ok" } else { "fail" };
+                println!(
+                    "check[{status}]: {} (required={}) - {}",
+                    check.name, check.required, check.detail
+                );
+            }
+            for note in rendered.notes {
                 println!("note: {note}");
             }
         }
         OutputFormat::Json => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&report).context("failed to encode doctor report")?
+                serde_json::to_string_pretty(&rendered)
+                    .context("failed to encode doctor report")?
             );
         }
     }
@@ -227,23 +235,31 @@ fn run_artifacts(command: ArtifactCommand, config: &PortConfig) -> Result<()> {
 
 fn run_machine(command: MachineCommand, config: &PortConfig) -> Result<()> {
     match command {
-        MachineCommand::Launch { machine } => {
-            let spec = config
-                .machines
-                .get(&machine)
-                .with_context(|| format!("unknown machine '{machine}'"))?;
+        MachineCommand::Launch {
+            machine,
+            runtime_root,
+            boot_wait_secs,
+        } => {
+            let metadata = port_runtime::launch_local_machine(
+                config,
+                &LaunchRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    boot_wait: Duration::from_secs(boot_wait_secs),
+                },
+            )?;
+            println!("launched machine: {}", metadata.machine_name);
+            println!("pid: {}", metadata.pid);
+            println!("runtime dir: {}", metadata.runtime_dir.display());
             println!(
-                "planned launch: machine={} host={} kernel={} guest_image={} vcpu={} memory_mib={} vsock={}:{}",
-                machine,
-                spec.host,
-                spec.kernel,
-                spec.guest_image,
-                spec.vcpu_count,
-                spec.memory_mib,
-                spec.guest.vsock_cid,
-                spec.guest.control_port,
+                "firecracker binary: {}",
+                metadata.firecracker_binary.display()
             );
-            println!("console log: {}", spec.guest.console_log.display());
+            println!("config path: {}", metadata.config_path.display());
+            println!("firecracker log: {}", metadata.log_path.display());
+            println!("console stdout: {}", metadata.stdout_path.display());
+            println!("console stderr: {}", metadata.stderr_path.display());
+            println!("manifest: {}", metadata.manifest_path.display());
         }
     }
 
@@ -308,6 +324,12 @@ fn load_config(path: Option<PathBuf>) -> Result<PortConfig> {
     }
 }
 
+fn load_config_if_present(path: Option<&std::path::Path>) -> Result<Option<PortConfig>> {
+    path.map(PortConfig::from_path)
+        .transpose()
+        .map_err(anyhow::Error::from)
+}
+
 pub fn render_help() -> String {
     let mut command = Cli::command();
     command.render_long_help().to_string()
@@ -352,11 +374,19 @@ mod tests {
             "launch",
             "--machine",
             "demo",
+            "--runtime-root",
+            "/tmp/runtime",
         ]);
 
         match cli.command {
-            Command::Machine(MachineCommand::Launch { machine }) => {
+            Command::Machine(MachineCommand::Launch {
+                machine,
+                runtime_root,
+                boot_wait_secs,
+            }) => {
                 assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(boot_wait_secs, 3);
                 assert_eq!(
                     cli.config.as_deref(),
                     Some(std::path::Path::new("examples/port.toml"))
@@ -386,6 +416,26 @@ mod tests {
                 assert_eq!(command, ["/bin/sh", "-lc", "uname -a"]);
             }
             other => panic!("unexpected command: {other:?}"),
+        }
+    }
+}
+
+impl From<DoctorReport> for RenderedDoctorReport {
+    fn from(value: DoctorReport) -> Self {
+        Self {
+            host_os: value.host_os,
+            local_firecracker_supported: value.local_firecracker_supported,
+            notes: value.notes,
+            checks: value
+                .checks
+                .into_iter()
+                .map(|check| RenderedDoctorCheck {
+                    name: check.name,
+                    ok: check.ok,
+                    required: check.required,
+                    detail: check.detail,
+                })
+                .collect(),
         }
     }
 }

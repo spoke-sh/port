@@ -25,13 +25,13 @@ started_at: 2026-03-06T14:40:38
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/5 stories complete
+**Progress:** 1/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Bootstrap Port Workspace And CLI](../../../../stories/1vydgl000/README.md) | feat | in-progress |
+| [Bootstrap Port Workspace And CLI](../../../../stories/1vydgl000/README.md) | feat | done |
 | [Document Operator Workflows](../../../../stories/1vydgm000/README.md) | feat | backlog |
-| [Implement Local Firecracker Launch](../../../../stories/1vydim000/README.md) | feat | backlog |
+| [Implement Local Firecracker Launch](../../../../stories/1vydim000/README.md) | feat | in-progress |
 | [Deliver Guest Agent Capabilities](../../../../stories/1vydip000/README.md) | feat | backlog |
 | [Build Artifact Pipelines And Docs](../../../../stories/1vydit000/README.md) | feat | backlog |
 <!-- END GENERATED -->

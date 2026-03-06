@@ -52,6 +52,10 @@ impl PortConfig {
                 guest_image: String::from("demo-guest"),
                 vcpu_count: 2,
                 memory_mib: 512,
+                kernel_args: String::from(
+                    "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw",
+                ),
+                rootfs_read_only: false,
                 guest: GuestControl {
                     vsock_cid: 52,
                     control_port: 7000,
@@ -87,6 +91,10 @@ impl PortConfig {
     pub fn to_toml_string(&self) -> Result<String, toml::ser::Error> {
         toml::to_string_pretty(self)
     }
+
+    pub fn artifact(&self, name: &str) -> Option<&ArtifactSpec> {
+        self.artifacts.lookup(name)
+    }
 }
 
 #[derive(Debug)]
@@ -120,6 +128,21 @@ impl std::error::Error for ModelError {}
 pub struct ArtifactCatalog {
     pub kernels: BTreeMap<String, ArtifactSpec>,
     pub guest_images: BTreeMap<String, ArtifactSpec>,
+}
+
+impl ArtifactCatalog {
+    pub fn lookup(&self, name: &str) -> Option<&ArtifactSpec> {
+        self.kernels
+            .get(name)
+            .or_else(|| self.guest_images.get(name))
+    }
+
+    pub fn all(&self) -> impl Iterator<Item = (&str, &ArtifactSpec)> {
+        self.kernels
+            .iter()
+            .chain(self.guest_images.iter())
+            .map(|(name, spec)| (name.as_str(), spec))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +191,8 @@ pub struct MachineSpec {
     pub guest_image: String,
     pub vcpu_count: u8,
     pub memory_mib: u32,
+    pub kernel_args: String,
+    pub rootfs_read_only: bool,
     pub guest: GuestControl,
 }
 
