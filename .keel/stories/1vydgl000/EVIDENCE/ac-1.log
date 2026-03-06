@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T14:45:47.787715978-08:00
+mode: manual
+---
+Rust workspace added with the canonical port binary, shared model crate, protocol crate, sample model, and README/CLI bootstrap surfaces.

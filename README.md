@@ -43,9 +43,57 @@ machine, a lab environment, or cloud-hosted Linux capacity.
 
 ## Project Status
 
-Port is early-stage and under active development. Interfaces, deployment
-patterns, and runtime details are expected to change as the core architecture
-lands.
+Port is early-stage and under active development. The repository now contains
+the canonical Rust workspace, shared model, and the first public CLI surface,
+but Firecracker launch, guest-agent behavior, and artifact production are still
+being implemented story by story.
+
+## CLI Surface
+
+The canonical binary is `port`. The current command tree is:
+
+```text
+port doctor
+port artifacts build --artifact <name>
+port artifacts validate --artifact <name>
+port machine launch --machine <name>
+port guest exec --machine <name> -- <command...>
+port guest copy --machine <name> --source <path> --destination <path>
+port guest pty --machine <name>
+port guest logs --machine <name>
+port guest forward --machine <name> --listen <addr> --target <addr>
+```
+
+Use `port --help` or any nested `--help` command to inspect the current command
+model and examples.
+
+## Model And Example Config
+
+Port keeps one canonical machine model for artifacts, hosts, and machines. The
+initial sample model lives at [`examples/port.toml`](examples/port.toml).
+
+The workspace crates are:
+
+- `port-model`: serializable artifact, host, and machine definitions
+- `port-agent-protocol`: shared guest-agent request and response types
+- `port-cli`: the `port` binary and help/argument parsing layer
+
+You can inspect the current surface with:
+
+```bash
+cargo run -p port-cli -- --help
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+```
+
+## Current Platform Boundary
+
+- Linux is the only platform expected to run Firecracker locally.
+- macOS operators are expected to target remote Linux hosts.
+- Windows operators are expected to use a Linux or WSL-backed workflow when a
+  local Linux environment is required.
+
+`port doctor` is the canonical entrypoint for surfacing those support
+boundaries in the CLI.
 
 ## Development
 
@@ -56,6 +104,12 @@ nix develop
 ```
 
 Repository automation and planning workflow live in [AGENTS.md](AGENTS.md).
+
+The current Rust verification command is:
+
+```bash
+cargo test
+```
 
 ## License
 

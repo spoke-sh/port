@@ -1,0 +1,24 @@
+---
+recorded_at: 2026-03-06T14:45:51.120978268-08:00
+command: nix develop -c cargo run -p port-cli -- guest --help
+---
+Reach guest agent capabilities
+
+Usage: port guest [OPTIONS] <COMMAND>
+
+Commands:
+  exec     Run a non-interactive command in the guest
+  copy     Copy files between host and guest
+  pty      Open an interactive PTY-backed session in the guest
+  logs     Stream guest logs exposed by the agent
+  forward  Forward a local listener into the guest through the agent
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>  Load a Port model from a TOML file instead of using the built-in sample
+  -h, --help           Print help
+
+--- stderr ---
+path '/home/alex/workspace/spoke-sh/port/.keel' does not contain a 'flake.nix', searching up
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `/home/alex/.cache/cargo-target/port/debug/port guest --help`

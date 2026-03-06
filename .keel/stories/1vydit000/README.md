@@ -2,9 +2,9 @@
 id: 1vydit000
 title: Build Artifact Pipelines And Docs
 type: feat
-status: icebox
+status: backlog
 created_at: 2026-03-06T14:32:43
-updated_at: 2026-03-06T14:32:50
+updated_at: 2026-03-06T14:40:27
 scope: 1vydg7000/1vydgL000
 ---
 

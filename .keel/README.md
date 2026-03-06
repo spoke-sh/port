@@ -11,9 +11,9 @@
 
 ## Epics
 
-### [Port MVP](epics/1vydg7000/) (draft)
+### [Port MVP](epics/1vydg7000/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Local Linux CLI Runtime](epics/1vydg7000/voyages/1vydgL000/) | draft |
+| [Local Linux CLI Runtime](epics/1vydg7000/voyages/1vydgL000/) | in-progress |
 

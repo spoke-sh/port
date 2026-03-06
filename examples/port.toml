@@ -1,0 +1,31 @@
+[artifacts.kernels.demo-kernel]
+path = "artifacts/kernel/demo/vmlinux"
+build = "port artifacts build --artifact demo-kernel"
+validate = "port artifacts validate --artifact demo-kernel"
+
+[artifacts.guest_images.demo-guest]
+path = "artifacts/guest/demo/rootfs.ext4"
+build = "port artifacts build --artifact demo-guest"
+validate = "port artifacts validate --artifact demo-guest"
+
+[hosts.local]
+platform = "linux"
+
+[hosts.local.connection]
+mode = "local"
+
+[hosts.local.firecracker]
+local_launch = true
+notes = ["Requires /dev/kvm and the firecracker binary"]
+
+[machines.demo]
+host = "local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+vcpu_count = 2
+memory_mib = 512
+
+[machines.demo.guest]
+vsock_cid = 52
+control_port = 7000
+console_log = "runtime/demo/console.log"
