@@ -19,10 +19,11 @@ created_at: 2026-03-06T14:29:51
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/3 voyages complete, 9/9 stories done
+**Progress:** 3/4 voyages complete, 9/10 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Local Linux CLI Runtime](voyages/1vydgL000/) | done | 5/5 |
 | [Cloud Linux Control Lane](voyages/1vyeq5000/) | done | 3/3 |
 | [Clarify Help Examples](voyages/1vyfCm000/) | done | 1/1 |
+| [Remove Nix Bias From Help Surface](voyages/1vyfXX000/) | planned | 0/1 |
 <!-- END GENERATED -->
