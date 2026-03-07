@@ -2,11 +2,12 @@
 id: 1vyeq5000
 index: 2
 title: Cloud Linux Control Lane
-status: in-progress
+status: done
 epic: 1vydg7000
 created_at: 2026-03-06T15:44:13
 updated_at: 2026-03-06T15:49:04
 started_at: 2026-03-06T15:49:47
+completed_at: 2026-03-06T16:03:13
 ---
 
 # Cloud Linux Control Lane
@@ -20,16 +21,18 @@ started_at: 2026-03-06T15:49:47
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Publish Cloud Support Matrix](../../../../stories/1vyerX000/README.md) | feat | backlog |
+| [Publish Cloud Support Matrix](../../../../stories/1vyerX000/README.md) | feat | done |
 | [Model Cloud Linux Providers](../../../../stories/1vyerj000/README.md) | feat | done |
 | [Implement Remote Linux Diagnostics](../../../../stories/1vyetE000/README.md) | feat | done |
 <!-- END GENERATED -->
