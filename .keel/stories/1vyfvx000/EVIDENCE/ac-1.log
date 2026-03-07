@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:30:34.411910594-08:00
+mode: manual
+---
+Launched a fresh demo VM under /tmp/port-live-proof.rIrHfc and ran host-to-guest copy of /tmp/port-live-proof.rIrHfc/host-proof.txt to /workspace/host-proof.txt through the canonical CLI; the follow-up 'port guest exec --machine demo --runtime-root /tmp/port-live-proof.rIrHfc -- /bin/sh -lc "cat /workspace/host-proof.txt"' returned 'live-copy-final'.

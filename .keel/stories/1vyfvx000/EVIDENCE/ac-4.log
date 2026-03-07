@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:30:45.326359715-08:00
+mode: manual
+---
+Updated the canonical surfaces so help text, README, and operator docs now describe the live guest transport for exec/copy/pty/logs/forward, the foreground forward lifecycle, and the sample-guest loopback prerequisite for guest-side 127.0.0.1 targets.

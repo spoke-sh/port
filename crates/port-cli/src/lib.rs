@@ -4,11 +4,12 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use port_agent_protocol::{
-    CopyDirection, CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest,
-    OperationResult, PtyRequest,
+    CopyDirection, ExecRequest, GuestOperation, LogsRequest, OperationResult, PtyRequest,
 };
 use port_model::PortConfig;
-use port_runtime::{DoctorReport, GuestRequest, LaunchRequest};
+use port_runtime::{
+    DoctorReport, GuestCopyRequest, GuestForwardRequest, GuestRequest, LaunchRequest,
+};
 use serde::Serialize;
 
 const AFTER_HELP: &str = "\
@@ -29,8 +30,9 @@ Guest workflow examples:
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
-  `port guest exec`, `pty`, and `logs` now work against launched Firecracker VMs through the live guest transport.
-  `port guest copy` and `port guest forward` still require a host-side guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock` until their transport rewrite lands.
+  `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
+  `port guest forward` is a foreground host-side proxy session; stop it with Ctrl-C when you are done.
+  Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
 
 Platform Support:
   Linux: local Firecracker launch is supported when port doctor passes.
@@ -350,23 +352,20 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             destination,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(config, GuestRequest {
-                machine_name: &machine,
-                runtime_root: &runtime_root,
-                operation: GuestOperation::Copy(CopyRequest {
-                    source,
-                    destination,
+            let result = port_runtime::copy_guest_file(
+                config,
+                GuestCopyRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    source: source.as_ref(),
+                    destination: destination.as_ref(),
                     direction: direction.into(),
-                }),
-            })? {
-                OperationResult::Copy(result) => {
-                    println!(
-                        "copied {} bytes via {:?} to {}",
-                        result.bytes_copied, result.direction, result.path
-                    );
-                }
-                other => bail!("unexpected guest copy result: {other:?}"),
-            }
+                },
+            )?;
+            println!(
+                "copied {} bytes via {:?} to {}",
+                result.bytes_copied, result.direction, result.path
+            );
         }
         GuestCommand::Pty {
             machine,
@@ -419,17 +418,19 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             target,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(config, GuestRequest {
-                machine_name: &machine,
-                runtime_root: &runtime_root,
-                operation: GuestOperation::Forward(ForwardRequest { listen, target }),
-            })? {
-                OperationResult::Forward(result) => {
-                    println!("forward listening: {}", result.listen);
-                    println!("forward target: {}", result.target);
-                }
-                other => bail!("unexpected guest forward result: {other:?}"),
-            }
+            let session = port_runtime::prepare_guest_forward(
+                config,
+                GuestForwardRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    listen: &listen,
+                    target: &target,
+                },
+            )?;
+            println!("forward listening: {}", session.listen_addr());
+            println!("forward target: {}", session.target());
+            println!("forward lifecycle: foreground; press Ctrl-C to stop");
+            session.serve()?;
         }
     }
 
@@ -497,6 +498,7 @@ mod tests {
             "GCP",
             "Azure",
             "PVM",
+            "foreground host-side proxy",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

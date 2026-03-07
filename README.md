@@ -146,14 +146,16 @@ If the required tools are not available, `port doctor` may report missing
 prerequisites such as `firecracker` on `PATH`, and `port machine launch` is
 expected to fail until that environment is corrected.
 
-The launched-VM guest transport is now partially live:
+The launched-VM guest transport is now the canonical path for the guest CLI:
 
-- `port guest exec`, `port guest pty`, and `port guest logs` connect to a
-  launched Firecracker VM through the machine model's configured guest control
-  port.
-- `port guest copy` and `port guest forward` still target the runtime
-  guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock` until the
-  real host/guest boundary rewrite lands.
+- `port guest exec`, `port guest copy`, `port guest pty`, `port guest logs`,
+  and `port guest forward` all connect to launched Firecracker VMs through the
+  machine model's configured guest control port.
+- `port guest copy` now transfers bytes across the real host/guest boundary
+  instead of assuming the guest can see host filesystem paths directly.
+- `port guest forward` is a foreground host-side proxy session. It binds on the
+  host, connects each inbound client to the guest target through the guest
+  transport, and runs until you stop it.
 
 ## Artifact Workflow
 
@@ -181,9 +183,17 @@ Detailed contracts, inputs, outputs, and validation expectations live in
 
 ## Guest Agent Workflow
 
-The current MVP guest-agent transport is a Unix socket at
-`<runtime-root>/<machine>/guest-agent.sock`. The `port guest ...` commands use
-that path by default with `--runtime-root runtime`.
+For launched Firecracker VMs, the canonical `port guest ...` commands now use
+the live guest transport automatically:
+
+- Port resolves the machine's configured guest control port from the model.
+- The host runtime connects to `<runtime-root>/<machine>/guest.vsock`.
+- Firecracker tunnels that host-side socket into the guest-side
+  `port-guest-agent` vsock listener.
+
+The runtime Unix socket at `<runtime-root>/<machine>/guest-agent.sock` remains
+the explicit local shim path when present, mainly for tests and host-local
+debugging, but launched VMs no longer depend on it.
 
 Example flows:
 
@@ -206,11 +216,15 @@ cargo run -p port-cli -- --config examples/port.toml guest forward \
   --listen 127.0.0.1:8080 --target 127.0.0.1:80
 ```
 
-Current limitation:
+Current forward lifecycle:
 
-- The guest image now embeds and launches `port-guest-agent`.
-- The canonical host-side `port guest ...` commands still target the runtime
-  socket workflow rather than a launched Firecracker guest transport.
+- `port guest forward` is a foreground host-side proxy. The command prints the
+  bound listener address, keeps serving until you interrupt it, and opens one
+  guest transport connection per inbound client.
+- Guest-side `--target` addresses still depend on guest networking being up.
+  In the sample guest image, bring loopback up before targeting
+  `127.0.0.1`, for example with
+  `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
 
 ## Model And Example Config
 

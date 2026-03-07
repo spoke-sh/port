@@ -1,6 +1,7 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -98,6 +99,23 @@ pub struct GuestRequest<'a> {
     pub machine_name: &'a str,
     pub runtime_root: &'a Path,
     pub operation: GuestOperation,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuestCopyRequest<'a> {
+    pub machine_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub source: &'a Path,
+    pub destination: &'a Path,
+    pub direction: port_agent_protocol::CopyDirection,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuestForwardRequest<'a> {
+    pub machine_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub listen: &'a str,
+    pub target: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -688,18 +706,14 @@ fn repo_root() -> Result<PathBuf> {
 }
 
 pub fn execute_guest_operation(config: &PortConfig, request: GuestRequest<'_>) -> Result<OperationResult> {
-    let endpoint = resolve_guest_endpoint(config, &request)?;
-    if matches!(endpoint, GuestEndpoint::FirecrackerVsock { .. })
-        && matches!(
-            &request.operation,
-            GuestOperation::Copy(_) | GuestOperation::Forward(_)
-        )
-    {
-        bail!(
-            "launched Firecracker VMs now support `port guest exec`, `pty`, and `logs` through the live guest transport, but `copy` and `forward` are still being rewired for the real host/guest boundary"
-        );
+    if matches!(
+        &request.operation,
+        GuestOperation::Copy(_) | GuestOperation::Forward(_)
+    ) {
+        bail!("copy and forward use dedicated runtime flows");
     }
 
+    let endpoint = resolve_guest_endpoint(config, &request)?;
     let stream = connect_guest_endpoint(&endpoint)?;
     let writer_stream = stream
         .try_clone()
@@ -736,6 +750,272 @@ pub fn execute_guest_operation(config: &PortConfig, request: GuestRequest<'_>) -
         ResponseEnvelope::Accepted { .. } => {
             bail!("streaming guest operations are not implemented yet")
         }
+    }
+}
+
+pub fn copy_guest_file(
+    config: &PortConfig,
+    request: GuestCopyRequest<'_>,
+) -> Result<port_agent_protocol::CopyResult> {
+    let endpoint = resolve_guest_endpoint(
+        config,
+        &GuestRequest {
+            machine_name: request.machine_name,
+            runtime_root: request.runtime_root,
+            operation: GuestOperation::Exec(port_agent_protocol::ExecRequest {
+                command: vec![String::from("/bin/true")],
+                cwd: None,
+                env: Default::default(),
+            }),
+        },
+    )?;
+    let stream = connect_guest_endpoint(&endpoint)?;
+    let writer_stream = stream
+        .try_clone()
+        .context("failed to clone guest agent socket")?;
+    let mut writer = BufWriter::new(writer_stream);
+    let mut reader = BufReader::new(stream);
+
+    let size_bytes = match request.direction {
+        port_agent_protocol::CopyDirection::HostToGuest => Some(
+            fs::metadata(request.source)
+                .with_context(|| format!("failed to stat '{}'", request.source.display()))?
+                .len(),
+        ),
+        port_agent_protocol::CopyDirection::GuestToHost => None,
+    };
+
+    write_frame(
+        &mut writer,
+        &RequestEnvelope {
+            id: 1,
+            operation: GuestOperation::Copy(port_agent_protocol::CopyRequest {
+                source: request.source.display().to_string(),
+                destination: request.destination.display().to_string(),
+                direction: request.direction,
+                size_bytes,
+            }),
+        },
+    )
+    .map_err(|error| anyhow!("protocol error: {error}"))?;
+
+    match request.direction {
+        port_agent_protocol::CopyDirection::HostToGuest => {
+            match read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))? {
+                ResponseEnvelope::Accepted {
+                    stream: port_agent_protocol::StreamKind::Bytes,
+                    ..
+                } => {}
+                ResponseEnvelope::Failed { message, .. } => {
+                    bail!("guest agent returned an error: {message}")
+                }
+                response => bail!("unexpected guest copy handshake response: {response:?}"),
+            }
+
+            let mut source = File::open(request.source)
+                .with_context(|| format!("failed to open '{}'", request.source.display()))?;
+            std::io::copy(&mut source, &mut writer)
+                .with_context(|| format!("failed to stream '{}'", request.source.display()))?;
+            writer.flush().context("failed to flush copy stream")?;
+        }
+        port_agent_protocol::CopyDirection::GuestToHost => {
+            let size_bytes = match read_frame(&mut reader)
+                .map_err(|error| anyhow!("protocol error: {error}"))?
+            {
+                ResponseEnvelope::Accepted {
+                    stream: port_agent_protocol::StreamKind::Bytes,
+                    size_bytes: Some(size_bytes),
+                    ..
+                } => size_bytes,
+                ResponseEnvelope::Failed { message, .. } => {
+                    bail!("guest agent returned an error: {message}")
+                }
+                response => bail!("unexpected guest copy handshake response: {response:?}"),
+            };
+
+            if let Some(parent) = request.destination.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create '{}'", parent.display()))?;
+            }
+            let mut destination = File::create(request.destination)
+                .with_context(|| format!("failed to create '{}'", request.destination.display()))?;
+            let mut limited = reader.by_ref().take(size_bytes);
+            let bytes_copied = std::io::copy(&mut limited, &mut destination)
+                .with_context(|| format!("failed to write '{}'", request.destination.display()))?;
+            if bytes_copied != size_bytes {
+                bail!(
+                    "expected {size_bytes} bytes from guest copy, received {bytes_copied}"
+                );
+            }
+        }
+    }
+
+    let response: ResponseEnvelope =
+        read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+
+    match response {
+        ResponseEnvelope::Completed {
+            exit_code: 0,
+            result: OperationResult::Copy(result),
+            ..
+        } => Ok(result),
+        ResponseEnvelope::Completed {
+            exit_code, result, ..
+        } => bail!("guest copy failed with exit code {exit_code}: {result:?}"),
+        ResponseEnvelope::Failed { message, .. } => {
+            bail!("guest agent returned an error: {message}")
+        }
+        ResponseEnvelope::Accepted { .. } => {
+            bail!("unexpected second streaming response from guest copy")
+        }
+    }
+}
+
+pub struct GuestForwardSession {
+    listener: TcpListener,
+    endpoint: GuestEndpoint,
+    target: String,
+}
+
+impl GuestForwardSession {
+    #[must_use]
+    pub fn listen_addr(&self) -> String {
+        self.listener
+            .local_addr()
+            .map(|addr| addr.to_string())
+            .unwrap_or_else(|_| String::from("<unknown>"))
+    }
+
+    #[must_use]
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub fn serve(self) -> Result<()> {
+        for inbound in self.listener.incoming() {
+            let inbound = inbound.context("failed to accept forwarded host connection")?;
+            let endpoint = self.endpoint.clone();
+            let target = self.target.clone();
+            thread::spawn(move || {
+                if let Err(error) = proxy_guest_forward_connection(endpoint, target, inbound) {
+                    eprintln!("port guest forward connection failed: {error}");
+                }
+            });
+        }
+
+        Ok(())
+    }
+}
+
+pub fn prepare_guest_forward(
+    config: &PortConfig,
+    request: GuestForwardRequest<'_>,
+) -> Result<GuestForwardSession> {
+    let endpoint = resolve_guest_endpoint(
+        config,
+        &GuestRequest {
+            machine_name: request.machine_name,
+            runtime_root: request.runtime_root,
+            operation: GuestOperation::Exec(port_agent_protocol::ExecRequest {
+                command: vec![String::from("/bin/true")],
+                cwd: None,
+                env: Default::default(),
+            }),
+        },
+    )?;
+    let listener = TcpListener::bind(request.listen)
+        .with_context(|| format!("failed to bind '{}'", request.listen))?;
+    Ok(GuestForwardSession {
+        listener,
+        endpoint,
+        target: request.target.to_string(),
+    })
+}
+
+fn proxy_guest_forward_connection(
+    endpoint: GuestEndpoint,
+    target: String,
+    inbound: TcpStream,
+) -> Result<()> {
+    let stream = connect_guest_endpoint(&endpoint)?;
+    let writer_stream = stream
+        .try_clone()
+        .context("failed to clone guest transport stream")?;
+    let mut writer = BufWriter::new(writer_stream);
+    let mut reader = BufReader::new(stream);
+
+    write_frame(
+        &mut writer,
+        &RequestEnvelope {
+            id: 1,
+            operation: GuestOperation::Forward(port_agent_protocol::ForwardRequest {
+                listen: String::new(),
+                target: target.clone(),
+            }),
+        },
+    )
+    .map_err(|error| anyhow!("protocol error: {error}"))?;
+
+    match read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))? {
+        ResponseEnvelope::Accepted {
+            stream: port_agent_protocol::StreamKind::Bytes,
+            ..
+        } => {}
+        ResponseEnvelope::Failed { message, .. } => {
+            bail!("guest agent returned an error: {message}")
+        }
+        response => bail!("unexpected guest forward handshake response: {response:?}"),
+    };
+
+    let buffered = reader.buffer().to_vec();
+    let guest_stream = reader.into_inner();
+    let mut guest_write = guest_stream
+        .try_clone()
+        .context("failed to clone guest forward stream")?;
+    let mut guest_read = PrefixedReader::new(buffered, guest_stream);
+    let mut inbound_read = inbound
+        .try_clone()
+        .context("failed to clone inbound forward socket")?;
+    let mut inbound_write = inbound;
+
+    let first = thread::spawn(move || {
+        let result = std::io::copy(&mut inbound_read, &mut guest_write);
+        let _ = guest_write.shutdown(Shutdown::Write);
+        result
+    });
+    let second = thread::spawn(move || {
+        let result = std::io::copy(&mut guest_read, &mut inbound_write);
+        let _ = inbound_write.shutdown(Shutdown::Write);
+        result
+    });
+
+    let _ = first.join();
+    let _ = second.join();
+    Ok(())
+}
+
+struct PrefixedReader<R> {
+    prefix: Cursor<Vec<u8>>,
+    inner: R,
+}
+
+impl<R> PrefixedReader<R> {
+    fn new(prefix: Vec<u8>, inner: R) -> Self {
+        Self {
+            prefix: Cursor::new(prefix),
+            inner,
+        }
+    }
+}
+
+impl<R: Read> Read for PrefixedReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let prefix_bytes = self.prefix.read(buf)?;
+        if prefix_bytes > 0 {
+            return Ok(prefix_bytes);
+        }
+
+        self.inner.read(buf)
     }
 }
 
@@ -920,7 +1200,8 @@ struct VsockConfig {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{Shutdown, TcpStream};
     use std::os::unix::net::UnixListener;
     use std::path::Path;
     use std::process::{Command, Stdio};
@@ -930,13 +1211,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, DoctorCheck, GuestRequest, LaunchRequest, RuntimePaths, artifact_script,
-        build_firecracker_config, collect_doctor_report, execute_guest_operation,
-        launch_local_machine, path_check, prepare_runtime_state, read_pid_file, repo_root,
+        ArtifactAction, DoctorCheck, GuestCopyRequest, GuestForwardRequest, GuestRequest,
+        LaunchRequest, RuntimePaths, artifact_script, build_firecracker_config,
+        collect_doctor_report, copy_guest_file, execute_guest_operation, launch_local_machine,
+        path_check, prepare_guest_forward, prepare_runtime_state, read_pid_file, repo_root,
     };
     use port_agent_protocol::{
-        ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
-        ResponseEnvelope, read_frame, write_frame,
+        CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
+        ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
     use port_model::{ArtifactKind, PortConfig};
 
@@ -1220,5 +1502,224 @@ mod tests {
         }
 
         server.join().expect("server thread should complete");
+    }
+
+    #[test]
+    fn copy_guest_file_uses_firecracker_vsock_tunnel_in_both_directions() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+
+        let host_source = tempdir.path().join("host.txt");
+        fs::write(&host_source, "copy-ok").expect("host source should write");
+        let host_destination = tempdir.path().join("downloaded.txt");
+        let host_destination_for_server = host_destination.clone();
+
+        let listener = UnixListener::bind(&paths.vsock_path).expect("vsock listener should bind");
+        let server = thread::spawn(move || {
+            let (mut upload_stream, _) = listener.accept().expect("upload accept");
+            let upload_reader_stream = upload_stream.try_clone().expect("upload clone");
+            let mut upload_reader = BufReader::new(upload_reader_stream);
+            let mut handshake = String::new();
+            upload_reader
+                .read_line(&mut handshake)
+                .expect("upload handshake should read");
+            assert_eq!(handshake, "CONNECT 7000\n");
+            upload_stream.write_all(b"OK\n").expect("upload ack");
+            let upload_request: RequestEnvelope =
+                read_frame(&mut upload_reader).expect("upload request should decode");
+            let GuestOperation::Copy(upload_request) = upload_request.operation else {
+                panic!("unexpected upload operation");
+            };
+            assert_eq!(upload_request.direction, CopyDirection::HostToGuest);
+            assert_eq!(upload_request.size_bytes, Some(7));
+            write_frame(
+                &mut upload_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .expect("upload accepted should encode");
+            let mut uploaded = Vec::new();
+            upload_reader
+                .by_ref()
+                .take(7)
+                .read_to_end(&mut uploaded)
+                .expect("upload bytes should read");
+            assert_eq!(uploaded, b"copy-ok");
+            write_frame(
+                &mut upload_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(port_agent_protocol::CopyResult {
+                        bytes_copied: 7,
+                        path: String::from("/workspace/copied.txt"),
+                        direction: CopyDirection::HostToGuest,
+                    }),
+                },
+            )
+            .expect("upload completion should encode");
+            drop(upload_stream);
+
+            let (mut download_stream, _) = listener.accept().expect("download accept");
+            let download_reader_stream = download_stream.try_clone().expect("download clone");
+            let mut download_reader = BufReader::new(download_reader_stream);
+            let mut handshake = String::new();
+            download_reader
+                .read_line(&mut handshake)
+                .expect("download handshake should read");
+            assert_eq!(handshake, "CONNECT 7000\n");
+            download_stream.write_all(b"OK\n").expect("download ack");
+            let download_request: RequestEnvelope =
+                read_frame(&mut download_reader).expect("download request should decode");
+            let GuestOperation::Copy(download_request) = download_request.operation else {
+                panic!("unexpected download operation");
+            };
+            assert_eq!(download_request.direction, CopyDirection::GuestToHost);
+            write_frame(
+                &mut download_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: Some(7),
+                },
+            )
+            .expect("download accepted should encode");
+            download_stream
+                .write_all(b"copy-ok")
+                .expect("download bytes should write");
+            write_frame(
+                &mut download_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(port_agent_protocol::CopyResult {
+                        bytes_copied: 7,
+                        path: host_destination_for_server.display().to_string(),
+                        direction: CopyDirection::GuestToHost,
+                    }),
+                },
+            )
+            .expect("download completion should encode");
+        });
+
+        let upload = copy_guest_file(
+            &PortConfig::sample(),
+            GuestCopyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                source: &host_source,
+                destination: Path::new("/workspace/copied.txt"),
+                direction: CopyDirection::HostToGuest,
+            },
+        )
+        .expect("upload should succeed");
+        assert_eq!(upload.bytes_copied, 7);
+
+        let download = copy_guest_file(
+            &PortConfig::sample(),
+            GuestCopyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                source: Path::new("/workspace/copied.txt"),
+                destination: &host_destination,
+                direction: CopyDirection::GuestToHost,
+            },
+        )
+        .expect("download should succeed");
+        assert_eq!(download.bytes_copied, 7);
+        assert_eq!(download.path, host_destination.display().to_string());
+        assert_eq!(
+            fs::read_to_string(&host_destination).expect("downloaded file should read"),
+            "copy-ok"
+        );
+
+        server.join().expect("copy server thread should complete");
+    }
+
+    #[test]
+    fn guest_forward_session_proxies_through_firecracker_vsock_tunnel() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener = UnixListener::bind(&paths.vsock_path).expect("vsock listener should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("forward accept");
+            let reader_stream = stream.try_clone().expect("forward clone");
+            let mut reader = BufReader::new(reader_stream);
+            let mut handshake = String::new();
+            reader
+                .read_line(&mut handshake)
+                .expect("forward handshake should read");
+            assert_eq!(handshake, "CONNECT 7000\n");
+            stream.write_all(b"OK\n").expect("forward ack");
+            let request: RequestEnvelope = read_frame(&mut reader).expect("forward request");
+            let GuestOperation::Forward(request) = request.operation else {
+                panic!("unexpected forward operation");
+            };
+            assert_eq!(request.target, "127.0.0.1:8081");
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .expect("forward accepted should encode");
+            stream
+                .write_all(b"ready")
+                .expect("forward eager bytes should write");
+            stream.flush().expect("forward eager bytes should flush");
+            let mut echoed = [0_u8; 16];
+            let len = reader.read(&mut echoed).expect("forward bytes should read");
+            stream
+                .write_all(&echoed[..len])
+                .expect("forward bytes should echo");
+        });
+
+        let session = prepare_guest_forward(
+            &PortConfig::sample(),
+            GuestForwardRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                listen: "127.0.0.1:0",
+                target: "127.0.0.1:8081",
+            },
+        )
+        .expect("forward session should prepare");
+        let listen_addr = session.listen_addr();
+        let serve_thread = thread::spawn(move || session.serve().expect("forward serve should run"));
+
+        let mut forwarded: Option<TcpStream> = None;
+        for _ in 0..100 {
+            match TcpStream::connect(&listen_addr) {
+                Ok(stream) => {
+                    forwarded = Some(stream);
+                    break;
+                }
+                Err(_) => thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        let mut forwarded = forwarded.expect("should connect to forwarded listener");
+        let mut eager = [0_u8; 5];
+        forwarded
+            .read_exact(&mut eager)
+            .expect("forward eager bytes should read");
+        assert_eq!(&eager, b"ready");
+        forwarded.write_all(b"forward-ok").expect("forward write");
+        forwarded.shutdown(Shutdown::Write).expect("forward shutdown");
+        let mut echoed = Vec::new();
+        forwarded
+            .read_to_end(&mut echoed)
+            .expect("forward read should complete");
+        assert_eq!(echoed, b"forward-ok");
+
+        let _ = serve_thread.thread().id();
+        server.join().expect("forward server thread should complete");
     }
 }

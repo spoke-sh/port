@@ -32,6 +32,7 @@ pub struct CopyRequest {
     pub source: String,
     pub destination: String,
     pub direction: CopyDirection,
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +68,7 @@ pub enum ResponseEnvelope {
     Accepted {
         id: u64,
         stream: StreamKind,
+        size_bytes: Option<u64>,
     },
     Completed {
         id: u64,
@@ -209,6 +211,7 @@ mod tests {
                 source: String::from("./local.txt"),
                 destination: String::from("/tmp/remote.txt"),
                 direction: CopyDirection::HostToGuest,
+                size_bytes: Some(7),
             }),
         };
 
@@ -224,6 +227,7 @@ mod tests {
         let accepted = ResponseEnvelope::Accepted {
             id: 1,
             stream: StreamKind::Pty,
+            size_bytes: None,
         };
         let completed = ResponseEnvelope::Completed {
             id: 1,

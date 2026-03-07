@@ -40,11 +40,16 @@ Important prerequisite note:
 
 Current guest-command behavior:
 
-- `port guest exec`, `pty`, and `logs` now work against launched Firecracker
-  VMs through the machine model's live guest control port.
-- `port guest copy` and `port guest forward` still use the runtime guest-agent
-  socket at `<runtime-root>/<machine>/guest-agent.sock` until their live-VM
-  transport rewrite lands.
+- `port guest exec`, `copy`, `pty`, `logs`, and `forward` now work against
+  launched Firecracker VMs through the machine model's live guest control port.
+- `port guest copy` transfers bytes across the real host/guest boundary; it no
+  longer depends on the guest seeing host paths directly.
+- `port guest forward` binds on the host and stays attached in the foreground
+  until you stop it.
+- Guest-side `port guest forward --target ...` addresses still depend on guest
+  networking being up. In the sample guest image, bring loopback up before
+  targeting `127.0.0.1`, for example with
+  `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
 
 ## Remote Linux And Cloud Workflow
 

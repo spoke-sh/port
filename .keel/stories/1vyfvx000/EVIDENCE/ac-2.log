@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:30:45.327793576-08:00
+mode: manual
+---
+Against the same launched VM, 'port guest copy --direction guest-to-host --source /workspace/host-proof.txt --destination /tmp/port-live-proof.rIrHfc/roundtrip-proof.txt' reported 'copied 16 bytes via GuestToHost to /tmp/port-live-proof.rIrHfc/roundtrip-proof.txt', and the host file contents were 'live-copy-final'.

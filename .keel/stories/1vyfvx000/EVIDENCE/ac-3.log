@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:30:45.293297503-08:00
+mode: manual
+---
+In the launched demo VM under /tmp/port-live-proof.rIrHfc, I brought loopback up with 'port guest exec --machine demo --runtime-root /tmp/port-live-proof.rIrHfc -- /bin/sh -lc "busybox ifconfig lo up"', started 'busybox httpd -f -p 127.0.0.1:18080 -h /workspace', ran 'port guest forward --machine demo --runtime-root /tmp/port-live-proof.rIrHfc --listen 127.0.0.1:18081 --target 127.0.0.1:18080', and 'curl --http1.0 http://127.0.0.1:18081/host-proof.txt' returned 'live-copy-final' through the host-side forward session.

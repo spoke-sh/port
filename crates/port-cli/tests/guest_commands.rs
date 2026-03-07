@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -106,6 +106,32 @@ fn cli_guest_commands_cover_all_capabilities() {
         fs::read_to_string(guest_root.join("workspace/copied.txt")).expect("copied file"),
         "copy-ok"
     );
+    let host_roundtrip = temp.path().join("roundtrip.txt");
+    let copy_back = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("copy")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .arg("--direction")
+        .arg("guest-to-host")
+        .arg("--source")
+        .arg("/workspace/copied.txt")
+        .arg("--destination")
+        .arg(&host_roundtrip)
+        .output()
+        .expect("copy back command");
+    assert!(copy_back.status.success());
+    assert_eq!(
+        fs::read_to_string(&host_roundtrip).expect("roundtrip file"),
+        "copy-ok"
+    );
+    assert!(
+        String::from_utf8_lossy(&copy_back.stdout).contains(&host_roundtrip.display().to_string())
+    );
 
     let pty = Command::new(port_bin())
         .arg("--config")
@@ -151,7 +177,11 @@ fn cli_guest_commands_cover_all_capabilities() {
         let len = stream.read(&mut buf).expect("read target");
         stream.write_all(&buf[..len]).expect("write target");
     });
-    let forward = Command::new(port_bin())
+    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve listen port");
+    let listen_addr = reserved.local_addr().expect("listen addr");
+    drop(reserved);
+
+    let mut forward = Command::new(port_bin())
         .arg("--config")
         .arg(&config_path)
         .arg("guest")
@@ -161,20 +191,31 @@ fn cli_guest_commands_cover_all_capabilities() {
         .arg("--runtime-root")
         .arg(&runtime_root)
         .arg("--listen")
-        .arg("127.0.0.1:0")
+        .arg(listen_addr.to_string())
         .arg("--target")
         .arg(target_addr.to_string())
-        .output()
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("forward command");
-    assert!(forward.status.success());
-    let stdout = String::from_utf8_lossy(&forward.stdout);
-    let listen = stdout
-        .lines()
-        .find_map(|line| line.strip_prefix("forward listening: "))
-        .expect("forward listener output");
-    let mut forwarded = TcpStream::connect(listen).expect("connect forwarded listener");
+
+    let mut forwarded = None;
+    for _ in 0..100 {
+        match TcpStream::connect(listen_addr) {
+            Ok(stream) => {
+                forwarded = Some(stream);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut forwarded = forwarded.expect("connect forwarded listener");
     forwarded.write_all(b"forward-ok").expect("write forwarded");
     let mut buf = [0_u8; 32];
     let len = forwarded.read(&mut buf).expect("read forwarded");
     assert_eq!(&buf[..len], b"forward-ok");
+
+    let _ = forward.kill();
+    let status = forward.wait().expect("forward process should exit");
+    assert!(!status.success(), "forward process should have been terminated");
 }
