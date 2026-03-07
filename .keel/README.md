@@ -11,11 +11,11 @@
 
 ## Epics
 
-### [Port MVP](epics/1vydg7000/) (active)
+### [Port MVP](epics/1vydg7000/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Local Linux CLI Runtime](epics/1vydg7000/voyages/1vydgL000/) | done |
 | [Cloud Linux Control Lane](epics/1vydg7000/voyages/1vyeq5000/) | done |
-| [Clarify Help Examples](epics/1vydg7000/voyages/1vyfCm000/) | in-progress |
+| [Clarify Help Examples](epics/1vydg7000/voyages/1vyfCm000/) | done |
 
