@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -275,6 +275,7 @@ pub fn launch_local_machine(
         machine.memory_mib,
         machine.kernel_args.clone(),
         machine.rootfs_read_only,
+        machine.guest.control_port,
         machine.guest.vsock_cid,
         paths.vsock_path.clone(),
     );
@@ -686,30 +687,20 @@ fn repo_root() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("failed to derive repository root from CARGO_MANIFEST_DIR"))
 }
 
-pub fn execute_guest_operation(request: GuestRequest<'_>) -> Result<OperationResult> {
-    let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
-    if !paths.guest_agent_socket.exists() {
-        if paths.vsock_path.exists() || paths.manifest_path.exists() {
-            bail!(
-                "guest agent socket '{}' does not exist for machine '{}'. The machine may be running, but `port guest ...` is still wired only to a host-side runtime guest-agent socket; launched-VM guest transport is not implemented yet.",
-                paths.guest_agent_socket.display(),
-                request.machine_name
-            );
-        }
-
+pub fn execute_guest_operation(config: &PortConfig, request: GuestRequest<'_>) -> Result<OperationResult> {
+    let endpoint = resolve_guest_endpoint(config, &request)?;
+    if matches!(endpoint, GuestEndpoint::FirecrackerVsock { .. })
+        && matches!(
+            &request.operation,
+            GuestOperation::Copy(_) | GuestOperation::Forward(_)
+        )
+    {
         bail!(
-            "guest agent socket '{}' does not exist for machine '{}'",
-            paths.guest_agent_socket.display(),
-            request.machine_name
+            "launched Firecracker VMs now support `port guest exec`, `pty`, and `logs` through the live guest transport, but `copy` and `forward` are still being rewired for the real host/guest boundary"
         );
     }
 
-    let stream = UnixStream::connect(&paths.guest_agent_socket).with_context(|| {
-        format!(
-            "failed to connect to guest agent socket '{}'",
-            paths.guest_agent_socket.display()
-        )
-    })?;
+    let stream = connect_guest_endpoint(&endpoint)?;
     let writer_stream = stream
         .try_clone()
         .context("failed to clone guest agent socket")?;
@@ -748,6 +739,111 @@ pub fn execute_guest_operation(request: GuestRequest<'_>) -> Result<OperationRes
     }
 }
 
+#[derive(Debug, Clone)]
+enum GuestEndpoint {
+    RuntimeSocket(PathBuf),
+    FirecrackerVsock {
+        host_socket_path: PathBuf,
+        guest_port: u32,
+    },
+}
+
+fn resolve_guest_endpoint(config: &PortConfig, request: &GuestRequest<'_>) -> Result<GuestEndpoint> {
+    let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
+    if paths.guest_agent_socket.exists() {
+        return Ok(GuestEndpoint::RuntimeSocket(paths.guest_agent_socket));
+    }
+
+    if paths.vsock_path.exists() {
+        let machine = config
+            .machines
+            .get(request.machine_name)
+            .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
+        return Ok(GuestEndpoint::FirecrackerVsock {
+            host_socket_path: paths.vsock_path,
+            guest_port: u32::from(machine.guest.control_port),
+        });
+    }
+
+    if paths.manifest_path.exists() {
+        bail!(
+            "launched machine '{}' does not expose a live guest transport socket at '{}'; inspect the runtime logs or relaunch the VM",
+            request.machine_name,
+            paths.vsock_path.display()
+        );
+    }
+
+    bail!(
+        "guest agent socket '{}' does not exist for machine '{}'",
+        paths.guest_agent_socket.display(),
+        request.machine_name
+    );
+}
+
+fn connect_guest_endpoint(endpoint: &GuestEndpoint) -> Result<UnixStream> {
+    match endpoint {
+        GuestEndpoint::RuntimeSocket(socket_path) => {
+            UnixStream::connect(socket_path).with_context(|| {
+                format!(
+                    "failed to connect to guest agent socket '{}'",
+                    socket_path.display()
+                )
+            })
+        }
+        GuestEndpoint::FirecrackerVsock {
+            host_socket_path,
+            guest_port,
+        } => connect_firecracker_vsock(host_socket_path, *guest_port),
+    }
+}
+
+fn connect_firecracker_vsock(host_socket_path: &Path, guest_port: u32) -> Result<UnixStream> {
+    let mut stream = UnixStream::connect(host_socket_path).with_context(|| {
+        format!(
+            "failed to connect to Firecracker guest transport socket '{}'",
+            host_socket_path.display()
+        )
+    })?;
+    stream
+        .write_all(format!("CONNECT {guest_port}\n").as_bytes())
+        .with_context(|| {
+            format!(
+                "failed to request Firecracker guest transport port {} via '{}'",
+                guest_port,
+                host_socket_path.display()
+            )
+        })?;
+    stream.flush().context("failed to flush Firecracker handshake")?;
+
+    let reader_stream = stream
+        .try_clone()
+        .context("failed to clone Firecracker guest transport socket")?;
+    let mut reader = BufReader::new(reader_stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).with_context(|| {
+        format!(
+            "failed to read Firecracker response from '{}'",
+            host_socket_path.display()
+        )
+    })?;
+
+    if !line.starts_with("OK") {
+        let detail = line.trim();
+        bail!(
+            "Firecracker refused to establish a guest transport tunnel to port {} via '{}': {}",
+            guest_port,
+            host_socket_path.display(),
+            if detail.is_empty() {
+                "empty response"
+            } else {
+                detail
+            }
+        );
+    }
+
+    Ok(stream)
+}
+
 fn build_firecracker_config(
     kernel_image_path: PathBuf,
     rootfs_path: PathBuf,
@@ -755,9 +851,12 @@ fn build_firecracker_config(
     mem_size_mib: u32,
     boot_args: String,
     rootfs_read_only: bool,
+    guest_control_port: u16,
     guest_cid: u32,
     uds_path: PathBuf,
 ) -> FirecrackerConfig {
+    let boot_args = format!("{boot_args} init=/init port.guest_control_port={guest_control_port}");
+
     FirecrackerConfig {
         boot_source: BootSourceConfig {
             kernel_image_path,
@@ -821,6 +920,8 @@ struct VsockConfig {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
     use std::path::Path;
     use std::process::{Command, Stdio};
     use std::thread;
@@ -833,7 +934,10 @@ mod tests {
         build_firecracker_config, collect_doctor_report, execute_guest_operation,
         launch_local_machine, path_check, prepare_runtime_state, read_pid_file, repo_root,
     };
-    use port_agent_protocol::{ExecRequest, GuestOperation};
+    use port_agent_protocol::{
+        ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
+        ResponseEnvelope, read_frame, write_frame,
+    };
     use port_model::{ArtifactKind, PortConfig};
 
     #[test]
@@ -860,6 +964,7 @@ mod tests {
             512,
             String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
             false,
+            7000,
             52,
             "/tmp/guest.vsock".into(),
         );
@@ -869,6 +974,8 @@ mod tests {
         assert!(json.contains("\"/tmp/vmlinux\""));
         assert!(json.contains("\"rootfs\""));
         assert!(json.contains("\"guest_cid\": 52"));
+        assert!(json.contains("init=/init"));
+        assert!(json.contains("port.guest_control_port=7000"));
     }
 
     #[test]
@@ -1025,13 +1132,13 @@ mod tests {
     }
 
     #[test]
-    fn guest_operations_explain_missing_live_vm_transport() {
+    fn guest_operations_explain_missing_live_vm_transport_socket() {
         let tempdir = tempdir().expect("tempdir should exist");
         let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
         fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
-        fs::write(&paths.vsock_path, "").expect("vsock marker should write");
+        fs::write(&paths.manifest_path, "{}\n").expect("manifest marker should write");
 
-        let error = execute_guest_operation(GuestRequest {
+        let error = execute_guest_operation(&PortConfig::sample(), GuestRequest {
             machine_name: "demo",
             runtime_root: tempdir.path(),
             operation: GuestOperation::Exec(ExecRequest {
@@ -1047,8 +1154,71 @@ mod tests {
         .expect_err("missing guest socket should fail");
 
         let message = error.to_string();
-        assert!(message.contains("may be running"));
-        assert!(message.contains("host-side runtime guest-agent socket"));
-        assert!(message.contains("not implemented yet"));
+        assert!(message.contains("does not expose a live guest transport socket"));
+        assert!(message.contains("relaunch the VM"));
+    }
+
+    #[test]
+    fn guest_exec_uses_firecracker_vsock_tunnel_when_runtime_socket_is_absent() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener = UnixListener::bind(&paths.vsock_path).expect("vsock listener should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("should accept guest transport");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+
+            let mut handshake = String::new();
+            reader
+                .read_line(&mut handshake)
+                .expect("handshake line should read");
+            assert_eq!(handshake, "CONNECT 7000\n");
+            stream.write_all(b"OK\n").expect("should acknowledge handshake");
+            stream.flush().expect("should flush handshake response");
+
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => {
+                    assert_eq!(request.command, vec![String::from("/bin/echo"), String::from("live-ok")]);
+                }
+                other => panic!("unexpected operation over live guest transport: {other:?}"),
+            }
+
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("live-ok\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        });
+
+        let result = execute_guest_operation(
+            &PortConfig::sample(),
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("live-ok")],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
+        .expect("live guest exec should succeed");
+
+        match result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "live-ok\n"),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        server.join().expect("server thread should complete");
     }
 }

@@ -17,3 +17,4 @@ port-agent-protocol = { path = "../port-agent-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+vsock.workspace = true

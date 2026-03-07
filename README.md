@@ -146,11 +146,14 @@ If the required tools are not available, `port doctor` may report missing
 prerequisites such as `firecracker` on `PATH`, and `port machine launch` is
 expected to fail until that environment is corrected.
 
-The current guest-command workflow is still separate from the launched VM path:
-`port guest ...` targets the runtime guest-agent socket at
-`<runtime-root>/<machine>/guest-agent.sock`. The built guest image now embeds
-`port-guest-agent`, but the canonical host-side guest CLI transport is still the
-runtime socket workflow until the host/guest transport is unified.
+The launched-VM guest transport is now partially live:
+
+- `port guest exec`, `port guest pty`, and `port guest logs` connect to a
+  launched Firecracker VM through the machine model's configured guest control
+  port.
+- `port guest copy` and `port guest forward` still target the runtime
+  guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock` until the
+  real host/guest boundary rewrite lands.
 
 ## Artifact Workflow
 
@@ -168,8 +171,10 @@ Artifact contracts:
 - `demo-kernel` fetches a pinned Firecracker-compatible kernel from the official
   Firecracker CI bucket and validates its architecture-specific sha256 digest.
 - `demo-guest` builds a deterministic ext4 rootfs containing BusyBox userspace,
-  `/init`, and the `port-guest-agent` binary, then validates the filesystem
-  layout with `e2fsck` and `debugfs`.
+  `/init`, and the `port-guest-agent` binary. The guest init path reads
+  `port.guest_control_port` from the kernel cmdline and launches the guest
+  agent on that vsock port, then validates the filesystem layout with `e2fsck`
+  and `debugfs`.
 
 Detailed contracts, inputs, outputs, and validation expectations live in
 [`docs/artifacts.md`](docs/artifacts.md).

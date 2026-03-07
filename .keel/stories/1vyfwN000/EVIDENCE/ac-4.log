@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:10:48.220998645-08:00
+mode: manual
+---
+Added runtime coverage for Firecracker-vsock handshake and transport selection; nix develop -c env CARGO_TARGET_DIR=/tmp/port-target cargo test -p port-runtime -p port-guest-agent -p port-cli passes after the live transport changes.

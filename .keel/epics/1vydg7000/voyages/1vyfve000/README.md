@@ -25,11 +25,11 @@ started_at: 2026-03-06T16:58:03
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Rework Copy And Forward For Live Guest Transport](../../../../stories/1vyfvx000/README.md) | feat | backlog |
 | [Stabilize Runtime State For Guest Transport](../../../../stories/1vyfwJ000/README.md) | fix | done |
-| [Connect Exec Pty And Logs To Live VMs](../../../../stories/1vyfwN000/README.md) | feat | backlog |
+| [Connect Exec Pty And Logs To Live VMs](../../../../stories/1vyfwN000/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:10:48.031356520-08:00
+mode: manual
+---
+Launched a fresh demo VM under /tmp/port-liveguest.* and ran 'port guest exec --machine demo --runtime-root <root> -- /bin/sh -lc "printf live-exec"'; the command returned 'live-exec' through the live Firecracker guest transport.

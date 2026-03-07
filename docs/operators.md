@@ -40,10 +40,11 @@ Important prerequisite note:
 
 Current guest-command behavior:
 
-- `port guest exec`, `copy`, `pty`, `logs`, and `forward` use the runtime
-  guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock`.
-- The built guest image carries `port-guest-agent`, but the launched-guest
-  transport is not yet the canonical CLI path.
+- `port guest exec`, `pty`, and `logs` now work against launched Firecracker
+  VMs through the machine model's live guest control port.
+- `port guest copy` and `port guest forward` still use the runtime guest-agent
+  socket at `<runtime-root>/<machine>/guest-agent.sock` until their live-VM
+  transport rewrite lands.
 
 ## Remote Linux And Cloud Workflow
 

@@ -12,11 +12,14 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     socket: PathBuf,
 
+    #[arg(long, value_name = "PORT")]
+    vsock_port: Option<u32>,
+
     #[arg(long, value_name = "PATH")]
     root: PathBuf,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    port_guest_agent::serve(&cli.socket, cli.root)
+    port_guest_agent::serve_with_vsock(&cli.socket, cli.root, cli.vsock_port)
 }

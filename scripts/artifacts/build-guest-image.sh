@@ -78,20 +78,35 @@ cat >"$staging_dir/init" <<'EOF'
 #!/bin/sh
 set -eu
 
-mount -t devtmpfs devtmpfs /dev
+mount_if_needed() {
+  mount -t "$1" "$2" "$3" 2>/dev/null || true
+}
+
+mount_if_needed devtmpfs devtmpfs /dev
 mkdir -p /dev/pts
-mount -t devpts devpts /dev/pts
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
+mount_if_needed devpts devpts /dev/pts
+mount_if_needed proc proc /proc
+mount_if_needed sysfs sysfs /sys
 mkdir -p /run/port /tmp /var/log
+
+guest_control_port=7000
+for token in $(cat /proc/cmdline); do
+  case "$token" in
+    port.guest_control_port=*)
+      guest_control_port="${token#port.guest_control_port=}"
+      ;;
+  esac
+done
 
 echo "port guest image booted" >/dev/console
 echo "port guest image booted" >>/var/log/port-agent.log
-/usr/bin/port-guest-agent --socket /run/port/guest-agent.sock --root / >>/var/log/port-agent.log 2>&1 &
-echo "port-guest-agent launched" >/dev/console
-echo "port-guest-agent launched" >>/var/log/port-agent.log
+/usr/bin/port-guest-agent --socket /run/port/guest-agent.sock --vsock-port "$guest_control_port" --root / >>/var/log/port-agent.log 2>&1 &
+echo "port-guest-agent launched on vsock port $guest_control_port" >/dev/console
+echo "port-guest-agent launched on vsock port $guest_control_port" >>/var/log/port-agent.log
 
-exec /bin/sh </dev/console >/dev/console 2>&1
+while true; do
+  sleep 3600
+done
 EOF
 chmod 0755 "$staging_dir/init"
 

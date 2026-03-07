@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:10:48.002390981-08:00
+mode: manual
+---
+Rebuilt demo-guest after wiring init=/init and port.guest_control_port boot args. The launched VM log now shows 'port-guest-agent launched on vsock port 7000', proving the guest image starts the agent on the configured control port.

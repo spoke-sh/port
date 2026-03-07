@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{BufReader, BufWriter, Read};
 use std::net::{TcpListener, TcpStream};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::{Component, Path, PathBuf};
 use std::thread;
 
@@ -12,6 +12,7 @@ use port_agent_protocol::{
     ResponseEnvelope, read_frame, write_frame,
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use vsock::{VMADDR_CID_ANY, VsockListener};
 
 #[derive(Debug, Clone)]
 pub struct AgentService {
@@ -235,6 +236,33 @@ impl AgentService {
 }
 
 pub fn serve(socket_path: &Path, root: PathBuf) -> Result<()> {
+    serve_with_vsock(socket_path, root, None)
+}
+
+pub fn serve_with_vsock(socket_path: &Path, root: PathBuf, vsock_port: Option<u32>) -> Result<()> {
+    let service = AgentService::new(root);
+    let unix_listener = bind_unix_listener(socket_path)?;
+    let vsock_listener = vsock_port
+        .map(|port| {
+            VsockListener::bind_with_cid_port(VMADDR_CID_ANY, port).with_context(|| {
+                format!("failed to bind guest-agent vsock listener on port {port}")
+            })
+        })
+        .transpose()?;
+
+    if let Some(vsock_listener) = vsock_listener {
+        let service = service.clone();
+        thread::spawn(move || {
+            if let Err(error) = serve_vsock_listener(vsock_listener, &service) {
+                eprintln!("port-guest-agent vsock listener exited: {error}");
+            }
+        });
+    }
+
+    serve_unix_listener(unix_listener, &service)
+}
+
+fn bind_unix_listener(socket_path: &Path) -> Result<UnixListener> {
     if socket_path.exists() {
         fs::remove_file(socket_path)
             .with_context(|| format!("failed to remove '{}'", socket_path.display()))?;
@@ -244,22 +272,37 @@ pub fn serve(socket_path: &Path, root: PathBuf) -> Result<()> {
             .with_context(|| format!("failed to create '{}'", parent.display()))?;
     }
 
-    let listener = UnixListener::bind(socket_path)
-        .with_context(|| format!("failed to bind '{}'", socket_path.display()))?;
-    let service = AgentService::new(root);
+    UnixListener::bind(socket_path)
+        .with_context(|| format!("failed to bind '{}'", socket_path.display()))
+}
 
+fn serve_unix_listener(listener: UnixListener, service: &AgentService) -> Result<()> {
     for stream in listener.incoming() {
         let stream = stream.context("failed to accept guest-agent connection")?;
-        handle_stream(stream, &service)?;
+        let reader = stream.try_clone().context("failed to clone UnixStream")?;
+        handle_protocol_stream(reader, stream, service)?;
     }
 
     Ok(())
 }
 
-fn handle_stream(stream: UnixStream, service: &AgentService) -> Result<()> {
-    let reader = stream.try_clone().context("failed to clone UnixStream")?;
-    let mut reader = BufReader::new(reader);
-    let mut writer = BufWriter::new(stream);
+fn serve_vsock_listener(listener: VsockListener, service: &AgentService) -> Result<()> {
+    for stream in listener.incoming() {
+        let stream = stream.context("failed to accept guest-agent vsock connection")?;
+        let reader = stream.try_clone().context("failed to clone VsockStream")?;
+        handle_protocol_stream(reader, stream, service)?;
+    }
+
+    Ok(())
+}
+
+fn handle_protocol_stream<R, W>(reader_stream: R, writer_stream: W, service: &AgentService) -> Result<()>
+where
+    R: std::io::Read,
+    W: std::io::Write,
+{
+    let mut reader = BufReader::new(reader_stream);
+    let mut writer = BufWriter::new(writer_stream);
     let request: RequestEnvelope =
         read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))?;
     let response = service.handle(request);
@@ -294,7 +337,7 @@ mod tests {
     };
     use tempfile::tempdir;
 
-    use super::{AgentService, serve};
+    use super::{AgentService, serve_with_vsock};
 
     #[test]
     fn service_handles_exec_copy_pty_logs_and_forward() {
@@ -404,7 +447,9 @@ mod tests {
         let socket_path = temp.path().join("agent.sock");
         let socket_for_thread = socket_path.clone();
         let root = guest_root.clone();
-        thread::spawn(move || serve(&socket_for_thread, root).expect("server should run"));
+        thread::spawn(move || {
+            serve_with_vsock(&socket_for_thread, root, None).expect("server should run")
+        });
 
         for _ in 0..50 {
             if socket_path.exists() {

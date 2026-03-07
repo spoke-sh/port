@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:10:48.198637813-08:00
+mode: manual
+---
+Against the same launched VM, 'port guest pty' returned 'live-pty' and 'port guest logs --path /var/log/port-agent.log --tail-lines 20' returned the guest boot and vsock-launch lines.

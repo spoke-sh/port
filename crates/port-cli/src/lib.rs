@@ -29,8 +29,8 @@ Guest workflow examples:
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
-  These guest examples require a host-side guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock`.
-  A launched Firecracker VM does not create that host-side socket yet, so `port guest ...` is still not wired to the live VM transport.
+  `port guest exec`, `pty`, and `logs` now work against launched Firecracker VMs through the live guest transport.
+  `port guest copy` and `port guest forward` still require a host-side guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock` until their transport rewrite lands.
 
 Platform Support:
   Linux: local Firecracker launch is supported when port doctor passes.
@@ -326,7 +326,7 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             command,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(GuestRequest {
+            match port_runtime::execute_guest_operation(config, GuestRequest {
                 machine_name: &machine,
                 runtime_root: &runtime_root,
                 operation: GuestOperation::Exec(ExecRequest {
@@ -350,7 +350,7 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             destination,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(GuestRequest {
+            match port_runtime::execute_guest_operation(config, GuestRequest {
                 machine_name: &machine,
                 runtime_root: &runtime_root,
                 operation: GuestOperation::Copy(CopyRequest {
@@ -374,7 +374,7 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             command,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(GuestRequest {
+            match port_runtime::execute_guest_operation(config, GuestRequest {
                 machine_name: &machine,
                 runtime_root: &runtime_root,
                 operation: GuestOperation::Pty(PtyRequest {
@@ -397,7 +397,7 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             follow,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(GuestRequest {
+            match port_runtime::execute_guest_operation(config, GuestRequest {
                 machine_name: &machine,
                 runtime_root: &runtime_root,
                 operation: GuestOperation::Logs(LogsRequest {
@@ -419,7 +419,7 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             target,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(GuestRequest {
+            match port_runtime::execute_guest_operation(config, GuestRequest {
                 machine_name: &machine,
                 runtime_root: &runtime_root,
                 operation: GuestOperation::Forward(ForwardRequest { listen, target }),
