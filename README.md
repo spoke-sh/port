@@ -74,7 +74,10 @@ port guest forward --machine <name> --listen <addr> --target <addr>
 ```
 
 Use `port --help` or any nested `--help` command to inspect the current command
-model and examples.
+model and examples. The sample `port --help` commands assume you are running
+from the repository root. Local artifact and launch examples also assume you
+entered `nix develop` first, or otherwise installed the same required tools on
+`PATH`.
 
 Current behavior:
 
@@ -139,6 +142,10 @@ What that produces:
 - deterministic artifacts under `artifacts/`
 - host validation through `port doctor`
 - Firecracker runtime state, logs, and manifest files under the chosen runtime root
+
+If you run the same commands outside `nix develop`, `port doctor` may report
+missing prerequisites such as `firecracker` on `PATH`, and `port machine launch`
+is expected to fail until that environment is corrected.
 
 The current guest-command workflow is still separate from the launched VM path:
 `port guest ...` targets the runtime guest-agent socket at

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T16:10:46.307700691-08:00
+mode: manual
+---
+Verified README.md and docs/operators.md now match the CLI help boundary: repo-root sample config usage, nix develop or equivalent dependencies on PATH, and port doctor as the launch gate.

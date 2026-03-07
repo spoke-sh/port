@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T16:10:46.317237363-08:00
+mode: manual
+---
+Ran the published local workflow in nix develop with the built port binary: port doctor, demo-kernel build, demo-guest build, config-aware doctor, and machine launch all succeeded; launch produced runtime metadata under a temporary runtime root.

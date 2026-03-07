@@ -14,6 +14,8 @@ Windows operators.
 ## Linux Workflow
 
 Use this workflow when `port doctor` passes on a Linux host.
+Run the sample-config commands from the repository root so
+`examples/port.toml` resolves correctly.
 
 ```bash
 nix develop
@@ -27,6 +29,14 @@ cargo run -p port-cli -- --config examples/port.toml machine launch --machine de
 
 Artifacts land under `artifacts/`. Runtime manifests and console logs land under
 the chosen runtime root, which defaults to `runtime/`.
+
+Important prerequisite note:
+
+- The sample artifact and launch workflow assumes `nix develop` or an
+  equivalent environment that provides `firecracker`, artifact-build tools, and
+  the Linux networking utilities that `port doctor` checks.
+- If `port doctor` reports a missing dependency, treat that as the explanation
+  for why a later `port machine launch` example will fail.
 
 Current guest-command behavior:
 

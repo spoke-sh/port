@@ -12,11 +12,20 @@ use port_runtime::{DoctorReport, GuestRequest, LaunchRequest};
 use serde::Serialize;
 
 const AFTER_HELP: &str = "\
-Examples:
+Example assumptions:
+  Run these sample-config commands from the repository root.
+  For local artifact and launch workflows, enter `nix develop` first or provide equivalent tools on PATH.
+  Treat `port doctor` as the gate for whether local `port machine launch` can succeed.
+
+Runnable local workflow:
+  nix develop
   port doctor
   port --config examples/port.toml doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel
+  port --config examples/port.toml artifacts build --artifact demo-guest
   port --config examples/port.toml machine launch --machine demo
+
+Guest workflow examples:
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
@@ -481,6 +490,8 @@ mod tests {
             "Linux",
             "macOS",
             "Windows",
+            "nix develop",
+            "repository root",
             "generic-linux",
             "AWS",
             "GCP",
