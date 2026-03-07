@@ -18,7 +18,7 @@ Run the sample-config commands from the repository root so
 `examples/port.toml` resolves correctly.
 
 ```bash
-nix develop
+cargo run -p port-cli -- doctor
 cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
 cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
 cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
@@ -32,9 +32,9 @@ the chosen runtime root, which defaults to `runtime/`.
 
 Important prerequisite note:
 
-- The sample artifact and launch workflow assumes `nix develop` or an
-  equivalent environment that provides `firecracker`, artifact-build tools, and
-  the Linux networking utilities that `port doctor` checks.
+- The sample artifact and launch workflow assumes `firecracker`,
+  artifact-build tools, and the Linux networking utilities that `port doctor`
+  checks are available in the execution environment.
 - If `port doctor` reports a missing dependency, treat that as the explanation
   for why a later `port machine launch` example will fail.
 

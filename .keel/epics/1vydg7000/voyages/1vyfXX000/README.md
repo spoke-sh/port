@@ -2,10 +2,11 @@
 id: 1vyfXX000
 index: 4
 title: Remove Nix Bias From Help Surface
-status: planned
+status: in-progress
 epic: 1vydg7000
 created_at: 2026-03-06T16:29:07
 updated_at: 2026-03-06T16:30:22
+started_at: 2026-03-06T16:30:56
 ---
 
 # Remove Nix Bias From Help Surface

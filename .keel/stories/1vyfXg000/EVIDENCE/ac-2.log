@@ -1,0 +1,33 @@
+---
+recorded_at: 2026-03-06T16:49:21.254947874-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "PATH|port doctor|repository root" /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/operators.md && ! rg -q "nix develop" /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/operators.md'
+---
+/home/alex/workspace/spoke-sh/port/docs/operators.md:16:Use this workflow when `port doctor` passes on a Linux host.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:17:Run the sample-config commands from the repository root so
+/home/alex/workspace/spoke-sh/port/docs/operators.md:36:  artifact-build tools, and the Linux networking utilities that `port doctor`
+/home/alex/workspace/spoke-sh/port/docs/operators.md:38:- If `port doctor` reports a missing dependency, treat that as the explanation
+/home/alex/workspace/spoke-sh/port/docs/operators.md:66:- `port doctor` shows provider-aware checks for `generic-linux`, `aws`, `gcp`,
+/home/alex/workspace/spoke-sh/port/docs/operators.md:84:3. Use `port doctor` on that Linux host before attempting local Firecracker launch.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:91:  run `port doctor` and any future launch commands on the Linux side, not on
+/home/alex/workspace/spoke-sh/port/docs/operators.md:99:2. Run `port doctor` inside that Linux environment.
+/home/alex/workspace/spoke-sh/port/docs/operators.md:100:3. If `port doctor` reports missing `/dev/kvm`, Firecracker, or other required
+/home/alex/workspace/spoke-sh/port/README.md:37:- Linux: run the full local MVP workflow, including artifact build, `port doctor`,
+/home/alex/workspace/spoke-sh/port/README.md:38:  and `port machine launch`, on a host where `port doctor` passes.
+/home/alex/workspace/spoke-sh/port/README.md:41:- Windows: use WSL for the repository and CLI if helpful, but treat `port doctor`
+/home/alex/workspace/spoke-sh/port/README.md:55:artifact pipelines. Cloud host support is still partial: `port doctor` and the
+/home/alex/workspace/spoke-sh/port/README.md:65:port doctor
+/home/alex/workspace/spoke-sh/port/README.md:78:from the repository root. Local artifact and launch examples also assume the
+/home/alex/workspace/spoke-sh/port/README.md:79:needed runtime tools are available in the execution environment and on `PATH`.
+/home/alex/workspace/spoke-sh/port/README.md:85:- `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
+/home/alex/workspace/spoke-sh/port/README.md:91:- `port doctor` also reports provider-aware support boundaries for
+/home/alex/workspace/spoke-sh/port/README.md:107:| `local` | `demo` | Supported | `port doctor` performs local preflight; `port machine launch --machine demo` can launch Firecracker on Linux |
+/home/alex/workspace/spoke-sh/port/README.md:108:| `generic-linux` | `cloud-generic` | Partial | `port doctor` reports the future remote Linux lane; `port machine launch` tells you to run Port on that Linux host directly |
+/home/alex/workspace/spoke-sh/port/README.md:109:| `aws` | `cloud-aws` | Partial | `port doctor` reports AWS as a justified future lane; `port machine launch --machine cloud-aws` fails with AWS-specific guidance |
+/home/alex/workspace/spoke-sh/port/README.md:110:| `gcp` | `cloud-gcp` | Partial | `port doctor` reports GCP as a justified future lane; `port machine launch` fails with GCP-specific guidance |
+/home/alex/workspace/spoke-sh/port/README.md:111:| `azure` | `cloud-azure` | Unsupported | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
+/home/alex/workspace/spoke-sh/port/README.md:142:- host validation through `port doctor`
+/home/alex/workspace/spoke-sh/port/README.md:145:If the required tools are not available, `port doctor` may report missing
+/home/alex/workspace/spoke-sh/port/README.md:146:prerequisites such as `firecracker` on `PATH`, and `port machine launch` is
+/home/alex/workspace/spoke-sh/port/README.md:241:`port doctor` and `port machine launch`.
+/home/alex/workspace/spoke-sh/port/README.md:249:  `port doctor` confirm whether local launch is available in that environment.
+/home/alex/workspace/spoke-sh/port/README.md:251:`port doctor` is the canonical entrypoint for surfacing those support

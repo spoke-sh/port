@@ -75,9 +75,8 @@ port guest forward --machine <name> --listen <addr> --target <addr>
 
 Use `port --help` or any nested `--help` command to inspect the current command
 model and examples. The sample `port --help` commands assume you are running
-from the repository root. Local artifact and launch examples also assume you
-entered `nix develop` first, or otherwise installed the same required tools on
-`PATH`.
+from the repository root. Local artifact and launch examples also assume the
+needed runtime tools are available in the execution environment and on `PATH`.
 
 Current behavior:
 
@@ -130,7 +129,7 @@ The explicit cloud design, remote workflow, and PVM decision live in
 The supported end-to-end Linux MVP workflow is:
 
 ```bash
-nix develop
+cargo run -p port-cli -- doctor
 cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
 cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
 cargo run -p port-cli -- --config examples/port.toml doctor
@@ -143,9 +142,9 @@ What that produces:
 - host validation through `port doctor`
 - Firecracker runtime state, logs, and manifest files under the chosen runtime root
 
-If you run the same commands outside `nix develop`, `port doctor` may report
-missing prerequisites such as `firecracker` on `PATH`, and `port machine launch`
-is expected to fail until that environment is corrected.
+If the required tools are not available, `port doctor` may report missing
+prerequisites such as `firecracker` on `PATH`, and `port machine launch` is
+expected to fail until that environment is corrected.
 
 The current guest-command workflow is still separate from the launched VM path:
 `port guest ...` targets the runtime guest-agent socket at
@@ -158,10 +157,10 @@ runtime socket workflow until the host/guest transport is unified.
 Build the sample artifacts through the canonical CLI:
 
 ```bash
-nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
-nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
-nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
-nix develop -c cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
 ```
 
 Artifact contracts:
@@ -255,17 +254,8 @@ local-only launch restriction.
 
 ## Development
 
-For the current development environment:
-
-```bash
-nix develop
-```
-
 Repository automation and planning workflow live in [AGENTS.md](AGENTS.md).
-
-On Linux, `nix develop` now includes Firecracker plus the host networking tools
-needed by the local launch path, along with the artifact-tooling dependencies
-used by the sample kernel and guest-image pipelines.
+The repository development environment is defined in [flake.nix](flake.nix).
 
 The current Rust verification command is:
 

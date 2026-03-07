@@ -25,5 +25,5 @@ created_at: 2026-03-06T14:29:51
 | [Local Linux CLI Runtime](voyages/1vydgL000/) | done | 5/5 |
 | [Cloud Linux Control Lane](voyages/1vyeq5000/) | done | 3/3 |
 | [Clarify Help Examples](voyages/1vyfCm000/) | done | 1/1 |
-| [Remove Nix Bias From Help Surface](voyages/1vyfXX000/) | planned | 0/1 |
+| [Remove Nix Bias From Help Surface](voyages/1vyfXX000/) | in-progress | 0/1 |
 <!-- END GENERATED -->

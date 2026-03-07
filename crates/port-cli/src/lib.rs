@@ -14,11 +14,10 @@ use serde::Serialize;
 const AFTER_HELP: &str = "\
 Example assumptions:
   Run these sample-config commands from the repository root.
-  For local artifact and launch workflows, enter `nix develop` first or provide equivalent tools on PATH.
+  Local artifact and launch workflows require the needed host tools to be available in the execution environment.
   Treat `port doctor` as the gate for whether local `port machine launch` can succeed.
 
 Runnable local workflow:
-  nix develop
   port doctor
   port --config examples/port.toml doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel
@@ -30,6 +29,8 @@ Guest workflow examples:
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
+  These guest examples require a host-side guest-agent socket at `<runtime-root>/<machine>/guest-agent.sock`.
+  A launched Firecracker VM does not create that host-side socket yet, so `port guest ...` is still not wired to the live VM transport.
 
 Platform Support:
   Linux: local Firecracker launch is supported when port doctor passes.
@@ -490,7 +491,6 @@ mod tests {
             "Linux",
             "macOS",
             "Windows",
-            "nix develop",
             "repository root",
             "generic-linux",
             "AWS",
