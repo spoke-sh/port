@@ -11,9 +11,10 @@ use port_model::PortConfig;
 use port_runtime::{DoctorReport, GuestRequest, LaunchRequest};
 use serde::Serialize;
 
-const EXAMPLES: &str = "\
+const AFTER_HELP: &str = "\
 Examples:
   port doctor
+  port --config examples/port.toml doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel
   port --config examples/port.toml machine launch --machine demo
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
@@ -24,15 +25,19 @@ Examples:
 Platform Support:
   Linux: local Firecracker launch is supported when port doctor passes.
   macOS: run Port on a Linux host; local Firecracker launch requires Linux and /dev/kvm.
-  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.";
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
+Cloud Linux:
+  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
+  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
+  Azure and the PVM/protected-vm lane are out of scope for the MVP.";
 
 #[derive(Debug, Parser)]
 #[command(
     name = "port",
     version,
     about = "CLI-first Firecracker orchestration for local and cloud Linux hosts",
-    long_about = "Port manages Firecracker-backed Linux workloads through one canonical CLI and shared machine model. Local Firecracker launch is supported on Linux hosts; macOS and Windows operators use Linux or WSL-backed workflows.",
-    after_help = EXAMPLES
+    long_about = "Port manages Firecracker-backed Linux workloads through one canonical CLI and shared machine model. Local Firecracker launch is supported on Linux hosts; remote generic-linux, AWS, and GCP hosts are modeled with provider-aware diagnostics; macOS and Windows operators use Linux or WSL-backed workflows.",
+    after_help = AFTER_HELP
 )]
 pub struct Cli {
     #[arg(
@@ -476,6 +481,11 @@ mod tests {
             "Linux",
             "macOS",
             "Windows",
+            "generic-linux",
+            "AWS",
+            "GCP",
+            "Azure",
+            "PVM",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

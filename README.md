@@ -44,14 +44,18 @@ operator lanes around it:
   host.
 
 Detailed operator workflows live in [`docs/operators.md`](docs/operators.md).
+Cloud-provider boundaries and the current remote Linux support matrix live in
+[`docs/cloud.md`](docs/cloud.md).
 
 ## Project Status
 
 Port is early-stage and under active development. The repository now contains
 the canonical Rust workspace, a working local Linux Firecracker launch path,
 the first guest-agent-backed CLI workflows, and in-repo kernel plus guest-image
-artifact pipelines. Cloud host support is still being implemented story by
-story.
+artifact pipelines. Cloud host support is still partial: `port doctor` and the
+shared model describe the remote Linux lane, while remote `port machine launch`
+still fails fast with provider-aware guidance instead of attempting a hidden
+runtime path. The PVM / protected VM lane is explicitly dropped from the MVP.
 
 ## CLI Surface
 
@@ -82,9 +86,41 @@ Current behavior:
 - `port machine launch` now writes a Firecracker config plus runtime metadata
   and console/log files under the chosen runtime root before invoking
   Firecracker with `--config-file`.
+- `port doctor` also reports provider-aware support boundaries for
+  `generic-linux`, `aws`, `gcp`, and `azure` hosts when they are present in the
+  config.
+- `port machine launch` still supports only local Linux launch in the MVP and
+  returns provider-specific guidance for remote Linux or cloud hosts.
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
   guest-agent protocol through the canonical CLI and return structured results
   rendered as human-readable CLI output.
+
+## Cloud Linux Support
+
+Port keeps one canonical host model for local Linux and remote Linux/cloud
+targets. The current MVP support matrix is:
+
+| Provider | Example machine | MVP status | Current command behavior |
+|----------|-----------------|------------|--------------------------|
+| `local` | `demo` | Supported | `port doctor` performs local preflight; `port machine launch --machine demo` can launch Firecracker on Linux |
+| `generic-linux` | `cloud-generic` | Partial | `port doctor` reports the future remote Linux lane; `port machine launch` tells you to run Port on that Linux host directly |
+| `aws` | `cloud-aws` | Partial | `port doctor` reports AWS as a justified future lane; `port machine launch --machine cloud-aws` fails with AWS-specific guidance |
+| `gcp` | `cloud-gcp` | Partial | `port doctor` reports GCP as a justified future lane; `port machine launch` fails with GCP-specific guidance |
+| `azure` | `cloud-azure` | Unsupported | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
+
+The remote Linux workflow is intentionally limited today:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml doctor
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
+```
+
+The first command surfaces the provider-aware support matrix through the CLI.
+The second command is expected to fail with an AWS-specific message because the
+MVP does not yet implement remote launch orchestration.
+
+The explicit cloud design, remote workflow, and PVM decision live in
+[`docs/cloud.md`](docs/cloud.md).
 
 ## Linux Local Workflow
 
@@ -170,6 +206,13 @@ Current limitation:
 Port keeps one canonical machine model for artifacts, hosts, and machines. The
 initial sample model lives at [`examples/port.toml`](examples/port.toml).
 
+The host model now carries explicit provider identity:
+
+- `provider = "local"` for the supported local Linux launch lane
+- `provider = "generic-linux"` for future remote Linux control
+- `provider = "aws"` and `provider = "gcp"` for the justified future cloud lanes
+- `provider = "azure"` for the explicitly unsupported MVP lane
+
 The workspace crates are:
 
 - `port-model`: serializable artifact, host, and machine definitions
@@ -200,7 +243,8 @@ Build the sample kernel and guest image first, then use the same config to run
   `port doctor` confirm whether local launch is available in that environment.
 
 `port doctor` is the canonical entrypoint for surfacing those support
-boundaries in the CLI.
+boundaries in the CLI, including the remote cloud matrix and the current
+local-only launch restriction.
 
 ## Development
 

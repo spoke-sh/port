@@ -1,0 +1,39 @@
+---
+recorded_at: 2026-03-06T16:01:18.021561811-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "PVM|protected VM|confidential VM|drop" /home/alex/workspace/spoke-sh/port/README.md /home/alex/workspace/spoke-sh/port/docs/cloud.md /home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SRS.md /home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md'
+---
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:3:> Design and partially implement the remote Linux cloud lane, document provider boundaries, and encode the PVM drop decision.
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:16:- publish the cloud/operator support matrix plus the explicit PVM drop decision
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:30:        remote Linux host profiles    AWS / GCP / Azure / PVM decision
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:44:- any kept PVM lane. This voyage encodes the research-backed decision to drop
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:45:  PVM from MVP.
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:54:| Cloud viability bearing `1vydg7000` | Planning | Provider support matrix and PVM recommendation | current board artifact |
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:64:| PVM lane | Drop from MVP and document the decision | Current research does not justify keeping it in scope |
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:73:- `README` / `docs/*`: operator workflows, provider matrix, and PVM decision.
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:87:  publish the support matrix, remote Linux workflow, and explicit PVM drop.
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SDD.md:120:| PVM lane ambiguity reappears in docs or config | Review against bearing and docs | Fail review and restate drop decision | Keep PVM out of MVP until new research justifies it |
+/home/alex/workspace/spoke-sh/port/docs/cloud.md:35:## PVM Decision
+/home/alex/workspace/spoke-sh/port/docs/cloud.md:37:The PVM / protected VM / confidential VM lane is dropped from the MVP.
+/home/alex/workspace/spoke-sh/port/docs/cloud.md:40:supportable Linux KVM path, while protected/confidential VM offerings change the
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SRS.md:3:> Design and partially implement the remote Linux cloud lane, document provider boundaries, and encode the PVM drop decision.
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SRS.md:14:  and explicit PVM decision for the MVP.
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SRS.md:35:- The PVM/confidential/protected VM lane needs an explicit keep-or-drop outcome
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SRS.md:51:| SRS-05 | Port must record an explicit PVM keep-or-drop decision for MVP and tie it to the current research outcome. | SCOPE-03 | FR-06 | manual review + research/doc proof |
+/home/alex/workspace/spoke-sh/port/.keel/epics/1vydg7000/voyages/1vyeq5000/SRS.md:60:| SRS-NFR-02 | The provider matrix and PVM decision must stay traceable to current research and checked-in planning artifacts. | SCOPE-03 | NFR-03 | manual review |
+/home/alex/workspace/spoke-sh/port/README.md:58:runtime path. The PVM / protected VM lane is explicitly dropped from the MVP.
+/home/alex/workspace/spoke-sh/port/README.md:122:The explicit cloud design, remote workflow, and PVM decision live in
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

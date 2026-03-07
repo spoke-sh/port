@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T16:01:56.377100077-08:00
+mode: manual
+---
+Verified that README.md, docs/operators.md, docs/cloud.md, and port --help all publish the cloud Linux matrix and remote workflow using the canonical port doctor and port machine launch terms.

@@ -35,6 +35,34 @@ Current guest-command behavior:
 - The built guest image carries `port-guest-agent`, but the launched-guest
   transport is not yet the canonical CLI path.
 
+## Remote Linux And Cloud Workflow
+
+The shared model now includes explicit provider identity for remote Linux and
+cloud-adjacent hosts:
+
+- `generic-linux` for a future remote Linux control lane
+- `aws` and `gcp` for the currently justified future cloud lanes
+- `azure` for an explicitly unsupported Firecracker MVP lane
+
+Use the canonical CLI to inspect that boundary:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml doctor
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
+```
+
+What to expect:
+
+- `port doctor` shows provider-aware checks for `generic-linux`, `aws`, `gcp`,
+  and `azure` alongside the usual local Linux prerequisites.
+- `port machine launch --machine cloud-aws` is expected to fail with AWS-
+  specific guidance because remote launch orchestration is not implemented in
+  the MVP.
+- `port machine launch --machine demo` remains the supported local Linux launch
+  proof for the MVP.
+
+The full cloud matrix and the PVM drop decision live in [`docs/cloud.md`](cloud.md).
+
 ## macOS Workflow
 
 The supported macOS workflow is to run the actual Port commands on a Linux host.
@@ -49,6 +77,9 @@ Unsupported path:
 
 - Running local Firecracker launch directly on macOS is unsupported because the
   MVP launch path requires Linux and `/dev/kvm`.
+- Remote cloud hosts should still be treated as Linux execution environments:
+  run `port doctor` and any future launch commands on the Linux side, not on
+  macOS itself.
 
 ## Windows Workflow
 
@@ -70,3 +101,5 @@ Current constraint:
 - Native Windows is not a supported Firecracker execution environment for the
   MVP, and WSL availability of the required Linux virtualization features is an
   environment check rather than a Port guarantee.
+- The cloud provider matrix is still a Linux-hosted workflow; Windows changes
+  the operator workstation, not the underlying Firecracker requirement.

@@ -19,9 +19,9 @@ created_at: 2026-03-06T14:29:51
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 6/8 stories done
+**Progress:** 1/2 voyages complete, 7/8 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Local Linux CLI Runtime](voyages/1vydgL000/) | done | 5/5 |
-| [Cloud Linux Control Lane](voyages/1vyeq5000/) | in-progress | 1/3 |
+| [Cloud Linux Control Lane](voyages/1vyeq5000/) | in-progress | 2/3 |
 <!-- END GENERATED -->
