@@ -19,5 +19,5 @@
 | [Cloud Linux Control Lane](epics/1vydg7000/voyages/1vyeq5000/) | done |
 | [Clarify Help Examples](epics/1vydg7000/voyages/1vyfCm000/) | done |
 | [Remove Nix Bias From Help Surface](epics/1vydg7000/voyages/1vyfXX000/) | done |
-| [Wire Live Guest Transport](epics/1vydg7000/voyages/1vyfve000/) | planned |
+| [Wire Live Guest Transport](epics/1vydg7000/voyages/1vyfve000/) | in-progress |
 

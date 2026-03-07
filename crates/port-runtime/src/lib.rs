@@ -266,6 +266,7 @@ pub fn launch_local_machine(
             paths.runtime_dir.display()
         )
     })?;
+    prepare_runtime_state(&paths, request.machine_name)?;
 
     let config_payload = build_firecracker_config(
         kernel.path.clone(),
@@ -370,6 +371,91 @@ fn wait_for_boot(
     child
         .try_wait()
         .context("failed to poll Firecracker process after boot wait")
+}
+
+fn prepare_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()> {
+    if let Some(pid) = live_firecracker_pid(&paths.pid_path, machine_name)? {
+        bail!(
+            "machine '{}' already appears to be running with pid {} in '{}'; stop it first or choose a different --runtime-root",
+            machine_name,
+            pid,
+            paths.runtime_dir.display()
+        );
+    }
+
+    remove_stale_runtime_path(&paths.pid_path, "pid file")?;
+    remove_stale_runtime_path(&paths.vsock_path, "vsock socket")?;
+    remove_stale_runtime_path(&paths.guest_agent_socket, "guest-agent socket")?;
+
+    Ok(())
+}
+
+fn live_firecracker_pid(pid_path: &Path, machine_name: &str) -> Result<Option<u32>> {
+    let Some(pid) = read_pid_file(pid_path)? else {
+        return Ok(None);
+    };
+
+    let Some(cmdline) = process_cmdline(pid)? else {
+        return Ok(None);
+    };
+
+    let is_firecracker = cmdline.contains("firecracker");
+    let matches_machine = cmdline.contains(&format!("--id {machine_name}"))
+        || cmdline.contains(&format!("--id\0{machine_name}"));
+
+    if is_firecracker && matches_machine {
+        Ok(Some(pid))
+    } else {
+        Ok(None)
+    }
+}
+
+fn read_pid_file(pid_path: &Path) -> Result<Option<u32>> {
+    if !pid_path.exists() {
+        return Ok(None);
+    }
+
+    let pid = fs::read_to_string(pid_path)
+        .with_context(|| format!("failed to read pid file '{}'", pid_path.display()))?;
+    let pid = pid
+        .trim()
+        .parse::<u32>()
+        .with_context(|| format!("failed to parse pid file '{}'", pid_path.display()))?;
+
+    Ok(Some(pid))
+}
+
+fn process_cmdline(pid: u32) -> Result<Option<String>> {
+    let cmdline_path = PathBuf::from("/proc").join(pid.to_string()).join("cmdline");
+    if !cmdline_path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read(&cmdline_path).with_context(|| {
+        format!(
+            "failed to read process cmdline '{}'",
+            cmdline_path.display()
+        )
+    })?;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+
+    let rendered = raw
+        .into_iter()
+        .map(|byte| if byte == 0 { ' ' } else { byte as char })
+        .collect();
+
+    Ok(Some(rendered))
+}
+
+fn remove_stale_runtime_path(path: &Path, label: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    fs::remove_file(path)
+        .with_context(|| format!("failed to remove stale {label} '{}'", path.display()))
 }
 
 fn path_check(
@@ -603,6 +689,14 @@ fn repo_root() -> Result<PathBuf> {
 pub fn execute_guest_operation(request: GuestRequest<'_>) -> Result<OperationResult> {
     let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
     if !paths.guest_agent_socket.exists() {
+        if paths.vsock_path.exists() || paths.manifest_path.exists() {
+            bail!(
+                "guest agent socket '{}' does not exist for machine '{}'. The machine may be running, but `port guest ...` is still wired only to a host-side runtime guest-agent socket; launched-VM guest transport is not implemented yet.",
+                paths.guest_agent_socket.display(),
+                request.machine_name
+            );
+        }
+
         bail!(
             "guest agent socket '{}' does not exist for machine '{}'",
             paths.guest_agent_socket.display(),
@@ -728,15 +822,18 @@ struct VsockConfig {
 mod tests {
     use std::fs;
     use std::path::Path;
+    use std::process::{Command, Stdio};
+    use std::thread;
     use std::time::Duration;
 
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, DoctorCheck, LaunchRequest, RuntimePaths, artifact_script,
-        build_firecracker_config, collect_doctor_report, launch_local_machine, path_check,
-        repo_root,
+        ArtifactAction, DoctorCheck, GuestRequest, LaunchRequest, RuntimePaths, artifact_script,
+        build_firecracker_config, collect_doctor_report, execute_guest_operation,
+        launch_local_machine, path_check, prepare_runtime_state, read_pid_file, repo_root,
     };
+    use port_agent_protocol::{ExecRequest, GuestOperation};
     use port_model::{ArtifactKind, PortConfig};
 
     #[test]
@@ -818,6 +915,55 @@ mod tests {
     }
 
     #[test]
+    fn prepare_runtime_state_cleans_stale_socket_and_pid_files() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        fs::write(&paths.pid_path, "0\n").expect("pid file should write");
+        fs::write(&paths.vsock_path, "").expect("stale vsock placeholder should write");
+        fs::write(&paths.guest_agent_socket, "").expect("stale guest socket should write");
+
+        prepare_runtime_state(&paths, "demo").expect("stale runtime state should be cleaned");
+
+        assert_eq!(
+            read_pid_file(&paths.pid_path).expect("pid read should work"),
+            None
+        );
+        assert!(!paths.vsock_path.exists());
+        assert!(!paths.guest_agent_socket.exists());
+    }
+
+    #[test]
+    fn prepare_runtime_state_rejects_live_matching_firecracker_process() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        fs::write(&paths.vsock_path, "").expect("vsock placeholder should write");
+
+        let mut command = Command::new("bash");
+        command
+            .args(["-lc", "exec -a firecracker /bin/sh -c 'sleep 30' --id demo"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .expect("fake firecracker process should start");
+        fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
+        thread::sleep(Duration::from_millis(100));
+
+        let error = prepare_runtime_state(&paths, "demo")
+            .expect_err("live matching firecracker should block relaunch");
+        let message = error.to_string();
+        assert!(message.contains("already appears to be running"));
+        assert!(message.contains("stop it first"));
+        assert!(paths.vsock_path.exists());
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
     fn doctor_report_includes_provider_aware_remote_host_checks() {
         let report = collect_doctor_report(Some(&PortConfig::sample()));
 
@@ -876,5 +1022,33 @@ mod tests {
         assert!(message.contains("AWS"));
         assert!(message.contains("not implemented"));
         assert!(message.contains("Run Port on the AWS Linux host itself"));
+    }
+
+    #[test]
+    fn guest_operations_explain_missing_live_vm_transport() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        fs::write(&paths.vsock_path, "").expect("vsock marker should write");
+
+        let error = execute_guest_operation(GuestRequest {
+            machine_name: "demo",
+            runtime_root: tempdir.path(),
+            operation: GuestOperation::Exec(ExecRequest {
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("true"),
+                ],
+                cwd: None,
+                env: Default::default(),
+            }),
+        })
+        .expect_err("missing guest socket should fail");
+
+        let message = error.to_string();
+        assert!(message.contains("may be running"));
+        assert!(message.contains("host-side runtime guest-agent socket"));
+        assert!(message.contains("not implemented yet"));
     }
 }

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:00:10.923504438-08:00
+mode: manual
+---
+Verified with cargo test -p port-runtime and a real CLI relaunch under /tmp/port-story1.*: stale pid/vsock state from a killed Firecracker run no longer blocks a second port machine launch against the same runtime root.

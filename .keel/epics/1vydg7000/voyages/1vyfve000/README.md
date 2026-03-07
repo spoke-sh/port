@@ -2,10 +2,11 @@
 id: 1vyfve000
 index: 6
 title: Wire Live Guest Transport
-status: planned
+status: in-progress
 epic: 1vydg7000
 created_at: 2026-03-06T16:54:02
 updated_at: 2026-03-06T16:56:57
+started_at: 2026-03-06T16:58:03
 ---
 
 # Wire Live Guest Transport
@@ -24,11 +25,11 @@ updated_at: 2026-03-06T16:56:57
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Rework Copy And Forward For Live Guest Transport](../../../../stories/1vyfvx000/README.md) | feat | backlog |
-| [Stabilize Runtime State For Guest Transport](../../../../stories/1vyfwJ000/README.md) | fix | backlog |
+| [Stabilize Runtime State For Guest Transport](../../../../stories/1vyfwJ000/README.md) | fix | done |
 | [Connect Exec Pty And Logs To Live VMs](../../../../stories/1vyfwN000/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-06T17:00:11.109370112-08:00
+mode: manual
+---
+Launched a real demo VM and ran port guest exec against it before live transport exists; the CLI now reports the launched-VM transport gap instead of only saying guest-agent.sock is missing.
