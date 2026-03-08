@@ -20,8 +20,8 @@ host kits, and first-class AVF on macOS.
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/4 stories done
+**Progress:** 0/1 voyages complete, 3/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Substrate Drivers And Host Kits](voyages/1vz3j0000/) | in-progress | 2/4 |
+| [Substrate Drivers And Host Kits](voyages/1vz3j0000/) | in-progress | 3/4 |
 <!-- END GENERATED -->
