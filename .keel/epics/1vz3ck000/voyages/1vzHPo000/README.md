@@ -25,12 +25,12 @@ started_at: 2026-03-08T10:00:09
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Model Pvm Node Capability Contract](../../../../stories/1vzHRt000/README.md) | feat | done |
 | [Gate Hosted Pvm Placement](../../../../stories/1vzHRx000/README.md) | feat | done |
-| [Publish Pvm Admission Workflow](../../../../stories/1vzHRy000/README.md) | feat | backlog |
+| [Publish Pvm Admission Workflow](../../../../stories/1vzHRy000/README.md) | feat | done |
 | [Select Local Pvm Runtime Inputs](../../../../stories/1vzHSA000/README.md) | feat | done |
 <!-- END GENERATED -->

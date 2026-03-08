@@ -2,11 +2,12 @@
 id: 1vzHRy000
 title: Publish Pvm Admission Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T09:57:54
-updated_at: 2026-03-08T11:46:04
+updated_at: 2026-03-08T11:57:17
 scope: 1vz3ck000/1vzHPo000
 started_at: 2026-03-08T11:46:04
+completed_at: 2026-03-08T11:57:17
 ---
 
 # Publish Pvm Admission Workflow
