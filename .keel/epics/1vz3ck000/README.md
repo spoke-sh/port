@@ -20,10 +20,10 @@ host kits, and first-class AVF on macOS.
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 voyages complete, 8/9 stories done
+**Progress:** 3/3 voyages complete, 9/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Substrate Drivers And Host Kits](voyages/1vz3j0000/) | done | 4/4 |
 | [Mac Operator Shell Compatibility](voyages/1vz4qH000/) | done | 1/1 |
-| [X86 64 PVM Host Kit Foundation](voyages/1vzGo0000/) | in-progress | 3/4 |
+| [X86 64 PVM Host Kit Foundation](voyages/1vzGo0000/) | done | 4/4 |
 <!-- END GENERATED -->

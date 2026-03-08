@@ -2,11 +2,13 @@
 id: 1vzGrQ000
 title: Publish PVM Operator Proof Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T09:20:08
-updated_at: 2026-03-08T09:47:05
+updated_at: 2026-03-08T09:54:21
 scope: 1vz3ck000/1vzGo0000
 started_at: 2026-03-08T09:47:05
+submitted_at: 2026-03-08T09:54:15
+completed_at: 2026-03-08T09:54:21
 ---
 
 # Publish PVM Operator Proof Workflow
