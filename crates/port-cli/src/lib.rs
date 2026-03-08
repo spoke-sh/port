@@ -42,6 +42,13 @@ Guest workflow examples:
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
   port --config examples/port.toml guest forward --machine demo --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
+Service workflow examples:
+  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+  port --config examples/port.toml service apply --machine cloud-aws --name web --kind service --secret API_TOKEN=demo-token -- /app/web --listen :8080
+  port --config examples/port.toml service apply --machine cloud-aws --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
+  port --config examples/port.toml service list --machine cloud-aws
+  port --config examples/port.toml service status --machine cloud-aws --name web
+  port --config examples/port.toml service stop --machine cloud-aws --name web
   `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
   `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
@@ -71,7 +78,12 @@ Hosted Control:
   `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
   This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
-  `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests; secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
+  `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
+  `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution and SDK clients as follow-on slices.
+Service Control:
+  `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
+  Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
+  `port service apply` persists desired state, guest command, secret bindings, and hosted routing context; real guest execution and teardown remain explicit follow-on work.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";
@@ -110,6 +122,11 @@ pub enum Command {
     Machine(MachineCommand),
     #[command(subcommand, about = "Reach guest agent capabilities")]
     Guest(GuestCommand),
+    #[command(
+        subcommand,
+        about = "Manage machine-bound secrets, services, and sandboxes"
+    )]
+    Service(ServiceCommand),
     #[command(subcommand, hide = true)]
     Internal(InternalCommand),
 }
@@ -130,6 +147,12 @@ pub enum CopyDirectionArg {
 pub enum ForwardLifecycleArg {
     Foreground,
     Detached,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ServiceKindArg {
+    Service,
+    Sandbox,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -232,6 +255,15 @@ impl From<ProtectionModeArg> for ProtectionMode {
     }
 }
 
+impl From<ServiceKindArg> for port_runtime::ServiceKind {
+    fn from(value: ServiceKindArg) -> Self {
+        match value {
+            ServiceKindArg::Service => Self::Service,
+            ServiceKindArg::Sandbox => Self::Sandbox,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
     #[command(about = "Launch a named machine from the model")]
@@ -279,6 +311,83 @@ pub enum MachineCommand {
         runtime_root: PathBuf,
         #[arg(long, default_value_t = 3)]
         wait_secs: u64,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ServiceCommand {
+    #[command(subcommand, about = "Manage machine-bound secret references")]
+    Secret(ServiceSecretCommand),
+    #[command(about = "Store a service or sandbox definition under the resolved runtime owner")]
+    Apply {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long, value_enum, default_value_t = ServiceKindArg::Service)]
+        kind: ServiceKindArg,
+        #[arg(long = "secret")]
+        secret: Vec<String>,
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    #[command(about = "List stored service and sandbox definitions for a machine")]
+    List {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+    },
+    #[command(about = "Inspect one stored service or sandbox definition")]
+    Status {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
+    #[command(about = "Set a stored service or sandbox definition to the stopped desired state")]
+    Stop {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ServiceSecretCommand {
+    #[command(about = "Store a secret reference for one machine runtime")]
+    Put {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        value: String,
+    },
+    #[command(about = "List stored secret references for one machine runtime")]
+    List {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+    },
+    #[command(about = "Remove a stored secret reference that is no longer in use")]
+    Remove {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -407,6 +516,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let config_path = cli.config.clone();
             let config = load_config(config_path.clone())?;
             run_guest(command, config_path.as_deref(), &config)
+        }
+        Command::Service(command) => {
+            let config = load_config(cli.config)?;
+            run_service(command, &config)
         }
         Command::Internal(command) => match command {
             InternalCommand::ForwardDaemon {
@@ -730,6 +843,115 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
     Ok(())
 }
 
+fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
+    match command {
+        ServiceCommand::Secret(command) => match command {
+            ServiceSecretCommand::Put {
+                machine,
+                runtime_root,
+                name,
+                value,
+            } => {
+                ensure_machine_exists(config, &machine)?;
+                let secret = port_runtime::put_machine_secret(
+                    config,
+                    port_runtime::SecretPutRequest {
+                        machine_name: &machine,
+                        runtime_root: &runtime_root,
+                        name: &name,
+                        value: &value,
+                    },
+                )?;
+                print_machine_secret(&secret);
+            }
+            ServiceSecretCommand::List {
+                machine,
+                runtime_root,
+            } => {
+                ensure_machine_exists(config, &machine)?;
+                let secrets = port_runtime::list_machine_secrets(config, &runtime_root, &machine)?;
+                if secrets.is_empty() {
+                    println!("no secrets stored for machine '{}'", machine);
+                } else {
+                    for secret in secrets {
+                        print_machine_secret(&secret);
+                        println!();
+                    }
+                }
+            }
+            ServiceSecretCommand::Remove {
+                machine,
+                runtime_root,
+                name,
+            } => {
+                ensure_machine_exists(config, &machine)?;
+                let secret =
+                    port_runtime::delete_machine_secret(config, &runtime_root, &machine, &name)?;
+                print_machine_secret(&secret);
+            }
+        },
+        ServiceCommand::Apply {
+            machine,
+            runtime_root,
+            name,
+            kind,
+            secret,
+            command,
+        } => {
+            ensure_machine_exists(config, &machine)?;
+            let definition = port_runtime::apply_machine_service(
+                config,
+                port_runtime::ServiceApplyRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    name: &name,
+                    kind: kind.into(),
+                    command,
+                    secret_bindings: parse_secret_bindings(secret)?,
+                },
+            )?;
+            print_service_definition(&definition);
+        }
+        ServiceCommand::List {
+            machine,
+            runtime_root,
+        } => {
+            ensure_machine_exists(config, &machine)?;
+            let services = port_runtime::list_machine_services(config, &runtime_root, &machine)?;
+            if services.is_empty() {
+                println!("no services or sandboxes stored for machine '{}'", machine);
+            } else {
+                for service in services {
+                    print_service_definition(&service);
+                    println!();
+                }
+            }
+        }
+        ServiceCommand::Status {
+            machine,
+            runtime_root,
+            name,
+        } => {
+            ensure_machine_exists(config, &machine)?;
+            let service =
+                port_runtime::machine_service_status(config, &runtime_root, &machine, &name)?;
+            print_service_definition(&service);
+        }
+        ServiceCommand::Stop {
+            machine,
+            runtime_root,
+            name,
+        } => {
+            ensure_machine_exists(config, &machine)?;
+            let service =
+                port_runtime::stop_machine_service(config, &runtime_root, &machine, &name)?;
+            print_service_definition(&service);
+        }
+    }
+
+    Ok(())
+}
+
 fn print_machine_monitor(report: &port_runtime::MachineMonitorReport) {
     println!("machine: {}", report.machine_name);
     println!("state: {}", report.state);
@@ -835,6 +1057,97 @@ fn print_machine_top(report: &port_runtime::MachineTopReport) {
         println!("source: {}", entry.source.display());
         println!("detail: {}", entry.detail);
     }
+}
+
+fn print_machine_secret(secret: &port_runtime::MachineSecretSummary) {
+    println!("machine: {}", secret.machine_name);
+    println!("secret: {}", secret.name);
+    println!("inventory scope: {}", secret.control.inventory_scope);
+    println!("lifecycle owner: {}", secret.control.lifecycle_owner);
+    println!("guest broker: {}", secret.control.guest_broker);
+    println!("service route: {}", secret.control.service_route);
+    println!(
+        "control plane: {}",
+        secret.control_plane.as_deref().unwrap_or("(local)")
+    );
+    println!("node: {}", secret.node_name.as_deref().unwrap_or("(local)"));
+    println!(
+        "host groups: {}",
+        if secret.host_groups.is_empty() {
+            String::from("(none)")
+        } else {
+            secret.host_groups.join(", ")
+        }
+    );
+    println!("path: {}", secret.path.display());
+    println!("detail: {}", secret.detail);
+}
+
+fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
+    println!("machine: {}", service.machine_name);
+    println!("name: {}", service.name);
+    println!("kind: {}", service.kind);
+    println!("desired state: {}", service.desired_state);
+    println!("inventory scope: {}", service.control.inventory_scope);
+    println!("lifecycle owner: {}", service.control.lifecycle_owner);
+    println!("guest broker: {}", service.control.guest_broker);
+    println!("service route: {}", service.control.service_route);
+    println!(
+        "control plane: {}",
+        service.control_plane.as_deref().unwrap_or("(local)")
+    );
+    println!(
+        "node: {}",
+        service.node_name.as_deref().unwrap_or("(local)")
+    );
+    println!(
+        "host groups: {}",
+        if service.host_groups.is_empty() {
+            String::from("(none)")
+        } else {
+            service.host_groups.join(", ")
+        }
+    );
+    println!("manifest: {}", service.manifest_path.display());
+    println!(
+        "command: {}",
+        if service.command.is_empty() {
+            String::from("(none)")
+        } else {
+            service.command.join(" ")
+        }
+    );
+    if service.secret_bindings.is_empty() {
+        println!("secret bindings: (none)");
+    } else {
+        println!(
+            "secret bindings: {}",
+            service
+                .secret_bindings
+                .iter()
+                .map(|binding| format!("{}={}", binding.env, binding.secret))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    println!("detail: {}", service.detail);
+}
+
+fn parse_secret_bindings(values: Vec<String>) -> Result<Vec<port_runtime::ServiceSecretBinding>> {
+    let mut bindings = Vec::new();
+    for value in values {
+        let (env, secret) = value
+            .split_once('=')
+            .context("service --secret entries must use ENV=SECRET_NAME")?;
+        if env.trim().is_empty() || secret.trim().is_empty() {
+            bail!("service --secret entries must use ENV=SECRET_NAME");
+        }
+        bindings.push(port_runtime::ServiceSecretBinding {
+            env: env.trim().to_string(),
+            secret: secret.trim().to_string(),
+        });
+    }
+    Ok(bindings)
 }
 
 fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortConfig) -> Result<()> {
@@ -1321,8 +1634,8 @@ mod tests {
 
     use super::{
         ArchitectureArg, ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand,
-        MachineCommand, ProtectionModeArg, SubstrateArg, render_help,
-        render_nested_subcommand_help, render_subcommand_help,
+        MachineCommand, ProtectionModeArg, ServiceCommand, ServiceKindArg, ServiceSecretCommand,
+        SubstrateArg, render_help, render_nested_subcommand_help, render_subcommand_help,
     };
 
     #[test]
@@ -1349,6 +1662,7 @@ mod tests {
             "Hosted Control",
             "push",
             "pull",
+            "service",
             "Artifact Mobility",
             "detached lifecycle modes",
         ] {
@@ -1371,6 +1685,14 @@ mod tests {
             assert!(
                 machine_help.contains(keyword),
                 "missing machine help keyword: {keyword}"
+            );
+        }
+
+        let service_help = render_subcommand_help("service").expect("service help should exist");
+        for keyword in ["secret", "apply", "list", "status", "stop", "sandbox"] {
+            assert!(
+                service_help.contains(keyword),
+                "missing service help keyword: {keyword}"
             );
         }
 
@@ -1605,6 +1927,74 @@ mod tests {
             }) => {
                 assert_eq!(machine, "demo");
                 assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_service_and_secret_arguments() {
+        let apply = Cli::parse_from([
+            "port",
+            "service",
+            "apply",
+            "--machine",
+            "cloud-aws",
+            "--name",
+            "api",
+            "--kind",
+            "service",
+            "--secret",
+            "API_TOKEN=demo-token",
+            "--",
+            "/app/api",
+            "--listen",
+            ":8080",
+        ]);
+
+        match apply.command {
+            Command::Service(ServiceCommand::Apply {
+                machine,
+                runtime_root,
+                name,
+                kind,
+                secret,
+                command,
+            }) => {
+                assert_eq!(machine, "cloud-aws");
+                assert_eq!(runtime_root, std::path::Path::new("runtime"));
+                assert_eq!(name, "api");
+                assert_eq!(kind, ServiceKindArg::Service);
+                assert_eq!(secret, vec![String::from("API_TOKEN=demo-token")]);
+                assert_eq!(command, vec!["/app/api", "--listen", ":8080"]);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let secret_put = Cli::parse_from([
+            "port",
+            "service",
+            "secret",
+            "put",
+            "--machine",
+            "cloud-aws",
+            "--name",
+            "demo-token",
+            "--value",
+            "s3cr3t",
+        ]);
+
+        match secret_put.command {
+            Command::Service(ServiceCommand::Secret(ServiceSecretCommand::Put {
+                machine,
+                runtime_root,
+                name,
+                value,
+            })) => {
+                assert_eq!(machine, "cloud-aws");
+                assert_eq!(runtime_root, std::path::Path::new("runtime"));
+                assert_eq!(name, "demo-token");
+                assert_eq!(value, "s3cr3t");
             }
             other => panic!("unexpected command: {other:?}"),
         }

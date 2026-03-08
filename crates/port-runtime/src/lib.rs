@@ -190,6 +190,90 @@ pub struct MachineTopReport {
     pub entries: Vec<MachineTopEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceKind {
+    Service,
+    Sandbox,
+}
+
+impl std::fmt::Display for ServiceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Service => f.write_str("service"),
+            Self::Sandbox => f.write_str("sandbox"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceDesiredState {
+    Active,
+    Stopped,
+}
+
+impl std::fmt::Display for ServiceDesiredState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => f.write_str("active"),
+            Self::Stopped => f.write_str("stopped"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceSecretBinding {
+    pub env: String,
+    pub secret: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SecretPutRequest<'a> {
+    pub machine_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub name: &'a str,
+    pub value: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub struct ServiceApplyRequest<'a> {
+    pub machine_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub name: &'a str,
+    pub kind: ServiceKind,
+    pub command: Vec<String>,
+    pub secret_bindings: Vec<ServiceSecretBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineSecretSummary {
+    pub machine_name: String,
+    pub name: String,
+    pub control: MachineControlContract,
+    pub control_plane: Option<String>,
+    pub node_name: Option<String>,
+    pub host_groups: Vec<String>,
+    pub path: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServiceDefinitionStatus {
+    pub machine_name: String,
+    pub name: String,
+    pub kind: ServiceKind,
+    pub desired_state: ServiceDesiredState,
+    pub command: Vec<String>,
+    pub secret_bindings: Vec<ServiceSecretBinding>,
+    pub control: MachineControlContract,
+    pub control_plane: Option<String>,
+    pub node_name: Option<String>,
+    pub host_groups: Vec<String>,
+    pub manifest_path: PathBuf,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimePaths {
     pub runtime_dir: PathBuf,
@@ -828,6 +912,217 @@ pub fn machine_top(
     firecracker_local_machine_top(runtime_root, machine_name)
 }
 
+pub fn put_machine_secret(
+    config: &PortConfig,
+    request: SecretPutRequest<'_>,
+) -> Result<MachineSecretSummary> {
+    let context =
+        resolve_service_runtime_context(config, request.runtime_root, request.machine_name)?;
+    validate_identifier(request.name, "secret name")?;
+    let dir = service_secret_dir(&context.status.runtime_dir);
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create secret directory '{}'", dir.display()))?;
+    let record = MachineSecretRecord {
+        name: request.name.to_string(),
+        value: request.value.to_string(),
+    };
+    let path = dir.join(format!("{}.json", request.name));
+    write_json_file(&path, &record)?;
+    Ok(MachineSecretSummary {
+        machine_name: request.machine_name.to_string(),
+        name: request.name.to_string(),
+        control: context.status.control,
+        control_plane: context.control_plane,
+        node_name: context.node_name,
+        host_groups: context.host_groups,
+        path,
+        detail: String::from(
+            "stored secret reference under the resolved machine runtime; future service execution will materialize it through the same runtime owner",
+        ),
+    })
+}
+
+pub fn list_machine_secrets(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<Vec<MachineSecretSummary>> {
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let dir = service_secret_dir(&context.status.runtime_dir);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut secrets = Vec::new();
+    for entry in fs::read_dir(&dir)
+        .with_context(|| format!("failed to read secret directory '{}'", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to inspect '{}'", dir.display()))?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+            .is_file()
+        {
+            continue;
+        }
+        let record: MachineSecretRecord = read_json_file(&entry.path())?;
+        secrets.push(MachineSecretSummary {
+            machine_name: machine_name.to_string(),
+            name: record.name,
+            control: context.status.control.clone(),
+            control_plane: context.control_plane.clone(),
+            node_name: context.node_name.clone(),
+            host_groups: context.host_groups.clone(),
+            path: entry.path(),
+            detail: String::from("secret reference is available to service and sandbox bindings"),
+        });
+    }
+    secrets.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(secrets)
+}
+
+pub fn delete_machine_secret(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    secret_name: &str,
+) -> Result<MachineSecretSummary> {
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    validate_identifier(secret_name, "secret name")?;
+    let references = service_references_secret(&context.status.runtime_dir, secret_name)?;
+    if !references.is_empty() {
+        bail!(
+            "cannot remove secret '{}' because it is referenced by service definitions: {}",
+            secret_name,
+            references.join(", ")
+        );
+    }
+    let path = service_secret_dir(&context.status.runtime_dir).join(format!("{secret_name}.json"));
+    let record: MachineSecretRecord = read_json_file(&path)?;
+    fs::remove_file(&path)
+        .with_context(|| format!("failed to remove secret '{}'", path.display()))?;
+    Ok(MachineSecretSummary {
+        machine_name: machine_name.to_string(),
+        name: record.name,
+        control: context.status.control,
+        control_plane: context.control_plane,
+        node_name: context.node_name,
+        host_groups: context.host_groups,
+        path,
+        detail: String::from("removed secret reference from the resolved machine runtime"),
+    })
+}
+
+pub fn apply_machine_service(
+    config: &PortConfig,
+    request: ServiceApplyRequest<'_>,
+) -> Result<ServiceDefinitionStatus> {
+    let context =
+        resolve_service_runtime_context(config, request.runtime_root, request.machine_name)?;
+    validate_identifier(request.name, "service name")?;
+    if request.command.is_empty() {
+        bail!("service apply requires a command");
+    }
+    validate_secret_bindings(&request.secret_bindings)?;
+    for binding in &request.secret_bindings {
+        let path = service_secret_dir(&context.status.runtime_dir)
+            .join(format!("{}.json", binding.secret));
+        if !path.exists() {
+            bail!(
+                "secret '{}' referenced by '{}' does not exist for machine '{}'",
+                binding.secret,
+                binding.env,
+                request.machine_name
+            );
+        }
+    }
+
+    let dir = service_definition_dir(&context.status.runtime_dir);
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create service directory '{}'", dir.display()))?;
+    let path = dir.join(format!("{}.json", request.name));
+    let record = ServiceDefinitionRecord {
+        machine_name: request.machine_name.to_string(),
+        name: request.name.to_string(),
+        kind: request.kind,
+        desired_state: ServiceDesiredState::Active,
+        command: request.command,
+        secret_bindings: request.secret_bindings,
+        control: context.status.control.clone(),
+        control_plane: context.control_plane.clone(),
+        node_name: context.node_name.clone(),
+        host_groups: context.host_groups.clone(),
+        created_at_unix_s: unix_timestamp_now()?,
+        detail: String::from(
+            "service definition is stored under the resolved runtime owner; guest execution remains a follow-on control-plane and node-agent slice",
+        ),
+    };
+    write_json_file(&path, &record)?;
+    Ok(service_status_from_record(record, path))
+}
+
+pub fn list_machine_services(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<Vec<ServiceDefinitionStatus>> {
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let dir = service_definition_dir(&context.status.runtime_dir);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut services = Vec::new();
+    for entry in fs::read_dir(&dir)
+        .with_context(|| format!("failed to read service directory '{}'", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to inspect '{}'", dir.display()))?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+            .is_file()
+        {
+            continue;
+        }
+        let record: ServiceDefinitionRecord = read_json_file(&entry.path())?;
+        services.push(service_status_from_record(record, entry.path()));
+    }
+    services.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(services)
+}
+
+pub fn machine_service_status(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    validate_identifier(service_name, "service name")?;
+    let path =
+        service_definition_dir(&context.status.runtime_dir).join(format!("{service_name}.json"));
+    let record: ServiceDefinitionRecord = read_json_file(&path)?;
+    Ok(service_status_from_record(record, path))
+}
+
+pub fn stop_machine_service(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    validate_identifier(service_name, "service name")?;
+    let path =
+        service_definition_dir(&context.status.runtime_dir).join(format!("{service_name}.json"));
+    let mut record: ServiceDefinitionRecord = read_json_file(&path)?;
+    record.desired_state = ServiceDesiredState::Stopped;
+    record.detail = String::from(
+        "service definition is retained with desired state stopped; hosted execution and teardown remain a follow-on slice",
+    );
+    write_json_file(&path, &record)?;
+    Ok(service_status_from_record(record, path))
+}
+
 pub fn stop_machine(
     config: &PortConfig,
     runtime_root: &Path,
@@ -1434,6 +1729,215 @@ fn machine_top_entry_rank(kind: MachineTopEntryKind) -> u8 {
         MachineTopEntryKind::Hypervisor => 0,
         MachineTopEntryKind::DetachedForward => 1,
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct MachineSecretRecord {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ServiceDefinitionRecord {
+    machine_name: String,
+    name: String,
+    kind: ServiceKind,
+    desired_state: ServiceDesiredState,
+    command: Vec<String>,
+    secret_bindings: Vec<ServiceSecretBinding>,
+    control: MachineControlContract,
+    control_plane: Option<String>,
+    node_name: Option<String>,
+    host_groups: Vec<String>,
+    created_at_unix_s: u64,
+    detail: String,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedMachineRuntime {
+    status: MachineStatus,
+    control_plane: Option<String>,
+    node_name: Option<String>,
+    host_groups: Vec<String>,
+}
+
+fn service_state_dir(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join("services")
+}
+
+fn service_secret_dir(runtime_dir: &Path) -> PathBuf {
+    service_state_dir(runtime_dir).join("secrets")
+}
+
+fn service_definition_dir(runtime_dir: &Path) -> PathBuf {
+    service_state_dir(runtime_dir).join("definitions")
+}
+
+fn resolve_machine_runtime(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<ResolvedMachineRuntime> {
+    if config.machines.contains_key(machine_name) {
+        let machine = config
+            .machines
+            .get(machine_name)
+            .with_context(|| format!("unknown machine '{}'", machine_name))?;
+        let host = config
+            .hosts
+            .get(&machine.host)
+            .with_context(|| format!("unknown host '{}'", machine.host))?;
+        return match &host.connection {
+            HostConnection::Local => Ok(ResolvedMachineRuntime {
+                status: firecracker_local_machine_status(runtime_root, machine_name)?,
+                control_plane: None,
+                node_name: None,
+                host_groups: Vec::new(),
+            }),
+            HostConnection::HostedControlPlane { .. } => {
+                let resolution = hosted_machine_resolution(config, machine_name)?;
+                Ok(ResolvedMachineRuntime {
+                    status: resolution.status,
+                    control_plane: Some(resolution.control_plane),
+                    node_name: resolution.node_name,
+                    host_groups: resolution.host_groups,
+                })
+            }
+        };
+    }
+
+    Ok(ResolvedMachineRuntime {
+        status: firecracker_local_machine_status(runtime_root, machine_name)?,
+        control_plane: None,
+        node_name: None,
+        host_groups: Vec::new(),
+    })
+}
+
+fn resolve_service_runtime_context(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<ResolvedMachineRuntime> {
+    let context = resolve_machine_runtime(config, runtime_root, machine_name)?;
+    if context.status.state == MachineRuntimeState::Malformed {
+        bail!(
+            "service operations require well-formed runtime state for machine '{}': {}",
+            machine_name,
+            context.status.detail
+        );
+    }
+    if !context.status.runtime_dir.exists() {
+        bail!(
+            "service operations require an existing Port runtime for machine '{}': {}",
+            machine_name,
+            context.status.detail
+        );
+    }
+    Ok(context)
+}
+
+fn validate_identifier(value: &str, label: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("{label} must not be empty");
+    }
+    if trimmed.contains('/') || trimmed.contains("..") {
+        bail!("{label} must not contain path traversal or '/' segments");
+    }
+    Ok(())
+}
+
+fn validate_secret_bindings(bindings: &[ServiceSecretBinding]) -> Result<()> {
+    let mut seen = BTreeMap::new();
+    for binding in bindings {
+        validate_identifier(&binding.env, "secret environment name")?;
+        validate_identifier(&binding.secret, "secret binding name")?;
+        if seen
+            .insert(binding.env.clone(), binding.secret.clone())
+            .is_some()
+        {
+            bail!(
+                "secret environment name '{}' is bound more than once",
+                binding.env
+            );
+        }
+    }
+    Ok(())
+}
+
+fn service_references_secret(runtime_dir: &Path, secret_name: &str) -> Result<Vec<String>> {
+    let definitions = service_definition_dir(runtime_dir);
+    if !definitions.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut references = Vec::new();
+    for entry in fs::read_dir(&definitions).with_context(|| {
+        format!(
+            "failed to read service directory '{}'",
+            definitions.display()
+        )
+    })? {
+        let entry =
+            entry.with_context(|| format!("failed to inspect '{}'", definitions.display()))?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+            .is_file()
+        {
+            continue;
+        }
+        let record: ServiceDefinitionRecord = read_json_file(&entry.path())?;
+        if record
+            .secret_bindings
+            .iter()
+            .any(|binding| binding.secret == secret_name)
+        {
+            references.push(record.name);
+        }
+    }
+    references.sort();
+    Ok(references)
+}
+
+fn service_status_from_record(
+    record: ServiceDefinitionRecord,
+    manifest_path: PathBuf,
+) -> ServiceDefinitionStatus {
+    ServiceDefinitionStatus {
+        machine_name: record.machine_name,
+        name: record.name,
+        kind: record.kind,
+        desired_state: record.desired_state,
+        command: record.command,
+        secret_bindings: record.secret_bindings,
+        control: record.control,
+        control_plane: record.control_plane,
+        node_name: record.node_name,
+        host_groups: record.host_groups,
+        manifest_path,
+        detail: record.detail,
+    }
+}
+
+fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(value)
+        .with_context(|| format!("failed to encode '{}'", path.display()))?;
+    fs::write(path, format!("{}\n", String::from_utf8_lossy(&bytes)))
+        .with_context(|| format!("failed to write '{}'", path.display()))
+}
+
+fn read_json_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
+    let file = File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+    serde_json::from_reader(file).with_context(|| format!("failed to decode '{}'", path.display()))
+}
+
+fn unix_timestamp_now() -> Result<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .context("system clock is before the Unix epoch")
 }
 
 #[derive(Debug, Clone)]

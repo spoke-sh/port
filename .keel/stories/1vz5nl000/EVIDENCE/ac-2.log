@@ -1,0 +1,93 @@
+---
+recorded_at: 2026-03-08T06:38:29.043539634-07:00
+mode: manual
+files: [".keel/stories/1vz5nl000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-cli ==
+
+running 7 tests
+.......
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port service --help excerpt ==
+Manage machine-bound secrets, services, and sandboxes
+
+Usage: port service [OPTIONS] <COMMAND>
+
+Commands:
+  secret  Manage machine-bound secret references
+  apply   Store a service or sandbox definition under the resolved runtime owner
+  list    List stored service and sandbox definitions for a machine
+  status  Inspect one stored service or sandbox definition
+  stop    Set a stored service or sandbox definition to the stopped desired state
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>  Load a Port model from a TOML file instead of using the built-in sample
+  -h, --help           Print help
+
+== hosted service docs excerpt ==
+crates/port-cli/src/lib.rs:46:  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+crates/port-cli/src/lib.rs:48:  port --config examples/port.toml service apply --machine cloud-aws --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
+crates/port-cli/src/lib.rs:82:  `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution and SDK clients as follow-on slices.
+crates/port-cli/src/lib.rs:84:  `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
+crates/port-cli/src/lib.rs:85:  Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
+crates/port-cli/src/lib.rs:86:  `port service apply` persists desired state, guest command, secret bindings, and hosted routing context; real guest execution and teardown remain explicit follow-on work.
+crates/port-cli/src/lib.rs:1068:    println!("service route: {}", secret.control.service_route);
+crates/port-cli/src/lib.rs:1094:    println!("service route: {}", service.control.service_route);
+README.md:130:port service secret put --machine <name> --name <secret> --value <value>
+README.md:131:port service secret list --machine <name>
+README.md:132:port service secret remove --machine <name> --name <secret>
+README.md:133:port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--secret <ENV=SECRET_NAME>]... -- <command...>
+README.md:134:port service list --machine <name>
+README.md:135:port service status --machine <name> --name <name>
+README.md:136:port service stop --machine <name> --name <name>
+README.md:195:- `port service secret` and `port service apply|list|status|stop` now persist
+README.md:199:  while real hosted execution remains follow-on work.
+README.md:268:- `port service` is now the canonical secrets/services/sandboxes family. It
+README.md:270:  sandboxes expressed as `--kind sandbox` instead of a second runtime model.
+README.md:271:- Secret values are currently stored as runtime-owned JSON files under the
+README.md:335:- `port service secret put|list|remove` stores machine-scoped secret references
+README.md:337:- `port service apply --kind service|sandbox` stores a guest command plus
+README.md:341:- `port service list|status|stop` lets operators inspect or change the stored
+README.md:345:  secret backends remain follow-on work.
+docs/hosted.md:256:- hosted `service secret put|list|remove` now stores machine-scoped secret
+docs/hosted.md:263:  definitions, but real hosted execution and teardown remain follow-on work
+docs/hosted.md:284:- `service_route = "direct-local-runtime"`
+docs/hosted.md:300:- `service_route = "hosted-control-plane"`
+docs/hosted.md:344:  SDK/API clients
+docs/hosted.md:378:- hosted `service secret` and `service apply|list|status|stop` are also
+

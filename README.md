@@ -127,6 +127,13 @@ port guest copy --machine <name> --direction <host-to-guest|guest-to-host> --sou
 port guest pty --machine <name> -- <command...>
 port guest logs --machine <name> --path <path> [--tail-lines <n>] [--follow]
 port guest forward --machine <name> --listen <tcp-addr|unix:path> --target <tcp-addr|unix:path> [--lifecycle <foreground|detached>] [--name <name>] [--list] [--stop]
+port service secret put --machine <name> --name <secret> --value <value>
+port service secret list --machine <name>
+port service secret remove --machine <name> --name <secret>
+port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--secret <ENV=SECRET_NAME>]... -- <command...>
+port service list --machine <name>
+port service status --machine <name> --name <name>
+port service stop --machine <name> --name <name>
 ```
 
 Use `port --help` or any nested `--help` command to inspect the current command
@@ -185,6 +192,11 @@ Current behavior:
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
   guest-agent protocol through the canonical CLI and return structured results
   rendered as human-readable CLI output.
+- `port service secret` and `port service apply|list|status|stop` now persist
+  machine-scoped secret references plus service or sandbox definitions under
+  the resolved runtime owner. This first slice is spec-backed: it stores
+  desired state, guest command, secret bindings, and hosted routing context,
+  while real hosted execution remains follow-on work.
 
 ## Cloud Linux Support
 
@@ -252,7 +264,13 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - `port machine monitor` and `port machine top` now make the hosted monitoring
   boundary explicit: they inspect node-agent-owned runtime state, detached
   forwards, and live processes, but they are not yet a full metrics,
-  secrets/services, or sandbox product.
+  secrets/services, or sandbox execution product.
+- `port service` is now the canonical secrets/services/sandboxes family. It
+  uses the same resolved runtime ownership as `machine` and `guest`, with
+  sandboxes expressed as `--kind sandbox` instead of a second runtime model.
+- Secret values are currently stored as runtime-owned JSON files under the
+  resolved machine runtime root. Treat that as a bootstrap operator workflow,
+  not as a hardened secret backend.
 - Local `machine list`, `status`, `monitor`, `top`, and `stop` now publish the
   control-contract fields that future hosted routing will reuse: inventory
   scope, inventory owner, lifecycle owner, status source, and per-verb route.
@@ -311,6 +329,20 @@ The launched-VM guest transport is now the canonical path for the guest CLI:
 - `port guest forward` is a foreground host-side proxy session. It binds on the
   host, connects each inbound client to the guest target through the guest
   transport, and runs until you stop it.
+
+The first service/sandbox surface builds on that same runtime ownership model:
+
+- `port service secret put|list|remove` stores machine-scoped secret references
+  under the resolved runtime owner.
+- `port service apply --kind service|sandbox` stores a guest command plus
+  secret bindings under the same runtime owner, so hosted service and sandbox
+  workflows reuse the canonical machine/guest routing instead of inventing a
+  second hosted surface.
+- `port service list|status|stop` lets operators inspect or change the stored
+  desired state for those definitions.
+- This slice is intentionally spec-backed. Service definitions are persisted and
+  routed correctly today, but real hosted execution, teardown, and secure
+  secret backends remain follow-on work.
 
 ## Artifact Workflow
 

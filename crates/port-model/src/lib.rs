@@ -538,6 +538,25 @@ impl PortConfig {
         }))
     }
 
+    pub fn hosted_service_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedServiceContract>, ValidationError> {
+        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+            Some(summary) => summary,
+            None => return Ok(None),
+        };
+        Ok(Some(HostedServiceContract {
+            machine: summary.clone(),
+            lifecycle_owner: summary.control.lifecycle_owner,
+            guest_broker: summary.control.guest_broker,
+            service_route: summary.control.service_route,
+            detail: String::from(
+                "Hosted secrets, services, and sandboxes stay on the canonical service surface and reuse the same control-plane plus node-agent runtime ownership as machine and guest operations.",
+            ),
+        }))
+    }
+
     pub fn hosted_guest_attach_contract(
         &self,
         machine_name: &str,
@@ -1053,6 +1072,15 @@ pub struct HostedMachineMonitorContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedServiceContract {
+    pub machine: HostedMachineSummaryContract,
+    pub lifecycle_owner: MachineLifecycleOwner,
+    pub guest_broker: MachineGuestBroker,
+    pub service_route: MachineCommandRoute,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedGuestAttachContract {
     pub machine: HostedMachineSummaryContract,
     pub guest_broker: MachineGuestBroker,
@@ -1178,6 +1206,7 @@ pub struct MachineControlContract {
     pub stop_route: MachineCommandRoute,
     pub monitor_route: MachineCommandRoute,
     pub top_route: MachineCommandRoute,
+    pub service_route: MachineCommandRoute,
     pub guest_route: MachineCommandRoute,
 }
 
@@ -1204,6 +1233,7 @@ impl MachineControlContract {
             stop_route: MachineCommandRoute::DirectLocalRuntime,
             monitor_route: MachineCommandRoute::DirectLocalRuntime,
             top_route: MachineCommandRoute::DirectLocalRuntime,
+            service_route: MachineCommandRoute::DirectLocalRuntime,
             guest_route: MachineCommandRoute::DirectLocalRuntime,
         }
     }
@@ -1222,6 +1252,7 @@ impl MachineControlContract {
             stop_route: MachineCommandRoute::HostedControlPlane,
             monitor_route: MachineCommandRoute::HostedControlPlane,
             top_route: MachineCommandRoute::HostedControlPlane,
+            service_route: MachineCommandRoute::HostedControlPlane,
             guest_route: MachineCommandRoute::HostedControlPlane,
         }
     }
@@ -1933,6 +1964,10 @@ mod tests {
             MachineCommandRoute::DirectLocalRuntime
         );
         assert_eq!(contract.top_route, MachineCommandRoute::DirectLocalRuntime);
+        assert_eq!(
+            contract.service_route,
+            MachineCommandRoute::DirectLocalRuntime
+        );
     }
 
     #[test]
@@ -1970,6 +2005,10 @@ mod tests {
             MachineCommandRoute::HostedControlPlane
         );
         assert_eq!(contract.top_route, MachineCommandRoute::HostedControlPlane);
+        assert_eq!(
+            contract.service_route,
+            MachineCommandRoute::HostedControlPlane
+        );
     }
 
     #[test]
@@ -2119,6 +2158,24 @@ mod tests {
             MachineLifecycleOwner::HostedNodeAgent
         );
         assert!(monitor.detail.contains("detached forward"));
+
+        let service = config
+            .hosted_service_contract("cloud-aws")
+            .expect("hosted service contract should resolve")
+            .expect("cloud-aws service should be hosted");
+        assert_eq!(
+            service.lifecycle_owner,
+            MachineLifecycleOwner::HostedNodeAgent
+        );
+        assert_eq!(
+            service.guest_broker,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel
+        );
+        assert_eq!(
+            service.service_route,
+            MachineCommandRoute::HostedControlPlane
+        );
+        assert!(service.detail.contains("canonical service surface"));
     }
 
     #[test]

@@ -171,7 +171,7 @@ What this does not claim:
 
 - no scheduler policy exists yet beyond explicit membership
 - no hosted remote-launch implementation ships yet
-- no secrets/services/sandboxes product exists yet
+- no hosted secrets/services/sandboxes execution product exists yet
 - hosted `machine monitor` and `top` are runtime-inspection surfaces, not a
   full metrics or fleet-observability product yet
 
@@ -253,6 +253,14 @@ What is runnable today:
 - hosted guest attach failures surface the control plane and node-routing
   context directly, so missing guest sockets or unresolved hosted node
   ownership stay visible to the operator
+- hosted `service secret put|list|remove` now stores machine-scoped secret
+  references under the resolved runtime owner instead of inventing a separate
+  hosted secret store
+- hosted `service apply --kind service|sandbox` now stores service and sandbox
+  definitions under that same runtime owner, including desired state, guest
+  command, secret bindings, and hosted routing context
+- hosted `service list|status|stop` now inspects or updates those stored
+  definitions, but real hosted execution and teardown remain follow-on work
 
 ## Canonical Machine Control Contract
 
@@ -273,6 +281,7 @@ Local runtime-root contract:
 - `stop_route = "direct-local-runtime"`
 - `monitor_route = "direct-local-runtime"`
 - `top_route = "direct-local-runtime"`
+- `service_route = "direct-local-runtime"`
 - `guest_route = "direct-local-runtime"`
 
 Hosted control-plane contract:
@@ -288,6 +297,7 @@ Hosted control-plane contract:
 - `stop_route = "hosted-control-plane"`
 - `monitor_route = "hosted-control-plane"`
 - `top_route = "hosted-control-plane"`
+- `service_route = "hosted-control-plane"`
 - `guest_route = "hosted-control-plane"`
 
 Those tokens are the implementation-ready contract for the next hosted node
@@ -331,7 +341,7 @@ forward listener and lifecycle ownership broaden.
 What still remains after this runtime slice:
 
 - follow-on order after this foundation is:
-  secrets/services/sandboxes -> SDK/API clients
+  SDK/API clients
 - those follow-on capabilities are downstream of the authenticated API,
   inventory, lifecycle, and guest-attach foundation; they are not already
   shipped
@@ -348,6 +358,13 @@ to expose lifecycle and guest-transport verbs that mirror the CLI:
 - `machines.top`
 - `machines.stop`
 - `machines.connect_guest`
+- `services.apply`
+- `services.list`
+- `services.get`
+- `services.stop`
+- `secrets.put`
+- `secrets.list`
+- `secrets.remove`
 
 Those verbs are the hosted counterpart of today's local runtime calls and
 should remain substrate-aware without becoming Firecracker-specific API names.
@@ -358,6 +375,9 @@ should remain substrate-aware without becoming Firecracker-specific API names.
 - hosted `machine list`, `status`, `monitor`, `top`, and `stop` are currently
   config-backed and in-process; they inspect the selected node `runtime_root`
   rather than reaching a real remote control plane.
+- hosted `service secret` and `service apply|list|status|stop` are also
+  config-backed and in-process; they persist spec state under the selected node
+  `runtime_root` rather than materializing real hosted execution yet.
 - Those commands already report the control-contract fields above so the
   operator-visible lifecycle vocabulary does not need to change when the real
   hosted routing lands.
