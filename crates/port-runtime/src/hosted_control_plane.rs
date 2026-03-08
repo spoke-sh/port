@@ -15,18 +15,22 @@ use port_hosted_protocol::{
     HostedError, HostedGuestRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
     HostedNodeRoute, HostedRouteContext, HostedSuccess,
 };
-use port_model::{HostConnection, HostedAuthTokenSource, HostedMachineSummaryContract, PortConfig};
+use port_model::{
+    ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
+    HostedMachineSummaryContract, PortConfig, ProtectionMode,
+};
 use reqwest::Client;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 
 use crate::{
-    GuestCopyRequest, GuestForwardRequest, GuestRequest, MachineRuntimeState, MachineStatus,
-    RuntimePaths, StopResult, copy_guest_file, execute_guest_operation,
-    hosted_placeholder_runtime_root, machine_monitor as runtime_machine_monitor,
-    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
-    prepare_guest_forward, stop_machine as runtime_stop_machine,
+    GuestCopyRequest, GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest,
+    MachineRuntimeState, MachineStatus, RuntimePaths, StopResult, copy_guest_file,
+    execute_guest_operation, hosted_placeholder_runtime_root, launch_local_machine,
+    machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
+    machine_top as runtime_machine_top, prepare_guest_forward,
+    stop_machine as runtime_stop_machine,
 };
 use port_agent_protocol::{ForwardResult, GuestOperation, OperationResult};
 
@@ -115,6 +119,12 @@ impl HostedMachineProjection for crate::MachineTopReport {
         self.node_name = route.node_name.clone();
         self.host_groups = route.host_groups.clone();
         self.detail = append_route_detail(self.detail, route);
+        self
+    }
+}
+
+impl HostedMachineProjection for LaunchMetadata {
+    fn apply_hosted_route(self, _route: &HostedRouteContext) -> Self {
         self
     }
 }
@@ -771,7 +781,7 @@ fn node_agent_router(state: NodeAgentState) -> Router {
     Router::new()
         .route(
             "/v1/node/machines/{machine}",
-            get(node_machine_status).post(node_machine_stop),
+            get(node_machine_status).post(node_machine_command),
         )
         .route(
             "/v1/node/machines/{machine}/monitor",
@@ -846,29 +856,46 @@ async fn node_machine_top(
     )
 }
 
-async fn node_machine_stop(
+async fn node_machine_command(
     State(state): State<NodeAgentState>,
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let Some(machine_name) = machine.strip_suffix(":stop") else {
-        return node_agent_error(
+    if let Some(machine_name) = machine.strip_suffix(":launch") {
+        return node_machine_response(
             &state,
-            Some(machine),
-            format!(
-                "node '{}' only serves stop through '/v1/node/machines/{{machine}}:stop'",
-                state.inner.node_name
-            ),
+            &headers,
+            machine_name,
+            |config, runtime_root, machine_name| {
+                launch_local_machine(
+                    config,
+                    &LaunchRequest {
+                        machine_name,
+                        runtime_root,
+                        boot_wait: Duration::from_secs(3),
+                    },
+                )
+            },
         );
-    };
+    }
+    if let Some(machine_name) = machine.strip_suffix(":stop") {
+        return node_machine_response(
+            &state,
+            &headers,
+            machine_name,
+            |config, runtime_root, machine_name| {
+                runtime_stop_machine(config, runtime_root, machine_name, Duration::from_secs(3))
+            },
+        );
+    }
 
-    node_machine_response(
+    node_agent_error(
         &state,
-        &headers,
-        machine_name,
-        |config, runtime_root, machine_name| {
-            runtime_stop_machine(config, runtime_root, machine_name, Duration::from_secs(3))
-        },
+        Some(machine),
+        format!(
+            "node '{}' only serves launch and stop through '/v1/node/machines/{{machine}}:launch' and '/v1/node/machines/{{machine}}:stop'",
+            state.inner.node_name
+        ),
     )
 }
 
@@ -1015,11 +1042,67 @@ fn localize_machine_for_node(
                 Some(node_route_context(state, Some(machine_name.to_string()))),
             )
         })?;
-    localized
+    let machine = localized
+        .machines
+        .get(machine_name)
+        .expect("machine should exist after summary resolution")
+        .clone();
+    let node = localized
+        .nodes
+        .get(&state.inner.node_name)
+        .expect("selected node should exist after summary resolution")
+        .clone();
+    let host = localized
         .hosts
         .get_mut(&host_name)
-        .expect("machine host should exist after summary resolution")
-        .connection = HostConnection::Local;
+        .expect("machine host should exist after summary resolution");
+    host.connection = HostConnection::Local;
+    host.firecracker.local_launch = true;
+    if machine.substrate == ExecutionSubstrate::Firecracker
+        && machine.protection_mode == ProtectionMode::Pvm
+    {
+        let Some(node_lane) = node.capabilities.pvm_lane_for(machine.architecture) else {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' does not advertise a PVM lane for machine '{}'",
+                    state.inner.node_name, machine_name
+                ),
+                Some(
+                    HostedRouteContext::from_machine_summary(&summary).with_selected_node(
+                        &state.inner.node_name,
+                        state.inner.runtime_root.clone(),
+                    ),
+                ),
+            ));
+        };
+        let Some(host_kit) = node_lane.host_kit.clone() else {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' does not declare a prepared PVM host-kit contract for machine '{}'",
+                    state.inner.node_name, machine_name
+                ),
+                Some(
+                    HostedRouteContext::from_machine_summary(&summary).with_selected_node(
+                        &state.inner.node_name,
+                        state.inner.runtime_root.clone(),
+                    ),
+                ),
+            ));
+        };
+        let mut contract = FirecrackerPvmLaneContract::for_architecture(node_lane.architecture);
+        contract.host_kit = Some(host_kit);
+        host.firecracker
+            .pvm_lanes
+            .retain(|lane| lane.architecture != contract.architecture);
+        host.firecracker.pvm_lanes.push(contract);
+    }
+    localized.machines.retain(|name, _| name == machine_name);
+    localized.hosts.retain(|name, _| name == &host_name);
+    localized.nodes.clear();
+    localized.host_groups.clear();
+    localized.control_planes.clear();
 
     let route = HostedRouteContext::from_machine_summary(&summary)
         .with_selected_node(&state.inner.node_name, state.inner.runtime_root.clone());
@@ -1167,6 +1250,7 @@ mod tests {
     };
     use std::io::BufReader;
     use std::net::SocketAddr;
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -1415,6 +1499,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn node_agent_launches_pvm_machine_from_prepared_host_kit() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws machine should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+        let kernel_path = tempdir.path().join("pvm-vmlinux");
+        let guest_path = tempdir.path().join("pvm-rootfs.ext4");
+        std::fs::write(&kernel_path, b"fake-kernel").expect("kernel variant should write");
+        std::fs::write(&guest_path, b"fake-rootfs").expect("guest variant should write");
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == port_model::MachineArchitecture::X86_64
+                    && variant.selector.substrate == port_model::ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == port_model::ProtectionMode::Pvm
+            })
+            .expect("pvm kernel variant should exist")
+            .path = kernel_path.clone();
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == port_model::MachineArchitecture::X86_64
+                    && variant.selector.substrate == port_model::ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == port_model::ProtectionMode::Pvm
+            })
+            .expect("pvm guest variant should exist")
+            .path = guest_path.clone();
+        let host_kit = config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .host_kit
+            .as_mut()
+            .expect("aws node should declare a host-kit contract");
+        host_kit.requires_custom_host_kernel = false;
+        host_kit.host_boot_args.clear();
+        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_NODE_PVM_FIRECRACKER"));
+        let fake_binary = write_fake_firecracker(tempdir.path(), "firecracker-pvm");
+        unsafe {
+            std::env::set_var("PORT_TEST_NODE_PVM_FIRECRACKER", &fake_binary);
+        }
+
+        let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
+        let response = Client::new()
+            .post(format!(
+                "http://{node_addr}/v1/node/machines/cloud-aws:launch"
+            ))
+            .header("x-port-node-agent-token", "node-secret")
+            .send()
+            .await
+            .expect("launch request should complete");
+        let status = response.status();
+        let body = response.text().await.expect("launch body should decode");
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let success: serde_json::Value =
+            serde_json::from_str(&body).expect("launch body should decode");
+        let result = &success["result"];
+        assert_eq!(result["machine_name"], "cloud-aws");
+        assert_eq!(
+            result["firecracker_binary"].as_str(),
+            Some(fake_binary.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            success["route"]["node_name"].as_str(),
+            Some("aws-linux-node")
+        );
+
+        let config_path = PathBuf::from(
+            result["config_path"]
+                .as_str()
+                .expect("config path should be present"),
+        );
+        let manifest_path = PathBuf::from(
+            result["manifest_path"]
+                .as_str()
+                .expect("manifest path should be present"),
+        );
+        let config_json = std::fs::read_to_string(&config_path).expect("config should exist");
+        assert!(config_json.contains(kernel_path.to_string_lossy().as_ref()));
+        assert!(config_json.contains(guest_path.to_string_lossy().as_ref()));
+        assert!(manifest_path.exists());
+
+        let pid = result["pid"].as_u64().expect("pid should be present");
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+    }
+
+    #[tokio::test]
     async fn node_agent_reports_missing_guest_socket_with_runtime_context() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let config = sample_control_plane_config(tempdir.path());
@@ -1586,6 +1775,19 @@ mod tests {
             let _ = axum::serve(listener, node_agent_router(state)).await;
         });
         addr
+    }
+
+    fn write_fake_firecracker(root: &std::path::Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        std::fs::write(&path, "#!/usr/bin/env bash\nsleep 30\n")
+            .expect("fake firecracker should write");
+        let mut permissions = std::fs::metadata(&path)
+            .expect("fake firecracker metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions)
+            .expect("fake firecracker permissions should update");
+        path
     }
 
     fn write_manifest(paths: &RuntimePaths, machine_name: &str, pid: u32) {

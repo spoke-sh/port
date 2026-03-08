@@ -91,6 +91,7 @@ pub enum HostedGuestVerb {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostedMachineRoute {
     List,
+    Launch { machine_name: String },
     Status { machine_name: String },
     Monitor { machine_name: String },
     Top { machine_name: String },
@@ -239,6 +240,9 @@ pub struct HostedError {
 fn machine_route_path(route: &HostedMachineRoute) -> String {
     match route {
         HostedMachineRoute::List => String::from("/v1/machines"),
+        HostedMachineRoute::Launch { machine_name } => {
+            format!("/v1/machines/{machine_name}:launch")
+        }
         HostedMachineRoute::Status { machine_name } => {
             format!("/v1/machines/{machine_name}")
         }
@@ -295,6 +299,9 @@ fn service_route_path(route: &HostedServiceRoute) -> String {
 fn machine_node_route_suffix(route: &HostedMachineRoute) -> String {
     match route {
         HostedMachineRoute::List => String::from("/machines"),
+        HostedMachineRoute::Launch { machine_name } => {
+            format!("/machines/{machine_name}:launch")
+        }
         HostedMachineRoute::Status { machine_name } => {
             format!("/machines/{machine_name}")
         }
@@ -404,6 +411,13 @@ mod tests {
             "/v1/machines"
         );
         assert_eq!(
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Launch {
+                machine_name: String::from("cloud-aws"),
+            })
+            .path(),
+            "/v1/machines/cloud-aws:launch"
+        );
+        assert_eq!(
             HostedControlPlaneRoute::Machine(HostedMachineRoute::Stop {
                 machine_name: String::from("cloud-aws"),
             })
@@ -430,6 +444,13 @@ mod tests {
 
     #[test]
     fn node_routes_render_internal_paths() {
+        assert_eq!(
+            HostedNodeRoute::Machine(HostedMachineRoute::Launch {
+                machine_name: String::from("cloud-aws"),
+            })
+            .path(),
+            "/v1/node/machines/cloud-aws:launch"
+        );
         assert_eq!(
             HostedNodeRoute::Machine(HostedMachineRoute::Monitor {
                 machine_name: String::from("cloud-aws"),

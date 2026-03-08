@@ -690,6 +690,33 @@ fn firecracker_local_launch_machine(
         bail!("machine contract failed: {}", machine_check.detail);
     }
     let resolved_architecture = resolve_machine_architecture(machine.architecture)?;
+    let kernel_variant = kernel
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "kernel artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.kernel, resolved_architecture, machine.substrate, machine.protection_mode
+            )
+        })?;
+    let guest_variant = guest_image
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "guest image artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.guest_image,
+                resolved_architecture,
+                machine.substrate,
+                machine.protection_mode
+            )
+        })?;
 
     let facts = DoctorHostFacts::collect();
 
@@ -709,8 +736,10 @@ fn firecracker_local_launch_machine(
         }
     }
 
-    let report = collect_doctor_report(Some(config));
-    let failures = report.blocking_failures();
+    let failures = launch_preflight_checks(machine, &kernel_variant.path, &guest_variant.path)
+        .into_iter()
+        .filter(|check| check.required && !check.ok)
+        .collect::<Vec<_>>();
     if !failures.is_empty() {
         let details = failures
             .into_iter()
@@ -743,34 +772,6 @@ fn firecracker_local_launch_machine(
         )
     })?;
     prepare_runtime_state(&paths, request.machine_name)?;
-
-    let kernel_variant = kernel
-        .variant(
-            resolved_architecture,
-            machine.substrate,
-            machine.protection_mode,
-        )
-        .with_context(|| {
-            format!(
-                "kernel artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
-                machine.kernel, resolved_architecture, machine.substrate, machine.protection_mode
-            )
-        })?;
-    let guest_variant = guest_image
-        .variant(
-            resolved_architecture,
-            machine.substrate,
-            machine.protection_mode,
-        )
-        .with_context(|| {
-            format!(
-                "guest image artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
-                machine.guest_image,
-                resolved_architecture,
-                machine.substrate,
-                machine.protection_mode
-            )
-        })?;
 
     let config_payload = build_firecracker_config(
         kernel_variant.path.clone(),
@@ -2714,12 +2715,13 @@ fn local_pvm_lane_checks(
                     },
                 });
 
-                let binary_ok = facts.pvm_firecracker_binary.is_some();
+                let observed_binary = observed_pvm_firecracker_binary(host_kit, facts);
+                let binary_ok = observed_binary.is_some();
                 checks.push(DoctorCheck {
                     name: format!("pvm:{host_name}:{architecture}:firecracker-binary"),
                     ok: binary_ok,
                     required: false,
-                    detail: match &facts.pvm_firecracker_binary {
+                    detail: match &observed_binary {
                         Some(path) => format!(
                             "Found the patched PVM Firecracker binary at '{}'.",
                             path.display()
@@ -2880,6 +2882,19 @@ fn pvm_firecracker_missing_detail(host_kit: &PvmHostKit) -> String {
     }
 }
 
+fn observed_pvm_firecracker_binary(
+    host_kit: &PvmHostKit,
+    facts: &DoctorHostFacts,
+) -> Option<PathBuf> {
+    if host_kit.firecracker_binary_name == "firecracker-pvm"
+        && host_kit.firecracker_binary_env.as_deref() == Some("PORT_PVM_FIRECRACKER_BINARY")
+    {
+        facts.pvm_firecracker_binary.clone()
+    } else {
+        find_pvm_firecracker_binary_for_host_kit(host_kit)
+    }
+}
+
 fn resolve_machine_architecture(architecture: MachineArchitecture) -> Result<MachineArchitecture> {
     match architecture {
         MachineArchitecture::Native => match env::consts::ARCH {
@@ -2928,6 +2943,50 @@ fn remote_launch_guidance(
     };
 
     format!("{detail}{hosted_route}")
+}
+
+fn launch_preflight_checks(
+    machine: &port_model::MachineSpec,
+    kernel_path: &Path,
+    guest_image_path: &Path,
+) -> Vec<DoctorCheck> {
+    let mut checks = vec![
+        path_check(
+            "kvm-device",
+            Path::new("/dev/kvm"),
+            true,
+            "Found /dev/kvm for KVM acceleration.",
+            "Missing /dev/kvm.",
+        ),
+        versioned_binary_check("iproute2", "ip", &["-V"], "iproute2", true),
+        versioned_binary_check("iptables", "iptables", &["--version"], "iptables", true),
+        path_check(
+            format!("artifact:{}", machine.kernel),
+            kernel_path,
+            true,
+            &format!("Artifact variant '{}' exists.", kernel_path.display()),
+            &format!(
+                "Artifact variant '{}' is missing. Build or pull the selected variant first.",
+                kernel_path.display()
+            ),
+        ),
+        path_check(
+            format!("artifact:{}", machine.guest_image),
+            guest_image_path,
+            true,
+            &format!("Artifact variant '{}' exists.", guest_image_path.display()),
+            &format!(
+                "Artifact variant '{}' is missing. Build or pull the selected variant first.",
+                guest_image_path.display()
+            ),
+        ),
+    ];
+
+    if machine.protection_mode == ProtectionMode::Standard {
+        checks.push(binary_check("firecracker-binary", "firecracker", true));
+    }
+
+    checks
 }
 
 fn binary_check(name: &str, binary: &str, required: bool) -> DoctorCheck {

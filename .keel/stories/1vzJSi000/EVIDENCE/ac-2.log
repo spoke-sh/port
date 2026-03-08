@@ -1,0 +1,97 @@
+---
+recorded_at: 2026-03-08T12:32:46.836560527-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJSi000/verify-ac-2.sh
+---
+
+running 45 tests
+.............................................
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.04s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 10 tests
+..........
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+launched machine: demo
+pid: 2826980
+runtime dir: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo
+firecracker binary: /nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker
+config path: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/firecracker-config.json
+firecracker log: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/firecracker.log
+console stdout: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/console.stdout.log
+console stderr: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/console.stderr.log
+manifest: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/manifest.json
+machine: demo
+state: running
+pid: 2826980
+inventory scope: local-runtime-root
+inventory owner: local-runtime-root
+lifecycle owner: local-port-runtime
+guest broker: local-runtime-transport
+status source: runtime-manifest-and-host-process
+launch route: direct-local-runtime
+inventory route: direct-local-runtime
+status route: direct-local-runtime
+stop route: direct-local-runtime
+guest route: direct-local-runtime
+runtime dir: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo
+config path: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/firecracker-config.json
+manifest: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/manifest.json
+pid file: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/firecracker.pid
+firecracker log: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/firecracker.log
+console stdout: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/console.stdout.log
+console stderr: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo/console.stderr.log
+detail: live Firecracker process matches runtime manifest
+machine: demo
+previous state: running
+current state: stopped
+pid: 2826980
+inventory scope: local-runtime-root
+lifecycle owner: local-port-runtime
+status source: runtime-manifest-and-host-process
+stop route: direct-local-runtime
+runtime dir: /var/tmp/nix-shell.O1OCsX/tmp.xfZ1AgtpuA/runtime/demo
+detail: sent SIGTERM to pid and cleaned stale runtime sockets
+launched machine: demo
+state: running
+current state: stopped
