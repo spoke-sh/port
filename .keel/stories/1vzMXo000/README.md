@@ -22,6 +22,3 @@ guest protocol, guest agent, runtime, and canonical CLI.
   runtimes.
 - [ ] [SRS-02/AC-02] `port guest logs --follow` streams incremental guest log
   output while preserving the existing non-follow log behavior.
-- [ ] [SRS-06/AC-03] Existing Firecracker standard, hosted PVM, and AVF
-  guest-operation proofs remain green after the streamed local-session path
-  lands.

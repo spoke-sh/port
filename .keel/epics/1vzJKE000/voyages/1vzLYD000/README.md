@@ -2,11 +2,12 @@
 id: 1vzLYD000
 index: 2
 title: Executable Avf Runtime Foundation
-status: in-progress
+status: done
 epic: 1vzJKE000
 created_at: 2026-03-08T14:20:37
 updated_at: 2026-03-08T14:23:39
 started_at: 2026-03-08T14:23:53
+completed_at: 2026-03-08T15:38:18
 ---
 
 # Executable Avf Runtime Foundation
