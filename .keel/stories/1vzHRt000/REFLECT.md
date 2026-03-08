@@ -6,19 +6,7 @@ created_at: 2026-03-08T10:07:21
 
 ## Knowledge
 
-### 1w04a0000: Prefer Per-Ac Verify Annotations Over Shared Proof Blocks
-| Field | Value |
-|-------|-------|
-| **Category** | process |
-| **Context** | A story has multiple acceptance criteria and `keel story record` is used to capture rerunnable command proofs. |
-| **Insight** | Shared summary-level verify comments can cause proof metadata to drift or cross-wire between acceptance criteria, while one inline verify annotation per AC stays stable. |
-| **Suggested Action** | For multi-AC stories, use repo-rooted `verify-ac-*.sh` scripts and only the per-AC inline verify comment form before recording evidence. |
-| **Applies To** | `.keel/stories/*/README.md`, `.keel/stories/*/verify-ac-*.sh` |
-| **Linked Knowledge IDs** | 1w03x0000 |
-| **Observed At** | 2026-03-08T17:07:30Z |
-| **Score** | 0.72 |
-| **Confidence** | 0.9 |
-| **Applied** | yes |
+- [1w04a0000](../../knowledge/1w04a0000.md) Prefer Per-Ac Verify Annotations Over Shared Proof Blocks
 
 ## Observations
 
