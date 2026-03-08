@@ -6,8 +6,9 @@ use port_agent_protocol::{
     CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, PtyRequest,
 };
 use port_hosted_protocol::{
-    HostedClientHeaders, HostedControlPlaneRoute, HostedError, HostedGuestRoute, HostedGuestVerb,
-    HostedMachineRoute, HostedRouteContext, HostedServiceRoute,
+    HostedClientHeaders, HostedControlPlaneRoute, HostedError, HostedGuestRoute,
+    HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
+    HostedRouteContext, HostedServiceRoute,
 };
 use port_model::{
     HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
@@ -43,6 +44,12 @@ pub struct HostedApiRequest {
     pub url: String,
     pub headers: BTreeMap<String, String>,
     pub body: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HostedApiStreamRequest {
+    pub request: HostedApiRequest,
+    pub protocol: HostedGuestStreamProtocol,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,12 +384,60 @@ impl<'a> GuestClient<'a> {
         self.operation(machine_name, "pty", GuestOperation::Pty(request))
     }
 
+    pub fn pty_stream(
+        &self,
+        machine_name: &str,
+        request: PtyRequest,
+    ) -> Result<HostedApiStreamRequest> {
+        self.stream(
+            machine_name,
+            HostedGuestVerb::Pty,
+            GuestOperation::Pty(request),
+        )
+    }
+
     pub fn logs(&self, machine_name: &str, request: LogsRequest) -> Result<HostedApiRequest> {
         self.operation(machine_name, "logs", GuestOperation::Logs(request))
     }
 
+    pub fn logs_stream(
+        &self,
+        machine_name: &str,
+        request: LogsRequest,
+    ) -> Result<HostedApiStreamRequest> {
+        self.stream(
+            machine_name,
+            HostedGuestVerb::Logs,
+            GuestOperation::Logs(request),
+        )
+    }
+
     pub fn forward(&self, machine_name: &str, request: ForwardRequest) -> Result<HostedApiRequest> {
         self.operation(machine_name, "forward", GuestOperation::Forward(request))
+    }
+
+    pub fn copy_stream(
+        &self,
+        machine_name: &str,
+        request: CopyRequest,
+    ) -> Result<HostedApiStreamRequest> {
+        self.stream(
+            machine_name,
+            HostedGuestVerb::Copy,
+            GuestOperation::Copy(request),
+        )
+    }
+
+    pub fn forward_stream(
+        &self,
+        machine_name: &str,
+        request: ForwardRequest,
+    ) -> Result<HostedApiStreamRequest> {
+        self.stream(
+            machine_name,
+            HostedGuestVerb::Forward,
+            GuestOperation::Forward(request),
+        )
     }
 
     fn operation(
@@ -407,6 +462,26 @@ impl<'a> GuestClient<'a> {
             }),
             Some(body),
         ))
+    }
+
+    fn stream(
+        &self,
+        machine_name: &str,
+        verb: HostedGuestVerb,
+        operation: GuestOperation,
+    ) -> Result<HostedApiStreamRequest> {
+        let body = serde_json::to_value(operation).context("failed to encode guest operation")?;
+        Ok(HostedApiStreamRequest {
+            request: self.client.request(
+                HttpMethod::Post,
+                HostedControlPlaneRoute::GuestStream(HostedGuestStreamRoute {
+                    machine_name: machine_name.to_string(),
+                    verb,
+                }),
+                Some(body),
+            ),
+            protocol: HostedGuestStreamProtocol::PortAgentStreamV1,
+        })
     }
 }
 
@@ -514,16 +589,17 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        HostedClient, HttpMethod, SecretPutRequest, ServiceApplyRequest, ServiceClient,
-        ServiceKind, ServiceSecretBinding,
+        HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest, ServiceApplyRequest,
+        ServiceClient, ServiceKind, ServiceSecretBinding,
     };
     use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::get;
     use axum::{Json, Router};
-    use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest};
+    use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest, LogsRequest, PtyRequest};
     use port_hosted_protocol::{
-        HostedError, HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
+        HostedError, HostedGuestStreamProtocol, HostedRouteContext, HostedSuccess,
+        PORT_AUDIENCE_HEADER,
     };
     use serde_json::json;
 
@@ -694,6 +770,51 @@ mod tests {
         assert_eq!(
             client.services().stop("cloud-aws", "api").url,
             "https://port.example.internal/v1/machines/cloud-aws/services/api:stop"
+        );
+    }
+
+    #[test]
+    fn guest_stream_requests_follow_stream_paths_and_protocol() {
+        let client = HostedClient::new(
+            "https://port.example.internal",
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let request: HostedApiStreamRequest = client
+            .guest()
+            .pty_stream(
+                "cloud-aws",
+                PtyRequest {
+                    command: vec![String::from("/bin/sh")],
+                    cols: 80,
+                    rows: 24,
+                },
+            )
+            .expect("stream request should encode");
+        assert_eq!(
+            request.request.url,
+            "https://port.example.internal/v1/machines/cloud-aws/guest:pty:stream"
+        );
+        assert_eq!(
+            request.protocol,
+            HostedGuestStreamProtocol::PortAgentStreamV1
+        );
+
+        let logs = client
+            .guest()
+            .logs_stream(
+                "cloud-aws",
+                LogsRequest {
+                    path: String::from("/var/log/app.log"),
+                    follow: true,
+                    tail_lines: Some(50),
+                },
+            )
+            .expect("logs stream request should encode");
+        assert_eq!(
+            logs.request.url,
+            "https://port.example.internal/v1/machines/cloud-aws/guest:logs:stream"
         );
     }
 

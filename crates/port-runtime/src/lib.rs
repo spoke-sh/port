@@ -4989,7 +4989,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::{Mutex, OnceLock, mpsc};
     use std::thread;
     use std::time::Duration;
 
@@ -5116,16 +5116,6 @@ mod tests {
         addr.to_string()
     }
 
-    fn wait_for_tcp(addr: &str) {
-        for _ in 0..100 {
-            if TcpStream::connect(addr).is_ok() {
-                return;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        panic!("timed out waiting for tcp listener at '{addr}'");
-    }
-
     fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
         let path = root.join(name);
         fs::write(&path, "#!/usr/bin/env bash\nexec sleep 30\n")
@@ -5173,7 +5163,35 @@ exec sleep 30
         path
     }
 
-    fn start_live_hosted_servers(config: &PortConfig, bind_node: bool) -> PortConfig {
+    fn wait_for_tcp_or_server_error(
+        addr: &str,
+        error_rx: &mpsc::Receiver<anyhow::Result<()>>,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        for _ in 0..100 {
+            if TcpStream::connect(addr).is_ok() {
+                return Ok(());
+            }
+            if let Ok(result) = error_rx.try_recv() {
+                return match result {
+                    Ok(()) => Err(anyhow::anyhow!(
+                        "{name} exited before becoming ready on '{addr}'"
+                    )),
+                    Err(error) => Err(error),
+                };
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        Err(anyhow::anyhow!(
+            "timed out waiting for {name} listener at '{addr}'"
+        ))
+    }
+
+    fn start_live_hosted_servers(
+        config: &PortConfig,
+        bind_node: bool,
+    ) -> anyhow::Result<PortConfig> {
         let _guard = hosted_server_lock().lock().expect("lock should work");
         unsafe {
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
@@ -5191,8 +5209,9 @@ exec sleep 30
         if bind_node {
             let node_config = client_config.clone();
             let bind = node_addr.clone();
+            let (node_tx, node_rx) = mpsc::channel();
             thread::spawn(move || {
-                serve_node_agent(
+                let result = serve_node_agent(
                     node_config,
                     NodeAgentServeRequest {
                         node_name: String::from("aws-linux-node"),
@@ -5200,9 +5219,10 @@ exec sleep 30
                         token: String::from("node-secret"),
                     },
                 )
-                .expect("node-agent should serve");
+                .map(|_| ());
+                let _ = node_tx.send(result);
             });
-            wait_for_tcp(&node_addr);
+            wait_for_tcp_or_server_error(&node_addr, &node_rx, "node-agent")?;
         }
 
         let control_config = client_config.clone();
@@ -5216,8 +5236,9 @@ exec sleep 30
         } else {
             Vec::new()
         };
+        let (control_tx, control_rx) = mpsc::channel();
         thread::spawn(move || {
-            serve_control_plane(
+            let result = serve_control_plane(
                 control_config,
                 ControlPlaneServeRequest {
                     control_plane: String::from("demo"),
@@ -5225,11 +5246,12 @@ exec sleep 30
                     node_bindings,
                 },
             )
-            .expect("control plane should serve");
+            .map(|_| ());
+            let _ = control_tx.send(result);
         });
-        wait_for_tcp(&control_plane_addr);
+        wait_for_tcp_or_server_error(&control_plane_addr, &control_rx, "control plane")?;
 
-        client_config
+        Ok(client_config)
     }
 
     fn write_manifest(paths: &RuntimePaths, machine_name: &str, pid: u32) {
@@ -5977,7 +5999,7 @@ exec sleep 30
         let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
         let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
         write_manifest(&paths, "cloud-aws", 424242);
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let status = machine_status(&config, tempdir.path(), "cloud-aws")
             .expect("hosted status should load");
@@ -6003,7 +6025,7 @@ exec sleep 30
         let hosted_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
         let hosted_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
         write_manifest(&hosted_paths, "cloud-aws", 424242);
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let machines = list_machines(&config, tempdir.path()).expect("machine list should load");
         let hosted = machines
@@ -6047,7 +6069,7 @@ exec sleep 30
 
         write_manifest(&paths, "cloud-aws", child.id());
         fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let result = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(2))
             .expect("hosted stop should succeed");
@@ -6108,7 +6130,7 @@ exec sleep 30
             )
             .expect("response should encode");
         });
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let result = execute_guest_operation(
             &config,
@@ -6134,7 +6156,8 @@ exec sleep 30
 
     #[test]
     fn hosted_guest_exec_explains_unresolved_node_routing() {
-        let config = start_live_hosted_servers(&PortConfig::sample(), false);
+        let config = start_live_hosted_servers(&PortConfig::sample(), false)
+            .expect("hosted control plane should start");
         let error = execute_guest_operation(
             &config,
             GuestRequest {
@@ -6170,7 +6193,7 @@ exec sleep 30
             .get_mut("cloud-generic")
             .expect("cloud-generic should exist")
             .protection_mode = port_model::ProtectionMode::Pvm;
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let status = machine_status(&config, tempdir.path(), "cloud-generic")
             .expect("hosted pvm status should load");
@@ -6268,7 +6291,7 @@ exec sleep 30
             std::env::set_var("PORT_TEST_HOSTED_PVM_FIRECRACKER", &fake_binary);
         }
 
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
         let metadata = launch_local_machine(
             &config,
             &LaunchRequest {
@@ -6744,7 +6767,7 @@ exec sleep 30
             "127.0.0.1:8081",
             "127.0.0.1:80",
         );
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let report =
             machine_monitor(&config, tempdir.path(), "cloud-aws").expect("monitor should load");
@@ -6810,7 +6833,7 @@ exec sleep 30
             "127.0.0.1:8081",
             "127.0.0.1:80",
         );
-        let config = start_live_hosted_servers(&config, true);
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
         let report = machine_top(&config, tempdir.path(), "cloud-aws").expect("top should load");
         let hypervisor = report

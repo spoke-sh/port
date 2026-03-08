@@ -105,6 +105,18 @@ pub struct HostedGuestRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedGuestStreamRoute {
+    pub machine_name: String,
+    pub verb: HostedGuestVerb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedGuestStreamProtocol {
+    PortAgentStreamV1,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostedServiceRoute {
     SecretPut {
         machine_name: String,
@@ -137,6 +149,7 @@ pub enum HostedServiceRoute {
 pub enum HostedControlPlaneRoute {
     Machine(HostedMachineRoute),
     Guest(HostedGuestRoute),
+    GuestStream(HostedGuestStreamRoute),
     Service(HostedServiceRoute),
 }
 
@@ -146,6 +159,7 @@ impl HostedControlPlaneRoute {
         match self {
             Self::Machine(route) => machine_route_path(route),
             Self::Guest(route) => guest_route_path(route),
+            Self::GuestStream(route) => guest_stream_route_path(route),
             Self::Service(route) => service_route_path(route),
         }
     }
@@ -155,6 +169,7 @@ impl HostedControlPlaneRoute {
 pub enum HostedNodeRoute {
     Machine(HostedMachineRoute),
     Guest(HostedGuestRoute),
+    GuestStream(HostedGuestStreamRoute),
     Service(HostedServiceRoute),
 }
 
@@ -164,6 +179,7 @@ impl HostedNodeRoute {
         let suffix = match self {
             Self::Machine(route) => machine_node_route_suffix(route),
             Self::Guest(route) => guest_node_route_suffix(route),
+            Self::GuestStream(route) => guest_stream_node_route_suffix(route),
             Self::Service(route) => service_node_route_suffix(route),
         };
         format!("/v1/node{suffix}")
@@ -266,6 +282,14 @@ fn guest_route_path(route: &HostedGuestRoute) -> String {
     )
 }
 
+fn guest_stream_route_path(route: &HostedGuestStreamRoute) -> String {
+    format!(
+        "/v1/machines/{}/guest:{}:stream",
+        route.machine_name,
+        route.verb.as_str()
+    )
+}
+
 fn service_route_path(route: &HostedServiceRoute) -> String {
     match route {
         HostedServiceRoute::SecretPut {
@@ -325,6 +349,14 @@ fn guest_node_route_suffix(route: &HostedGuestRoute) -> String {
     )
 }
 
+fn guest_stream_node_route_suffix(route: &HostedGuestStreamRoute) -> String {
+    format!(
+        "/machines/{}/guest:{}:stream",
+        route.machine_name,
+        route.verb.as_str()
+    )
+}
+
 fn service_node_route_suffix(route: &HostedServiceRoute) -> String {
     match route {
         HostedServiceRoute::SecretPut {
@@ -379,9 +411,10 @@ mod tests {
     };
 
     use super::{
-        HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestVerb,
-        HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext,
-        HostedServiceRoute, HostedSuccess, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestStreamProtocol,
+        HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
+        HostedNodeRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
+        PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -433,6 +466,14 @@ mod tests {
             "/v1/machines/cloud-aws/guest:forward"
         );
         assert_eq!(
+            HostedControlPlaneRoute::GuestStream(HostedGuestStreamRoute {
+                machine_name: String::from("cloud-aws"),
+                verb: HostedGuestVerb::Pty,
+            })
+            .path(),
+            "/v1/machines/cloud-aws/guest:pty:stream"
+        );
+        assert_eq!(
             HostedControlPlaneRoute::Service(HostedServiceRoute::Status {
                 machine_name: String::from("cloud-aws"),
                 service_name: String::from("buildbox"),
@@ -466,6 +507,21 @@ mod tests {
             .path(),
             "/v1/node/machines/cloud-aws/guest:exec"
         );
+        assert_eq!(
+            HostedNodeRoute::GuestStream(HostedGuestStreamRoute {
+                machine_name: String::from("cloud-aws"),
+                verb: HostedGuestVerb::Logs,
+            })
+            .path(),
+            "/v1/node/machines/cloud-aws/guest:logs:stream"
+        );
+    }
+
+    #[test]
+    fn hosted_guest_stream_protocol_serializes_stably() {
+        let encoded = serde_json::to_string(&HostedGuestStreamProtocol::PortAgentStreamV1)
+            .expect("stream protocol should encode");
+        assert_eq!(encoded, "\"port-agent-stream-v1\"");
     }
 
     #[test]

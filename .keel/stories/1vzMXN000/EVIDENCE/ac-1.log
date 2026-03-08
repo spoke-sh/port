@@ -1,0 +1,77 @@
+---
+recorded_at: 2026-03-08T15:36:20.644870869-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzMXN000/verify-ac-1.sh | tee /home/alex/workspace/spoke-sh/port/.keel/stories/1vzMXN000/EVIDENCE/ac-1.log
+---
+== cargo test -q -p port-agent-protocol ==
+
+running 8 tests
+........
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== cargo test -q -p port-hosted-protocol ==
+
+running 8 tests
+........
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== shared stream contract excerpt ==
+crates/port-hosted-protocol/src/lib.rs:108:pub struct HostedGuestStreamRoute {
+crates/port-hosted-protocol/src/lib.rs:115:pub enum HostedGuestStreamProtocol {
+crates/port-hosted-protocol/src/lib.rs:152:    GuestStream(HostedGuestStreamRoute),
+crates/port-hosted-protocol/src/lib.rs:172:    GuestStream(HostedGuestStreamRoute),
+crates/port-hosted-protocol/src/lib.rs:285:fn guest_stream_route_path(route: &HostedGuestStreamRoute) -> String {
+crates/port-hosted-protocol/src/lib.rs:287:        "/v1/machines/{}/guest:{}:stream",
+crates/port-hosted-protocol/src/lib.rs:352:fn guest_stream_node_route_suffix(route: &HostedGuestStreamRoute) -> String {
+crates/port-hosted-protocol/src/lib.rs:354:        "/machines/{}/guest:{}:stream",
+crates/port-hosted-protocol/src/lib.rs:414:        HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestStreamProtocol,
+crates/port-hosted-protocol/src/lib.rs:415:        HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
+crates/port-hosted-protocol/src/lib.rs:469:            HostedControlPlaneRoute::GuestStream(HostedGuestStreamRoute {
+crates/port-hosted-protocol/src/lib.rs:474:            "/v1/machines/cloud-aws/guest:pty:stream"
+crates/port-hosted-protocol/src/lib.rs:511:            HostedNodeRoute::GuestStream(HostedGuestStreamRoute {
+crates/port-hosted-protocol/src/lib.rs:516:            "/v1/node/machines/cloud-aws/guest:logs:stream"
+crates/port-hosted-protocol/src/lib.rs:522:        let encoded = serde_json::to_string(&HostedGuestStreamProtocol::PortAgentStreamV1)
+crates/port-agent-protocol/src/lib.rs:139:pub struct StreamSessionContract {
+crates/port-agent-protocol/src/lib.rs:141:    pub input: StreamInputMode,
+crates/port-agent-protocol/src/lib.rs:142:    pub output: Vec<StreamOutputChannel>,
+crates/port-agent-protocol/src/lib.rs:143:    pub termination: StreamTerminationMode,
+crates/port-agent-protocol/src/lib.rs:146:impl StreamSessionContract {
+crates/port-agent-protocol/src/lib.rs:151:            input: StreamInputMode::Pty,
+crates/port-agent-protocol/src/lib.rs:152:            output: vec![StreamOutputChannel::Stdout, StreamOutputChannel::Stderr],
+crates/port-agent-protocol/src/lib.rs:153:            termination: StreamTerminationMode::ExplicitExit,
+crates/port-agent-protocol/src/lib.rs:161:            input: StreamInputMode::None,
+crates/port-agent-protocol/src/lib.rs:162:            output: vec![StreamOutputChannel::Logs],
+crates/port-agent-protocol/src/lib.rs:163:            termination: StreamTerminationMode::ExplicitEof,
+crates/port-agent-protocol/src/lib.rs:171:            input: StreamInputMode::Bytes,
+crates/port-agent-protocol/src/lib.rs:172:            output: vec![StreamOutputChannel::Bytes],
+crates/port-agent-protocol/src/lib.rs:173:            termination: StreamTerminationMode::ExplicitEof,
+crates/port-agent-protocol/src/lib.rs:180:pub enum StreamInputMode {
+crates/port-agent-protocol/src/lib.rs:188:pub enum StreamOutputChannel {
+crates/port-agent-protocol/src/lib.rs:197:pub enum StreamTerminationMode {
+crates/port-agent-protocol/src/lib.rs:293:        GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, StreamInputMode,
+crates/port-agent-protocol/src/lib.rs:294:        StreamKind, StreamOutputChannel, StreamSessionContract, StreamTerminationMode,
+crates/port-agent-protocol/src/lib.rs:429:        let pty = StreamSessionContract::pty();
+crates/port-agent-protocol/src/lib.rs:431:        assert_eq!(pty.input, StreamInputMode::Pty);
+crates/port-agent-protocol/src/lib.rs:434:            vec![StreamOutputChannel::Stdout, StreamOutputChannel::Stderr]
+crates/port-agent-protocol/src/lib.rs:436:        assert_eq!(pty.termination, StreamTerminationMode::ExplicitExit);
+crates/port-agent-protocol/src/lib.rs:438:        let logs = StreamSessionContract::logs_follow();
+crates/port-agent-protocol/src/lib.rs:440:        assert_eq!(logs.input, StreamInputMode::None);
+crates/port-agent-protocol/src/lib.rs:441:        assert_eq!(logs.output, vec![StreamOutputChannel::Logs]);
+crates/port-agent-protocol/src/lib.rs:442:        assert_eq!(logs.termination, StreamTerminationMode::ExplicitEof);
+crates/port-agent-protocol/src/lib.rs:444:        let bytes = StreamSessionContract::byte_stream();
+crates/port-agent-protocol/src/lib.rs:446:        assert_eq!(bytes.input, StreamInputMode::Bytes);
+crates/port-agent-protocol/src/lib.rs:447:        assert_eq!(bytes.output, vec![StreamOutputChannel::Bytes]);
+crates/port-agent-protocol/src/lib.rs:448:        assert_eq!(bytes.termination, StreamTerminationMode::ExplicitEof);
+crates/port-agent-protocol/src/lib.rs:453:        let contract = StreamSessionContract::pty();
+crates/port-agent-protocol/src/lib.rs:455:        let decoded: StreamSessionContract =

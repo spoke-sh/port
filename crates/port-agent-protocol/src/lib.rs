@@ -135,6 +135,71 @@ pub enum StreamKind {
     Logs,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamSessionContract {
+    pub kind: StreamKind,
+    pub input: StreamInputMode,
+    pub output: Vec<StreamOutputChannel>,
+    pub termination: StreamTerminationMode,
+}
+
+impl StreamSessionContract {
+    #[must_use]
+    pub fn pty() -> Self {
+        Self {
+            kind: StreamKind::Pty,
+            input: StreamInputMode::Pty,
+            output: vec![StreamOutputChannel::Stdout, StreamOutputChannel::Stderr],
+            termination: StreamTerminationMode::ExplicitExit,
+        }
+    }
+
+    #[must_use]
+    pub fn logs_follow() -> Self {
+        Self {
+            kind: StreamKind::Logs,
+            input: StreamInputMode::None,
+            output: vec![StreamOutputChannel::Logs],
+            termination: StreamTerminationMode::ExplicitEof,
+        }
+    }
+
+    #[must_use]
+    pub fn byte_stream() -> Self {
+        Self {
+            kind: StreamKind::Bytes,
+            input: StreamInputMode::Bytes,
+            output: vec![StreamOutputChannel::Bytes],
+            termination: StreamTerminationMode::ExplicitEof,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamInputMode {
+    None,
+    Bytes,
+    Pty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamOutputChannel {
+    Bytes,
+    Stdout,
+    Stderr,
+    Logs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamTerminationMode {
+    ExplicitEof,
+    ExplicitExit,
+    ExplicitError,
+}
+
 #[derive(Debug)]
 pub enum ProtocolError {
     Io(std::io::Error),
@@ -225,7 +290,8 @@ pub fn read_frame<R: BufRead, T: DeserializeOwned>(reader: &mut R) -> Result<T, 
 mod tests {
     use super::{
         CopyDirection, CopyRequest, ExecRequest, ExecResult, ForwardEndpoint, ForwardResult,
-        GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, StreamKind,
+        GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, StreamInputMode,
+        StreamKind, StreamOutputChannel, StreamSessionContract, StreamTerminationMode,
         parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
     };
     use std::collections::BTreeMap;
@@ -356,5 +422,38 @@ mod tests {
             render_forward_endpoint(&ForwardEndpoint::Unix(PathBuf::from("/tmp/port.sock"))),
             "unix:/tmp/port.sock"
         );
+    }
+
+    #[test]
+    fn stream_session_contracts_encode_expected_lifecycle() {
+        let pty = StreamSessionContract::pty();
+        assert_eq!(pty.kind, StreamKind::Pty);
+        assert_eq!(pty.input, StreamInputMode::Pty);
+        assert_eq!(
+            pty.output,
+            vec![StreamOutputChannel::Stdout, StreamOutputChannel::Stderr]
+        );
+        assert_eq!(pty.termination, StreamTerminationMode::ExplicitExit);
+
+        let logs = StreamSessionContract::logs_follow();
+        assert_eq!(logs.kind, StreamKind::Logs);
+        assert_eq!(logs.input, StreamInputMode::None);
+        assert_eq!(logs.output, vec![StreamOutputChannel::Logs]);
+        assert_eq!(logs.termination, StreamTerminationMode::ExplicitEof);
+
+        let bytes = StreamSessionContract::byte_stream();
+        assert_eq!(bytes.kind, StreamKind::Bytes);
+        assert_eq!(bytes.input, StreamInputMode::Bytes);
+        assert_eq!(bytes.output, vec![StreamOutputChannel::Bytes]);
+        assert_eq!(bytes.termination, StreamTerminationMode::ExplicitEof);
+    }
+
+    #[test]
+    fn stream_session_contract_round_trips_through_json() {
+        let contract = StreamSessionContract::pty();
+        let encoded = serde_json::to_string(&contract).expect("contract should encode");
+        let decoded: StreamSessionContract =
+            serde_json::from_str(&encoded).expect("contract should decode");
+        assert_eq!(decoded, contract);
     }
 }
