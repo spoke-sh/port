@@ -176,6 +176,10 @@ pub struct HostedRouteContext {
     pub node_name: Option<String>,
     pub candidate_nodes: Vec<String>,
     pub host_groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rejected_nodes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement_detail: Option<String>,
     pub runtime_root: Option<PathBuf>,
     pub inventory_owner: Option<MachineInventoryOwner>,
     pub lifecycle_owner: Option<MachineLifecycleOwner>,
@@ -191,6 +195,9 @@ impl HostedRouteContext {
             node_name: None,
             candidate_nodes: summary.candidate_nodes.clone(),
             host_groups: summary.host_groups.clone(),
+            rejected_nodes: summary.rejected_nodes.clone(),
+            placement_detail: (!summary.placement_detail.trim().is_empty())
+                .then(|| summary.placement_detail.clone()),
             runtime_root: None,
             inventory_owner: Some(summary.control.inventory_owner),
             lifecycle_owner: Some(summary.control.lifecycle_owner),
@@ -495,6 +502,34 @@ mod tests {
         assert_eq!(
             body["result"]["nodes"]["aws-linux-node"]["capabilities"]["pvm_lanes"][0]["state"],
             "ready"
+        );
+    }
+
+    #[test]
+    fn route_context_serializes_hosted_pvm_rejection_detail() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-generic")
+            .expect("cloud-generic should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+        let summary = config
+            .hosted_machine_summary_contract("cloud-generic")
+            .expect("summary should resolve")
+            .expect("cloud-generic should be hosted");
+
+        let body = to_value(HostedRouteContext::from_machine_summary(&summary))
+            .expect("route context should serialize");
+
+        assert_eq!(
+            body["rejected_nodes"]["generic-linux-node"],
+            "pvm-ready state is required but node advertises planned"
+        );
+        assert!(
+            body["placement_detail"]
+                .as_str()
+                .expect("placement detail should exist")
+                .contains("planned")
         );
     }
 }

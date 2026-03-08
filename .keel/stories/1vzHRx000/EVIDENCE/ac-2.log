@@ -1,0 +1,76 @@
+
+running 10 tests
+..........
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 40 tests
+........................................
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+machine: cloud-generic
+state: malformed
+pid: (none)
+inventory scope: hosted-fleet
+inventory owner: hosted-control-plane
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+status source: control-plane-inventory-and-node-agent-runtime
+launch route: hosted-control-plane
+inventory route: hosted-control-plane
+status route: hosted-control-plane
+stop route: hosted-control-plane
+guest route: hosted-control-plane
+runtime dir: .port/hosted/demo/cloud-generic
+config path: .port/hosted/demo/cloud-generic/firecracker-config.json
+manifest: .port/hosted/demo/cloud-generic/manifest.json
+pid file: .port/hosted/demo/cloud-generic/firecracker.pid
+firecracker log: .port/hosted/demo/cloud-generic/firecracker.log
+console stdout: .port/hosted/demo/cloud-generic/console.stdout.log
+console stderr: .port/hosted/demo/cloud-generic/console.stderr.log
+detail: control plane 'demo' cannot place machine 'cloud-generic': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+Error: hosted machine 'cloud-generic' is not placeable through control plane 'demo': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+machine: cloud-generic
+state: malformed
+detail: control plane 'demo' cannot place machine 'cloud-generic': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+Error: hosted machine 'cloud-generic' is not placeable through control plane 'demo': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)

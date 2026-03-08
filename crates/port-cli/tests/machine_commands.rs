@@ -66,6 +66,10 @@ fn hosted_config(runtime_root: &Path) -> PortConfig {
     config
 }
 
+fn generic_hosted_config() -> PortConfig {
+    PortConfig::sample()
+}
+
 fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) -> PathBuf {
     let runtime_dir = runtime_root.join(machine);
     fs::create_dir_all(&runtime_dir).expect("runtime dir should exist");
@@ -231,6 +235,89 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[test]
+fn cli_machine_status_surfaces_hosted_pvm_placement_denial() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("client-port.toml");
+    let control_plane_addr = reserve_addr();
+    let mut config = generic_hosted_config();
+    config
+        .machines
+        .get_mut("cloud-generic")
+        .expect("cloud-generic should exist")
+        .protection_mode = port_model::ProtectionMode::Pvm;
+    config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&config_path, &config);
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .output()
+        .expect("status command should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("machine: cloud-generic"));
+    assert!(stdout.contains("state: malformed"));
+    assert!(stdout.contains("generic-linux-node"));
+    assert!(stdout.contains("planned"));
+    assert!(stdout.contains("PVM"));
+}
+
+#[test]
+fn cli_machine_launch_rejects_unplaceable_hosted_pvm_machine() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let mut config = PortConfig::sample();
+    config
+        .machines
+        .get_mut("cloud-generic")
+        .expect("cloud-generic should exist")
+        .protection_mode = port_model::ProtectionMode::Pvm;
+    write_config(&config_path, &config);
+
+    let output = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .output()
+        .expect("launch command should run");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cloud-generic"));
+    assert!(stderr.contains("generic-linux-node"));
+    assert!(stderr.contains("planned"));
+    assert!(stderr.contains("PVM"));
 }
 
 #[test]

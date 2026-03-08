@@ -2074,6 +2074,25 @@ fn hosted_machine_resolution(
         }
     };
 
+    if summary.candidate_nodes.is_empty() {
+        return Ok(HostedMachineResolution {
+            control_plane: summary.control_plane.clone(),
+            node_name: None,
+            host_groups: summary.host_groups.clone(),
+            runtime_root: placeholder_root.clone(),
+            status: synthetic_machine_status(
+                machine_name,
+                &RuntimePaths::for_machine(&placeholder_root, machine_name),
+                control,
+                MachineRuntimeState::Malformed,
+                format!(
+                    "control plane '{}' cannot place machine '{}': {}",
+                    summary.control_plane, machine_name, summary.placement_detail
+                ),
+            ),
+        });
+    }
+
     let inventory = config.hosted_inventory_contract()?;
     let mut selected = None::<HostedMachineResolution>;
     for node_name in &summary.candidate_nodes {
@@ -2129,8 +2148,8 @@ fn hosted_machine_resolution(
             control,
             MachineRuntimeState::Malformed,
             format!(
-                "control plane '{}' resolved machine '{}' but no candidate node runtime bindings were available",
-                summary.control_plane, machine_name
+                "control plane '{}' resolved machine '{}' but no candidate node runtime bindings were available. {}",
+                summary.control_plane, machine_name, summary.placement_detail
             ),
         ),
     }))
@@ -2231,6 +2250,16 @@ fn hosted_control_plane_launch_machine(
                 request.machine_name
             )
         })?;
+    if let Some(summary) = config.hosted_machine_summary_contract(request.machine_name)? {
+        if summary.candidate_nodes.is_empty() {
+            bail!(
+                "hosted machine '{}' is not placeable through control plane '{}': {}",
+                request.machine_name,
+                summary.control_plane,
+                summary.placement_detail
+            );
+        }
+    }
     bail!(
         "{}",
         remote_launch_guidance(
@@ -4873,6 +4902,55 @@ mod tests {
         );
         assert!(message.contains("cloud-azure"));
         assert!(message.contains("no hosted node inventory record matches that host"));
+    }
+
+    #[test]
+    fn hosted_pvm_status_surfaces_node_readiness_denial() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-generic");
+        config
+            .machines
+            .get_mut("cloud-generic")
+            .expect("cloud-generic should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+        let config = start_live_hosted_servers(&config, true);
+
+        let status = machine_status(&config, tempdir.path(), "cloud-generic")
+            .expect("hosted pvm status should load");
+
+        assert_eq!(status.state, MachineRuntimeState::Malformed);
+        assert!(status.detail.contains("generic-linux-node"));
+        assert!(status.detail.contains("planned"));
+        assert!(status.detail.contains("PVM"));
+    }
+
+    #[test]
+    fn hosted_pvm_launch_rejects_unplaceable_nodes_before_remote_guidance() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-generic")
+            .expect("cloud-generic should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-generic",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("hosted pvm launch should fail fast");
+
+        let message = error.to_string();
+        assert!(message.contains("generic-linux-node"));
+        assert!(message.contains("planned"));
+        assert!(message.contains("PVM"));
     }
 
     #[test]

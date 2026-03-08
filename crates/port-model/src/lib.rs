@@ -482,17 +482,25 @@ impl PortConfig {
                 ))
             })?;
         let inventory = self.hosted_inventory_contract()?;
-        let candidate_nodes = inventory
+        let host_nodes = inventory
             .nodes
             .iter()
             .filter(|(_, node)| node.host == machine.host)
-            .map(|(node_name, _)| node_name.clone())
             .collect::<Vec<_>>();
-        if candidate_nodes.is_empty() {
+        if host_nodes.is_empty() {
             return Err(ValidationError::new(format!(
                 "machine '{}' targets hosted host '{}' but no hosted node inventory record matches that host",
                 machine_name, machine.host
             )));
+        }
+        let mut candidate_nodes = Vec::new();
+        let mut rejected_nodes = BTreeMap::new();
+        for (node_name, node) in host_nodes {
+            if let Some(reason) = hosted_node_rejection_reason(machine_name, machine, node)? {
+                rejected_nodes.insert(node_name.clone(), reason);
+            } else {
+                candidate_nodes.push(node_name.clone());
+            }
         }
 
         let host_groups = inventory
@@ -506,12 +514,16 @@ impl PortConfig {
             })
             .map(|(group_name, _)| group_name.clone())
             .collect::<Vec<_>>();
+        let placement_detail =
+            hosted_placement_detail(machine_name, machine, &candidate_nodes, &rejected_nodes)?;
 
         Ok(Some(HostedMachineSummaryContract {
             machine_name: machine_name.to_string(),
             control_plane: hosted_identity.control_plane,
             candidate_nodes,
+            rejected_nodes: rejected_nodes.clone(),
             host_groups,
+            placement_detail,
             control,
         }))
     }
@@ -1113,7 +1125,9 @@ pub struct HostedMachineSummaryContract {
     pub machine_name: String,
     pub control_plane: String,
     pub candidate_nodes: Vec<String>,
+    pub rejected_nodes: BTreeMap<String, String>,
     pub host_groups: Vec<String>,
+    pub placement_detail: String,
     pub control: MachineControlContract,
 }
 
@@ -1955,6 +1969,155 @@ fn validate_hosted_host_group(
     Ok(())
 }
 
+fn hosted_node_rejection_reason(
+    machine_name: &str,
+    machine: &MachineSpec,
+    node: &HostedNodeContract,
+) -> Result<Option<String>, ValidationError> {
+    let architecture = resolve_machine_architecture(machine.architecture).map_err(|error| {
+        ValidationError::new(format!(
+            "machine '{}' cannot resolve hosted placement architecture: {error}",
+            machine_name
+        ))
+    })?;
+
+    if !node.capabilities.substrates.contains(&machine.substrate) {
+        return Ok(Some(format!(
+            "substrate '{}' is required but node advertises {}",
+            execution_substrate_label(machine.substrate),
+            label_list(&node.capabilities.substrates, execution_substrate_label,)
+        )));
+    }
+    if !node.capabilities.architectures.contains(&architecture) {
+        return Ok(Some(format!(
+            "architecture '{}' is required but node advertises {}",
+            machine_architecture_label(architecture),
+            label_list(&node.capabilities.architectures, machine_architecture_label,)
+        )));
+    }
+    if !node
+        .capabilities
+        .protection_modes
+        .contains(&machine.protection_mode)
+    {
+        return Ok(Some(format!(
+            "protection mode '{}' is required but node advertises {}",
+            protection_mode_label(machine.protection_mode),
+            label_list(&node.capabilities.protection_modes, protection_mode_label,)
+        )));
+    }
+    if machine.protection_mode == ProtectionMode::Pvm {
+        let Some(lane) = node.capabilities.pvm_lane_for(architecture) else {
+            return Ok(Some(format!(
+                "pvm-ready state is required but node does not advertise a '{}' PVM lane",
+                machine_architecture_label(architecture)
+            )));
+        };
+        if lane.state != PvmCapabilityState::Ready {
+            return Ok(Some(format!(
+                "pvm-ready state is required but node advertises {}",
+                hosted_pvm_state_label(lane.state)
+            )));
+        }
+    }
+
+    Ok(None)
+}
+
+fn hosted_placement_detail(
+    machine_name: &str,
+    machine: &MachineSpec,
+    candidate_nodes: &[String],
+    rejected_nodes: &BTreeMap<String, String>,
+) -> Result<String, ValidationError> {
+    let requirement = hosted_machine_requirement(machine_name, machine)?;
+
+    let mut detail = format!("machine '{machine_name}' requires {requirement}");
+    if candidate_nodes.is_empty() {
+        detail.push_str("; no hosted nodes satisfy that requirement");
+    } else {
+        detail.push_str(&format!(
+            "; candidate nodes: {}",
+            candidate_nodes.join(", ")
+        ));
+    }
+    if !rejected_nodes.is_empty() {
+        let rejected = rejected_nodes
+            .iter()
+            .map(|(node_name, reason)| format!("{node_name} ({reason})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        detail.push_str(&format!("; rejected nodes: {rejected}"));
+    }
+
+    Ok(detail)
+}
+
+fn hosted_machine_requirement(
+    machine_name: &str,
+    machine: &MachineSpec,
+) -> Result<String, ValidationError> {
+    let architecture = resolve_machine_architecture(machine.architecture).map_err(|error| {
+        ValidationError::new(format!(
+            "machine '{}' cannot resolve hosted placement architecture: {error}",
+            machine_name
+        ))
+    })?;
+    Ok(format!(
+        "{} on {} via {}",
+        protection_mode_requirement_label(machine.protection_mode),
+        machine_architecture_label(architecture),
+        execution_substrate_label(machine.substrate)
+    ))
+}
+
+fn protection_mode_requirement_label(mode: ProtectionMode) -> &'static str {
+    match mode {
+        ProtectionMode::Standard => "standard protection",
+        ProtectionMode::Pvm => "PVM",
+    }
+}
+
+fn protection_mode_label(mode: ProtectionMode) -> &'static str {
+    match mode {
+        ProtectionMode::Standard => "standard",
+        ProtectionMode::Pvm => "pvm",
+    }
+}
+
+fn machine_architecture_label(architecture: MachineArchitecture) -> &'static str {
+    match architecture {
+        MachineArchitecture::Native => "native",
+        MachineArchitecture::X86_64 => "x86_64",
+        MachineArchitecture::Aarch64 => "aarch64",
+    }
+}
+
+fn execution_substrate_label(substrate: ExecutionSubstrate) -> &'static str {
+    match substrate {
+        ExecutionSubstrate::Firecracker => "firecracker",
+        ExecutionSubstrate::CloudHypervisor => "cloud-hypervisor",
+        ExecutionSubstrate::Avf => "avf",
+    }
+}
+
+fn hosted_pvm_state_label(state: PvmCapabilityState) -> &'static str {
+    match state {
+        PvmCapabilityState::Ready => "ready",
+        PvmCapabilityState::Planned => "planned",
+        PvmCapabilityState::ResearchOnly => "research-only",
+    }
+}
+
+fn label_list<T: Copy>(items: &[T], label: fn(T) -> &'static str) -> String {
+    items
+        .iter()
+        .copied()
+        .map(label)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -2309,6 +2472,29 @@ mod tests {
             MachineCommandRoute::HostedControlPlane
         );
         assert!(service.detail.contains("canonical service surface"));
+    }
+
+    #[test]
+    fn hosted_pvm_summary_filters_candidates_to_ready_nodes() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-generic")
+            .expect("cloud-generic should exist")
+            .protection_mode = ProtectionMode::Pvm;
+
+        let summary = config
+            .hosted_machine_summary_contract("cloud-generic")
+            .expect("hosted pvm summary should resolve")
+            .expect("cloud-generic should be hosted");
+
+        assert!(summary.candidate_nodes.is_empty());
+        assert_eq!(
+            summary.rejected_nodes["generic-linux-node"],
+            "pvm-ready state is required but node advertises planned"
+        );
+        assert!(summary.placement_detail.contains("generic-linux-node"));
+        assert!(summary.placement_detail.contains("planned"));
     }
 
     #[test]

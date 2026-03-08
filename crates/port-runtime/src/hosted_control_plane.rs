@@ -266,17 +266,47 @@ async fn machine_status(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
-        &state,
-        &headers,
-        &machine,
-        HostedNodeRoute::Machine(HostedMachineRoute::Status {
-            machine_name: machine.clone(),
-        }),
-        Method::GET,
-        None,
-    )
-    .await
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    match resolve_node_binding(&state, &summary) {
+        Ok((binding, route)) => {
+            let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
+                machine_name: machine.clone(),
+            });
+            match proxy_json::<HostedSuccess<MachineStatus>>(
+                &state,
+                &binding,
+                status_route,
+                Method::GET,
+                None,
+                route.clone(),
+            )
+            .await
+            {
+                Ok(status) => json_response(StatusCode::OK, &status),
+                Err(message) => json_response(
+                    StatusCode::OK,
+                    &HostedSuccess {
+                        route: route.clone(),
+                        result: malformed_machine_status(&summary, route, message),
+                    },
+                ),
+            }
+        }
+        Err((route, message)) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: route.clone(),
+                result: malformed_machine_status(&summary, route, message),
+            },
+        ),
+    }
 }
 
 async fn machine_monitor(
@@ -515,6 +545,15 @@ fn resolve_node_binding(
     summary: &HostedMachineSummaryContract,
 ) -> Result<(HostedNodeBinding, HostedRouteContext), (HostedRouteContext, String)> {
     let route_context = HostedRouteContext::from_machine_summary(summary);
+    if summary.candidate_nodes.is_empty() {
+        return Err((
+            route_context,
+            format!(
+                "control plane '{}' cannot place machine '{}': {}",
+                state.inner.control_plane, summary.machine_name, summary.placement_detail
+            ),
+        ));
+    }
 
     for node_name in &summary.candidate_nodes {
         if let Some(binding) = state.inner.node_bindings.get(node_name) {
@@ -537,8 +576,11 @@ fn resolve_node_binding(
     Err((
         route_context,
         format!(
-            "control plane '{}' could not route machine '{}' because none of the candidate nodes {:?} have a bound node-agent endpoint",
-            state.inner.control_plane, summary.machine_name, summary.candidate_nodes
+            "control plane '{}' could not route machine '{}' because none of the candidate nodes {:?} have a bound node-agent endpoint. {}",
+            state.inner.control_plane,
+            summary.machine_name,
+            summary.candidate_nodes,
+            summary.placement_detail
         ),
     ))
 }
@@ -1260,13 +1302,12 @@ mod tests {
             .send()
             .await
             .expect("request should complete");
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-        let error: HostedError = response.json().await.expect("error body should decode");
-        assert!(error.message.contains("aws-linux-node"));
-        assert_eq!(
-            error.route.and_then(|route| route.control_plane),
-            Some(String::from("demo"))
-        );
+        assert_eq!(response.status(), StatusCode::OK);
+        let success: HostedSuccess<MachineStatus> =
+            response.json().await.expect("success body should decode");
+        assert_eq!(success.result.state, MachineRuntimeState::Malformed);
+        assert!(success.result.detail.contains("aws-linux-node"));
+        assert_eq!(success.route.control_plane, Some(String::from("demo")));
     }
 
     #[tokio::test]

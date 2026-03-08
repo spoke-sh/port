@@ -253,6 +253,9 @@ fn render_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(runtime_root) = &route.runtime_root {
         parts.push(format!("runtime-root={}", runtime_root.display()));
     }
+    if let Some(placement_detail) = &route.placement_detail {
+        parts.push(format!("placement={placement_detail}"));
+    }
     if parts.is_empty() {
         String::new()
     } else {
@@ -771,5 +774,49 @@ mod tests {
         assert!(message.contains("control-plane=demo"));
         assert!(message.contains("machine=cloud-aws"));
         assert!(message.contains("node=aws-linux-node"));
+    }
+
+    #[test]
+    fn hosted_client_surfaces_placement_detail_from_live_errors() {
+        async fn error_handler() -> (StatusCode, Json<HostedError>) {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(HostedError {
+                    route: Some(HostedRouteContext {
+                        control_plane: Some(String::from("demo")),
+                        machine_name: Some(String::from("cloud-generic")),
+                        rejected_nodes: BTreeMap::from([(
+                            String::from("generic-linux-node"),
+                            String::from("pvm-ready state is required but node advertises planned"),
+                        )]),
+                        placement_detail: Some(String::from(
+                            "machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)",
+                        )),
+                        ..HostedRouteContext::default()
+                    }),
+                    message: String::from("machine is not placeable"),
+                }),
+            )
+        }
+
+        let endpoint =
+            serve_router(Router::new().route("/v1/machines/cloud-generic", get(error_handler)));
+
+        let client = HostedClient::new(
+            endpoint,
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let error = client
+            .execute_json::<HostedSuccess<serde_json::Value>>(
+                client.machines().status("cloud-generic"),
+            )
+            .expect_err("request should fail");
+        let message = error.to_string();
+        assert!(message.contains("machine is not placeable"));
+        assert!(message.contains("machine=cloud-generic"));
+        assert!(message.contains("placement=machine 'cloud-generic' requires PVM"));
+        assert!(message.contains("planned"));
     }
 }
