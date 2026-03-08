@@ -1,0 +1,138 @@
+---
+recorded_at: 2026-03-07T21:04:31.079309121-08:00
+mode: manual
+files: [".keel/stories/1vz5nU000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-cli ==
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port --help hosted runtime excerpt ==
+
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned
+  macOS lane.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch
+  is supported.
+Execution Lanes:
+  Firecracker + standard on Linux is the current shipped lane.
+  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit
+  plus pvm artifact variants.
+
+== hosted runtime docs excerpt ==
+crates/port-cli/src/lib.rs:32:  port --config examples/port.toml machine stop --machine demo
+crates/port-cli/src/lib.rs:40:  `port guest forward` is a foreground host-side proxy session; stop it with Ctrl-C when you are done.
+crates/port-cli/src/lib.rs:61:  Hosted Port now resolves `machine list|status|stop` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
+crates/port-cli/src/lib.rs:64:  Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
+crates/port-cli/src/lib.rs:65:  `port machine list|status|stop` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
+crates/port-cli/src/lib.rs:227:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:234:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:241:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:248:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:261:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:270:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:283:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:292:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:305:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:512:            runtime_root,
+crates/port-cli/src/lib.rs:519:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:536:        MachineCommand::List { runtime_root } => {
+crates/port-cli/src/lib.rs:537:            let machines = port_runtime::list_machines(&config, &runtime_root)?;
+crates/port-cli/src/lib.rs:541:                    runtime_root.display()
+crates/port-cli/src/lib.rs:566:            runtime_root,
+crates/port-cli/src/lib.rs:568:            let status = port_runtime::machine_status(&config, &runtime_root, &machine)?;
+crates/port-cli/src/lib.rs:585:            println!("stop route: {}", status.control.stop_route);
+crates/port-cli/src/lib.rs:598:            runtime_root,
+crates/port-cli/src/lib.rs:601:            let result = port_runtime::stop_machine(
+crates/port-cli/src/lib.rs:603:                &runtime_root,
+crates/port-cli/src/lib.rs:619:            println!("stop route: {}", result.control.stop_route);
+crates/port-cli/src/lib.rs:632:            runtime_root,
+crates/port-cli/src/lib.rs:640:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:657:            runtime_root,
+crates/port-cli/src/lib.rs:667:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:680:            runtime_root,
+crates/port-cli/src/lib.rs:688:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:704:            runtime_root,
+crates/port-cli/src/lib.rs:714:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:730:            runtime_root,
+crates/port-cli/src/lib.rs:739:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:746:            println!("forward lifecycle: foreground; press Ctrl-C to stop");
+crates/port-cli/src/lib.rs:860:        for keyword in ["launch", "list", "status", "stop"] {
+crates/port-cli/src/lib.rs:897:                runtime_root,
+crates/port-cli/src/lib.rs:901:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:929:                runtime_root,
+crates/port-cli/src/lib.rs:933:                assert_eq!(runtime_root, std::path::Path::new("runtime"));
+crates/port-cli/src/lib.rs:941:    fn parses_guest_copy_direction_and_runtime_root() {
+crates/port-cli/src/lib.rs:961:                runtime_root,
+crates/port-cli/src/lib.rs:967:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:1010:            Command::Machine(MachineCommand::List { runtime_root }) => {
+crates/port-cli/src/lib.rs:1011:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:1029:                runtime_root,
+crates/port-cli/src/lib.rs:1032:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:1037:        let stop = Cli::parse_from([
+crates/port-cli/src/lib.rs:1040:            "stop",
+crates/port-cli/src/lib.rs:1049:        match stop.command {
+crates/port-cli/src/lib.rs:1052:                runtime_root,
+crates/port-cli/src/lib.rs:1056:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+docs/hosted.md:11:  `stop`
+docs/hosted.md:33:- The command verbs stay stable: `machine launch`, `list`, `status`, `stop`,
+docs/hosted.md:40:- launches and stops VMs on the local substrate
+docs/hosted.md:58:- asks node agents to launch, inspect, stop, or connect to machines
+docs/hosted.md:186:- `port machine stop --machine <name>`
+docs/hosted.md:194:- stop: the lifecycle owner and route for the future hosted
+docs/hosted.md:195:  `port machine stop` command
+docs/hosted.md:202:- `runtime_root = "runtime/hosted/aws-linux-node"`
+docs/hosted.md:205:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:210:- the control plane remains the routing entry point for list, status, and stop
+docs/hosted.md:217:- local `port machine list`, `status`, and `stop` inspect and manage
+docs/hosted.md:219:- hosted `machine list`, `status`, and `stop` now resolve through the hosted
+docs/hosted.md:220:  control-plane contract plus the configured node `runtime_root`
+docs/hosted.md:223:  then inspects or stops machine state through the selected node-agent runtime
+docs/hosted.md:226:  node runtime binding, surface as `malformed` so the control-plane mismatch is
+docs/hosted.md:233:`stop` already publish.
+docs/hosted.md:245:- `stop_route = "direct-local-runtime"`
+docs/hosted.md:258:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:298:  hosted guest runtime -> detached and Unix-socket forwarding -> monitoring and
+docs/hosted.md:312:- `machines.stop`
+docs/hosted.md:321:- `port machine list`, `status`, and `stop` currently inspect local runtime
+README.md:122:port machine stop --machine <name> [--runtime-root <path>]
+README.md:144:- `port machine stop --machine <name>` stops a local Port-managed machine and
+README.md:164:- `port machine list`, `port machine status`, and `port machine stop` now use
+README.md:226:  `[host_groups.<name>]`, with capability, node-agent `runtime_root`, and
+README.md:229:- Hosted `machine list`, `status`, and `stop` are also modeled explicitly as
+README.md:232:  hosted runtime slice now runs through configured node `runtime_root`
+README.md:233:  directories, so `port machine list|status|stop` can surface hosted machines
+README.md:241:  as `malformed` in `port machine list|status` so unresolved hosted ownership is
+README.md:243:- Local `machine list`, `status`, and `stop` now publish the control-contract
+README.md:261:cargo run -p port-cli -- machine stop --machine demo
+README.md:269:- lifecycle inspection and stop surfaces through `port machine list`, `status`,
+README.md:270:  and `stop`
+README.md:275:<name>`, and `port machine stop --machine <name>` to inspect and control that
+README.md:297:  transport, and runs until you stop it.
+

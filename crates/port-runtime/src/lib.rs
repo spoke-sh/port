@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
@@ -173,6 +174,7 @@ pub struct GuestForwardRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineDriverKind {
     FirecrackerLocal,
+    HostedControlPlane,
 }
 
 trait MachineDriver {
@@ -181,12 +183,18 @@ trait MachineDriver {
 
     fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata>;
 
-    fn list_machines(&self, runtime_root: &Path) -> Result<Vec<MachineStatus>>;
+    fn list_machines(&self, config: &PortConfig, runtime_root: &Path) -> Result<Vec<MachineStatus>>;
 
-    fn machine_status(&self, runtime_root: &Path, machine_name: &str) -> Result<MachineStatus>;
+    fn machine_status(
+        &self,
+        config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineStatus>;
 
     fn stop_machine(
         &self,
+        config: &PortConfig,
         runtime_root: &Path,
         machine_name: &str,
         timeout: Duration,
@@ -201,6 +209,9 @@ trait MachineDriver {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct FirecrackerLocalDriver;
+
+#[derive(Debug, Default, Clone, Copy)]
+struct HostedControlPlaneDriver;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactAction {
@@ -429,7 +440,7 @@ fn firecracker_local_launch_machine(
         );
     }
 
-    if !matches!(host.connection, HostConnection::Local) {
+    if !matches!(&host.connection, HostConnection::Local) {
         let hosted_identity = config
             .hosted_api_identity_contract(request.machine_name)
             .with_context(|| {
@@ -596,8 +607,16 @@ fn firecracker_local_launch_machine(
     Ok(metadata)
 }
 
-pub fn list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
-    local_runtime_driver().list_machines(runtime_root)
+pub fn list_machines(config: &PortConfig, runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+    let mut machines = BTreeMap::new();
+    for machine in local_runtime_driver().list_machines(config, runtime_root)? {
+        machines.insert(machine.machine_name.clone(), machine);
+    }
+    for machine in hosted_control_plane_driver().list_machines(config, runtime_root)? {
+        machines.insert(machine.machine_name.clone(), machine);
+    }
+
+    Ok(machines.into_values().collect())
 }
 
 fn firecracker_local_list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
@@ -624,15 +643,28 @@ fn firecracker_local_list_machines(runtime_root: &Path) -> Result<Vec<MachineSta
         }
 
         let machine_name = entry.file_name().to_string_lossy().into_owned();
-        machines.push(inspect_machine(runtime_root, &machine_name)?);
+        machines.push(inspect_machine(
+            runtime_root,
+            &machine_name,
+            MachineControlContract::local_runtime_root(),
+        )?);
     }
     machines.sort_by(|left, right| left.machine_name.cmp(&right.machine_name));
 
     Ok(machines)
 }
 
-pub fn machine_status(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
-    local_runtime_driver().machine_status(runtime_root, machine_name)
+pub fn machine_status(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineStatus> {
+    if config.machines.contains_key(machine_name) {
+        return driver_for_machine(config, machine_name)?
+            .machine_status(config, runtime_root, machine_name);
+    }
+
+    firecracker_local_machine_status(runtime_root, machine_name)
 }
 
 fn firecracker_local_machine_status(
@@ -648,15 +680,25 @@ fn firecracker_local_machine_status(
         );
     }
 
-    inspect_machine(runtime_root, machine_name)
+    inspect_machine(
+        runtime_root,
+        machine_name,
+        MachineControlContract::local_runtime_root(),
+    )
 }
 
 pub fn stop_machine(
+    config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
     timeout: Duration,
 ) -> Result<StopResult> {
-    local_runtime_driver().stop_machine(runtime_root, machine_name, timeout)
+    if config.machines.contains_key(machine_name) {
+        return driver_for_machine(config, machine_name)?
+            .stop_machine(config, runtime_root, machine_name, timeout);
+    }
+
+    firecracker_local_stop_machine(runtime_root, machine_name, timeout)
 }
 
 fn firecracker_local_stop_machine(
@@ -774,7 +816,11 @@ fn prepare_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()>
     Ok(())
 }
 
-fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+fn inspect_machine(
+    runtime_root: &Path,
+    machine_name: &str,
+    control: MachineControlContract,
+) -> Result<MachineStatus> {
     let paths = RuntimePaths::for_machine(runtime_root, machine_name);
     let pid_from_file = match read_pid_file(&paths.pid_path) {
         Ok(pid) => pid,
@@ -782,6 +828,7 @@ fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineSta
             return Ok(malformed_machine_status(
                 machine_name,
                 &paths,
+                control.clone(),
                 error.to_string(),
             ));
         }
@@ -791,6 +838,7 @@ fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineSta
         return Ok(malformed_machine_status(
             machine_name,
             &paths,
+            control.clone(),
             format!(
                 "runtime manifest '{}' is missing",
                 paths.manifest_path.display()
@@ -804,6 +852,7 @@ fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineSta
             return Ok(malformed_machine_status(
                 machine_name,
                 &paths,
+                control.clone(),
                 format!(
                     "failed to parse manifest '{}': {error}",
                     paths.manifest_path.display()
@@ -816,6 +865,7 @@ fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineSta
         return Ok(malformed_machine_status(
             machine_name,
             &paths,
+            control.clone(),
             format!(
                 "manifest machine name '{}' does not match runtime directory '{}'",
                 manifest.machine_name, machine_name
@@ -844,7 +894,7 @@ fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineSta
         machine_name: machine_name.to_string(),
         state,
         pid,
-        control: MachineControlContract::local_runtime_root(),
+        control,
         runtime_dir: paths.runtime_dir,
         config_path: paths.config_path,
         manifest_path: paths.manifest_path,
@@ -987,13 +1037,30 @@ fn cleanup_runtime_transient_paths(paths: &RuntimePaths) -> Result<()> {
 fn malformed_machine_status(
     machine_name: &str,
     paths: &RuntimePaths,
+    control: MachineControlContract,
+    detail: String,
+) -> MachineStatus {
+    synthetic_machine_status(
+        machine_name,
+        paths,
+        control,
+        MachineRuntimeState::Malformed,
+        detail,
+    )
+}
+
+fn synthetic_machine_status(
+    machine_name: &str,
+    paths: &RuntimePaths,
+    control: MachineControlContract,
+    state: MachineRuntimeState,
     detail: String,
 ) -> MachineStatus {
     MachineStatus {
         machine_name: machine_name.to_string(),
-        state: MachineRuntimeState::Malformed,
+        state,
         pid: None,
-        control: MachineControlContract::local_runtime_root(),
+        control,
         runtime_dir: paths.runtime_dir.clone(),
         config_path: paths.config_path.clone(),
         manifest_path: paths.manifest_path.clone(),
@@ -1003,6 +1070,230 @@ fn malformed_machine_status(
         stderr_log: paths.stderr_log.clone(),
         detail,
     }
+}
+
+#[derive(Debug, Clone)]
+struct HostedMachineResolution {
+    control_plane: String,
+    node_name: Option<String>,
+    runtime_root: PathBuf,
+    status: MachineStatus,
+}
+
+fn hosted_placeholder_runtime_root(control_plane: &str) -> PathBuf {
+    PathBuf::from(".port/hosted").join(control_plane)
+}
+
+fn status_priority(state: MachineRuntimeState) -> u8 {
+    match state {
+        MachineRuntimeState::Running => 4,
+        MachineRuntimeState::Malformed => 3,
+        MachineRuntimeState::Stale => 2,
+        MachineRuntimeState::Stopped => 1,
+    }
+}
+
+fn hosted_machine_resolution(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<HostedMachineResolution> {
+    let control = config.machine_control_contract(machine_name)?;
+    let hosted_identity = config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| anyhow!("machine '{machine_name}' does not target a hosted control plane"))?;
+    let placeholder_root = hosted_placeholder_runtime_root(&hosted_identity.control_plane);
+
+    let summary = match config.hosted_machine_summary_contract(machine_name) {
+        Ok(Some(summary)) => summary,
+        Ok(None) => {
+            return Ok(HostedMachineResolution {
+                control_plane: hosted_identity.control_plane.clone(),
+                node_name: None,
+                runtime_root: placeholder_root.clone(),
+                status: synthetic_machine_status(
+                    machine_name,
+                    &RuntimePaths::for_machine(&placeholder_root, machine_name),
+                    control,
+                    MachineRuntimeState::Malformed,
+                    format!(
+                        "control plane '{}' did not resolve a hosted machine contract for '{}'",
+                        hosted_identity.control_plane, machine_name
+                    ),
+                ),
+            });
+        }
+        Err(error) => {
+            return Ok(HostedMachineResolution {
+                control_plane: hosted_identity.control_plane.clone(),
+                node_name: None,
+                runtime_root: placeholder_root.clone(),
+                status: synthetic_machine_status(
+                    machine_name,
+                    &RuntimePaths::for_machine(&placeholder_root, machine_name),
+                    control,
+                    MachineRuntimeState::Malformed,
+                    format!(
+                        "control plane '{}' cannot resolve hosted runtime for machine '{}': {}",
+                        hosted_identity.control_plane, machine_name, error
+                    ),
+                ),
+            });
+        }
+    };
+
+    let inventory = config.hosted_inventory_contract()?;
+    let mut selected = None::<HostedMachineResolution>;
+    for node_name in &summary.candidate_nodes {
+        let Some(node) = inventory.nodes.get(node_name) else {
+            continue;
+        };
+
+        let paths = RuntimePaths::for_machine(&node.runtime_root, machine_name);
+        let mut status = if paths.runtime_dir.exists() {
+            inspect_machine(&node.runtime_root, machine_name, control.clone())?
+        } else {
+            synthetic_machine_status(
+                machine_name,
+                &paths,
+                control.clone(),
+                MachineRuntimeState::Stopped,
+                format!(
+                    "control plane '{}' resolved node '{}' but the node-agent runtime root '{}' does not contain machine state",
+                    summary.control_plane,
+                    node_name,
+                    node.runtime_root.display()
+                ),
+            )
+        };
+        status.detail = format!(
+            "{} Routed through control plane '{}' and node '{}'.",
+            status.detail, summary.control_plane, node_name
+        );
+
+        let candidate = HostedMachineResolution {
+            control_plane: summary.control_plane.clone(),
+            node_name: Some(node_name.clone()),
+            runtime_root: node.runtime_root.clone(),
+            status,
+        };
+
+        if selected.as_ref().is_none_or(|current| {
+            status_priority(candidate.status.state) > status_priority(current.status.state)
+        }) {
+            selected = Some(candidate);
+        }
+    }
+
+    Ok(selected.unwrap_or(HostedMachineResolution {
+        control_plane: summary.control_plane.clone(),
+        node_name: None,
+        runtime_root: placeholder_root.clone(),
+        status: synthetic_machine_status(
+            machine_name,
+            &RuntimePaths::for_machine(&placeholder_root, machine_name),
+            control,
+            MachineRuntimeState::Malformed,
+            format!(
+                "control plane '{}' resolved machine '{}' but no candidate node runtime bindings were available",
+                summary.control_plane, machine_name
+            ),
+        ),
+    }))
+}
+
+fn hosted_control_plane_launch_machine(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+) -> Result<LaunchMetadata> {
+    let machine = config
+        .machines
+        .get(request.machine_name)
+        .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    let hosted_identity = config
+        .hosted_api_identity_contract(request.machine_name)?
+        .ok_or_else(|| anyhow!("machine '{}' does not target a hosted control plane", request.machine_name))?;
+    bail!(
+        "{}",
+        remote_launch_guidance(
+            request.machine_name,
+            &machine.host,
+            host.provider,
+            Some(&hosted_identity),
+        )
+    );
+}
+
+fn hosted_control_plane_machine_status(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<MachineStatus> {
+    Ok(hosted_machine_resolution(config, machine_name)?.status)
+}
+
+fn hosted_control_plane_stop_machine(
+    config: &PortConfig,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let resolution = hosted_machine_resolution(config, machine_name)?;
+    let control = MachineControlContract::hosted_control_plane();
+    let status = resolution.status;
+
+    let Some(node_name) = resolution.node_name else {
+        return Ok(StopResult {
+            machine_name: machine_name.to_string(),
+            previous_state: status.state,
+            current_state: status.state,
+            pid: status.pid,
+            control,
+            runtime_dir: status.runtime_dir,
+            detail: format!("hosted stop could not route to a node agent: {}", status.detail),
+        });
+    };
+
+    if !status.runtime_dir.exists() {
+        return Ok(StopResult {
+            machine_name: machine_name.to_string(),
+            previous_state: MachineRuntimeState::Stopped,
+            current_state: MachineRuntimeState::Stopped,
+            pid: None,
+            control,
+            runtime_dir: status.runtime_dir,
+            detail: format!(
+                "control plane '{}' routed stop to node '{}', but the node-agent runtime root does not contain machine state",
+                resolution.control_plane, node_name
+            ),
+        });
+    }
+
+    if status.state == MachineRuntimeState::Malformed {
+        return Ok(StopResult {
+            machine_name: machine_name.to_string(),
+            previous_state: MachineRuntimeState::Malformed,
+            current_state: MachineRuntimeState::Malformed,
+            pid: status.pid,
+            control,
+            runtime_dir: status.runtime_dir,
+            detail: format!(
+                "control plane '{}' routed stop to node '{}', but runtime state is malformed: {}",
+                resolution.control_plane, node_name, status.detail
+            ),
+        });
+    }
+
+    let result = firecracker_local_stop_machine(&resolution.runtime_root, machine_name, timeout)?;
+    Ok(StopResult {
+        control,
+        detail: format!(
+            "{} Routed through control plane '{}' and node '{}'.",
+            result.detail, resolution.control_plane, node_name
+        ),
+        ..result
+    })
 }
 
 fn remove_stale_runtime_path(path: &Path, label: &str) -> Result<()> {
@@ -1938,16 +2229,22 @@ impl MachineDriver for FirecrackerLocalDriver {
         firecracker_local_launch_machine(config, request)
     }
 
-    fn list_machines(&self, runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+    fn list_machines(&self, _config: &PortConfig, runtime_root: &Path) -> Result<Vec<MachineStatus>> {
         firecracker_local_list_machines(runtime_root)
     }
 
-    fn machine_status(&self, runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+    fn machine_status(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineStatus> {
         firecracker_local_machine_status(runtime_root, machine_name)
     }
 
     fn stop_machine(
         &self,
+        _config: &PortConfig,
         runtime_root: &Path,
         machine_name: &str,
         timeout: Duration,
@@ -1964,25 +2261,95 @@ impl MachineDriver for FirecrackerLocalDriver {
     }
 }
 
+impl MachineDriver for HostedControlPlaneDriver {
+    fn kind(&self) -> MachineDriverKind {
+        MachineDriverKind::HostedControlPlane
+    }
+
+    fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata> {
+        hosted_control_plane_launch_machine(config, request)
+    }
+
+    fn list_machines(&self, config: &PortConfig, _runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+        let mut hosted_names = config
+            .machines
+            .iter()
+            .filter_map(|(machine_name, machine)| {
+                let host = config.hosts.get(&machine.host)?;
+                matches!(&host.connection, HostConnection::HostedControlPlane { .. })
+                    .then(|| machine_name.clone())
+            })
+            .collect::<Vec<_>>();
+        hosted_names.sort();
+
+        let mut machines = Vec::new();
+        for machine_name in hosted_names {
+            machines.push(hosted_control_plane_machine_status(config, &machine_name)?);
+        }
+        Ok(machines)
+    }
+
+    fn machine_status(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineStatus> {
+        hosted_control_plane_machine_status(config, machine_name)
+    }
+
+    fn stop_machine(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+        machine_name: &str,
+        timeout: Duration,
+    ) -> Result<StopResult> {
+        hosted_control_plane_stop_machine(config, machine_name, timeout)
+    }
+
+    fn guest_endpoint(
+        &self,
+        _config: &PortConfig,
+        request: &GuestRequest<'_>,
+    ) -> Result<GuestEndpoint> {
+        bail!(
+            "machine '{}' targets a hosted control plane, but hosted `port guest ...` runtime brokerage is not implemented in this slice yet",
+            request.machine_name
+        );
+    }
+}
+
 fn local_runtime_driver() -> FirecrackerLocalDriver {
     FirecrackerLocalDriver
 }
 
-fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<FirecrackerLocalDriver> {
+fn hosted_control_plane_driver() -> HostedControlPlaneDriver {
+    HostedControlPlaneDriver
+}
+
+fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<Box<dyn MachineDriver>> {
     let machine = config
         .machines
         .get(machine_name)
         .with_context(|| format!("unknown machine '{machine_name}'"))?;
-    match machine.substrate {
-        ExecutionSubstrate::Firecracker => Ok(FirecrackerLocalDriver),
-        ExecutionSubstrate::CloudHypervisor => bail!(
-            "machine '{}' targets Cloud Hypervisor, but Port has not implemented a Cloud Hypervisor driver yet",
-            machine_name
-        ),
-        ExecutionSubstrate::Avf => bail!(
-            "machine '{}' targets Apple Virtualization Framework, but Port has not implemented an AVF driver yet",
-            machine_name
-        ),
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    match &host.connection {
+        HostConnection::HostedControlPlane { .. } => Ok(Box::new(HostedControlPlaneDriver)),
+        HostConnection::Local => match machine.substrate {
+            ExecutionSubstrate::Firecracker => Ok(Box::new(FirecrackerLocalDriver)),
+            ExecutionSubstrate::CloudHypervisor => bail!(
+                "machine '{}' targets Cloud Hypervisor, but Port has not implemented a Cloud Hypervisor driver yet",
+                machine_name
+            ),
+            ExecutionSubstrate::Avf => bail!(
+                "machine '{}' targets Apple Virtualization Framework, but Port has not implemented an AVF driver yet",
+                machine_name
+            ),
+        },
     }
 }
 
@@ -2126,8 +2493,8 @@ mod tests {
         driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
         machine_status, path_check, prepare_guest_forward, prepare_runtime_state, read_pid_file,
         repo_root, stop_machine, ArtifactAction, DoctorCheck, GuestCopyRequest,
-        GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest, MachineDriver,
-        MachineDriverKind, MachineRuntimeState, RuntimePaths, StopResult,
+        GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest, MachineDriverKind,
+        MachineRuntimeState, RuntimePaths, StopResult,
     };
     use port_agent_protocol::{
         read_frame, write_frame, CopyDirection, ExecRequest, ExecResult, GuestOperation,
@@ -2138,12 +2505,61 @@ mod tests {
         HostProvider, HostSpec, PortConfig,
     };
 
+    fn sample_config_with_hosted_runtime_roots(root: &Path) -> PortConfig {
+        let mut config = PortConfig::sample();
+        config
+            .nodes
+            .get_mut("generic-linux-node")
+            .expect("generic-linux-node should exist")
+            .runtime_root = root.join("hosted/generic-linux-node");
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .runtime_root = root.join("hosted/aws-linux-node");
+        config
+            .nodes
+            .get_mut("gcp-linux-node")
+            .expect("gcp-linux-node should exist")
+            .runtime_root = root.join("hosted/gcp-linux-node");
+        config
+    }
+
+    fn write_manifest(paths: &RuntimePaths, machine_name: &str, pid: u32) {
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let manifest = LaunchMetadata {
+            machine_name: String::from(machine_name),
+            pid,
+            launched_at_unix_s: 1,
+            runtime_dir: paths.runtime_dir.clone(),
+            firecracker_binary: PathBuf::from("/usr/bin/firecracker"),
+            config_path: paths.config_path.clone(),
+            log_path: paths.firecracker_log.clone(),
+            stdout_path: paths.stdout_log.clone(),
+            stderr_path: paths.stderr_log.clone(),
+            manifest_path: paths.manifest_path.clone(),
+        };
+        fs::write(
+            &paths.manifest_path,
+            serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("manifest should write");
+    }
+
     #[test]
     fn driver_selection_routes_demo_machine_to_firecracker_local_driver() {
         let config = PortConfig::sample();
         let driver = driver_for_machine(&config, "demo").expect("driver should resolve");
 
         assert_eq!(driver.kind(), MachineDriverKind::FirecrackerLocal);
+    }
+
+    #[test]
+    fn driver_selection_routes_hosted_machine_to_control_plane_driver() {
+        let config = PortConfig::sample();
+        let driver = driver_for_machine(&config, "cloud-aws").expect("driver should resolve");
+
+        assert_eq!(driver.kind(), MachineDriverKind::HostedControlPlane);
     }
 
     #[test]
@@ -2168,7 +2584,9 @@ mod tests {
         machine.host = String::from("mac-local");
         machine.substrate = ExecutionSubstrate::Avf;
 
-        let error = driver_for_machine(&config, "demo").expect_err("AVF should not resolve");
+        let error = driver_for_machine(&config, "demo")
+            .err()
+            .expect("AVF should not resolve");
         assert!(error.to_string().contains("AVF driver"));
     }
 
@@ -2421,7 +2839,10 @@ mod tests {
         fs::write(&malformed_paths.manifest_path, "{not-json\n")
             .expect("malformed manifest should write");
 
-        let machines = list_machines(tempdir.path()).expect("machine listing should succeed");
+        let mut config = PortConfig::sample();
+        config.machines.retain(|name, _| name == "demo");
+
+        let machines = list_machines(&config, tempdir.path()).expect("machine listing should succeed");
         assert_eq!(machines.len(), 3);
 
         let running = machines
@@ -2473,7 +2894,8 @@ mod tests {
         )
         .expect("manifest should write");
 
-        let status = machine_status(tempdir.path(), "demo").expect("status should load");
+        let status = machine_status(&PortConfig::sample(), tempdir.path(), "demo")
+            .expect("status should load");
         assert_eq!(status.machine_name, "demo");
         assert_eq!(status.state, MachineRuntimeState::Stopped);
         assert_eq!(
@@ -2527,7 +2949,7 @@ mod tests {
         .expect("manifest should write");
         fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
 
-        let result = stop_machine(tempdir.path(), "demo", Duration::from_secs(2))
+        let result = stop_machine(&PortConfig::sample(), tempdir.path(), "demo", Duration::from_secs(2))
             .expect("stop should succeed");
         assert_eq!(
             result,
@@ -2552,10 +2974,99 @@ mod tests {
     }
 
     #[test]
+    fn hosted_machine_status_uses_control_plane_and_node_runtime_root() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        write_manifest(&paths, "cloud-aws", 424242);
+
+        let status = machine_status(&config, tempdir.path(), "cloud-aws")
+            .expect("hosted status should load");
+        assert_eq!(status.machine_name, "cloud-aws");
+        assert_eq!(status.state, MachineRuntimeState::Stopped);
+        assert_eq!(
+            status.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert_eq!(status.runtime_dir, paths.runtime_dir);
+        assert!(status.detail.contains("control plane 'demo'"));
+        assert!(status.detail.contains("node 'aws-linux-node'"));
+    }
+
+    #[test]
+    fn list_machines_includes_hosted_control_plane_statuses() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let hosted_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let hosted_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+        write_manifest(&hosted_paths, "cloud-aws", 424242);
+
+        let machines = list_machines(&config, tempdir.path()).expect("machine list should load");
+        let hosted = machines
+            .iter()
+            .find(|machine| machine.machine_name == "cloud-aws")
+            .expect("hosted machine should appear in machine list");
+        assert_eq!(hosted.control, port_model::MachineControlContract::hosted_control_plane());
+        assert_eq!(hosted.runtime_dir, hosted_paths.runtime_dir);
+    }
+
+    #[test]
+    fn hosted_stop_machine_routes_through_node_runtime_root() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        fs::write(&paths.vsock_path, "").expect("vsock path should write");
+        fs::write(&paths.guest_agent_socket, "").expect("guest socket should write");
+
+        let mut command = Command::new("bash");
+        command
+            .args(["-lc", "exec -a firecracker /bin/sh -c 'sleep 30' --id cloud-aws"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .expect("fake hosted firecracker process should start");
+        thread::sleep(Duration::from_millis(100));
+
+        write_manifest(&paths, "cloud-aws", child.id());
+        fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
+
+        let result =
+            stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(2))
+                .expect("hosted stop should succeed");
+        assert_eq!(
+            result.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert_eq!(result.previous_state, MachineRuntimeState::Running);
+        assert_eq!(result.current_state, MachineRuntimeState::Stopped);
+        assert!(result.detail.contains("control plane 'demo'"));
+        assert!(result.detail.contains("node 'aws-linux-node'"));
+
+        let _ = child.wait();
+    }
+
+    #[test]
     fn machine_status_reports_missing_and_malformed_runtime_state() {
         let tempdir = tempdir().expect("tempdir should exist");
-        let error =
-            machine_status(tempdir.path(), "missing").expect_err("missing machine should fail");
+        let error = machine_status(&PortConfig::sample(), tempdir.path(), "missing")
+            .expect_err("missing machine should fail");
         assert!(error
             .to_string()
             .contains("runtime state for machine 'missing' does not exist"));
@@ -2565,7 +3076,8 @@ mod tests {
         fs::write(&broken_paths.manifest_path, "{not-json\n")
             .expect("malformed manifest should write");
 
-        let broken = machine_status(tempdir.path(), "broken").expect("broken status should load");
+        let broken = machine_status(&PortConfig::sample(), tempdir.path(), "broken")
+            .expect("broken status should load");
         assert_eq!(broken.state, MachineRuntimeState::Malformed);
         assert_eq!(
             broken.control,

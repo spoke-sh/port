@@ -176,8 +176,8 @@ vocabulary instead of inventing a second inventory model.
 
 ## Hosted Machine Lifecycle Surface
 
-Port now models the hosted lifecycle surface without pretending the remote
-runtime already exists.
+Port now ships the first hosted lifecycle runtime slice without pretending the
+full remote control plane already exists.
 
 The canonical operator verbs stay the same:
 
@@ -199,6 +199,7 @@ Current hosted lifecycle contract for a sample machine such as `cloud-aws`:
 - `control_plane = "demo"`
 - `candidate_nodes = ["aws-linux-node"]`
 - `host_groups = ["remote-linux", "aws-builders"]`
+- `runtime_root = "runtime/hosted/aws-linux-node"`
 - `status_source = "control-plane-inventory-and-node-agent-runtime"`
 - `status_route = "hosted-control-plane"`
 - `stop_route = "hosted-control-plane"`
@@ -215,8 +216,15 @@ What is runnable today:
 
 - local `port machine list`, `status`, and `stop` inspect and manage
   Port-managed runtime directories on Linux
-- hosted `machine list`, `status`, and `stop` are modeled and documented, but
-  not implemented as remote runtime actions yet
+- hosted `machine list`, `status`, and `stop` now resolve through the hosted
+  control-plane contract plus the configured node `runtime_root`
+- this first hosted runtime slice is config-backed and in-process: Port
+  resolves hosted ownership from the control-plane and node inventory model,
+  then inspects or stops machine state through the selected node-agent runtime
+  root
+- hosted machines with unresolved inventory, such as a host without a matching
+  node runtime binding, surface as `malformed` so the control-plane mismatch is
+  explicit to the operator
 
 ## Canonical Machine Control Contract
 
@@ -287,9 +295,8 @@ What still remains after this contract:
 
 - no hosted `port guest ...` runtime path ships yet
 - follow-on order after this foundation is:
-  hosted machine runtime -> hosted guest runtime -> detached and Unix-socket
-  forwarding -> monitoring and `top` -> secrets/services/sandboxes -> SDK/API
-  clients
+  hosted guest runtime -> detached and Unix-socket forwarding -> monitoring and
+  `top` -> secrets/services/sandboxes -> SDK/API clients
 - those follow-on capabilities are downstream of the authenticated API,
   inventory, lifecycle, and guest-attach foundation; they are not already
   shipped

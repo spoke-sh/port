@@ -57,14 +57,12 @@ Artifact Mobility:
   `port artifacts build` and `validate` materialize one canonical local variant selected by architecture, substrate, and protection mode.
   `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
 Hosted Control:
-  Local Port still owns runtime lifecycle directly today.
-  Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the current guest protocol semantics.
+  Local Port still owns launch and guest-runtime lifecycle directly today.
+  Hosted Port now resolves `machine list|status|stop` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
-  Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders.
-  Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later scheduler, monitoring, and services work can reuse one placement vocabulary.
-  Hosted `machine list`, `status`, and `stop` are now modeled explicitly as control-plane plus node-agent contracts so the canonical machine verbs stay stable as Port moves from local to hosted execution.
-  In the MVP, those verbs still run only against the local runtime; the hosted lane is a published routing and ownership contract, not a runnable remote lifecycle yet.
+  Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
+  `port machine list|status|stop` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted guest attach is now modeled explicitly: the control plane authorizes the attach, the node agent opens the host-local guest transport, and `port guest exec|copy|pty|logs|forward` keep the same request and response frames.
   In the MVP, those guest verbs still run only through the local runtime path; the hosted lane is a published bridge contract for the next control-plane, node-agent, and follow-on service slices.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
@@ -507,13 +505,13 @@ fn render_selector(selector: port_model::ArtifactSelector) -> String {
 }
 
 fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<()> {
+    let config = load_config(config_path)?;
     match command {
         MachineCommand::Launch {
             machine,
             runtime_root,
             boot_wait_secs,
         } => {
-            let config = load_config(config_path)?;
             let metadata = port_runtime::launch_local_machine(
                 &config,
                 &LaunchRequest {
@@ -536,7 +534,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("manifest: {}", metadata.manifest_path.display());
         }
         MachineCommand::List { runtime_root } => {
-            let machines = port_runtime::list_machines(&runtime_root)?;
+            let machines = port_runtime::list_machines(&config, &runtime_root)?;
             if machines.is_empty() {
                 println!(
                     "no Port-managed machines found under runtime root '{}'",
@@ -567,7 +565,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             machine,
             runtime_root,
         } => {
-            let status = port_runtime::machine_status(&runtime_root, &machine)?;
+            let status = port_runtime::machine_status(&config, &runtime_root, &machine)?;
             println!("machine: {}", status.machine_name);
             println!("state: {}", status.state);
             println!(
@@ -601,6 +599,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             wait_secs,
         } => {
             let result = port_runtime::stop_machine(
+                &config,
                 &runtime_root,
                 &machine,
                 Duration::from_secs(wait_secs),

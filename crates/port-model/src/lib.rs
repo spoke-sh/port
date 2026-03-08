@@ -167,6 +167,7 @@ impl PortConfig {
                 String::from("generic-linux-node"),
                 HostedNodeSpec {
                     host: String::from("generic-linux"),
+                    runtime_root: PathBuf::from("runtime/hosted/generic-linux-node"),
                     capabilities: HostedNodeCapabilities {
                         providers: vec![HostProvider::GenericLinux],
                         platforms: vec![HostPlatform::Linux],
@@ -183,6 +184,7 @@ impl PortConfig {
                 String::from("aws-linux-node"),
                 HostedNodeSpec {
                     host: String::from("aws-linux"),
+                    runtime_root: PathBuf::from("runtime/hosted/aws-linux-node"),
                     capabilities: HostedNodeCapabilities {
                         providers: vec![HostProvider::Aws],
                         platforms: vec![HostPlatform::Linux],
@@ -199,6 +201,7 @@ impl PortConfig {
                 String::from("gcp-linux-node"),
                 HostedNodeSpec {
                     host: String::from("gcp-linux"),
+                    runtime_root: PathBuf::from("runtime/hosted/gcp-linux-node"),
                     capabilities: HostedNodeCapabilities {
                         providers: vec![HostProvider::Gcp],
                         platforms: vec![HostPlatform::Linux],
@@ -370,6 +373,7 @@ impl PortConfig {
                 node_name.clone(),
                 HostedNodeContract {
                     host: node.host.clone(),
+                    runtime_root: node.runtime_root.clone(),
                     control_plane,
                     inventory_owner: MachineInventoryOwner::HostedControlPlane,
                     lifecycle_owner: MachineLifecycleOwner::HostedNodeAgent,
@@ -940,6 +944,7 @@ pub struct HostedApiIdentityContract {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedNodeSpec {
     pub host: String,
+    pub runtime_root: PathBuf,
     pub capabilities: HostedNodeCapabilities,
     pub notes: Vec<String>,
 }
@@ -975,6 +980,7 @@ pub struct HostedInventoryContract {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedNodeContract {
     pub host: String,
+    pub runtime_root: PathBuf,
     pub control_plane: String,
     pub inventory_owner: MachineInventoryOwner,
     pub lifecycle_owner: MachineLifecycleOwner,
@@ -1682,6 +1688,12 @@ fn validate_hosted_node(
             node_name, node.host
         )));
     }
+    if node.runtime_root.as_os_str().is_empty() {
+        return Err(ValidationError::new(format!(
+            "node '{}' must declare a non-empty runtime_root",
+            node_name
+        )));
+    }
     if node.capabilities.providers.is_empty()
         || node.capabilities.platforms.is_empty()
         || node.capabilities.substrates.is_empty()
@@ -1973,6 +1985,10 @@ mod tests {
 
         let aws_node = &contract.nodes["aws-linux-node"];
         assert_eq!(aws_node.host, "aws-linux");
+        assert_eq!(
+            aws_node.runtime_root,
+            PathBuf::from("runtime/hosted/aws-linux-node")
+        );
         assert_eq!(aws_node.control_plane, "demo");
         assert_eq!(
             aws_node.inventory_owner,
@@ -2111,6 +2127,7 @@ mod tests {
             String::from("bad-node"),
             super::HostedNodeSpec {
                 host: String::from("local"),
+                runtime_root: PathBuf::from("runtime/hosted/bad-node"),
                 capabilities: super::HostedNodeCapabilities {
                     providers: vec![HostProvider::Local],
                     platforms: vec![super::HostPlatform::Linux],
@@ -2131,6 +2148,22 @@ mod tests {
                 .to_string()
                 .contains("hosted nodes must resolve through a hosted control plane")
         );
+    }
+
+    #[test]
+    fn validate_rejects_hosted_node_without_runtime_root() {
+        let mut config = PortConfig::sample();
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .runtime_root = PathBuf::new();
+
+        let error = config
+            .validate()
+            .expect_err("missing runtime_root should fail validation");
+
+        assert!(error.to_string().contains("must declare a non-empty runtime_root"));
     }
 
     #[test]
@@ -2217,6 +2250,10 @@ mod tests {
         assert_eq!(config.machines["cloud-azure"].host, "azure-linux");
         assert!(config.control_planes.contains_key("demo"));
         assert!(config.nodes.contains_key("aws-linux-node"));
+        assert_eq!(
+            config.nodes["aws-linux-node"].runtime_root,
+            PathBuf::from("runtime/hosted/aws-linux-node")
+        );
         assert!(config.host_groups.contains_key("remote-linux"));
         assert_eq!(
             config.hosts["generic-linux"].connection,

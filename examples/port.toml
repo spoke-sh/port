@@ -143,6 +143,7 @@ notes = ["Azure is modeled explicitly through the demo hosted control plane so d
 
 [nodes.generic-linux-node]
 host = "generic-linux"
+runtime_root = "runtime/hosted/generic-linux-node"
 notes = ["Generic Linux is the baseline hosted node contract before scheduler policy exists."]
 
 [nodes.generic-linux-node.capabilities]
@@ -154,6 +155,7 @@ protection_modes = ["standard"]
 
 [nodes.aws-linux-node]
 host = "aws-linux"
+runtime_root = "runtime/hosted/aws-linux-node"
 notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
 
 [nodes.aws-linux-node.capabilities]
@@ -165,6 +167,7 @@ protection_modes = ["standard"]
 
 [nodes.gcp-linux-node]
 host = "gcp-linux"
+runtime_root = "runtime/hosted/gcp-linux-node"
 notes = ["GCP is modeled as a hosted node so placement and lifecycle work can remain provider-aware."]
 
 [nodes.gcp-linux-node.capabilities]
