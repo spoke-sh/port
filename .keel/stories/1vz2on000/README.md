@@ -19,6 +19,6 @@ pull semantics.
 ## Acceptance Criteria
 
 - [ ] [SRS-05/AC-01] Port defines canonical artifact-reference and compatibility concepts covering local outputs, remote references, architecture, backend, and protection-mode variants.
-- [ ] [SRS-05/AC-02] The CLI surface and help text expose discoverable artifact mobility commands or reserved subcommands for build, push, and pull workflows.
-- [ ] [SRS-05/AC-03] Port publishes operator-facing documentation for local build, remote pull, and compatibility-selection flows using the new artifact vocabulary.
+- [ ] [SRS-06/AC-01] The CLI surface and help text expose discoverable artifact mobility commands or reserved subcommands for build, push, and pull workflows.
+- [ ] [SRS-06/AC-02] Port publishes operator-facing documentation for local build, remote pull, and compatibility-selection flows using the new artifact vocabulary.
 - [ ] [SRS-05/AC-04] The story defines concrete verification hooks for artifact mobility behavior through tests, docs review, and CLI-level evidence.

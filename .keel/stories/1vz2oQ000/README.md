@@ -2,11 +2,13 @@
 id: 1vz2oQ000
 title: Model Substrates And Protection Modes
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T17:20:06
-updated_at: 2026-03-07T17:25:37
+updated_at: 2026-03-07T17:40:24
 scope: 1vz2eV000/1vz2ky000
 started_at: 2026-03-07T17:25:37
+submitted_at: 2026-03-07T17:40:06
+completed_at: 2026-03-07T17:40:24
 ---
 
 # Model Substrates And Protection Modes
