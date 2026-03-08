@@ -2,11 +2,12 @@
 id: 1vzLZm000
 title: Wire Avf Guest Transport And Console Capture
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T14:22:14
-updated_at: 2026-03-08T14:52:50
+updated_at: 2026-03-08T15:08:58
 scope: 1vzJKE000/1vzLYD000
 started_at: 2026-03-08T14:52:50
+completed_at: 2026-03-08T15:08:58
 ---
 
 # Wire Avf Guest Transport And Console Capture
