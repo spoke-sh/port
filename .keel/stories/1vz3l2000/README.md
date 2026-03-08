@@ -2,11 +2,13 @@
 id: 1vz3l2000
 title: Define AVF Execution Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T18:20:40
-updated_at: 2026-03-07T19:06:55
+updated_at: 2026-03-07T19:11:32
 scope: 1vz3ck000/1vz3j0000
 started_at: 2026-03-07T19:06:55
+submitted_at: 2026-03-07T19:11:27
+completed_at: 2026-03-07T19:11:32
 ---
 
 # Define AVF Execution Contract
