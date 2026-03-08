@@ -2,11 +2,13 @@
 id: 1vz5o6000
 title: Add Detached And Unix-Socket Forwarding
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T20:31:58
-updated_at: 2026-03-07T21:14:04
+updated_at: 2026-03-07T21:23:00
 scope: 1vz4Yn000/1vz5mg000
 started_at: 2026-03-07T21:14:04
+submitted_at: 2026-03-07T21:22:54
+completed_at: 2026-03-07T21:23:00
 ---
 
 # Add Detached And Unix-Socket Forwarding

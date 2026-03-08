@@ -25,7 +25,7 @@ started_at: 2026-03-07T20:35:47
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/6 stories complete
+**Progress:** 3/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -34,5 +34,5 @@ started_at: 2026-03-07T20:35:47
 | [Add Hosted Secrets Services And Sandboxes](../../../../stories/1vz5nl000/README.md) | feat | backlog |
 | [Publish Hosted SDK And API Clients](../../../../stories/1vz5nm000/README.md) | feat | backlog |
 | [Add Hosted Monitoring And Top](../../../../stories/1vz5nx000/README.md) | feat | backlog |
-| [Add Detached And Unix-Socket Forwarding](../../../../stories/1vz5o6000/README.md) | feat | backlog |
+| [Add Detached And Unix-Socket Forwarding](../../../../stories/1vz5o6000/README.md) | feat | done |
 <!-- END GENERATED -->
