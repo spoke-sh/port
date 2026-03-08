@@ -1,0 +1,42 @@
+---
+recorded_at: 2026-03-07T19:10:38-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3l2000/verify-ac-1.sh
+---
+
+
+running 12 tests
+............
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+837:pub struct AvfExecutionContract {
+841:    pub guest_transport: AvfGuestTransport,
+842:    pub console_transport: AvfConsoleTransport,
+843:    pub directory_share: AvfDirectoryShareContract,
+848:impl AvfExecutionContract {
+858:            guest_transport: AvfGuestTransport::VirtioSocket,
+859:            console_transport: AvfConsoleTransport::SerialPort,
+860:            directory_share: AvfDirectoryShareContract {
+896:pub enum AvfGuestTransport {
+897:    VirtioSocket,
+902:pub enum AvfConsoleTransport {
+903:    SerialPort,
+907:pub struct AvfDirectoryShareContract {
+1090:        ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
+1283:        let contract = AvfExecutionContract::linux_guest();
+1286:        assert_eq!(contract.guest_transport, AvfGuestTransport::VirtioSocket);
+1287:        assert_eq!(contract.console_transport, AvfConsoleTransport::SerialPort);
+7:## Runtime Contract
+15:| guest agent transport | virtio socket devices and listeners | Keep the current guest protocol and map it onto AVF virtio sockets instead of inventing a macOS-specific guest API |
+16:| console and boot logs | serial-port configuration | Capture guest console output through AVF serial ports so `machine status` and logs stay coherent |
+19:## Launch Ownership
+32:## Guest Transport Mapping
+42:- console capture uses AVF serial ports, not the guest-agent socket
+80:4. The guest agent is reachable through AVF virtio sockets.
+81:5. Console/log capture works through AVF serial ports.
+90:3. Reuse the canonical guest protocol over AVF virtio sockets.
+91:4. Add console/log capture through AVF serial ports.

@@ -9,6 +9,7 @@ Apple Virtualization Framework.
 The hosted control-plane split that will eventually carry these remote lanes is
 defined in [`docs/hosted.md`](hosted.md).
 The dedicated Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
+The dedicated AVF macOS contract lives in [`avf.md`](avf.md).
 
 `port doctor` reports both provider-aware and lane-aware support boundaries, and
 `port machine launch` still fails fast when you target a lane that Port does not
@@ -22,7 +23,7 @@ yet execute.
 | Firecracker + `pvm` | `x86_64` | Planned / partial design | Strategic lane for cloud cost control; requires dedicated host-kernel, VMM, and artifact work |
 | Firecracker + `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path |
 | Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
-| AVF + `standard` | macOS `arm64` or `x86_64` | Planned | First-class macOS lane in the model and docs, not yet implemented |
+| AVF + `standard` | macOS `arm64` or `x86_64` | Planned | First-class macOS lane; keeps the canonical guest protocol over AVF virtio sockets and console capture over AVF serial ports |
 
 ## Provider Matrix
 

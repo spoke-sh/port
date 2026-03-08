@@ -46,7 +46,8 @@ operator lanes around it:
 Detailed operator workflows live in [`docs/operators.md`](docs/operators.md).
 Cloud-provider boundaries and the current remote Linux support matrix live in
 [`docs/cloud.md`](docs/cloud.md). The Firecracker/PVM host-kit contract lives in
-[`docs/pvm.md`](docs/pvm.md).
+[`docs/pvm.md`](docs/pvm.md). The Apple Virtualization Framework contract lives
+in [`docs/avf.md`](docs/avf.md).
 
 ## Project Status
 
@@ -88,6 +89,19 @@ Port's PVM position is intentionally concrete:
 
 The full host-kit, artifact-kit, validation, and follow-on implementation
 contract lives in [`docs/pvm.md`](docs/pvm.md).
+
+## AVF Contract
+
+Port's macOS lane follows the same rule as the Linux and hosted lanes:
+
+- keep the canonical `machine` and `guest` verbs
+- map guest transport onto AVF virtio sockets
+- map console/log capture onto AVF serial ports
+- keep directory sharing and Rosetta as optional operator workflows, not as a
+  replacement for the guest-agent protocol
+
+The full AVF runtime, operator, and follow-on implementation contract lives in
+[`docs/avf.md`](docs/avf.md).
 
 ## CLI Surface
 

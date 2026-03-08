@@ -833,6 +833,83 @@ pub struct PvmValidationExpectation {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AvfExecutionContract {
+    pub host_platform: HostPlatform,
+    pub supported_host_architectures: Vec<MachineArchitecture>,
+    pub launch_owners: Vec<AvfLaunchOwner>,
+    pub guest_transport: AvfGuestTransport,
+    pub console_transport: AvfConsoleTransport,
+    pub directory_share: AvfDirectoryShareContract,
+    pub operator_prerequisites: Vec<String>,
+    pub follow_on_work: Vec<String>,
+}
+
+impl AvfExecutionContract {
+    #[must_use]
+    pub fn linux_guest() -> Self {
+        Self {
+            host_platform: HostPlatform::Macos,
+            supported_host_architectures: vec![
+                MachineArchitecture::Aarch64,
+                MachineArchitecture::X86_64,
+            ],
+            launch_owners: vec![AvfLaunchOwner::LocalPortRuntime, AvfLaunchOwner::HostedNodeAgent],
+            guest_transport: AvfGuestTransport::VirtioSocket,
+            console_transport: AvfConsoleTransport::SerialPort,
+            directory_share: AvfDirectoryShareContract {
+                supported: true,
+                required_for_rosetta: true,
+                notes: vec![
+                    String::from(
+                        "Directory sharing is optional for Port guest control, but required when enabling Rosetta support for Linux guests on Apple silicon.",
+                    ),
+                    String::from(
+                        "Port should keep guest exec/copy/pty/logs/forward on the guest-agent protocol rather than replacing it with host directory mounts.",
+                    ),
+                ],
+            },
+            operator_prerequisites: vec![
+                String::from("Run the AVF lane on macOS with the Virtualization framework available."),
+                String::from(
+                    "Distributed macOS app targets need Apple's virtualization entitlement; sandboxed distributions also need the relevant network and file-access entitlements.",
+                ),
+            ],
+            follow_on_work: vec![
+                String::from("Implement an AVF driver that maps machine launch onto VZVirtualMachineConfiguration plus a Linux boot loader."),
+                String::from("Bridge the guest agent through AVF virtio sockets and map console/log capture onto AVF serial ports."),
+                String::from("Add macOS-focused port doctor checks for AVF availability, entitlements, and optional Rosetta support."),
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AvfLaunchOwner {
+    LocalPortRuntime,
+    HostedNodeAgent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AvfGuestTransport {
+    VirtioSocket,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AvfConsoleTransport {
+    SerialPort,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AvfDirectoryShareContract {
+    pub supported: bool,
+    pub required_for_rosetta: bool,
+    pub notes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MachineInventoryScope {
@@ -1010,7 +1087,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ArtifactStore, ExecutionSubstrate, FirecrackerPvmLaneContract, HostProvider,
+        ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
+        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, HostProvider,
         MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
         MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
         PortConfig, ProtectionMode, PvmLaneDecision,
@@ -1198,6 +1276,24 @@ mod tests {
         assert!(contract.validation[0]
             .detail
             .contains("supportable Firecracker/PVM runtime path"));
+    }
+
+    #[test]
+    fn avf_contract_maps_guest_transport_and_console() {
+        let contract = AvfExecutionContract::linux_guest();
+
+        assert_eq!(contract.host_platform, super::HostPlatform::Macos);
+        assert_eq!(contract.guest_transport, AvfGuestTransport::VirtioSocket);
+        assert_eq!(contract.console_transport, AvfConsoleTransport::SerialPort);
+        assert!(contract
+            .supported_host_architectures
+            .contains(&MachineArchitecture::Aarch64));
+        assert!(contract
+            .launch_owners
+            .contains(&AvfLaunchOwner::LocalPortRuntime));
+        assert!(contract.directory_share.supported);
+        assert!(contract.directory_share.required_for_rosetta);
+        assert!(contract.follow_on_work[0].contains("VZVirtualMachineConfiguration"));
     }
 
     #[test]

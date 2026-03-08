@@ -1,0 +1,39 @@
+---
+recorded_at: 2026-03-07T19:10:38-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3l2000/verify-ac-2.sh
+---
+
+/tmp/1vz3l2000-help.verify:73:  The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial
+/tmp/1vz3l2000-help.verify:93:  See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta
+crates/port-cli/src/lib.rs:52:  The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
+crates/port-cli/src/lib.rs:64:  See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
+README.md:50:in [`docs/avf.md`](docs/avf.md).
+README.md:98:- map guest transport onto AVF virtio sockets
+README.md:99:- map console/log capture onto AVF serial ports
+README.md:100:- keep directory sharing and Rosetta as optional operator workflows, not as a
+README.md:104:[`docs/avf.md`](docs/avf.md).
+docs/operators.md:190:  transport onto AVF virtio sockets, and maps console/log capture onto AVF
+docs/operators.md:191:  serial ports.
+docs/operators.md:192:- Distributed macOS app targets will need Apple's virtualization entitlement;
+docs/operators.md:193:  Rosetta-in-Linux-VM workflows are optional and depend on AVF directory
+docs/cloud.md:26:| AVF + `standard` | macOS `arm64` or `x86_64` | Planned | First-class macOS lane; keeps the canonical guest protocol over AVF virtio sockets and console capture over AVF serial ports |
+docs/avf.md:15:| guest agent transport | virtio socket devices and listeners | Keep the current guest protocol and map it onto AVF virtio sockets instead of inventing a macOS-specific guest API |
+docs/avf.md:16:| console and boot logs | serial-port configuration | Capture guest console output through AVF serial ports so `machine status` and logs stay coherent |
+docs/avf.md:17:| optional host/guest file exchange | directory sharing devices | Useful for operator workflows and Rosetta support, but not a replacement for Port's guest `copy` semantics |
+docs/avf.md:42:- console capture uses AVF serial ports, not the guest-agent socket
+docs/avf.md:55:- expect optional directory sharing for operator convenience and Rosetta
+docs/avf.md:61:- distributed macOS app targets need Apple's virtualization entitlement
+docs/avf.md:63:  entitlements for the chosen operator workflow
+docs/avf.md:65:Rosetta boundary:
+docs/avf.md:67:- Rosetta support in Linux guests is an Apple-silicon-specific workflow
+docs/avf.md:68:- it depends on AVF directory sharing plus the guest-side Rosetta service
+docs/avf.md:77:2. The build/distribution path satisfies Apple's virtualization entitlement
+docs/avf.md:80:4. The guest agent is reachable through AVF virtio sockets.
+docs/avf.md:81:5. Console/log capture works through AVF serial ports.
+docs/avf.md:88:   entitlement/distribution boundaries.
+docs/avf.md:90:3. Reuse the canonical guest protocol over AVF virtio sockets.
+docs/avf.md:91:4. Add console/log capture through AVF serial ports.
+docs/avf.md:92:5. Decide how much of directory sharing and Rosetta support belongs in the
+docs/avf.md:105:- Apple entitlement guidance:
+docs/avf.md:106:  <https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_security_virtualization>
+docs/avf.md:107:- Apple Rosetta-in-Linux-VM guidance:

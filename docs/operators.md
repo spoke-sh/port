@@ -170,8 +170,9 @@ same CLI lives in [`docs/hosted.md`](hosted.md).
 
 ## macOS Workflow
 
-The shipped macOS workflow is still to run the actual Firecracker commands on a
-Linux host.
+The current shipped macOS workflow is still to run the actual Firecracker
+commands on a Linux host, but Port now has an explicit first-class AVF
+contract in [`avf.md`](avf.md).
 
 Recommended path:
 
@@ -185,6 +186,12 @@ Current boundary:
   MVP launch path requires Linux and `/dev/kvm`.
 - Apple Virtualization Framework is now a first-class planned Port lane, but it
   is not executable in the current runtime yet.
+- The planned AVF lane keeps the same `machine` and `guest` verbs, maps guest
+  transport onto AVF virtio sockets, and maps console/log capture onto AVF
+  serial ports.
+- Distributed macOS app targets will need Apple's virtualization entitlement;
+  Rosetta-in-Linux-VM workflows are optional and depend on AVF directory
+  sharing rather than replacing Port's guest-agent contract.
 - Remote cloud hosts should still be treated as Linux execution environments:
   run `port doctor` and any future launch commands on the Linux side, not on
   macOS itself.

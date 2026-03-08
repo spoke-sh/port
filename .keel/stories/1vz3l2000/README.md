@@ -2,10 +2,11 @@
 id: 1vz3l2000
 title: Define AVF Execution Contract
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-07T18:20:40
-updated_at: 2026-03-07T18:22:39
+updated_at: 2026-03-07T19:06:55
 scope: 1vz3ck000/1vz3j0000
+started_at: 2026-03-07T19:06:55
 ---
 
 # Define AVF Execution Contract
@@ -18,5 +19,7 @@ macOS.
 
 ## Acceptance Criteria
 
-- [ ] [SRS-04/AC-01] Port defines the AVF runtime contract, including how canonical lifecycle and guest operations map onto AVF-specific primitives.
-- [ ] [SRS-05/AC-01] The story produces an implementation-ready AVF follow-on slice with explicit docs and verification expectations for macOS operators and leaves the voyage with a coherent ordered implementation set.
+<!-- verify: manual, SRS-04:start:end, proof: ac-1.log-->
+- [x] [SRS-04/AC-01] Port defines the AVF runtime contract, including how canonical lifecycle and guest operations map onto AVF-specific primitives. <!-- [SRS-04/AC-01] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3l2000/verify-ac-1.sh, proof: ac-1.log-->
+<!-- verify: manual, SRS-05:start:end, proof: ac-2.log-->
+- [x] [SRS-05/AC-01] The story produces an implementation-ready AVF follow-on slice with explicit docs and verification expectations for macOS operators and leaves the voyage with a coherent ordered implementation set. <!-- [SRS-05/AC-01] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3l2000/verify-ac-2.sh, proof: ac-2.log-->
