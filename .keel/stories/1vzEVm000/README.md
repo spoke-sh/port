@@ -2,11 +2,13 @@
 id: 1vzEVm000
 title: Implement Control Plane Serve Path
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T06:49:38
-updated_at: 2026-03-08T06:56:53
+updated_at: 2026-03-08T07:06:48
 scope: 1vzETR000/1vzETX000
 started_at: 2026-03-08T06:56:53
+submitted_at: 2026-03-08T07:06:41
+completed_at: 2026-03-08T07:06:48
 ---
 
 # Implement Control Plane Serve Path

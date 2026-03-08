@@ -19,8 +19,8 @@ created_at: 2026-03-08T06:47:13
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/5 stories done
+**Progress:** 0/1 voyages complete, 2/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Implement Hosted Control Plane Demo Lane](voyages/1vzETX000/) | in-progress | 1/5 |
+| [Implement Hosted Control Plane Demo Lane](voyages/1vzETX000/) | in-progress | 2/5 |
 <!-- END GENERATED -->
