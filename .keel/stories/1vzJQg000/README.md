@@ -2,11 +2,12 @@
 id: 1vzJQg000
 title: Define Prepared Pvm Host Kit Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T12:04:42
-updated_at: 2026-03-08T12:09:18
+updated_at: 2026-03-08T12:22:35
 scope: 1vzJKE000/1vzJP2000
 started_at: 2026-03-08T12:09:18
+completed_at: 2026-03-08T12:22:35
 ---
 
 # Define Prepared Pvm Host Kit Contract
