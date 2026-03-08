@@ -2,11 +2,13 @@
 id: 1vz4gc000
 title: Define Hosted Guest Bridge Attach Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T19:20:10
-updated_at: 2026-03-07T20:25:33
+updated_at: 2026-03-07T20:29:15
 scope: 1vz4Yn000/1vz4cU000
 started_at: 2026-03-07T20:25:33
+submitted_at: 2026-03-07T20:29:08
+completed_at: 2026-03-07T20:29:15
 ---
 
 # Define Hosted Guest Bridge Attach Contract

@@ -25,12 +25,12 @@ started_at: 2026-03-07T19:22:58
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/5 stories complete
+**Progress:** 4/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Hosted Auth And API Contract](../../../../stories/1vz4gb000/README.md) | feat | done |
-| [Define Hosted Guest Bridge Attach Contract](../../../../stories/1vz4gc000/README.md) | feat | backlog |
+| [Define Hosted Guest Bridge Attach Contract](../../../../stories/1vz4gc000/README.md) | feat | done |
 | [Define Hosted Machine Lifecycle Surface](../../../../stories/1vz4h3000/README.md) | feat | done |
 | [Define Hosted Node Inventory Model](../../../../stories/1vz4hB000/README.md) | feat | done |
 | [Sequence Hosted Follow-On Work](../../../../stories/1vz4ih000/README.md) | feat | backlog |
