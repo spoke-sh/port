@@ -2,11 +2,12 @@
 id: 1vzMXo000
 title: Implement Streamed Pty And Log Follow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T15:24:16
-updated_at: 2026-03-08T15:40:40
+updated_at: 2026-03-08T16:01:42
 scope: 1vzMVF000/1vzMVY000
 started_at: 2026-03-08T15:40:40
+completed_at: 2026-03-08T16:01:42
 ---
 
 # Implement Streamed Pty And Log Follow
