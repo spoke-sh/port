@@ -119,6 +119,8 @@ port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [
 port machine launch --machine <name>
 port machine list [--runtime-root <path>]
 port machine status --machine <name> [--runtime-root <path>]
+port machine monitor --machine <name> [--runtime-root <path>]
+port machine top --machine <name> [--runtime-root <path>]
 port machine stop --machine <name> [--runtime-root <path>]
 port guest exec --machine <name> -- <command...>
 port guest copy --machine <name> --direction <host-to-guest|guest-to-host> --source <path> --destination <path>
@@ -141,6 +143,11 @@ Local lifecycle quick reference:
   Firecracker API query.
 - `port machine status --machine <name>` reads that runtime state back and
   prints the paths and process metadata Port recorded for one machine.
+- `port machine monitor --machine <name>` expands that status view with the
+  current runtime-owner context, detached forward state, and the paths Port is
+  using for operator-visible logs and manifests.
+- `port machine top --machine <name>` inspects the hypervisor process plus any
+  detached forward processes Port recorded for that machine.
 - `port machine stop --machine <name>` stops a local Port-managed machine and
   cleans up runtime ownership details so the next launch is deterministic.
 - Those same lifecycle verbs are also the groundwork for the hosted product:
@@ -161,10 +168,11 @@ Current behavior:
 - `port machine launch` now writes a Firecracker config plus runtime metadata
   and console/log files under the chosen runtime root before invoking
   Firecracker with `--config-file`.
-- `port machine list`, `port machine status`, and `port machine stop` now use
-  Port-managed manifests plus live PID inspection instead of relying on the
-  Firecracker REST API. Once a machine is launched, these commands operate on
-  the runtime root and do not require the model file again.
+- `port machine list`, `port machine status`, `port machine monitor`,
+  `port machine top`, and `port machine stop` now use Port-managed manifests,
+  detached forward manifests, and live PID inspection instead of relying on
+  the Firecracker REST API. Once a machine is launched, these commands operate
+  on the runtime root and do not require the model file again.
 - The hosted direction keeps those same lifecycle and guest verbs; the
   published contract moves long-lived runtime ownership from the short-lived
   CLI process to a node agent plus control plane rather than inventing a second
@@ -226,24 +234,28 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   `[host_groups.<name>]`, with capability, node-agent `runtime_root`, and
   explicit-membership placement fields that later scheduler, monitoring, and
   services work can reuse.
-- Hosted `machine list`, `status`, and `stop` are also modeled explicitly as
-  control-plane plus node-agent contracts so the canonical machine verbs stay
-  stable as Port moves from the local runtime to a hosted fleet. The first
-  hosted runtime slice now runs through configured node `runtime_root`
-  directories, so `port machine list|status|stop` can surface hosted machines
-  without introducing hosted-only verbs.
+- Hosted `machine list`, `status`, `monitor`, `top`, and `stop` are also
+  modeled explicitly as control-plane plus node-agent contracts so the
+  canonical machine verbs stay stable as Port moves from the local runtime to
+  a hosted fleet. The first hosted runtime slice now runs through configured
+  node `runtime_root` directories, so `port machine list|status|monitor|top|stop`
+  can surface hosted machines without introducing hosted-only verbs.
 - Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
   a control-plane-authorized attach followed by node-agent guest brokerage to
   the in-guest `port-guest-agent`. The canonical `guest` verbs and guest
   protocol frames stay unchanged. The first hosted guest-runtime slice now runs
   through configured node `runtime_root` directories, so the canonical `guest`
   verbs work for hosted machines without introducing hosted-only aliases.
-- Hosted inventory that lacks a matching node runtime binding currently surfaces
-  as `malformed` in `port machine list|status` so unresolved hosted ownership is
-  visible instead of silently dropped.
-- Local `machine list`, `status`, and `stop` now publish the control-contract
-  fields that future hosted routing will reuse: inventory scope, inventory
-  owner, lifecycle owner, status source, and per-verb route.
+- Hosted inventory that lacks a matching node runtime binding currently
+  surfaces as `malformed` in `port machine list|status|monitor|top` so
+  unresolved hosted ownership is visible instead of silently dropped.
+- `port machine monitor` and `port machine top` now make the hosted monitoring
+  boundary explicit: they inspect node-agent-owned runtime state, detached
+  forwards, and live processes, but they are not yet a full metrics,
+  secrets/services, or sandbox product.
+- Local `machine list`, `status`, `monitor`, `top`, and `stop` now publish the
+  control-contract fields that future hosted routing will reuse: inventory
+  scope, inventory owner, lifecycle owner, status source, and per-verb route.
 
 ## Linux Local Workflow
 
@@ -259,6 +271,8 @@ cargo run -p port-cli -- --config examples/port.toml doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 cargo run -p port-cli -- machine list
 cargo run -p port-cli -- machine status --machine demo
+cargo run -p port-cli -- machine monitor --machine demo
+cargo run -p port-cli -- machine top --machine demo
 cargo run -p port-cli -- machine stop --machine demo
 ```
 
@@ -267,12 +281,13 @@ What that produces:
 - deterministic artifact variants under `artifacts/<kind>/<name>/<architecture>/<substrate>/<protection-mode>/`
 - host validation through `port doctor`
 - Firecracker runtime state, logs, and manifest files under the chosen runtime root
-- lifecycle inspection and stop surfaces through `port machine list`, `status`,
-  and `stop`
+- lifecycle and monitoring surfaces through `port machine list`, `status`,
+  `monitor`, `top`, and `stop`
 
 The lifecycle commands above intentionally switch from model-driven launch to
 runtime-state-driven management. After `port machine launch` creates
 `runtime/<machine>/`, use `port machine list`, `port machine status --machine
+<name>`, `port machine monitor --machine <name>`, `port machine top --machine
 <name>`, and `port machine stop --machine <name>` to inspect and control that
 local Port-managed runtime state without going through Firecracker directly.
 That local ownership model is also the basis for the hosted control design: the

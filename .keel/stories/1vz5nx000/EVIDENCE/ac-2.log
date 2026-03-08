@@ -1,0 +1,119 @@
+---
+recorded_at: 2026-03-08T06:28:36.764303879-07:00
+mode: manual
+files: [".keel/stories/1vz5nx000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-cli ==
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port machine --help excerpt ==
+Launch and inspect Port-managed machines
+
+Usage: port machine [OPTIONS] <COMMAND>
+
+Commands:
+  launch   Launch a named machine from the model
+  list     List Port-managed machines under a runtime root
+  status   Inspect the runtime status of a named machine
+  monitor  Inspect runtime ownership, logs, and detached forward state for a named machine
+  top      Inspect hypervisor and detached-forward processes for a named machine
+  stop     Stop a Port-managed machine under a runtime root
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>  Load a Port model from a TOML file instead of using the built-in sample
+  -h, --help           Print help
+
+== hosted monitoring docs excerpt ==
+docs/hosted.md:60:- surfaces hosted inventory and status back through the CLI and future SDK/API
+docs/hosted.md:89:mode = "hosted-control-plane"
+docs/hosted.md:158:- keeps `inventory_owner = "hosted-control-plane"`
+docs/hosted.md:174:- no secrets/services/sandboxes product exists yet
+docs/hosted.md:175:- hosted `machine monitor` and `top` are runtime-inspection surfaces, not a
+docs/hosted.md:190:- `port machine monitor --machine <name>`
+docs/hosted.md:191:- `port machine top --machine <name>`
+docs/hosted.md:200:- monitor: the runtime owner plus route for hosted `port machine monitor` and
+docs/hosted.md:201:  `port machine top`
+docs/hosted.md:212:- `status_route = "hosted-control-plane"`
+docs/hosted.md:213:- `monitor_route = "hosted-control-plane"`
+docs/hosted.md:214:- `top_route = "hosted-control-plane"`
+docs/hosted.md:215:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:224:  `top` inspect, including detached forward manifests
+docs/hosted.md:238:  node-agent runtime root
+docs/hosted.md:242:- hosted `machine monitor` currently reports runtime-owner context, log and
+docs/hosted.md:243:  manifest paths, and detached forward state from the selected node runtime
+docs/hosted.md:245:- hosted `machine top` currently reports the hypervisor process plus any
+docs/hosted.md:246:  detached forward processes Port recorded under that node runtime root
+docs/hosted.md:251:  model, then attaches to the node-agent runtime root's host-local guest
+docs/hosted.md:281:- `inventory_owner = "hosted-control-plane"`
+docs/hosted.md:285:- `launch_route = "hosted-control-plane"`
+docs/hosted.md:286:- `inventory_route = "hosted-control-plane"`
+docs/hosted.md:287:- `status_route = "hosted-control-plane"`
+docs/hosted.md:288:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:289:- `monitor_route = "hosted-control-plane"`
+docs/hosted.md:290:- `top_route = "hosted-control-plane"`
+docs/hosted.md:291:- `guest_route = "hosted-control-plane"`
+docs/hosted.md:306:- `guest_route = "hosted-control-plane"`
+docs/hosted.md:328:control-plane and node-agent runtime path stays the same; only the host-side
+docs/hosted.md:334:  secrets/services/sandboxes -> SDK/API clients
+crates/port-cli/src/lib.rs:34:  port --config examples/port.toml machine monitor --machine demo
+crates/port-cli/src/lib.rs:35:  port --config examples/port.toml machine top --machine demo
+crates/port-cli/src/lib.rs:67:  Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
+crates/port-cli/src/lib.rs:70:  Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
+crates/port-cli/src/lib.rs:71:  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
+crates/port-cli/src/lib.rs:72:  Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
+crates/port-cli/src/lib.rs:74:  `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests; secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
+crates/port-cli/src/lib.rs:259:        about = "Inspect runtime ownership, logs, and detached forward state for a named machine"
+crates/port-cli/src/lib.rs:768:    println!("detached forwards: {}", report.detached_forwards.len());
+crates/port-cli/src/lib.rs:966:                    .context("--stop requires --name to select a detached forward")?;
+crates/port-cli/src/lib.rs:1074:        .context("failed to start detached forward daemon")?;
+crates/port-cli/src/lib.rs:1104:                        "failed to parse detached forward manifest '{}'",
+crates/port-cli/src/lib.rs:1119:        println!("no detached forwards found for machine '{}'", machine);
+crates/port-cli/src/lib.rs:1139:        println!("no detached forwards found for machine '{}'", machine);
+crates/port-cli/src/lib.rs:1183:                    "failed to remove detached forward socket '{}'",
+crates/port-cli/src/lib.rs:1260:        bail!("failed to stop detached forward pid {pid}");
+README.md:122:port machine monitor --machine <name> [--runtime-root <path>]
+README.md:123:port machine top --machine <name> [--runtime-root <path>]
+README.md:146:- `port machine monitor --machine <name>` expands that status view with the
+README.md:147:  current runtime-owner context, detached forward state, and the paths Port is
+README.md:149:- `port machine top --machine <name>` inspects the hypervisor process plus any
+README.md:150:  detached forward processes Port recorded for that machine.
+README.md:171:- `port machine list`, `port machine status`, `port machine monitor`,
+README.md:172:  `port machine top`, and `port machine stop` now use Port-managed manifests,
+README.md:173:  detached forward manifests, and live PID inspection instead of relying on
+README.md:252:- `port machine monitor` and `port machine top` now make the hosted monitoring
+README.md:274:cargo run -p port-cli -- machine monitor --machine demo
+README.md:275:cargo run -p port-cli -- machine top --machine demo
+README.md:290:<name>`, `port machine monitor --machine <name>`, `port machine top --machine
+

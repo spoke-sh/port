@@ -31,6 +31,8 @@ Runnable local workflow:
   port --config examples/port.toml machine launch --machine demo
   port --config examples/port.toml machine list
   port --config examples/port.toml machine status --machine demo
+  port --config examples/port.toml machine monitor --machine demo
+  port --config examples/port.toml machine top --machine demo
   port --config examples/port.toml machine stop --machine demo
 
 Guest workflow examples:
@@ -62,14 +64,14 @@ Artifact Mobility:
   `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
 Hosted Control:
   Local Port still owns launch and guest-runtime lifecycle directly today.
-  Hosted Port now resolves `machine list|status|stop` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
+  Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
-  `port machine list|status|stop` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
+  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
   This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
-  Monitoring, secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
+  `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests; secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";
@@ -248,6 +250,22 @@ pub enum MachineCommand {
     },
     #[command(about = "Inspect the runtime status of a named machine")]
     Status {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+    },
+    #[command(
+        about = "Inspect runtime ownership, logs, and detached forward state for a named machine"
+    )]
+    Monitor {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+    },
+    #[command(about = "Inspect hypervisor and detached-forward processes for a named machine")]
+    Top {
         #[arg(long)]
         machine: String,
         #[arg(long, default_value = "runtime")]
@@ -666,6 +684,20 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("console stderr: {}", status.stderr_log.display());
             println!("detail: {}", status.detail);
         }
+        MachineCommand::Monitor {
+            machine,
+            runtime_root,
+        } => {
+            let report = port_runtime::machine_monitor(&config, &runtime_root, &machine)?;
+            print_machine_monitor(&report);
+        }
+        MachineCommand::Top {
+            machine,
+            runtime_root,
+        } => {
+            let report = port_runtime::machine_top(&config, &runtime_root, &machine)?;
+            print_machine_top(&report);
+        }
         MachineCommand::Stop {
             machine,
             runtime_root,
@@ -696,6 +728,113 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
     }
 
     Ok(())
+}
+
+fn print_machine_monitor(report: &port_runtime::MachineMonitorReport) {
+    println!("machine: {}", report.machine_name);
+    println!("state: {}", report.state);
+    println!(
+        "pid: {}",
+        report
+            .pid
+            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+    );
+    println!("inventory scope: {}", report.control.inventory_scope);
+    println!("inventory owner: {}", report.control.inventory_owner);
+    println!("lifecycle owner: {}", report.control.lifecycle_owner);
+    println!("status source: {}", report.control.status_source);
+    println!("monitor route: {}", report.control.monitor_route);
+    println!("top route: {}", report.control.top_route);
+    println!(
+        "control plane: {}",
+        report.control_plane.as_deref().unwrap_or("(local)")
+    );
+    println!("node: {}", report.node_name.as_deref().unwrap_or("(local)"));
+    println!(
+        "host groups: {}",
+        if report.host_groups.is_empty() {
+            String::from("(none)")
+        } else {
+            report.host_groups.join(", ")
+        }
+    );
+    println!("runtime dir: {}", report.runtime_dir.display());
+    println!("config path: {}", report.config_path.display());
+    println!("manifest: {}", report.manifest_path.display());
+    println!("pid file: {}", report.pid_path.display());
+    println!("firecracker log: {}", report.firecracker_log.display());
+    println!("console stdout: {}", report.stdout_log.display());
+    println!("console stderr: {}", report.stderr_log.display());
+    println!("detached forwards: {}", report.detached_forwards.len());
+    for forward in &report.detached_forwards {
+        println!();
+        println!("forward: {}", forward.name);
+        println!("state: {}", forward.state);
+        println!(
+            "pid: {}",
+            forward
+                .pid
+                .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+        );
+        println!("listen: {}", forward.listen);
+        println!("target: {}", forward.target);
+        println!("manifest: {}", forward.manifest_path.display());
+        println!("stdout log: {}", forward.stdout_log.display());
+        println!("stderr log: {}", forward.stderr_log.display());
+        println!("detail: {}", forward.detail);
+    }
+    println!("detail: {}", report.detail);
+}
+
+fn print_machine_top(report: &port_runtime::MachineTopReport) {
+    println!("machine: {}", report.machine_name);
+    println!("state: {}", report.state);
+    println!(
+        "pid: {}",
+        report
+            .pid
+            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+    );
+    println!("inventory scope: {}", report.control.inventory_scope);
+    println!("lifecycle owner: {}", report.control.lifecycle_owner);
+    println!("status source: {}", report.control.status_source);
+    println!("monitor route: {}", report.control.monitor_route);
+    println!("top route: {}", report.control.top_route);
+    println!(
+        "control plane: {}",
+        report.control_plane.as_deref().unwrap_or("(local)")
+    );
+    println!("node: {}", report.node_name.as_deref().unwrap_or("(local)"));
+    println!(
+        "host groups: {}",
+        if report.host_groups.is_empty() {
+            String::from("(none)")
+        } else {
+            report.host_groups.join(", ")
+        }
+    );
+    println!("runtime dir: {}", report.runtime_dir.display());
+    println!("detail: {}", report.detail);
+    if report.entries.is_empty() {
+        println!("entries: 0");
+        return;
+    }
+    println!("entries: {}", report.entries.len());
+    for entry in &report.entries {
+        println!();
+        println!("entry kind: {}", entry.kind);
+        println!("name: {}", entry.name);
+        println!("state: {}", entry.state);
+        println!(
+            "pid: {}",
+            entry
+                .pid
+                .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+        );
+        println!("command: {}", entry.command.as_deref().unwrap_or("(none)"));
+        println!("source: {}", entry.source.display());
+        println!("detail: {}", entry.detail);
+    }
 }
 
 fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortConfig) -> Result<()> {
@@ -1228,7 +1367,7 @@ mod tests {
         let artifact_help = render_nested_subcommand_help(&["artifacts", "push"])
             .expect("artifact help should exist");
 
-        for keyword in ["launch", "list", "status", "stop"] {
+        for keyword in ["launch", "list", "status", "stop", "monitor", "top"] {
             assert!(
                 machine_help.contains(keyword),
                 "missing machine help keyword: {keyword}"
@@ -1426,6 +1565,46 @@ mod tests {
                 assert_eq!(machine, "demo");
                 assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
                 assert_eq!(wait_secs, 9);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let monitor = Cli::parse_from([
+            "port",
+            "machine",
+            "monitor",
+            "--machine",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+        ]);
+        match monitor.command {
+            Command::Machine(MachineCommand::Monitor {
+                machine,
+                runtime_root,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let top = Cli::parse_from([
+            "port",
+            "machine",
+            "top",
+            "--machine",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+        ]);
+        match top.command {
+            Command::Machine(MachineCommand::Top {
+                machine,
+                runtime_root,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
             }
             other => panic!("unexpected command: {other:?}"),
         }

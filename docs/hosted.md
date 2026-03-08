@@ -30,8 +30,9 @@ The `port` CLI remains the canonical operator surface.
   runtime root.
 - In hosted mode, it becomes a client of the control plane instead of owning
   VM processes itself.
-- The command verbs stay stable: `machine launch`, `list`, `status`, `stop`,
-  and guest `exec`, `copy`, `pty`, `logs`, and `forward`.
+- The command verbs stay stable: `machine launch`, `list`, `status`,
+  `monitor`, `top`, `stop`, and guest `exec`, `copy`, `pty`, `logs`, and
+  `forward`.
 
 ### Node Agent
 
@@ -55,7 +56,7 @@ The central control plane is the system of record for hosted Port.
 - authenticates clients and enforces policy
 - stores machine inventory and desired lifecycle state
 - selects nodes or host groups for placement
-- asks node agents to launch, inspect, stop, or connect to machines
+- asks node agents to launch, inspect, monitor, stop, or connect to machines
 - surfaces hosted inventory and status back through the CLI and future SDK/API
 
 The control plane does not execute guest commands inside the VM directly. It
@@ -169,8 +170,10 @@ Host-group contract:
 What this does not claim:
 
 - no scheduler policy exists yet beyond explicit membership
-- no hosted `machine list` or remote lifecycle implementation ships yet
-- no services or monitoring product exists yet
+- no hosted remote-launch implementation ships yet
+- no secrets/services/sandboxes product exists yet
+- hosted `machine monitor` and `top` are runtime-inspection surfaces, not a
+  full metrics or fleet-observability product yet
 
 Those later features are expected to reuse the same node and host-group
 vocabulary instead of inventing a second inventory model.
@@ -184,14 +187,18 @@ The canonical operator verbs stay the same:
 
 - `port machine list`
 - `port machine status --machine <name>`
+- `port machine monitor --machine <name>`
+- `port machine top --machine <name>`
 - `port machine stop --machine <name>`
 
-For a hosted machine, the shared model now derives three explicit contracts:
+For a hosted machine, the shared model now derives four explicit contracts:
 
 - summary: which control plane owns the machine, which hosted nodes can run it,
   and which explicit host groups include those nodes
 - status: the status source and route for the future hosted
   `port machine status` command
+- monitor: the runtime owner plus route for hosted `port machine monitor` and
+  `port machine top`
 - stop: the lifecycle owner and route for the future hosted
   `port machine stop` command
 
@@ -203,29 +210,40 @@ Current hosted lifecycle contract for a sample machine such as `cloud-aws`:
 - `runtime_root = "runtime/hosted/aws-linux-node"`
 - `status_source = "control-plane-inventory-and-node-agent-runtime"`
 - `status_route = "hosted-control-plane"`
+- `monitor_route = "hosted-control-plane"`
+- `top_route = "hosted-control-plane"`
 - `stop_route = "hosted-control-plane"`
 - `lifecycle_owner = "hosted-node-agent"`
 
 What this means operationally:
 
-- the control plane remains the routing entry point for list, status, and stop
+- the control plane remains the routing entry point for list, status, monitor,
+  top, and stop
 - the node agent remains the eventual owner of host-local lifecycle actions
+- the node agent already owns the host-local runtime state that `monitor` and
+  `top` inspect, including detached forward manifests
 - the CLI verbs and guest protocol do not need a second hosted-only naming
   scheme
 
 What is runnable today:
 
-- local `port machine list`, `status`, and `stop` inspect and manage
-  Port-managed runtime directories on Linux
-- hosted `machine list`, `status`, and `stop` now resolve through the hosted
-  control-plane contract plus the configured node `runtime_root`
+- local `port machine list`, `status`, `monitor`, `top`, and `stop` inspect
+  and manage Port-managed runtime directories on Linux
+- hosted `machine list`, `status`, `monitor`, `top`, and `stop` now resolve
+  through the hosted control-plane contract plus the configured node
+  `runtime_root`
 - this first hosted runtime slice is config-backed and in-process: Port
   resolves hosted ownership from the control-plane and node inventory model,
-  then inspects or stops machine state through the selected node-agent runtime
-  root
+  then inspects, monitors, or stops machine state through the selected
+  node-agent runtime root
 - hosted machines with unresolved inventory, such as a host without a matching
   node runtime binding, surface as `malformed` so the control-plane mismatch is
   explicit to the operator
+- hosted `machine monitor` currently reports runtime-owner context, log and
+  manifest paths, and detached forward state from the selected node runtime
+  root
+- hosted `machine top` currently reports the hypervisor process plus any
+  detached forward processes Port recorded under that node runtime root
 - hosted `guest exec`, `copy`, `pty`, `logs`, and `forward` now resolve through
   the hosted control-plane contract plus the configured node `runtime_root`
 - this first hosted guest-runtime slice is also config-backed and in-process:
@@ -239,8 +257,8 @@ What is runnable today:
 ## Canonical Machine Control Contract
 
 Port now names the lifecycle and inventory contract explicitly so later hosted
-drivers can reuse the same vocabulary that local `machine list`, `status`, and
-`stop` already publish.
+drivers can reuse the same vocabulary that local `machine list`, `status`,
+`monitor`, `top`, and `stop` already publish.
 
 Local runtime-root contract:
 
@@ -253,6 +271,8 @@ Local runtime-root contract:
 - `inventory_route = "direct-local-runtime"`
 - `status_route = "direct-local-runtime"`
 - `stop_route = "direct-local-runtime"`
+- `monitor_route = "direct-local-runtime"`
+- `top_route = "direct-local-runtime"`
 - `guest_route = "direct-local-runtime"`
 
 Hosted control-plane contract:
@@ -266,6 +286,8 @@ Hosted control-plane contract:
 - `inventory_route = "hosted-control-plane"`
 - `status_route = "hosted-control-plane"`
 - `stop_route = "hosted-control-plane"`
+- `monitor_route = "hosted-control-plane"`
+- `top_route = "hosted-control-plane"`
 - `guest_route = "hosted-control-plane"`
 
 Those tokens are the implementation-ready contract for the next hosted node
@@ -309,7 +331,7 @@ forward listener and lifecycle ownership broaden.
 What still remains after this runtime slice:
 
 - follow-on order after this foundation is:
-  monitoring and `top` -> secrets/services/sandboxes -> SDK/API clients
+  secrets/services/sandboxes -> SDK/API clients
 - those follow-on capabilities are downstream of the authenticated API,
   inventory, lifecycle, and guest-attach foundation; they are not already
   shipped
@@ -322,6 +344,8 @@ to expose lifecycle and guest-transport verbs that mirror the CLI:
 - `machines.create`
 - `machines.list`
 - `machines.get`
+- `machines.monitor`
+- `machines.top`
 - `machines.stop`
 - `machines.connect_guest`
 
@@ -331,12 +355,14 @@ should remain substrate-aware without becoming Firecracker-specific API names.
 ## Current Boundary
 
 - Port does not ship a hosted daemon or control plane yet.
-- `port machine list`, `status`, and `stop` currently inspect local runtime
-  roots only.
-- Those commands already report the local control-contract fields above so the
-  operator-visible lifecycle vocabulary does not need to change when hosted
-  routing lands.
+- hosted `machine list`, `status`, `monitor`, `top`, and `stop` are currently
+  config-backed and in-process; they inspect the selected node `runtime_root`
+  rather than reaching a real remote control plane.
+- Those commands already report the control-contract fields above so the
+  operator-visible lifecycle vocabulary does not need to change when the real
+  hosted routing lands.
 - Remote Linux providers are modeled and diagnosed, but remote launch remains a
   designed boundary rather than a shipped orchestration path.
 - The hosted contract is canonical design work for the next implementation
-  slices, not a claim that hosted Port is already available.
+  slices, but the first hosted runtime and monitoring surfaces are already
+  executable through the canonical CLI.

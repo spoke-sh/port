@@ -518,6 +518,26 @@ impl PortConfig {
         }))
     }
 
+    pub fn hosted_machine_monitor_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedMachineMonitorContract>, ValidationError> {
+        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+            Some(summary) => summary,
+            None => return Ok(None),
+        };
+        Ok(Some(HostedMachineMonitorContract {
+            machine: summary.clone(),
+            lifecycle_owner: summary.control.lifecycle_owner,
+            status_source: summary.control.status_source,
+            monitor_route: summary.control.monitor_route,
+            top_route: summary.control.top_route,
+            detail: String::from(
+                "Hosted monitoring and top remain routed through the control plane, with the node agent owning host-local runtime inspection and detached forward state.",
+            ),
+        }))
+    }
+
     pub fn hosted_guest_attach_contract(
         &self,
         machine_name: &str,
@@ -1023,6 +1043,16 @@ pub struct HostedMachineStopContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedMachineMonitorContract {
+    pub machine: HostedMachineSummaryContract,
+    pub lifecycle_owner: MachineLifecycleOwner,
+    pub status_source: MachineStatusSource,
+    pub monitor_route: MachineCommandRoute,
+    pub top_route: MachineCommandRoute,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedGuestAttachContract {
     pub machine: HostedMachineSummaryContract,
     pub guest_broker: MachineGuestBroker,
@@ -1146,6 +1176,8 @@ pub struct MachineControlContract {
     pub inventory_route: MachineCommandRoute,
     pub status_route: MachineCommandRoute,
     pub stop_route: MachineCommandRoute,
+    pub monitor_route: MachineCommandRoute,
+    pub top_route: MachineCommandRoute,
     pub guest_route: MachineCommandRoute,
 }
 
@@ -1170,6 +1202,8 @@ impl MachineControlContract {
             inventory_route: MachineCommandRoute::DirectLocalRuntime,
             status_route: MachineCommandRoute::DirectLocalRuntime,
             stop_route: MachineCommandRoute::DirectLocalRuntime,
+            monitor_route: MachineCommandRoute::DirectLocalRuntime,
+            top_route: MachineCommandRoute::DirectLocalRuntime,
             guest_route: MachineCommandRoute::DirectLocalRuntime,
         }
     }
@@ -1186,6 +1220,8 @@ impl MachineControlContract {
             inventory_route: MachineCommandRoute::HostedControlPlane,
             status_route: MachineCommandRoute::HostedControlPlane,
             stop_route: MachineCommandRoute::HostedControlPlane,
+            monitor_route: MachineCommandRoute::HostedControlPlane,
+            top_route: MachineCommandRoute::HostedControlPlane,
             guest_route: MachineCommandRoute::HostedControlPlane,
         }
     }
@@ -1892,6 +1928,11 @@ mod tests {
             contract.status_route,
             MachineCommandRoute::DirectLocalRuntime
         );
+        assert_eq!(
+            contract.monitor_route,
+            MachineCommandRoute::DirectLocalRuntime
+        );
+        assert_eq!(contract.top_route, MachineCommandRoute::DirectLocalRuntime);
     }
 
     #[test]
@@ -1924,6 +1965,11 @@ mod tests {
             contract.status_route,
             MachineCommandRoute::HostedControlPlane
         );
+        assert_eq!(
+            contract.monitor_route,
+            MachineCommandRoute::HostedControlPlane
+        );
+        assert_eq!(contract.top_route, MachineCommandRoute::HostedControlPlane);
     }
 
     #[test]
@@ -2054,6 +2100,25 @@ mod tests {
         assert_eq!(stop.stop_route, MachineCommandRoute::HostedControlPlane);
         assert_eq!(stop.lifecycle_owner, MachineLifecycleOwner::HostedNodeAgent);
         assert!(stop.detail.contains("node agent"));
+
+        let monitor = config
+            .hosted_machine_monitor_contract("cloud-aws")
+            .expect("hosted machine monitor should resolve")
+            .expect("cloud-aws monitor should be hosted");
+        assert_eq!(
+            monitor.status_source,
+            MachineStatusSource::ControlPlaneInventoryAndNodeAgentRuntime
+        );
+        assert_eq!(
+            monitor.monitor_route,
+            MachineCommandRoute::HostedControlPlane
+        );
+        assert_eq!(monitor.top_route, MachineCommandRoute::HostedControlPlane);
+        assert_eq!(
+            monitor.lifecycle_owner,
+            MachineLifecycleOwner::HostedNodeAgent
+        );
+        assert!(monitor.detail.contains("detached forward"));
     }
 
     #[test]

@@ -116,6 +116,80 @@ pub struct StopResult {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DetachedForwardStatus {
+    pub name: String,
+    pub state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub listen: String,
+    pub target: String,
+    pub manifest_path: PathBuf,
+    pub stdout_log: PathBuf,
+    pub stderr_log: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineMonitorReport {
+    pub machine_name: String,
+    pub state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub control: MachineControlContract,
+    pub control_plane: Option<String>,
+    pub node_name: Option<String>,
+    pub host_groups: Vec<String>,
+    pub runtime_dir: PathBuf,
+    pub config_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub pid_path: PathBuf,
+    pub firecracker_log: PathBuf,
+    pub stdout_log: PathBuf,
+    pub stderr_log: PathBuf,
+    pub detached_forwards: Vec<DetachedForwardStatus>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineTopEntryKind {
+    Hypervisor,
+    DetachedForward,
+}
+
+impl std::fmt::Display for MachineTopEntryKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Hypervisor => f.write_str("hypervisor"),
+            Self::DetachedForward => f.write_str("detached-forward"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineTopEntry {
+    pub kind: MachineTopEntryKind,
+    pub name: String,
+    pub state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub command: Option<String>,
+    pub source: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineTopReport {
+    pub machine_name: String,
+    pub state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub control: MachineControlContract,
+    pub control_plane: Option<String>,
+    pub node_name: Option<String>,
+    pub host_groups: Vec<String>,
+    pub runtime_dir: PathBuf,
+    pub detail: String,
+    pub entries: Vec<MachineTopEntry>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimePaths {
     pub runtime_dir: PathBuf,
@@ -201,6 +275,20 @@ trait MachineDriver {
         machine_name: &str,
         timeout: Duration,
     ) -> Result<StopResult>;
+
+    fn machine_monitor(
+        &self,
+        config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineMonitorReport>;
+
+    fn machine_top(
+        &self,
+        config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineTopReport>;
 
     fn guest_endpoint(
         &self,
@@ -692,6 +780,54 @@ fn firecracker_local_machine_status(
     )
 }
 
+fn firecracker_local_machine_monitor(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineMonitorReport> {
+    let status = firecracker_local_machine_status(runtime_root, machine_name)?;
+    machine_monitor_report(status, None, None, Vec::new())
+}
+
+fn firecracker_local_machine_top(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineTopReport> {
+    let status = firecracker_local_machine_status(runtime_root, machine_name)?;
+    machine_top_report(status, None, None, Vec::new())
+}
+
+pub fn machine_monitor(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineMonitorReport> {
+    if config.machines.contains_key(machine_name) {
+        return driver_for_machine(config, machine_name)?.machine_monitor(
+            config,
+            runtime_root,
+            machine_name,
+        );
+    }
+
+    firecracker_local_machine_monitor(runtime_root, machine_name)
+}
+
+pub fn machine_top(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineTopReport> {
+    if config.machines.contains_key(machine_name) {
+        return driver_for_machine(config, machine_name)?.machine_top(
+            config,
+            runtime_root,
+            machine_name,
+        );
+    }
+
+    firecracker_local_machine_top(runtime_root, machine_name)
+}
+
 pub fn stop_machine(
     config: &PortConfig,
     runtime_root: &Path,
@@ -966,6 +1102,23 @@ fn process_cmdline(pid: u32) -> Result<Option<String>> {
     Ok(Some(rendered))
 }
 
+fn process_exists(pid: u32) -> Result<bool> {
+    // SAFETY: `kill(pid, 0)` is the standard existence probe for a process id.
+    // The call does not mutate memory; it only asks the kernel whether the pid
+    // is valid and signalable.
+    let status = unsafe { libc::kill(pid as i32, 0) };
+    if status == 0 {
+        return Ok(true);
+    }
+
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(anyhow!("failed to probe pid {}: {}", pid, error)),
+    }
+}
+
 fn read_launch_metadata(path: &Path) -> Result<LaunchMetadata> {
     let file = File::open(path)
         .with_context(|| format!("failed to open manifest '{}'", path.display()))?;
@@ -1081,10 +1234,213 @@ fn synthetic_machine_status(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DetachedForwardManifestRecord {
+    name: String,
+    machine: String,
+    pid: u32,
+    listen: String,
+    target: String,
+    stdout_log: PathBuf,
+    stderr_log: PathBuf,
+}
+
+fn machine_monitor_report(
+    status: MachineStatus,
+    control_plane: Option<String>,
+    node_name: Option<String>,
+    host_groups: Vec<String>,
+) -> Result<MachineMonitorReport> {
+    let detached_forwards =
+        load_detached_forward_statuses(&status.runtime_dir, &status.machine_name)?;
+
+    Ok(MachineMonitorReport {
+        machine_name: status.machine_name,
+        state: status.state,
+        pid: status.pid,
+        control: status.control,
+        control_plane,
+        node_name,
+        host_groups,
+        runtime_dir: status.runtime_dir,
+        config_path: status.config_path,
+        manifest_path: status.manifest_path,
+        pid_path: status.pid_path,
+        firecracker_log: status.firecracker_log,
+        stdout_log: status.stdout_log,
+        stderr_log: status.stderr_log,
+        detached_forwards,
+        detail: status.detail,
+    })
+}
+
+fn machine_top_report(
+    status: MachineStatus,
+    control_plane: Option<String>,
+    node_name: Option<String>,
+    host_groups: Vec<String>,
+) -> Result<MachineTopReport> {
+    let firecracker_command = match status.pid {
+        Some(pid) => process_cmdline(pid)?,
+        None => None,
+    };
+    let mut entries = Vec::new();
+    if status.pid.is_some() || status.manifest_path.exists() {
+        entries.push(MachineTopEntry {
+            kind: MachineTopEntryKind::Hypervisor,
+            name: String::from("firecracker"),
+            state: status.state,
+            pid: status.pid,
+            command: firecracker_command,
+            source: status.manifest_path.clone(),
+            detail: status.detail.clone(),
+        });
+    }
+
+    for forward in load_detached_forward_statuses(&status.runtime_dir, &status.machine_name)? {
+        let command = match forward.pid {
+            Some(pid) => process_cmdline(pid)?,
+            None => None,
+        };
+        entries.push(MachineTopEntry {
+            kind: MachineTopEntryKind::DetachedForward,
+            name: forward.name,
+            state: forward.state,
+            pid: forward.pid,
+            command,
+            source: forward.manifest_path,
+            detail: format!(
+                "{} listen={} target={}",
+                forward.detail, forward.listen, forward.target
+            ),
+        });
+    }
+    entries.sort_by(|left, right| {
+        machine_top_entry_rank(left.kind)
+            .cmp(&machine_top_entry_rank(right.kind))
+            .then(left.name.cmp(&right.name))
+    });
+
+    Ok(MachineTopReport {
+        machine_name: status.machine_name,
+        state: status.state,
+        pid: status.pid,
+        control: status.control,
+        control_plane,
+        node_name,
+        host_groups,
+        runtime_dir: status.runtime_dir,
+        detail: status.detail,
+        entries,
+    })
+}
+
+fn load_detached_forward_statuses(
+    runtime_dir: &Path,
+    machine_name: &str,
+) -> Result<Vec<DetachedForwardStatus>> {
+    let forwards_dir = runtime_dir.join("forwards");
+    if !forwards_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut forwards = Vec::new();
+    for entry in fs::read_dir(&forwards_dir)
+        .with_context(|| format!("failed to read forward state '{}'", forwards_dir.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to inspect '{}'", forwards_dir.display()))?;
+        let path = entry.path();
+        if !entry
+            .file_type()
+            .with_context(|| format!("failed to inspect '{}'", path.display()))?
+            .is_file()
+        {
+            continue;
+        }
+
+        let bytes = fs::read(&path)
+            .with_context(|| format!("failed to read forward manifest '{}'", path.display()))?;
+        let manifest: DetachedForwardManifestRecord = match serde_json::from_slice(&bytes) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                forwards.push(DetachedForwardStatus {
+                    name: path
+                        .file_stem()
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| String::from("(unknown)")),
+                    state: MachineRuntimeState::Malformed,
+                    pid: None,
+                    listen: String::new(),
+                    target: String::new(),
+                    manifest_path: path.clone(),
+                    stdout_log: PathBuf::new(),
+                    stderr_log: PathBuf::new(),
+                    detail: format!("failed to parse detached forward manifest: {error}"),
+                });
+                continue;
+            }
+        };
+
+        if manifest.machine != machine_name {
+            forwards.push(DetachedForwardStatus {
+                name: manifest.name,
+                state: MachineRuntimeState::Malformed,
+                pid: Some(manifest.pid),
+                listen: manifest.listen,
+                target: manifest.target,
+                manifest_path: path.clone(),
+                stdout_log: manifest.stdout_log,
+                stderr_log: manifest.stderr_log,
+                detail: format!(
+                    "detached forward manifest targets machine '{}' instead of '{}'",
+                    manifest.machine, machine_name
+                ),
+            });
+            continue;
+        }
+
+        let state = if process_exists(manifest.pid)? {
+            MachineRuntimeState::Running
+        } else {
+            MachineRuntimeState::Stale
+        };
+        let detail = match state {
+            MachineRuntimeState::Running => String::from("detached forward process is live"),
+            MachineRuntimeState::Stale => {
+                String::from("recorded detached forward pid is no longer live")
+            }
+            _ => unreachable!("detached forward state should be running or stale"),
+        };
+        forwards.push(DetachedForwardStatus {
+            name: manifest.name,
+            state,
+            pid: Some(manifest.pid),
+            listen: manifest.listen,
+            target: manifest.target,
+            manifest_path: path,
+            stdout_log: manifest.stdout_log,
+            stderr_log: manifest.stderr_log,
+            detail,
+        });
+    }
+    forwards.sort_by(|left, right| left.name.cmp(&right.name));
+
+    Ok(forwards)
+}
+
+fn machine_top_entry_rank(kind: MachineTopEntryKind) -> u8 {
+    match kind {
+        MachineTopEntryKind::Hypervisor => 0,
+        MachineTopEntryKind::DetachedForward => 1,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct HostedMachineResolution {
     control_plane: String,
     node_name: Option<String>,
+    host_groups: Vec<String>,
     runtime_root: PathBuf,
     status: MachineStatus,
 }
@@ -1120,6 +1476,7 @@ fn hosted_machine_resolution(
             return Ok(HostedMachineResolution {
                 control_plane: hosted_identity.control_plane.clone(),
                 node_name: None,
+                host_groups: Vec::new(),
                 runtime_root: placeholder_root.clone(),
                 status: synthetic_machine_status(
                     machine_name,
@@ -1137,6 +1494,7 @@ fn hosted_machine_resolution(
             return Ok(HostedMachineResolution {
                 control_plane: hosted_identity.control_plane.clone(),
                 node_name: None,
+                host_groups: Vec::new(),
                 runtime_root: placeholder_root.clone(),
                 status: synthetic_machine_status(
                     machine_name,
@@ -1184,6 +1542,7 @@ fn hosted_machine_resolution(
         let candidate = HostedMachineResolution {
             control_plane: summary.control_plane.clone(),
             node_name: Some(node_name.clone()),
+            host_groups: summary.host_groups.clone(),
             runtime_root: node.runtime_root.clone(),
             status,
         };
@@ -1198,6 +1557,7 @@ fn hosted_machine_resolution(
     Ok(selected.unwrap_or(HostedMachineResolution {
         control_plane: summary.control_plane.clone(),
         node_name: None,
+        host_groups: summary.host_groups.clone(),
         runtime_root: placeholder_root.clone(),
         status: synthetic_machine_status(
             machine_name,
@@ -1248,6 +1608,34 @@ fn hosted_control_plane_machine_status(
     machine_name: &str,
 ) -> Result<MachineStatus> {
     Ok(hosted_machine_resolution(config, machine_name)?.status)
+}
+
+fn hosted_control_plane_machine_monitor(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<MachineMonitorReport> {
+    let resolution = hosted_machine_resolution(config, machine_name)?;
+    let status = resolution.status;
+    machine_monitor_report(
+        status,
+        Some(resolution.control_plane),
+        resolution.node_name,
+        resolution.host_groups,
+    )
+}
+
+fn hosted_control_plane_machine_top(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<MachineTopReport> {
+    let resolution = hosted_machine_resolution(config, machine_name)?;
+    let status = resolution.status;
+    machine_top_report(
+        status,
+        Some(resolution.control_plane),
+        resolution.node_name,
+        resolution.host_groups,
+    )
 }
 
 fn hosted_control_plane_stop_machine(
@@ -2460,6 +2848,24 @@ impl MachineDriver for FirecrackerLocalDriver {
         firecracker_local_stop_machine(runtime_root, machine_name, timeout)
     }
 
+    fn machine_monitor(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineMonitorReport> {
+        firecracker_local_machine_monitor(runtime_root, machine_name)
+    }
+
+    fn machine_top(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineTopReport> {
+        firecracker_local_machine_top(runtime_root, machine_name)
+    }
+
     fn guest_endpoint(
         &self,
         config: &PortConfig,
@@ -2518,6 +2924,24 @@ impl MachineDriver for HostedControlPlaneDriver {
         timeout: Duration,
     ) -> Result<StopResult> {
         hosted_control_plane_stop_machine(config, machine_name, timeout)
+    }
+
+    fn machine_monitor(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineMonitorReport> {
+        hosted_control_plane_machine_monitor(config, machine_name)
+    }
+
+    fn machine_top(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineTopReport> {
+        hosted_control_plane_machine_top(config, machine_name)
     }
 
     fn guest_endpoint(
@@ -2702,8 +3126,8 @@ mod tests {
         LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState, RuntimePaths,
         StopResult, artifact_script, build_firecracker_config, collect_doctor_report,
         copy_guest_file, driver_for_machine, execute_guest_operation, launch_local_machine,
-        list_machines, machine_status, path_check, prepare_guest_forward, prepare_runtime_state,
-        read_pid_file, repo_root, stop_machine,
+        list_machines, machine_monitor, machine_status, machine_top, path_check,
+        prepare_guest_forward, prepare_runtime_state, read_pid_file, repo_root, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
@@ -2753,6 +3177,34 @@ mod tests {
             serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
         )
         .expect("manifest should write");
+    }
+
+    fn write_detached_forward_manifest(
+        paths: &RuntimePaths,
+        name: &str,
+        pid: u32,
+        listen: &str,
+        target: &str,
+    ) {
+        let forwards_dir = paths.runtime_dir.join("forwards");
+        fs::create_dir_all(&forwards_dir).expect("forwards dir should exist");
+        let manifest = serde_json::json!({
+            "name": name,
+            "machine": paths.runtime_dir.file_name().expect("machine dir should exist").to_string_lossy(),
+            "pid": pid,
+            "listen": listen,
+            "target": target,
+            "stdout_log": paths.runtime_dir.join(format!("{name}.forward.stdout.log")),
+            "stderr_log": paths.runtime_dir.join(format!("{name}.forward.stderr.log")),
+        });
+        fs::write(
+            forwards_dir.join(format!("{name}.json")),
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&manifest).expect("manifest should serialize")
+            ),
+        )
+        .expect("forward manifest should write");
     }
 
     #[test]
@@ -3372,6 +3824,140 @@ mod tests {
         assert!(message.contains("control plane 'demo'"));
         assert!(message.contains("cloud-azure"));
         assert!(message.contains("no hosted node inventory record matches that host"));
+    }
+
+    #[test]
+    fn hosted_machine_monitor_reports_node_runtime_and_detached_forward_state() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        write_manifest(&paths, "cloud-aws", 424242);
+
+        let mut command = Command::new("bash");
+        command
+            .args([
+                "-lc",
+                "exec -a port-forward /bin/sh -c 'sleep 30' -- cloud-aws-web",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("forward helper should start");
+        thread::sleep(Duration::from_millis(100));
+
+        write_detached_forward_manifest(
+            &paths,
+            "web",
+            child.id(),
+            "127.0.0.1:8081",
+            "127.0.0.1:80",
+        );
+
+        let report =
+            machine_monitor(&config, tempdir.path(), "cloud-aws").expect("monitor should load");
+        assert_eq!(report.machine_name, "cloud-aws");
+        assert_eq!(report.control_plane.as_deref(), Some("demo"));
+        assert_eq!(report.node_name.as_deref(), Some("aws-linux-node"));
+        assert!(report.host_groups.contains(&String::from("aws-builders")));
+        assert_eq!(report.detached_forwards.len(), 1);
+        let forward = &report.detached_forwards[0];
+        assert_eq!(forward.name, "web");
+        assert_eq!(forward.state, MachineRuntimeState::Running);
+        assert_eq!(forward.pid, Some(child.id()));
+        assert_eq!(forward.listen, "127.0.0.1:8081");
+        assert_eq!(forward.target, "127.0.0.1:80");
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn hosted_machine_top_reports_hypervisor_and_detached_forward_processes() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+
+        let mut firecracker = Command::new("bash");
+        firecracker
+            .args([
+                "-lc",
+                "exec -a firecracker /bin/sh -c 'sleep 30' --id cloud-aws",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut firecracker = firecracker
+            .spawn()
+            .expect("fake firecracker process should start");
+        thread::sleep(Duration::from_millis(100));
+        write_manifest(&paths, "cloud-aws", firecracker.id());
+        fs::write(&paths.pid_path, format!("{}\n", firecracker.id())).expect("pid should write");
+
+        let mut command = Command::new("bash");
+        command
+            .args([
+                "-lc",
+                "exec -a port-forward /bin/sh -c 'sleep 30' -- cloud-aws-web",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("forward helper should start");
+        thread::sleep(Duration::from_millis(100));
+        write_detached_forward_manifest(
+            &paths,
+            "web",
+            child.id(),
+            "127.0.0.1:8081",
+            "127.0.0.1:80",
+        );
+
+        let report = machine_top(&config, tempdir.path(), "cloud-aws").expect("top should load");
+        let hypervisor = report
+            .entries
+            .iter()
+            .find(|entry| entry.name == "firecracker")
+            .expect("hypervisor entry should exist");
+        assert_eq!(hypervisor.state, MachineRuntimeState::Running);
+        assert_eq!(hypervisor.pid, Some(firecracker.id()));
+        assert!(
+            hypervisor
+                .command
+                .as_deref()
+                .expect("command should exist")
+                .contains("firecracker")
+        );
+
+        let forward = report
+            .entries
+            .iter()
+            .find(|entry| entry.name == "web")
+            .expect("forward entry should exist");
+        assert_eq!(forward.state, MachineRuntimeState::Running);
+        assert_eq!(forward.pid, Some(child.id()));
+        assert!(
+            forward
+                .command
+                .as_deref()
+                .expect("command should exist")
+                .contains("port-forward")
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = firecracker.kill();
+        let _ = firecracker.wait();
     }
 
     #[test]
