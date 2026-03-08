@@ -1,0 +1,33 @@
+
+running 37 tests
+.....................................
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+kernel protection mode: pvm
+kernel source: http://spec.ccfc.min.s3.amazonaws.com/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel artifact: artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+built kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/pvm at artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+validated kernel: artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+kernel protection mode: pvm
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel bytes: 44278288
+validated kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/pvm at artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+    Finished `release` profile [optimized] target(s) in 0.06s
+e2fsck 1.47.3 (8-Jul-2025)
+guest image artifact: artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: pvm
+guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent
+built guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/pvm at artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+e2fsck 1.47.3 (8-Jul-2025)
+validated guest image: artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: pvm
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/pvm at artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4

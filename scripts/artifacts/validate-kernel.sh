@@ -12,16 +12,21 @@ if [[ ! -f "$kernel_path" ]]; then
   exit 1
 fi
 
-arch="$(uname -m)"
-case "$arch" in
-  x86_64)
+case "$kernel_path" in
+  */x86_64/firecracker/standard/*|*/x86_64/firecracker/pvm/*)
+    arch="x86_64"
     expected_sha256="e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53"
     ;;
-  aarch64)
+  */aarch64/firecracker/standard/*)
+    arch="aarch64"
     expected_sha256="61baeae1ac6197be4fc5c71fa78df266acdc33c54570290d2f611c2b42c105be"
     ;;
+  */aarch64/firecracker/pvm/*)
+    echo "aarch64/firecracker/pvm remains research-only and has no validation pipeline yet" >&2
+    exit 1
+    ;;
   *)
-    echo "unsupported architecture for demo kernel validation: $arch" >&2
+    echo "unsupported artifact selector for demo kernel validation: $kernel_path" >&2
     exit 1
     ;;
 esac
@@ -39,5 +44,10 @@ if [[ "$kernel_size" -le 0 ]]; then
 fi
 
 printf 'validated kernel: %s\n' "$kernel_path"
+if [[ "$kernel_path" == */firecracker/pvm/* ]]; then
+  printf 'kernel protection mode: pvm\n'
+else
+  printf 'kernel protection mode: standard\n'
+fi
 printf 'kernel sha256: %s\n' "$actual_sha256"
 printf 'kernel bytes: %s\n' "$kernel_size"

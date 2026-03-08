@@ -47,6 +47,12 @@ impl PortConfig {
                             ProtectionMode::Standard,
                         ),
                         sample_artifact_variant(
+                            "artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Pvm,
+                        ),
+                        sample_artifact_variant(
                             "artifacts/kernel/demo/aarch64/firecracker/standard/vmlinux",
                             MachineArchitecture::Aarch64,
                             ExecutionSubstrate::Firecracker,
@@ -80,6 +86,12 @@ impl PortConfig {
                             MachineArchitecture::X86_64,
                             ExecutionSubstrate::Firecracker,
                             ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Pvm,
                         ),
                         sample_artifact_variant(
                             "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4",
@@ -2470,26 +2482,56 @@ mod tests {
                 .architecture,
             MachineArchitecture::X86_64
         );
+        assert!(
+            config.artifacts.kernels["demo-kernel"].supports(
+                MachineArchitecture::X86_64,
+                ExecutionSubstrate::Firecracker,
+                ProtectionMode::Pvm
+            )
+        );
         assert_eq!(
             config.artifacts.guest_images["demo-guest"].variants[0]
                 .selector
                 .substrate,
             ExecutionSubstrate::Firecracker
         );
+        assert!(
+            config.artifacts.guest_images["demo-guest"].supports(
+                MachineArchitecture::X86_64,
+                ExecutionSubstrate::Firecracker,
+                ProtectionMode::Pvm
+            )
+        );
     }
 
     #[test]
-    fn artifact_compatibility_rejects_unsupported_pvm_lane() {
+    fn artifact_compatibility_supports_x86_pvm_and_rejects_arm64_pvm() {
         let config = PortConfig::sample();
+        let kernel = &config.artifacts.kernels["demo-kernel"];
         let guest = &config.artifacts.guest_images["demo-guest"];
 
+        assert!(kernel.supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Pvm
+        ));
+        assert!(guest.supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Pvm
+        ));
+        assert!(!kernel.supports(
+            MachineArchitecture::Aarch64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Pvm
+        ));
         assert!(guest.supports(
             MachineArchitecture::X86_64,
             ExecutionSubstrate::Firecracker,
             ProtectionMode::Standard
         ));
         assert!(!guest.supports(
-            MachineArchitecture::X86_64,
+            MachineArchitecture::Aarch64,
             ExecutionSubstrate::Firecracker,
             ProtectionMode::Pvm
         ));
@@ -2520,7 +2562,7 @@ mod tests {
                     ExecutionSubstrate::Firecracker,
                     ProtectionMode::Pvm
                 )
-                .is_none()
+                .is_some()
         );
     }
 }

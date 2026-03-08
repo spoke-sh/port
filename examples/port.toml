@@ -27,6 +27,14 @@ substrate = "firecracker"
 protection_mode = "standard"
 
 [[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[[artifacts.kernels.demo-kernel.variants]]
 path = "artifacts/kernel/demo/aarch64/firecracker/standard/vmlinux"
 
 [artifacts.kernels.demo-kernel.variants.selector]
@@ -61,6 +69,14 @@ path = "artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4"
 architecture = "x86_64"
 substrate = "firecracker"
 protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
 
 [[artifacts.guest_images.demo-guest.variants]]
 path = "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4"

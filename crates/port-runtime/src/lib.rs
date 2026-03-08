@@ -686,6 +686,22 @@ fn firecracker_local_launch_machine(
     }
     let resolved_architecture = resolve_machine_architecture(machine.architecture)?;
 
+    if machine.protection_mode == ProtectionMode::Pvm {
+        let lane_prefix = format!(
+            "pvm:{}:{}:",
+            machine.host,
+            architecture_dir(resolved_architecture)
+        );
+        let pvm_failures = local_pvm_lane_checks(&machine.host, host, &DoctorHostFacts::collect())
+            .into_iter()
+            .filter(|check| check.name.starts_with(&lane_prefix) && !check.ok)
+            .map(|check| format!("{}: {}", check.name, check.detail))
+            .collect::<Vec<_>>();
+        if !pvm_failures.is_empty() {
+            bail!("pvm host-kit preflight failed: {}", pvm_failures.join("; "));
+        }
+    }
+
     let report = collect_doctor_report(Some(config));
     let failures = report.blocking_failures();
     if !failures.is_empty() {
@@ -3913,14 +3929,15 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts, GuestCopyRequest,
-        GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
-        MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths, StopResult,
-        artifact_script, build_firecracker_config, collect_doctor_report,
-        collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
-        execute_guest_operation, launch_local_machine, list_machines, machine_monitor,
-        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
-        read_pid_file, repo_root, serve_control_plane, serve_node_agent, stop_machine,
+        ArtifactAction, ArtifactRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts,
+        GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata,
+        LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest,
+        RuntimePaths, StopResult, artifact_script, build_firecracker_config,
+        collect_doctor_report, collect_doctor_report_with_facts, copy_guest_file,
+        driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
+        machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, read_pid_file, repo_root, resolve_artifact_metadata,
+        serve_control_plane, serve_node_agent, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
@@ -3928,7 +3945,7 @@ mod tests {
     };
     use port_model::{
         ArtifactKind, ExecutionSubstrate, FirecrackerSupport, HostConnection, HostPlatform,
-        HostProvider, HostSpec, PortConfig,
+        HostProvider, HostSpec, MachineArchitecture, PortConfig,
     };
 
     fn sample_config_with_hosted_runtime_roots(root: &Path) -> PortConfig {
@@ -4204,6 +4221,44 @@ mod tests {
             artifact_script(ArtifactKind::GuestImage, ArtifactAction::Validate)
                 .expect("guest image validate script should resolve"),
             root.join("scripts/artifacts/validate-guest-image.sh")
+        );
+    }
+
+    #[test]
+    fn resolve_artifact_metadata_distinguishes_standard_and_pvm_paths() {
+        let config = PortConfig::sample();
+
+        let standard = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: port_model::ProtectionMode::Standard,
+            },
+        )
+        .expect("standard kernel metadata should resolve");
+        let pvm = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: port_model::ProtectionMode::Pvm,
+            },
+        )
+        .expect("pvm kernel metadata should resolve");
+
+        assert_ne!(standard.path, pvm.path);
+        assert_eq!(
+            pvm.path,
+            PathBuf::from("artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux")
+        );
+        assert_eq!(
+            pvm.cache_path,
+            PathBuf::from(
+                ".port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/pvm/vmlinux"
+            )
         );
     }
 
@@ -4986,7 +5041,7 @@ mod tests {
     }
 
     #[test]
-    fn launch_rejects_unsupported_pvm_artifact_contract() {
+    fn launch_rejects_pvm_host_kit_when_runtime_is_not_prepared() {
         let mut config = PortConfig::sample();
         config
             .machines
@@ -5003,11 +5058,12 @@ mod tests {
                 boot_wait: Duration::from_secs(0),
             },
         )
-        .expect_err("launch should reject an unsupported PVM artifact contract");
+        .expect_err("launch should reject an unprepared PVM host kit");
 
         let message = error.to_string();
-        assert!(message.contains("machine contract failed"));
-        assert!(message.contains("not compatible"));
+        assert!(message.contains("pvm host-kit preflight failed"));
+        assert!(message.contains("pti=off"));
+        assert!(message.contains("firecracker-pvm"));
     }
 
     #[test]

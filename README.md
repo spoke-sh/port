@@ -439,13 +439,18 @@ Artifact contracts:
 - `demo-kernel` fetches a pinned Firecracker-compatible kernel from the official
   Firecracker CI bucket and validates its architecture-specific sha256 digest.
   In the sample model, the native build lands at
-  `artifacts/kernel/demo/<architecture>/firecracker/standard/vmlinux`.
+  `artifacts/kernel/demo/<architecture>/firecracker/standard/vmlinux`, and the
+  PVM foundation lane additionally materializes
+  `artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux`.
 - `demo-guest` builds a deterministic ext4 rootfs containing BusyBox userspace,
   `/init`, and the `port-guest-agent` binary. The guest init path reads
   `port.guest_control_port` from the kernel cmdline and launches the guest
   agent on that vsock port, then validates the filesystem layout with `e2fsck`
   and `debugfs`. Its native output lands at
-  `artifacts/guest/demo/<architecture>/firecracker/standard/rootfs.ext4`.
+  `artifacts/guest/demo/<architecture>/firecracker/standard/rootfs.ext4`, and
+  the PVM foundation lane additionally materializes
+  `artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4` with explicit
+  protection-mode markers.
 - The sample config uses a file-backed store at `artifact-store/demo-fs/` and a
   cache root at `.port/cache/`. `push` writes the selected variant into that
   store and warms the cache; `pull` restores the selected variant from the

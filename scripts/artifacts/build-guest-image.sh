@@ -10,6 +10,29 @@ output_path="$1"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+case "$output_path" in
+  */x86_64/firecracker/standard/*)
+    guest_architecture="x86_64"
+    protection_mode="standard"
+    ;;
+  */x86_64/firecracker/pvm/*)
+    guest_architecture="x86_64"
+    protection_mode="pvm"
+    ;;
+  */aarch64/firecracker/standard/*)
+    guest_architecture="aarch64"
+    protection_mode="standard"
+    ;;
+  */aarch64/firecracker/pvm/*)
+    echo "aarch64/firecracker/pvm remains research-only and has no guest-image build pipeline yet" >&2
+    exit 1
+    ;;
+  *)
+    echo "unsupported artifact selector for demo guest-image pipeline: $output_path" >&2
+    exit 1
+    ;;
+esac
+
 for tool in busybox cargo e2fsck ldd mkfs.ext4; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "missing required tool for guest image build: $tool" >&2
@@ -61,6 +84,9 @@ cat >"$staging_dir/etc/passwd" <<'EOF'
 root:x:0:0:root:/root:/bin/sh
 EOF
 
+printf '%s\n' "$guest_architecture" >"$staging_dir/etc/port-guest-architecture"
+printf '%s\n' "$protection_mode" >"$staging_dir/etc/port-protection-mode"
+
 cargo build -p port-guest-agent --release
 
 copy_binary_with_libs \
@@ -100,6 +126,8 @@ done
 
 echo "port guest image booted" >/dev/console
 echo "port guest image booted" >>/var/log/port-agent.log
+echo "port protection mode: ${protection_mode}" >/dev/console
+echo "port protection mode: ${protection_mode}" >>/var/log/port-agent.log
 /usr/bin/port-guest-agent --socket /run/port/guest-agent.sock --vsock-port "$guest_control_port" --root / >>/var/log/port-agent.log 2>&1 &
 echo "port-guest-agent launched on vsock port $guest_control_port" >/dev/console
 echo "port-guest-agent launched on vsock port $guest_control_port" >>/var/log/port-agent.log
@@ -117,4 +145,6 @@ install -m 0644 "$image_path" "$output_path"
 e2fsck -fn "$output_path" >/dev/null
 
 printf 'guest image artifact: %s\n' "$output_path"
+printf 'guest image architecture: %s\n' "$guest_architecture"
+printf 'guest image protection mode: %s\n' "$protection_mode"
 printf 'guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent\n'

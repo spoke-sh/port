@@ -55,9 +55,10 @@ Current runtime boundary:
 
 - the demo build and validate pipelines only run for the native host
   architecture
-- the sample config only ships Firecracker/standard variants
-- the future Firecracker/PVM lane requires a separate artifact kit rather than
-  reusing those `standard` variants
+- the sample config ships Firecracker/standard variants plus
+  `x86_64/firecracker/pvm` kernel and guest-image variants
+- `aarch64/firecracker/pvm` remains research-only and fails fast in the
+  build/validate scripts
 - push/pull are already variant-aware even when the selected variant is
   published or fetched on another host
 
@@ -67,8 +68,12 @@ The sample config points at deterministic local output paths:
 
 - kernel:
   `artifacts/kernel/demo/<architecture>/firecracker/standard/vmlinux`
+- kernel PVM:
+  `artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux`
 - guest image:
   `artifacts/guest/demo/<architecture>/firecracker/standard/rootfs.ext4`
+- guest image PVM:
+  `artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4`
 
 The file-backed store layout is similarly deterministic:
 
@@ -99,6 +104,11 @@ For `demo-kernel` on `x86_64/firecracker/standard`, that becomes:
 - Validation:
   sha256 check against the pinned architecture-specific digest and a non-zero
   file size check
+- PVM note:
+  the current `x86_64/firecracker/pvm` kernel variant is materialized as its
+  own selector/path and validation lane, but it is still seeded from the same
+  pinned Firecracker CI demo kernel while the real PVM host-kit/runtime path is
+  under construction
 
 ## Guest Image Artifact
 
@@ -117,11 +127,15 @@ For `demo-kernel` on `x86_64/firecracker/standard`, that becomes:
   `e2fsck -fn` for filesystem integrity plus `debugfs` checks that `/init`,
   `/bin/busybox`, and `/usr/bin/port-guest-agent` exist and that `/init`
   launches `port-guest-agent`
+- PVM note:
+  the `x86_64/firecracker/pvm` guest-image variant carries explicit
+  `/etc/port-protection-mode` and `/etc/port-guest-architecture` markers so
+  validation can distinguish it from the standard Firecracker lane
 
-## Future PVM Artifact Kit
+## PVM Artifact Kit
 
-Port's future Firecracker/PVM lane is not a metadata-only variation of the
-standard artifacts.
+Port's Firecracker/PVM lane is not a metadata-only variation of the standard
+artifacts.
 
 Required contract:
 
@@ -130,7 +144,9 @@ Required contract:
 - dedicated validation for those PVM variants
 - no silent fallback to `standard` artifacts
 
-The full host-kit and artifact-kit contract for that lane lives in
+The current foundation slice materializes those `x86_64` PVM selectors and
+keeps `aarch64` as research-only. The full host-kit and artifact-kit contract
+for that lane lives in
 [`pvm.md`](pvm.md).
 
 ## Operator Notes
