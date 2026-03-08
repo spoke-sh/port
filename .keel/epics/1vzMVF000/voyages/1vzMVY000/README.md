@@ -25,12 +25,12 @@ started_at: 2026-03-08T15:26:05
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/5 stories complete
+**Progress:** 1/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Publish Streamed Guest Workflow Surface](../../../../stories/1vzMXM000/README.md) | feat | backlog |
-| [Define Streamed Guest Session Contract](../../../../stories/1vzMXN000/README.md) | feat | backlog |
+| [Define Streamed Guest Session Contract](../../../../stories/1vzMXN000/README.md) | feat | done |
 | [Implement Streamed Pty And Log Follow](../../../../stories/1vzMXo000/README.md) | feat | backlog |
 | [Implement Hosted Streamed Copy Transport](../../../../stories/1vzMXy000/README.md) | feat | backlog |
 | [Implement Hosted Streamed Forward Transport](../../../../stories/1vzMY2000/README.md) | feat | backlog |

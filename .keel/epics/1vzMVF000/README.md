@@ -19,8 +19,8 @@ created_at: 2026-03-08T15:21:37
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/5 stories done
+**Progress:** 0/1 voyages complete, 1/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Streamed Guest Control Transport](voyages/1vzMVY000/) | in-progress | 0/5 |
+| [Streamed Guest Control Transport](voyages/1vzMVY000/) | in-progress | 1/5 |
 <!-- END GENERATED -->

@@ -2,11 +2,12 @@
 id: 1vzMXN000
 title: Define Streamed Guest Session Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T15:23:49
-updated_at: 2026-03-08T15:26:48
+updated_at: 2026-03-08T15:40:14
 scope: 1vzMVF000/1vzMVY000
 started_at: 2026-03-08T15:26:48
+completed_at: 2026-03-08T15:40:14
 ---
 
 # Define Streamed Guest Session Contract
