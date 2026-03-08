@@ -25,12 +25,12 @@ started_at: 2026-03-08T06:51:29
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/5 stories complete
+**Progress:** 1/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Publish Hosted Demo Workflow And Evidence](../../../../stories/1vzEVX000/README.md) | feat | backlog |
-| [Define Hosted HTTP Control Contracts](../../../../stories/1vzEVi000/README.md) | feat | backlog |
+| [Define Hosted HTTP Control Contracts](../../../../stories/1vzEVi000/README.md) | feat | done |
 | [Implement Node Agent Serve Path](../../../../stories/1vzEVk000/README.md) | feat | backlog |
 | [Implement Control Plane Serve Path](../../../../stories/1vzEVm000/README.md) | feat | backlog |
 | [Route Hosted CLI And SDK Through Live Transport](../../../../stories/1vzEVo000/README.md) | feat | backlog |

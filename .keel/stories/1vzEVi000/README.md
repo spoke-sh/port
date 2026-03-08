@@ -2,11 +2,13 @@
 id: 1vzEVi000
 title: Define Hosted HTTP Control Contracts
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T06:49:34
-updated_at: 2026-03-08T06:51:48
+updated_at: 2026-03-08T06:56:40
 scope: 1vzETR000/1vzETX000
 started_at: 2026-03-08T06:51:48
+submitted_at: 2026-03-08T06:56:38
+completed_at: 2026-03-08T06:56:40
 ---
 
 # Define Hosted HTTP Control Contracts
