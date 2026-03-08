@@ -10,9 +10,8 @@ use port_agent_protocol::{
 };
 use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode};
 use port_runtime::{
-    ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest,
-    GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchRequest,
-    NodeAgentServeRequest,
+    ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
+    GuestRequest, HostedNodeBinding, LaunchRequest, NodeAgentServeRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -75,14 +74,20 @@ Hosted Control:
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
   Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
   `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root.
+  Hosted demo flow:
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'`
   Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
   Demo control-plane servers bind explicit node-agent endpoints with `--node-binding <node>=<endpoint>,<token>`.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
   `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
-  Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
-  This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
+  Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
+  Hosted `guest copy` in the single-node demo still assumes the referenced host paths are visible on the node host; streamed remote file transport remains follow-on work.
+  Hosted `guest forward` still uses the repo-local guest transport lane for its listener lifecycle while streamed hosted forwarding remains follow-on work.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
   `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
 Service Control:

@@ -23,9 +23,10 @@ use tokio::net::TcpListener;
 
 use crate::{
     GuestCopyRequest, GuestForwardRequest, GuestRequest, MachineRuntimeState, MachineStatus,
-    RuntimePaths, copy_guest_file, execute_guest_operation, hosted_placeholder_runtime_root,
-    machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
-    machine_top as runtime_machine_top, prepare_guest_forward, stop_machine as runtime_stop_machine,
+    RuntimePaths, StopResult, copy_guest_file, execute_guest_operation,
+    hosted_placeholder_runtime_root, machine_monitor as runtime_machine_monitor,
+    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
+    prepare_guest_forward, stop_machine as runtime_stop_machine,
 };
 use port_agent_protocol::{ForwardResult, GuestOperation, OperationResult};
 
@@ -74,6 +75,58 @@ struct NodeAgentStateInner {
     node_name: String,
     runtime_root: std::path::PathBuf,
     token: String,
+}
+
+trait HostedMachineProjection {
+    fn apply_hosted_route(self, route: &HostedRouteContext) -> Self;
+}
+
+impl HostedMachineProjection for MachineStatus {
+    fn apply_hosted_route(mut self, route: &HostedRouteContext) -> Self {
+        self.control = port_model::MachineControlContract::hosted_control_plane();
+        self.detail = append_route_detail(self.detail, route);
+        self
+    }
+}
+
+impl HostedMachineProjection for StopResult {
+    fn apply_hosted_route(mut self, route: &HostedRouteContext) -> Self {
+        self.control = port_model::MachineControlContract::hosted_control_plane();
+        self.detail = append_route_detail(self.detail, route);
+        self
+    }
+}
+
+impl HostedMachineProjection for crate::MachineMonitorReport {
+    fn apply_hosted_route(mut self, route: &HostedRouteContext) -> Self {
+        self.control = port_model::MachineControlContract::hosted_control_plane();
+        self.control_plane = route.control_plane.clone();
+        self.node_name = route.node_name.clone();
+        self.host_groups = route.host_groups.clone();
+        self.detail = append_route_detail(self.detail, route);
+        self
+    }
+}
+
+impl HostedMachineProjection for crate::MachineTopReport {
+    fn apply_hosted_route(mut self, route: &HostedRouteContext) -> Self {
+        self.control = port_model::MachineControlContract::hosted_control_plane();
+        self.control_plane = route.control_plane.clone();
+        self.node_name = route.node_name.clone();
+        self.host_groups = route.host_groups.clone();
+        self.detail = append_route_detail(self.detail, route);
+        self
+    }
+}
+
+fn append_route_detail(detail: String, route: &HostedRouteContext) -> String {
+    let Some(control_plane) = route.control_plane.as_deref() else {
+        return detail;
+    };
+    let Some(node_name) = route.node_name.as_deref() else {
+        return detail;
+    };
+    format!("{detail} Routed through control plane '{control_plane}' and node '{node_name}'.")
 }
 
 pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest) -> Result<()> {
@@ -646,11 +699,19 @@ pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> R
     })
 }
 
-fn build_node_agent_state(config: PortConfig, request: NodeAgentServeRequest) -> Result<NodeAgentState> {
+fn build_node_agent_state(
+    config: PortConfig,
+    request: NodeAgentServeRequest,
+) -> Result<NodeAgentState> {
     let runtime_root = config
         .nodes
         .get(&request.node_name)
-        .with_context(|| format!("unknown hosted node '{}' for node-agent serve", request.node_name))?
+        .with_context(|| {
+            format!(
+                "unknown hosted node '{}' for node-agent serve",
+                request.node_name
+            )
+        })?
         .runtime_root
         .clone();
 
@@ -670,13 +731,31 @@ fn node_agent_router(state: NodeAgentState) -> Router {
             "/v1/node/machines/{machine}",
             get(node_machine_status).post(node_machine_stop),
         )
-        .route("/v1/node/machines/{machine}/monitor", get(node_machine_monitor))
+        .route(
+            "/v1/node/machines/{machine}/monitor",
+            get(node_machine_monitor),
+        )
         .route("/v1/node/machines/{machine}/top", get(node_machine_top))
-        .route("/v1/node/machines/{machine}/guest:exec", post(node_guest_exec))
-        .route("/v1/node/machines/{machine}/guest:copy", post(node_guest_copy))
-        .route("/v1/node/machines/{machine}/guest:pty", post(node_guest_pty))
-        .route("/v1/node/machines/{machine}/guest:logs", post(node_guest_logs))
-        .route("/v1/node/machines/{machine}/guest:forward", post(node_guest_forward))
+        .route(
+            "/v1/node/machines/{machine}/guest:exec",
+            post(node_guest_exec),
+        )
+        .route(
+            "/v1/node/machines/{machine}/guest:copy",
+            post(node_guest_copy),
+        )
+        .route(
+            "/v1/node/machines/{machine}/guest:pty",
+            post(node_guest_pty),
+        )
+        .route(
+            "/v1/node/machines/{machine}/guest:logs",
+            post(node_guest_logs),
+        )
+        .route(
+            "/v1/node/machines/{machine}/guest:forward",
+            post(node_guest_forward),
+        )
         .with_state(state)
 }
 
@@ -685,9 +764,14 @@ async fn node_machine_status(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    node_machine_response(&state, &headers, &machine, |config, runtime_root, machine_name| {
-        runtime_machine_status(config, runtime_root, machine_name)
-    })
+    node_machine_response(
+        &state,
+        &headers,
+        &machine,
+        |config, runtime_root, machine_name| {
+            runtime_machine_status(config, runtime_root, machine_name)
+        },
+    )
 }
 
 async fn node_machine_monitor(
@@ -695,9 +779,14 @@ async fn node_machine_monitor(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    node_machine_response(&state, &headers, &machine, |config, runtime_root, machine_name| {
-        runtime_machine_monitor(config, runtime_root, machine_name)
-    })
+    node_machine_response(
+        &state,
+        &headers,
+        &machine,
+        |config, runtime_root, machine_name| {
+            runtime_machine_monitor(config, runtime_root, machine_name)
+        },
+    )
 }
 
 async fn node_machine_top(
@@ -705,9 +794,14 @@ async fn node_machine_top(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    node_machine_response(&state, &headers, &machine, |config, runtime_root, machine_name| {
-        runtime_machine_top(config, runtime_root, machine_name)
-    })
+    node_machine_response(
+        &state,
+        &headers,
+        &machine,
+        |config, runtime_root, machine_name| {
+            runtime_machine_top(config, runtime_root, machine_name)
+        },
+    )
 }
 
 async fn node_machine_stop(
@@ -726,9 +820,14 @@ async fn node_machine_stop(
         );
     };
 
-    node_machine_response(&state, &headers, machine_name, |config, runtime_root, machine_name| {
-        runtime_stop_machine(config, runtime_root, machine_name, Duration::from_secs(3))
-    })
+    node_machine_response(
+        &state,
+        &headers,
+        machine_name,
+        |config, runtime_root, machine_name| {
+            runtime_stop_machine(config, runtime_root, machine_name, Duration::from_secs(3))
+        },
+    )
 }
 
 async fn node_guest_exec(
@@ -803,8 +902,16 @@ fn node_route_context(state: &NodeAgentState, machine_name: Option<String>) -> H
     }
 }
 
-fn node_agent_error(state: &NodeAgentState, machine_name: Option<String>, message: String) -> Response {
-    error_response(StatusCode::BAD_GATEWAY, message, Some(node_route_context(state, machine_name)))
+fn node_agent_error(
+    state: &NodeAgentState,
+    machine_name: Option<String>,
+    message: String,
+) -> Response {
+    error_response(
+        StatusCode::BAD_GATEWAY,
+        message,
+        Some(node_route_context(state, machine_name)),
+    )
 }
 
 fn localize_machine_for_node(
@@ -884,7 +991,7 @@ fn node_machine_response<T, F>(
     operation: F,
 ) -> Response
 where
-    T: Serialize,
+    T: Serialize + HostedMachineProjection,
     F: FnOnce(&PortConfig, &std::path::Path, &str) -> Result<T>,
 {
     if let Some(response) = node_authorize(state, headers) {
@@ -897,7 +1004,13 @@ where
     };
 
     match operation(&localized, &state.inner.runtime_root, machine_name) {
-        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Ok(result) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: route.clone(),
+                result: result.apply_hosted_route(&route),
+            },
+        ),
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
@@ -925,7 +1038,10 @@ fn node_guest_operation_response(
         Err(error) => {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                format!("node '{}' received invalid guest JSON: {error}", state.inner.node_name),
+                format!(
+                    "node '{}' received invalid guest JSON: {error}",
+                    state.inner.node_name
+                ),
                 Some(node_route_context(state, Some(machine_name.to_string()))),
             );
         }
@@ -1008,8 +1124,8 @@ mod tests {
         ResponseEnvelope, read_frame, write_frame,
     };
     use std::io::BufReader;
-    use std::os::unix::net::UnixListener;
     use std::net::SocketAddr;
+    use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
@@ -1224,10 +1340,15 @@ mod tests {
         let status_body: HostedSuccess<MachineStatus> =
             status.json().await.expect("status body should decode");
         assert_eq!(status_body.result.machine_name, "cloud-aws");
-        assert_eq!(status_body.route.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            status_body.route.node_name.as_deref(),
+            Some("aws-linux-node")
+        );
 
         let guest = client
-            .post(format!("http://{node_addr}/v1/node/machines/cloud-aws/guest:exec"))
+            .post(format!(
+                "http://{node_addr}/v1/node/machines/cloud-aws/guest:exec"
+            ))
             .header("x-port-node-agent-token", "node-secret")
             .header(CONTENT_TYPE, "application/json")
             .body(
@@ -1259,7 +1380,9 @@ mod tests {
         let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
 
         let response = Client::new()
-            .post(format!("http://{node_addr}/v1/node/machines/cloud-aws/guest:exec"))
+            .post(format!(
+                "http://{node_addr}/v1/node/machines/cloud-aws/guest:exec"
+            ))
             .header("x-port-node-agent-token", "node-secret")
             .header(CONTENT_TYPE, "application/json")
             .body(

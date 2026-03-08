@@ -1,6 +1,7 @@
 use std::fs;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -15,6 +16,44 @@ fn write_config(path: &Path, config: &PortConfig) {
 
 fn port_bin() -> &'static str {
     env!("CARGO_BIN_EXE_port")
+}
+
+fn reserve_addr() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("port should bind");
+    let addr = listener.local_addr().expect("addr should exist");
+    drop(listener);
+    addr.to_string()
+}
+
+fn wait_for_tcp(addr: &str) {
+    for _ in 0..100 {
+        if TcpStream::connect(addr).is_ok() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for tcp listener at '{addr}'");
+}
+
+#[derive(Debug)]
+struct ChildGuard {
+    child: Child,
+}
+
+impl ChildGuard {
+    fn spawn(name: &'static str, mut command: Command) -> Self {
+        let child = command.spawn().unwrap_or_else(|error| {
+            panic!("failed to spawn {name}: {error}");
+        });
+        Self { child }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 fn hosted_config(runtime_root: &Path) -> PortConfig {
@@ -88,8 +127,25 @@ fn write_forward_manifest(
 fn cli_machine_monitor_reports_hosted_runtime_context() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
-    let config_path = temp.path().join("port.toml");
-    write_config(&config_path, &hosted_config(&hosted_runtime_root));
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root.clone();
+    write_config(&client_config_path, &client_config);
     let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
 
     let mut command = Command::new("bash");
@@ -112,9 +168,47 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
         "127.0.0.1:80",
     );
 
-    let output = Command::new(port_bin())
+    let mut node_command = Command::new(port_bin());
+    node_command
         .arg("--config")
-        .arg(&config_path)
+        .arg(&server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(&node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(&node_addr);
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .arg("--node-binding")
+        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
         .arg("machine")
         .arg("monitor")
         .arg("--machine")
@@ -143,8 +237,25 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
 fn cli_machine_top_reports_hypervisor_and_forward_entries() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
-    let config_path = temp.path().join("port.toml");
-    write_config(&config_path, &hosted_config(&hosted_runtime_root));
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root.clone();
+    write_config(&client_config_path, &client_config);
 
     let runtime_dir = hosted_runtime_root.join("cloud-aws");
     fs::create_dir_all(&runtime_dir).expect("runtime dir should exist");
@@ -190,9 +301,47 @@ fn cli_machine_top_reports_hypervisor_and_forward_entries() {
         "127.0.0.1:80",
     );
 
-    let output = Command::new(port_bin())
+    let mut node_command = Command::new(port_bin());
+    node_command
         .arg("--config")
-        .arg(&config_path)
+        .arg(&server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(&node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(&node_addr);
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .arg("--node-binding")
+        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
         .arg("machine")
         .arg("top")
         .arg("--machine")

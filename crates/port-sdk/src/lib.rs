@@ -1,15 +1,20 @@
 use std::collections::BTreeMap;
+use std::env;
 
 use anyhow::{Context, Result};
 use port_agent_protocol::{
     CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, PtyRequest,
 };
 use port_hosted_protocol::{
-    HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestVerb,
-    HostedMachineRoute, HostedServiceRoute,
+    HostedClientHeaders, HostedControlPlaneRoute, HostedError, HostedGuestRoute, HostedGuestVerb,
+    HostedMachineRoute, HostedRouteContext, HostedServiceRoute,
 };
-use port_model::{HostedApiIdentityContract, PortConfig};
+use port_model::{
+    HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
+};
+use reqwest::blocking::Client as BlockingClient;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -76,6 +81,37 @@ impl HostedClient {
         Ok(Self::from_identity(contract, token.into()))
     }
 
+    pub fn from_machine_env(config: &PortConfig, machine_name: &str) -> Result<Self> {
+        let contract = config
+            .hosted_api_identity_contract(machine_name)?
+            .with_context(|| {
+                format!(
+                    "machine '{}' does not target a hosted control plane",
+                    machine_name
+                )
+            })?;
+        let token = token_from_source(&contract.auth.source)?;
+        Ok(Self::from_identity(contract, token))
+    }
+
+    pub fn from_control_plane_env(config: &PortConfig, control_plane_name: &str) -> Result<Self> {
+        let control_plane = config
+            .control_planes
+            .get(control_plane_name)
+            .with_context(|| format!("unknown control plane '{}'", control_plane_name))?;
+        let token = token_from_source(&control_plane.auth.source)?;
+        Ok(Self::from_identity(
+            HostedApiIdentityContract {
+                control_plane: control_plane_name.to_string(),
+                endpoint: control_plane.endpoint.clone(),
+                audience: control_plane.audience.clone(),
+                auth: control_plane.auth.clone(),
+                route: MachineCommandRoute::HostedControlPlane,
+            },
+            token,
+        ))
+    }
+
     #[must_use]
     pub fn machines(&self) -> MachineClient<'_> {
         MachineClient { client: self }
@@ -89,6 +125,71 @@ impl HostedClient {
     #[must_use]
     pub fn services(&self) -> ServiceClient<'_> {
         ServiceClient { client: self }
+    }
+
+    pub fn execute_json<T>(&self, request: HostedApiRequest) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
+        let client = BlockingClient::builder()
+            .build()
+            .context("failed to build hosted HTTP client")?;
+        let method = match request.method {
+            HttpMethod::Get => reqwest::Method::GET,
+            HttpMethod::Post => reqwest::Method::POST,
+            HttpMethod::Put => reqwest::Method::PUT,
+            HttpMethod::Delete => reqwest::Method::DELETE,
+        };
+
+        let mut builder = client.request(method.clone(), &request.url);
+        for (name, value) in &request.headers {
+            builder = builder.header(name, value);
+        }
+        if let Some(body) = &request.body {
+            builder = builder.json(body);
+        }
+
+        let response = builder.send().with_context(|| {
+            format!(
+                "failed to send hosted request {} {}",
+                request.method, request.url
+            )
+        })?;
+        let status = response.status();
+        if status.is_success() {
+            return response.json::<T>().with_context(|| {
+                format!(
+                    "failed to decode hosted response body for {} {}",
+                    request.method, request.url
+                )
+            });
+        }
+
+        let fallback = status
+            .canonical_reason()
+            .unwrap_or("unknown error")
+            .to_string();
+        match response.json::<HostedError>() {
+            Ok(error) => {
+                anyhow::bail!(
+                    "hosted request {} {} failed with {}: {}{}",
+                    request.method,
+                    request.url,
+                    status,
+                    error.message,
+                    render_route_context(error.route.as_ref()),
+                );
+            }
+            Err(_) => {
+                anyhow::bail!(
+                    "hosted request {} {} failed with {}: {}",
+                    request.method,
+                    request.url,
+                    status,
+                    fallback,
+                );
+            }
+        }
     }
 
     fn from_identity(contract: HostedApiIdentityContract, token: String) -> Self {
@@ -120,6 +221,42 @@ impl HostedClient {
             headers,
             body,
         }
+    }
+}
+
+fn token_from_source(source: &HostedAuthTokenSource) -> Result<String> {
+    match source {
+        HostedAuthTokenSource::Env { variable } => env::var(variable).with_context(|| {
+            format!(
+                "hosted auth token is missing from environment variable '{}'",
+                variable
+            )
+        }),
+    }
+}
+
+fn render_route_context(route: Option<&HostedRouteContext>) -> String {
+    let Some(route) = route else {
+        return String::new();
+    };
+
+    let mut parts = Vec::new();
+    if let Some(control_plane) = &route.control_plane {
+        parts.push(format!("control-plane={control_plane}"));
+    }
+    if let Some(machine_name) = &route.machine_name {
+        parts.push(format!("machine={machine_name}"));
+    }
+    if let Some(node_name) = &route.node_name {
+        parts.push(format!("node={node_name}"));
+    }
+    if let Some(runtime_root) = &route.runtime_root {
+        parts.push(format!("runtime-root={}", runtime_root.display()));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", parts.join(" "))
     }
 }
 
@@ -357,14 +494,52 @@ impl<'a> ServiceClient<'a> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-
-    use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest};
-    use port_hosted_protocol::PORT_AUDIENCE_HEADER;
+    use std::net::{TcpListener as StdTcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::Duration;
 
     use super::{
         HostedClient, HttpMethod, SecretPutRequest, ServiceApplyRequest, ServiceClient,
         ServiceKind, ServiceSecretBinding,
     };
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest};
+    use port_hosted_protocol::{
+        HostedError, HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
+    };
+    use serde_json::json;
+
+    fn serve_router(router: Router) -> String {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should become nonblocking");
+
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            runtime.block_on(async move {
+                let listener =
+                    tokio::net::TcpListener::from_std(listener).expect("listener should convert");
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        for _ in 0..100 {
+            if TcpStream::connect(addr).is_ok() {
+                return format!("http://{addr}");
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("timed out waiting for test server at '{addr}'");
+    }
 
     #[test]
     fn client_from_machine_uses_hosted_identity_contract() {
@@ -502,5 +677,99 @@ mod tests {
             client.services().stop("cloud-aws", "api").url,
             "https://port.example.internal/v1/machines/cloud-aws/services/api:stop"
         );
+    }
+
+    #[test]
+    fn hosted_client_executes_live_machine_requests() {
+        #[derive(Clone)]
+        struct AppState {
+            headers: Arc<Mutex<Vec<String>>>,
+        }
+
+        async fn status_handler(
+            State(state): State<AppState>,
+            headers: HeaderMap,
+        ) -> Json<HostedSuccess<serde_json::Value>> {
+            state.headers.lock().expect("headers lock").push(
+                headers
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(String::from("cloud-aws")),
+                    ..HostedRouteContext::default()
+                },
+                result: json!({
+                    "machine_name": "cloud-aws",
+                    "state": "stopped",
+                }),
+            })
+        }
+
+        let state = AppState {
+            headers: Arc::new(Mutex::new(Vec::new())),
+        };
+        let observed = state.headers.clone();
+        let endpoint = serve_router(
+            Router::new()
+                .route("/v1/machines/cloud-aws", get(status_handler))
+                .with_state(state),
+        );
+
+        let client = HostedClient::new(
+            endpoint,
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let response: HostedSuccess<serde_json::Value> = client
+            .execute_json(client.machines().status("cloud-aws"))
+            .expect("request should succeed");
+
+        assert_eq!(response.result["machine_name"], "cloud-aws");
+        assert_eq!(
+            observed.lock().expect("headers lock").as_slice(),
+            &[String::from("Bearer demo-token")]
+        );
+    }
+
+    #[test]
+    fn hosted_client_surfaces_route_context_from_live_errors() {
+        async fn error_handler() -> (StatusCode, Json<HostedError>) {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(HostedError {
+                    route: Some(HostedRouteContext {
+                        control_plane: Some(String::from("demo")),
+                        machine_name: Some(String::from("cloud-aws")),
+                        node_name: Some(String::from("aws-linux-node")),
+                        ..HostedRouteContext::default()
+                    }),
+                    message: String::from("node agent is unavailable"),
+                }),
+            )
+        }
+
+        let endpoint =
+            serve_router(Router::new().route("/v1/machines/cloud-aws", get(error_handler)));
+
+        let client = HostedClient::new(
+            endpoint,
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let error = client
+            .execute_json::<HostedSuccess<serde_json::Value>>(client.machines().status("cloud-aws"))
+            .expect_err("request should fail");
+        let message = error.to_string();
+        assert!(message.contains("node agent is unavailable"));
+        assert!(message.contains("control-plane=demo"));
+        assert!(message.contains("machine=cloud-aws"));
+        assert!(message.contains("node=aws-linux-node"));
     }
 }

@@ -261,29 +261,26 @@ What is runnable today:
 - local `port machine list`, `status`, `monitor`, `top`, and `stop` inspect
   and manage Port-managed runtime directories on Linux
 - hosted `machine list`, `status`, `monitor`, `top`, and `stop` now resolve
-  through the hosted control-plane contract plus the configured node
-  `runtime_root`
-- this first hosted runtime slice is config-backed and in-process: Port
-  resolves hosted ownership from the control-plane and node inventory model,
-  then inspects, monitors, or stops machine state through the selected
-  node-agent runtime root
+  through the live hosted HTTP path:
+  CLI/SDK -> `port control-plane serve` -> `port node-agent serve`
 - hosted machines with unresolved inventory, such as a host without a matching
-  node runtime binding, surface as `malformed` so the control-plane mismatch is
-  explicit to the operator
+  node runtime binding, fail with explicit hosted route context so the
+  control-plane mismatch is visible to the operator
 - hosted `machine monitor` currently reports runtime-owner context, log and
   manifest paths, and detached forward state from the selected node runtime
   root
 - hosted `machine top` currently reports the hypervisor process plus any
   detached forward processes Port recorded under that node runtime root
-- hosted `guest exec`, `copy`, `pty`, `logs`, and `forward` now resolve through
-  the hosted control-plane contract plus the configured node `runtime_root`
-- this first hosted guest-runtime slice is also config-backed and in-process:
-  Port resolves hosted ownership from the control-plane and node inventory
-  model, then attaches to the node-agent runtime root's host-local guest
-  transport instead of inventing hosted-only guest verbs
+- hosted `guest exec`, `copy`, `pty`, and `logs` now execute through that same
+  live hosted HTTP path while preserving the existing guest protocol payloads
 - hosted guest attach failures surface the control plane and node-routing
   context directly, so missing guest sockets or unresolved hosted node
   ownership stay visible to the operator
+- hosted `guest copy` in the single-node demo still assumes the referenced
+  host paths are visible on the node host; streamed remote file transport
+  remains follow-on work
+- hosted `guest forward` still keeps its listener lifecycle on the repo-local
+  guest transport lane while streamed hosted forwarding remains follow-on work
 - hosted `service secret put|list|remove` now stores machine-scoped secret
   references under the resolved runtime owner instead of inventing a separate
   hosted secret store
@@ -364,18 +361,16 @@ That means hosted Port still uses the same guest-operation model for `exec`,
 `copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
 stream.
 
-Hosted `guest forward` also keeps the same command family while extending the
-surface with detached lifecycle management and Unix-socket listeners. The
-control-plane and node-agent runtime path stays the same; only the host-side
-forward listener and lifecycle ownership broaden.
+Hosted `guest forward` keeps the same command family, but the first live hosted
+lane does not yet stream that listener lifecycle over the hosted HTTP path.
+Foreground and detached listener management still depend on the repo-local
+guest transport implementation.
 
 What still remains after this runtime slice:
 
-- the `port-sdk` crate now ships the supported typed client surface for those
-  hosted verbs
-- what still remains after that publication is a real transport, response
-  decoding, retries, and advanced auth/tenancy work on top of the same API
-  paths
+- retries and richer client policies on top of the shipped transport
+- streamed hosted file transfer and hosted forward lifecycle transport
+- advanced auth/tenancy work on top of the same API paths
 
 ## Hosted API Shape
 
@@ -399,26 +394,23 @@ publishes the request surface through `port-sdk`. The contract mirrors the CLI:
 
 Those verbs are the hosted counterpart of today's local runtime calls and
 should remain substrate-aware without becoming Firecracker-specific API names.
-`port-sdk` builds typed request objects for these paths today, while the actual
-remote transport remains a follow-on slice.
+`port-sdk` now builds and executes typed requests for these paths while reusing
+the shared route and auth contract from `port-hosted-protocol`.
 
 ## Current Boundary
 
-- Port does not ship a hosted daemon or control plane yet.
-- hosted `machine list`, `status`, `monitor`, `top`, and `stop` are currently
-  config-backed and in-process; they inspect the selected node `runtime_root`
-  rather than reaching a real remote control plane.
+- Port now ships a repository-local hosted daemon pair for the single-node demo
+  lane: `port control-plane serve` and `port node-agent serve`.
 - hosted `service secret` and `service apply|list|status|stop` are also
   config-backed and in-process; they persist spec state under the selected node
   `runtime_root` rather than materializing real hosted execution yet.
-- `port-sdk` now ships the supported typed client entry points for machine,
-  guest, and service operations, but it currently stops at request
-  construction instead of performing network transport.
+- `port-sdk` now ships the supported typed client entry points plus live JSON
+  execution for machine, guest, and service operations.
 - Those commands already report the control-contract fields above so the
   operator-visible lifecycle vocabulary does not need to change when the real
   hosted routing lands.
 - Remote Linux providers are modeled and diagnosed, but remote launch remains a
   designed boundary rather than a shipped orchestration path.
-- The hosted contract is now executable through the canonical CLI and mirrored
-  by the request-builder SDK, even though the real hosted control plane still
-  remains a planned runtime boundary.
+- The hosted contract is executable through the canonical CLI and mirrored by
+  the SDK, but the shipped lane is still explicitly a repository-local,
+  single-node demo rather than a hardened multi-node hosted product.

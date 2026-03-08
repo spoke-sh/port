@@ -245,10 +245,10 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 
 - The `port` CLI remains the canonical operator surface in both local and
   hosted modes.
-- A future node agent owns host-local lifecycle, manifests, transport bridges,
-  and artifact materialization on one execution node.
-- A future control plane owns fleet inventory, routing, and durable API
-  identity.
+- `port node-agent serve` now ships the first live hosted node-runtime server
+  for one execution node and runtime root.
+- `port control-plane serve` now ships the matching hosted control-plane
+  server for the single-node demo lane.
 - The sample config now names that hosted API identity explicitly under
   `[control_planes.demo]`, with endpoint `https://port.example.internal`,
   audience `port-hosted-demo`, and a bearer token sourced from
@@ -260,18 +260,23 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted `machine list`, `status`, `monitor`, `top`, and `stop` are also
   modeled explicitly as control-plane plus node-agent contracts so the
   canonical machine verbs stay stable as Port moves from the local runtime to
-  a hosted fleet. The first hosted runtime slice now runs through configured
-  node `runtime_root` directories, so `port machine list|status|monitor|top|stop`
-  can surface hosted machines without introducing hosted-only verbs.
+  a hosted fleet. Those verbs now execute through the live hosted HTTP path to
+  `port control-plane serve`, which routes to `port node-agent serve` for the
+  demo lane without introducing hosted-only verbs.
 - Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
   a control-plane-authorized attach followed by node-agent guest brokerage to
   the in-guest `port-guest-agent`. The canonical `guest` verbs and guest
-  protocol frames stay unchanged. The first hosted guest-runtime slice now runs
-  through configured node `runtime_root` directories, so the canonical `guest`
-  verbs work for hosted machines without introducing hosted-only aliases.
+  protocol frames stay unchanged. Hosted `guest exec|copy|pty|logs` now execute
+  through that live HTTP path for the demo lane without introducing hosted-only
+  aliases.
+- Hosted `guest copy` currently assumes the referenced host paths are visible
+  on the node host because the first live lane still uses JSON request bodies
+  instead of streamed remote file transport.
+- Hosted `guest forward` still uses the repo-local guest transport lane for its
+  listener lifecycle while streamed hosted forwarding remains follow-on work.
 - Hosted inventory that lacks a matching node runtime binding currently
-  surfaces as `malformed` in `port machine list|status|monitor|top` so
-  unresolved hosted ownership is visible instead of silently dropped.
+  fails with explicit control-plane and route context instead of being silently
+  dropped.
 - `port machine monitor` and `port machine top` now make the hosted monitoring
   boundary explicit: they inspect node-agent-owned runtime state, detached
   forwards, and live processes, but they are not yet a full metrics,
@@ -282,9 +287,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Secret values are currently stored as runtime-owned JSON files under the
   resolved machine runtime root. Treat that as a bootstrap operator workflow,
   not as a hardened secret backend.
-- `port-sdk` now publishes typed hosted request builders for canonical
-  machine, guest, and service operations so SDK/API consumers can follow the
-  same surface as the CLI without waiting for a separate client model.
+- `port-sdk` now publishes typed hosted request builders plus live response
+  execution helpers for canonical machine, guest, and service operations so
+  SDK/API consumers can follow the same surface as the CLI.
 - `port-hosted-protocol` now publishes the shared hosted HTTP route, auth, and
   route-context contract that later control-plane and node-agent servers will
   reuse instead of inventing a second hosted path model.
@@ -326,8 +331,8 @@ runtime-state-driven management. After `port machine launch` creates
 <name>`, and `port machine stop --machine <name>` to inspect and control that
 local Port-managed runtime state without going through Firecracker directly.
 That local ownership model is also the basis for the hosted control design: the
-same verbs remain canonical even when a future node agent and control plane own
-the runtime on behalf of the CLI. The commands now surface that contract
+same verbs remain canonical even when the hosted node agent and control plane
+own the runtime on behalf of the CLI. The commands now surface that contract
 explicitly with local values such as `local-runtime-root`,
 `local-port-runtime`, `runtime-manifest-and-host-process`, and
 `direct-local-runtime`.
@@ -364,20 +369,25 @@ The first service/sandbox surface builds on that same runtime ownership model:
 ## SDK And API Clients
 
 Port now ships the in-repo [`port-sdk`](crates/port-sdk/src/lib.rs) crate as
-the supported hosted client surface. It is intentionally a typed
-request-builder API today, not a claim that the remote control plane transport
-already exists.
+the supported hosted client surface. It now covers both typed request
+construction and live JSON response execution against the hosted control-plane
+API.
 
 The shared hosted HTTP route and auth contract now lives in
 [`crates/port-hosted-protocol/src/lib.rs`](crates/port-hosted-protocol/src/lib.rs).
 
 - `HostedClient::from_machine` derives the hosted endpoint, audience, and auth
   header shape from the shared Port model and `port-hosted-protocol`.
+- `HostedClient::from_machine_env` and `HostedClient::from_control_plane_env`
+  derive the token source from the model and read the configured environment
+  variable automatically.
 - `machines()` mirrors `port machine list|status|monitor|top|stop`.
 - `guest()` mirrors `port guest exec|copy|pty|logs|forward` and reuses the
   existing `port-agent-protocol` payloads.
 - `services()` mirrors `port service secret put|list|remove` and
   `port service apply|list|status|stop`.
+- `HostedClient::execute_json` sends those typed requests over HTTPS/HTTP and
+  decodes either the success payload or structured hosted route errors.
 
 See [`docs/sdk.md`](docs/sdk.md) for the request-path contract and
 [`crates/port-sdk/examples/hosted-sdk.rs`](crates/port-sdk/examples/hosted-sdk.rs)

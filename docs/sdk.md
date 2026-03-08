@@ -3,10 +3,9 @@
 Port now publishes a supported typed client surface in the `port-sdk` crate for
 hosted machine, guest, and service operations.
 
-This is intentionally a request-building SDK, not a claim that Port already
-ships a live remote control plane transport. The crate gives operators and
-future SDK consumers one canonical way to construct hosted API requests that
-mirror the existing CLI and model.
+The crate now covers both typed request construction and live JSON response
+execution against the hosted control-plane transport that Port ships for the
+single-node demo lane.
 
 ## Scope
 
@@ -14,20 +13,25 @@ Shipped today:
 
 - `HostedClient::from_machine` derives hosted endpoint, audience, and auth
   header shape from the shared Port model plus `port-hosted-protocol`
+- `HostedClient::from_machine_env` and `HostedClient::from_control_plane_env`
+  derive the auth token source from the model and read the configured
+  environment variable automatically
 - `machines()` mirrors `port machine list|status|monitor|top|stop`
 - `guest()` mirrors `port guest exec|copy|pty|logs|forward` using the existing
   `port-agent-protocol` request payloads
 - `services()` mirrors `port service secret put|list|remove` plus
   `port service apply|list|status|stop`
+- `HostedClient::execute_json` performs the live HTTP request and decodes
+  structured success or hosted route errors
 - `port-hosted-protocol` publishes the shared hosted HTTP route, auth-header,
   and route-context contract that the SDK now uses directly
 
 Still planned:
 
-- a real HTTP transport implementation
-- remote response decoding and retries
+- retries and richer client policies on top of the shipped transport
 - generated or versioned external API packages beyond the in-repo Rust crate
 - advanced auth, RBAC, and multi-tenant concerns
+- streamed hosted file transfer and fully remote hosted forward lifecycle work
 
 ## Example
 
@@ -64,6 +68,20 @@ let service = client.services().apply(
 assert_eq!(status.url, "https://port.example.internal/v1/machines/cloud-aws");
 assert_eq!(exec.url, "https://port.example.internal/v1/machines/cloud-aws/guest:exec");
 assert_eq!(service.url, "https://port.example.internal/v1/machines/cloud-aws/services");
+# Ok::<(), anyhow::Error>(())
+```
+
+If a hosted control plane is running and the token source is configured in the
+environment, the same client can execute the request directly:
+
+```rust
+# use port_hosted_protocol::HostedSuccess;
+# use port_sdk::HostedClient;
+# use port_model::PortConfig;
+let config = PortConfig::sample();
+let client = HostedClient::from_machine_env(&config, "cloud-aws")?;
+let status: HostedSuccess<serde_json::Value> =
+    client.execute_json(client.machines().status("cloud-aws"))?;
 # Ok::<(), anyhow::Error>(())
 ```
 

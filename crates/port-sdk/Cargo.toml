@@ -12,3 +12,8 @@ serde_json.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
 port-hosted-protocol = { path = "../port-hosted-protocol" }
 port-model = { path = "../port-model" }
+reqwest.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tokio.workspace = true

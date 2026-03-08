@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -45,6 +45,44 @@ fn spawn_agent(socket: &Path, root: &Path) {
 
 fn runtime_socket(runtime_root: &Path, machine: &str) -> PathBuf {
     runtime_root.join(machine).join("guest-agent.sock")
+}
+
+fn reserve_addr() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("port should bind");
+    let addr = listener.local_addr().expect("addr should exist");
+    drop(listener);
+    addr.to_string()
+}
+
+fn wait_for_tcp(addr: &str) {
+    for _ in 0..100 {
+        if TcpStream::connect(addr).is_ok() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for tcp listener at '{addr}'");
+}
+
+#[derive(Debug)]
+struct ChildGuard {
+    child: Child,
+}
+
+impl ChildGuard {
+    fn spawn(name: &'static str, mut command: Command) -> Self {
+        let child = command.spawn().unwrap_or_else(|error| {
+            panic!("failed to spawn {name}: {error}");
+        });
+        Self { child }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 fn add_runtime_root(command: &mut Command, runtime_root: Option<&Path>) {
@@ -221,6 +259,122 @@ fn run_guest_capability_suite(
     );
 }
 
+fn run_guest_capability_suite_without_forward(
+    config_path: &Path,
+    machine: &str,
+    runtime_root: Option<&Path>,
+    guest_root: &Path,
+    temp_root: &Path,
+) {
+    let mut exec = Command::new(port_bin());
+    exec.arg("--config")
+        .arg(config_path)
+        .arg("guest")
+        .arg("exec")
+        .arg("--machine")
+        .arg(machine);
+    add_runtime_root(&mut exec, runtime_root);
+    let exec = exec
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-lc")
+        .arg("printf exec-ok")
+        .output()
+        .expect("exec command");
+    assert!(exec.status.success());
+    assert_eq!(String::from_utf8_lossy(&exec.stdout), "exec-ok");
+
+    let host_source = temp_root.join("host.txt");
+    fs::write(&host_source, "copy-ok").expect("host file");
+    let mut copy = Command::new(port_bin());
+    copy.arg("--config")
+        .arg(config_path)
+        .arg("guest")
+        .arg("copy")
+        .arg("--machine")
+        .arg(machine);
+    add_runtime_root(&mut copy, runtime_root);
+    let copy = copy
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--direction")
+        .arg("host-to-guest")
+        .arg("--source")
+        .arg(&host_source)
+        .arg("--destination")
+        .arg("/workspace/copied.txt")
+        .output()
+        .expect("copy command");
+    assert!(copy.status.success());
+    assert_eq!(
+        fs::read_to_string(guest_root.join("workspace/copied.txt")).expect("copied file"),
+        "copy-ok"
+    );
+    let host_roundtrip = temp_root.join("roundtrip.txt");
+    let mut copy_back = Command::new(port_bin());
+    copy_back
+        .arg("--config")
+        .arg(config_path)
+        .arg("guest")
+        .arg("copy")
+        .arg("--machine")
+        .arg(machine);
+    add_runtime_root(&mut copy_back, runtime_root);
+    let copy_back = copy_back
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--direction")
+        .arg("guest-to-host")
+        .arg("--source")
+        .arg("/workspace/copied.txt")
+        .arg("--destination")
+        .arg(&host_roundtrip)
+        .output()
+        .expect("copy back command");
+    assert!(copy_back.status.success());
+    assert_eq!(
+        fs::read_to_string(&host_roundtrip).expect("roundtrip file"),
+        "copy-ok"
+    );
+
+    let mut pty = Command::new(port_bin());
+    pty.arg("--config")
+        .arg(config_path)
+        .arg("guest")
+        .arg("pty")
+        .arg("--machine")
+        .arg(machine);
+    add_runtime_root(&mut pty, runtime_root);
+    let pty = pty
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-lc")
+        .arg("printf pty-ok")
+        .output()
+        .expect("pty command");
+    assert!(pty.status.success());
+    assert!(String::from_utf8_lossy(&pty.stdout).contains("pty-ok"));
+
+    let mut logs = Command::new(port_bin());
+    logs.arg("--config")
+        .arg(config_path)
+        .arg("guest")
+        .arg("logs")
+        .arg("--machine")
+        .arg(machine);
+    add_runtime_root(&mut logs, runtime_root);
+    let logs = logs
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--path")
+        .arg("/var/log/app.log")
+        .arg("--tail-lines")
+        .arg("1")
+        .output()
+        .expect("logs command");
+    assert!(logs.status.success());
+    assert_eq!(String::from_utf8_lossy(&logs.stdout), "second\n");
+}
+
 fn hosted_config(runtime_root: &Path) -> PortConfig {
     let mut config = PortConfig::sample();
     config
@@ -260,17 +414,77 @@ fn cli_guest_commands_cover_hosted_control_plane_runtime() {
     let temp = tempdir().expect("tempdir should exist");
     let guest_root = temp.path().join("guest-root");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
-    let config_path = temp.path().join("port.toml");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
     fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
     fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
 
-    let config = hosted_config(&hosted_runtime_root);
-    write_config(&config_path, &config);
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root.clone();
+    write_config(&client_config_path, &client_config);
 
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
 
-    run_guest_capability_suite(&config_path, "cloud-aws", None, &guest_root, temp.path());
+    let mut node_command = Command::new(port_bin());
+    node_command
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(&node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(&node_addr);
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .arg("--node-binding")
+        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
+
+    run_guest_capability_suite_without_forward(
+        &client_config_path,
+        "cloud-aws",
+        None,
+        &guest_root,
+        temp.path(),
+    );
 }
 
 #[test]

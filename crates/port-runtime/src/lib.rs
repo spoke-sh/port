@@ -14,11 +14,13 @@ use port_agent_protocol::{
     ForwardEndpoint, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
     parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
 };
+use port_hosted_protocol::HostedSuccess;
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, HostedApiIdentityContract,
     MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode,
 };
+use port_sdk::HostedClient;
 use serde::{Deserialize, Serialize};
 
 mod hosted_control_plane;
@@ -2083,6 +2085,81 @@ fn hosted_machine_resolution(
     }))
 }
 
+fn machine_is_hosted(config: &PortConfig, machine_name: &str) -> Result<bool> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{machine_name}'"))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    Ok(matches!(
+        &host.connection,
+        HostConnection::HostedControlPlane { .. }
+    ))
+}
+
+fn hosted_client_for_machine(config: &PortConfig, machine_name: &str) -> Result<HostedClient> {
+    HostedClient::from_machine_env(config, machine_name).with_context(|| {
+        format!(
+            "failed to resolve live hosted client transport for machine '{}'",
+            machine_name
+        )
+    })
+}
+
+fn hosted_client_for_control_plane(
+    config: &PortConfig,
+    control_plane_name: &str,
+) -> Result<HostedClient> {
+    HostedClient::from_control_plane_env(config, control_plane_name).with_context(|| {
+        format!(
+            "failed to resolve live hosted client transport for control plane '{}'",
+            control_plane_name
+        )
+    })
+}
+
+fn hosted_control_plane_names(config: &PortConfig) -> Vec<String> {
+    let mut names = config
+        .machines
+        .values()
+        .filter_map(|machine| {
+            config
+                .hosts
+                .get(&machine.host)
+                .and_then(|host| match &host.connection {
+                    HostConnection::HostedControlPlane { control_plane } => {
+                        Some(control_plane.clone())
+                    }
+                    HostConnection::Local => None,
+                })
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn hosted_control_plane_list_machines(config: &PortConfig) -> Result<Vec<MachineStatus>> {
+    let mut machines = Vec::new();
+    for control_plane_name in hosted_control_plane_names(config) {
+        let client = hosted_client_for_control_plane(config, &control_plane_name)?;
+        let response: HostedSuccess<Vec<MachineStatus>> = client
+            .execute_json(client.machines().list())
+            .map_err(|error| {
+                anyhow!(
+                    "failed to list machines through hosted control plane '{}': {error}",
+                    control_plane_name
+                )
+            })?;
+        machines.extend(response.result);
+    }
+    machines.sort_by(|left, right| left.machine_name.cmp(&right.machine_name));
+    Ok(machines)
+}
+
 fn hosted_control_plane_launch_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
@@ -2118,35 +2195,48 @@ fn hosted_control_plane_machine_status(
     config: &PortConfig,
     machine_name: &str,
 ) -> Result<MachineStatus> {
-    Ok(hosted_machine_resolution(config, machine_name)?.status)
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<MachineStatus> = client
+        .execute_json(client.machines().status(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to load machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
 }
 
 fn hosted_control_plane_machine_monitor(
     config: &PortConfig,
     machine_name: &str,
 ) -> Result<MachineMonitorReport> {
-    let resolution = hosted_machine_resolution(config, machine_name)?;
-    let status = resolution.status;
-    machine_monitor_report(
-        status,
-        Some(resolution.control_plane),
-        resolution.node_name,
-        resolution.host_groups,
-    )
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<MachineMonitorReport> = client
+        .execute_json(client.machines().monitor(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to monitor machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
 }
 
 fn hosted_control_plane_machine_top(
     config: &PortConfig,
     machine_name: &str,
 ) -> Result<MachineTopReport> {
-    let resolution = hosted_machine_resolution(config, machine_name)?;
-    let status = resolution.status;
-    machine_top_report(
-        status,
-        Some(resolution.control_plane),
-        resolution.node_name,
-        resolution.host_groups,
-    )
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<MachineTopReport> = client
+        .execute_json(client.machines().top(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to inspect top data for machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
 }
 
 fn hosted_control_plane_stop_machine(
@@ -2154,64 +2244,17 @@ fn hosted_control_plane_stop_machine(
     machine_name: &str,
     timeout: Duration,
 ) -> Result<StopResult> {
-    let resolution = hosted_machine_resolution(config, machine_name)?;
-    let control = MachineControlContract::hosted_control_plane();
-    let status = resolution.status;
-
-    let Some(node_name) = resolution.node_name else {
-        return Ok(StopResult {
-            machine_name: machine_name.to_string(),
-            previous_state: status.state,
-            current_state: status.state,
-            pid: status.pid,
-            control,
-            runtime_dir: status.runtime_dir,
-            detail: format!(
-                "hosted stop could not route to a node agent: {}",
-                status.detail
-            ),
-        });
-    };
-
-    if !status.runtime_dir.exists() {
-        return Ok(StopResult {
-            machine_name: machine_name.to_string(),
-            previous_state: MachineRuntimeState::Stopped,
-            current_state: MachineRuntimeState::Stopped,
-            pid: None,
-            control,
-            runtime_dir: status.runtime_dir,
-            detail: format!(
-                "control plane '{}' routed stop to node '{}', but the node-agent runtime root does not contain machine state",
-                resolution.control_plane, node_name
-            ),
-        });
-    }
-
-    if status.state == MachineRuntimeState::Malformed {
-        return Ok(StopResult {
-            machine_name: machine_name.to_string(),
-            previous_state: MachineRuntimeState::Malformed,
-            current_state: MachineRuntimeState::Malformed,
-            pid: status.pid,
-            control,
-            runtime_dir: status.runtime_dir,
-            detail: format!(
-                "control plane '{}' routed stop to node '{}', but runtime state is malformed: {}",
-                resolution.control_plane, node_name, status.detail
-            ),
-        });
-    }
-
-    let result = firecracker_local_stop_machine(&resolution.runtime_root, machine_name, timeout)?;
-    Ok(StopResult {
-        control,
-        detail: format!(
-            "{} Routed through control plane '{}' and node '{}'.",
-            result.detail, resolution.control_plane, node_name
-        ),
-        ..result
-    })
+    let _ = timeout;
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<StopResult> = client
+        .execute_json(client.machines().stop(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to stop machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
 }
 
 fn hosted_control_plane_guest_endpoint(
@@ -2812,6 +2855,10 @@ pub fn execute_guest_operation(
         bail!("copy and forward use dedicated runtime flows");
     }
 
+    if machine_is_hosted(config, request.machine_name)? {
+        return hosted_control_plane_guest_operation(config, request);
+    }
+
     let driver = driver_for_machine(config, request.machine_name)?;
     let endpoint = driver.guest_endpoint(config, &request)?;
     let stream = connect_guest_endpoint(&endpoint)?;
@@ -2853,10 +2900,51 @@ pub fn execute_guest_operation(
     }
 }
 
+fn hosted_control_plane_guest_operation(
+    config: &PortConfig,
+    request: GuestRequest<'_>,
+) -> Result<OperationResult> {
+    let client = hosted_client_for_machine(config, request.machine_name)?;
+    let response: HostedSuccess<OperationResult> = match request.operation {
+        GuestOperation::Exec(exec) => client.execute_json(
+            client
+                .guest()
+                .exec(request.machine_name, exec)
+                .context("failed to encode hosted guest exec request")?,
+        ),
+        GuestOperation::Pty(pty) => client.execute_json(
+            client
+                .guest()
+                .pty(request.machine_name, pty)
+                .context("failed to encode hosted guest pty request")?,
+        ),
+        GuestOperation::Logs(logs) => client.execute_json(
+            client
+                .guest()
+                .logs(request.machine_name, logs)
+                .context("failed to encode hosted guest logs request")?,
+        ),
+        GuestOperation::Copy(_) | GuestOperation::Forward(_) => {
+            bail!("copy and forward use dedicated runtime flows");
+        }
+    }
+    .map_err(|error| {
+        anyhow!(
+            "failed to execute guest operation for machine '{}' through the live hosted control-plane route: {error}",
+            request.machine_name
+        )
+    })?;
+    Ok(response.result)
+}
+
 pub fn copy_guest_file(
     config: &PortConfig,
     request: GuestCopyRequest<'_>,
 ) -> Result<port_agent_protocol::CopyResult> {
+    if machine_is_hosted(config, request.machine_name)? {
+        return hosted_control_plane_copy_guest_file(config, request);
+    }
+
     let driver = driver_for_machine(config, request.machine_name)?;
     let endpoint = driver.guest_endpoint(
         config,
@@ -2968,6 +3056,35 @@ pub fn copy_guest_file(
             bail!("unexpected second streaming response from guest copy")
         }
     }
+}
+
+fn hosted_control_plane_copy_guest_file(
+    config: &PortConfig,
+    request: GuestCopyRequest<'_>,
+) -> Result<port_agent_protocol::CopyResult> {
+    let client = hosted_client_for_machine(config, request.machine_name)?;
+    let response: HostedSuccess<port_agent_protocol::CopyResult> = client
+        .execute_json(
+            client
+                .guest()
+                .copy(
+                    request.machine_name,
+                    port_agent_protocol::CopyRequest {
+                        source: request.source.display().to_string(),
+                        destination: request.destination.display().to_string(),
+                        direction: request.direction,
+                        size_bytes: None,
+                    },
+                )
+                .context("failed to encode hosted guest copy request")?,
+        )
+        .map_err(|error| {
+            anyhow!(
+                "failed to copy files for machine '{}' through the live hosted control-plane route: {error}",
+                request.machine_name
+            )
+        })?;
+    Ok(response.result)
 }
 
 pub struct GuestForwardSession {
@@ -3400,22 +3517,7 @@ impl MachineDriver for HostedControlPlaneDriver {
         config: &PortConfig,
         _runtime_root: &Path,
     ) -> Result<Vec<MachineStatus>> {
-        let mut hosted_names = config
-            .machines
-            .iter()
-            .filter_map(|(machine_name, machine)| {
-                let host = config.hosts.get(&machine.host)?;
-                matches!(&host.connection, HostConnection::HostedControlPlane { .. })
-                    .then(|| machine_name.clone())
-            })
-            .collect::<Vec<_>>();
-        hosted_names.sort();
-
-        let mut machines = Vec::new();
-        for machine_name in hosted_names {
-            machines.push(hosted_control_plane_machine_status(config, &machine_name)?);
-        }
-        Ok(machines)
+        hosted_control_plane_list_machines(config)
     }
 
     fn machine_status(
@@ -3623,22 +3725,25 @@ struct VsockConfig {
 mod tests {
     use std::fs;
     use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{Shutdown, TcpStream};
+    use std::net::{Shutdown, TcpListener as StdTcpListener, TcpStream};
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
+    use std::sync::{Mutex, OnceLock};
     use std::thread;
     use std::time::Duration;
 
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, DoctorCheck, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-        LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState, RuntimePaths,
-        StopResult, artifact_script, build_firecracker_config, collect_doctor_report,
-        copy_guest_file, driver_for_machine, execute_guest_operation, launch_local_machine,
-        list_machines, machine_monitor, machine_status, machine_top, path_check,
-        prepare_guest_forward, prepare_runtime_state, read_pid_file, repo_root, stop_machine,
+        ArtifactAction, ControlPlaneServeRequest, DoctorCheck, GuestCopyRequest,
+        GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
+        MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths, StopResult,
+        artifact_script, build_firecracker_config, collect_doctor_report, copy_guest_file,
+        driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
+        machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, read_pid_file, repo_root, serve_control_plane, serve_node_agent,
+        stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
@@ -3667,6 +3772,87 @@ mod tests {
             .expect("gcp-linux-node should exist")
             .runtime_root = root.join("hosted/gcp-linux-node");
         config
+    }
+
+    fn hosted_server_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn reserve_addr() -> String {
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("port should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        drop(listener);
+        addr.to_string()
+    }
+
+    fn wait_for_tcp(addr: &str) {
+        for _ in 0..100 {
+            if TcpStream::connect(addr).is_ok() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("timed out waiting for tcp listener at '{addr}'");
+    }
+
+    fn start_live_hosted_servers(config: &PortConfig, bind_node: bool) -> PortConfig {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let node_addr = reserve_addr();
+        let control_plane_addr = reserve_addr();
+        let mut client_config = config.clone();
+        client_config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{control_plane_addr}");
+
+        if bind_node {
+            let node_config = client_config.clone();
+            let bind = node_addr.clone();
+            thread::spawn(move || {
+                serve_node_agent(
+                    node_config,
+                    NodeAgentServeRequest {
+                        node_name: String::from("aws-linux-node"),
+                        bind,
+                        token: String::from("node-secret"),
+                    },
+                )
+                .expect("node-agent should serve");
+            });
+            wait_for_tcp(&node_addr);
+        }
+
+        let control_config = client_config.clone();
+        let bind = control_plane_addr.clone();
+        let node_bindings = if bind_node {
+            vec![HostedNodeBinding {
+                node_name: String::from("aws-linux-node"),
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+            }]
+        } else {
+            Vec::new()
+        };
+        thread::spawn(move || {
+            serve_control_plane(
+                control_config,
+                ControlPlaneServeRequest {
+                    control_plane: String::from("demo"),
+                    bind,
+                    node_bindings,
+                },
+            )
+            .expect("control plane should serve");
+        });
+        wait_for_tcp(&control_plane_addr);
+
+        client_config
     }
 
     fn write_manifest(paths: &RuntimePaths, machine_name: &str, pid: u32) {
@@ -4164,6 +4350,7 @@ mod tests {
         let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
         let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
         write_manifest(&paths, "cloud-aws", 424242);
+        let config = start_live_hosted_servers(&config, true);
 
         let status = machine_status(&config, tempdir.path(), "cloud-aws")
             .expect("hosted status should load");
@@ -4189,6 +4376,7 @@ mod tests {
         let hosted_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
         let hosted_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
         write_manifest(&hosted_paths, "cloud-aws", 424242);
+        let config = start_live_hosted_servers(&config, true);
 
         let machines = list_machines(&config, tempdir.path()).expect("machine list should load");
         let hosted = machines
@@ -4232,6 +4420,7 @@ mod tests {
 
         write_manifest(&paths, "cloud-aws", child.id());
         fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
+        let config = start_live_hosted_servers(&config, true);
 
         let result = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(2))
             .expect("hosted stop should succeed");
@@ -4292,6 +4481,7 @@ mod tests {
             )
             .expect("response should encode");
         });
+        let config = start_live_hosted_servers(&config, true);
 
         let result = execute_guest_operation(
             &config,
@@ -4317,8 +4507,9 @@ mod tests {
 
     #[test]
     fn hosted_guest_exec_explains_unresolved_node_routing() {
+        let config = start_live_hosted_servers(&PortConfig::sample(), false);
         let error = execute_guest_operation(
-            &PortConfig::sample(),
+            &config,
             GuestRequest {
                 machine_name: "cloud-azure",
                 runtime_root: Path::new("runtime"),
@@ -4332,7 +4523,10 @@ mod tests {
         .expect_err("unresolved hosted node routing should fail");
 
         let message = error.to_string();
-        assert!(message.contains("control plane 'demo'"));
+        assert!(
+            message.contains("control plane 'demo'") || message.contains("control-plane=demo"),
+            "{message}"
+        );
         assert!(message.contains("cloud-azure"));
         assert!(message.contains("no hosted node inventory record matches that host"));
     }
@@ -4368,6 +4562,7 @@ mod tests {
             "127.0.0.1:8081",
             "127.0.0.1:80",
         );
+        let config = start_live_hosted_servers(&config, true);
 
         let report =
             machine_monitor(&config, tempdir.path(), "cloud-aws").expect("monitor should load");
@@ -4433,6 +4628,7 @@ mod tests {
             "127.0.0.1:8081",
             "127.0.0.1:80",
         );
+        let config = start_live_hosted_servers(&config, true);
 
         let report = machine_top(&config, tempdir.path(), "cloud-aws").expect("top should load");
         let hypervisor = report

@@ -11,6 +11,7 @@ axum.workspace = true
 libc.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
 port-hosted-protocol = { path = "../port-hosted-protocol" }
+port-sdk = { path = "../port-sdk" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

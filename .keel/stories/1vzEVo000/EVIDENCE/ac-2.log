@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-08T09:07:41.883496077-07:00
+mode: manual
+---
+SDK live execution helpers, CLI help text, and hosted operator documentation now reflect the shipped transport and explicitly call out the remaining single-node demo limits for copy and forward.

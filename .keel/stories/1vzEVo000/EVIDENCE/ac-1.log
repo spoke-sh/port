@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-08T09:07:41.909968662-07:00
+mode: manual
+---
+CLI integration tests now prove hosted machine and guest commands route through live control-plane and node-agent HTTP transport, including configs whose client runtime root is intentionally wrong.
