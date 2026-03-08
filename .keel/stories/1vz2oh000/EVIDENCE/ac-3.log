@@ -1,24 +1,11 @@
 ---
-recorded_at: 2026-03-07T17:55:06.878988686-08:00
+recorded_at: 2026-03-07T17:55:43.638377233-08:00
 mode: manual
 files: ["/tmp/1vz2oh000-ac3.log"]
 ---
 
 --- File: 1vz2oh000-ac3.log ---
-== help keywords ==
-crates/port-cli/src/lib.rs:51:Hosted Control:
-docs/operators.md:104:same CLI lives in [`docs/hosted.md`](hosted.md).
-README.md:159:## Hosted Control
-README.md:173:The full hosted contract lives in [`docs/hosted.md`](docs/hosted.md).
-README.md:175:## Hosted Control
-README.md:188:The canonical hosted contract lives in [`docs/hosted.md`](docs/hosted.md).
-README.md:190:## Hosted Control Preview
-README.md:193:is now documented in [`docs/hosted.md`](docs/hosted.md).
-docs/cloud.md:10:defined in [`docs/hosted.md`](hosted.md).
-docs/cloud.md:54:## Hosted Mapping
-docs/cloud.md:67:The detailed hosted control contract lives in [`docs/hosted.md`](hosted.md).
-
-== help excerpt ==
+== port --help ==
 Port manages microVM-backed workloads through one canonical CLI and shared machine model.
 Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud
 Hypervisor, and Apple Virtualization Framework are modeled explicitly as planned or research-backed
@@ -97,4 +84,13 @@ Hosted Control:
   Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the
   current guest protocol semantics.
   Azure remains an explicitly unsupported Firecracker provider lane.
+
+== surfaced docs ==
+/home/alex/workspace/spoke-sh/port/crates/port-cli/src/lib.rs:51:Hosted Control:
+/home/alex/workspace/spoke-sh/port/crates/port-cli/src/lib.rs:618:            "Hosted Control",
+/home/alex/workspace/spoke-sh/port/docs/operators.md:104:same CLI lives in [`docs/hosted.md`](hosted.md).
+/home/alex/workspace/spoke-sh/port/docs/cloud.md:10:defined in [`docs/hosted.md`](hosted.md).
+/home/alex/workspace/spoke-sh/port/docs/cloud.md:67:The detailed hosted control contract lives in [`docs/hosted.md`](hosted.md).
+/home/alex/workspace/spoke-sh/port/README.md:159:## Hosted Control
+/home/alex/workspace/spoke-sh/port/README.md:162:is now documented in [`docs/hosted.md`](docs/hosted.md).
 

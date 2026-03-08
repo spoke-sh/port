@@ -6,18 +6,7 @@ created_at: 2026-03-07T18:02:00
 
 ## Knowledge
 
-### 1vz3N8000: Hosted Port Should Broker The Guest Protocol, Not Replace It
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | When Port extends from local runtime ownership into a hosted node-agent plus control-plane architecture |
-| **Insight** | Port already has a usable guest protocol and CLI vocabulary. The hosted layer should add routing, ownership, and auth around that protocol instead of inventing a second hosted-only guest API. |
-| **Suggested Action** | Keep hosted design and implementation work centered on tunneling the existing guest protocol through node agents and control-plane sessions, with the CLI remaining the same surface in local and hosted modes. |
-| **Applies To** | docs/hosted.md, crates/port-runtime/**, crates/port-cli/**, future hosted-control crates |
-| **Observed At** | 2026-03-08T02:02:00Z |
-| **Score** | 0.89 |
-| **Confidence** | 0.94 |
-| **Applied** | yes |
+- [1vz3N8000](../../knowledge/1vz3N8000.md) Hosted Port Should Broker The Guest Protocol, Not Replace It
 
 ## Observations
 

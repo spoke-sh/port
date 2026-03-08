@@ -27,12 +27,12 @@ started_at: 2026-03-07T17:24:47
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Model Substrates And Protection Modes](../../../../stories/1vz2oQ000/README.md) | feat | done |
 | [Add Machine Inventory Status And Stop](../../../../stories/1vz2oY000/README.md) | feat | done |
-| [Publish Hosted Node Agent Contract](../../../../stories/1vz2oh000/README.md) | feat | backlog |
+| [Publish Hosted Node Agent Contract](../../../../stories/1vz2oh000/README.md) | feat | done |
 | [Define Artifact Mobility Commands And Contracts](../../../../stories/1vz2on000/README.md) | feat | backlog |
 <!-- END GENERATED -->
