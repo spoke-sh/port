@@ -1,0 +1,267 @@
+---
+recorded_at: 2026-03-08T16:00:34.470223458-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzMXo000/verify-ac-2.sh | tee /home/alex/workspace/spoke-sh/port/.keel/stories/1vzMXo000/EVIDENCE/ac-2.log
+---
+== cargo test -q -p port-cli cli_guest_logs_follow_streams_appended_output ==
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.52s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+== cargo test -q ==
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 10 tests
+..........
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+running 7 tests
+.......
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.07s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 8 tests
+........
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 28 tests
+............................
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 53 tests
+.....................................................
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.08s
+
+
+running 8 tests
+........
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== streamed PTY/log follow surface excerpt ==
+crates/port-cli/tests/guest_commands.rs:413:fn cli_guest_logs_follow_streams_appended_output() {
+crates/port-cli/tests/guest_commands.rs:437:        .arg("--follow")
+crates/port-cli/tests/guest_commands.rs:440:    let mut child = child.spawn().expect("logs follow command should start");
+crates/port-cli/tests/guest_commands.rs:449:        .expect("logs follow command should exit");
+crates/port-cli/src/lib.rs:122:  Hosted `guest copy` in the single-node demo still assumes the referenced host paths are visible on the node host; streamed remote file transport remains follow-on work.
+crates/port-cli/src/lib.rs:123:  Hosted `guest forward` still uses the repo-local guest transport lane for its listener lifecycle while streamed hosted forwarding remains follow-on work.
+crates/port-cli/src/lib.rs:125:  `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
+crates/port-cli/src/lib.rs:129:  `port service apply` persists desired state, guest command, secret bindings, and hosted routing context; real guest execution and teardown remain explicit follow-on work.
+crates/port-cli/src/lib.rs:512:        follow: bool,
+crates/port-cli/src/lib.rs:1350:                operation: GuestOperation::Pty(PtyRequest {
+crates/port-cli/src/lib.rs:1367:                let _ = port_runtime::stream_guest_pty(
+crates/port-cli/src/lib.rs:1381:            follow,
+crates/port-cli/src/lib.rs:1387:                operation: GuestOperation::Logs(LogsRequest {
+crates/port-cli/src/lib.rs:1389:                    follow,
+crates/port-cli/src/lib.rs:1393:            if follow && !machine_uses_hosted_control_plane(config, &machine)? {
+crates/port-cli/src/lib.rs:1395:                let _ = port_runtime::stream_guest_logs(config, request, &mut stdout)?;
+crates/port-guest-agent/src/lib.rs:14:    ResponseEnvelope, StreamKind, StreamOutputChannel, StreamRequestFrame, StreamResponseFrame,
+crates/port-guest-agent/src/lib.rs:52:            GuestOperation::Pty(request) => self.pty(request),
+crates/port-guest-agent/src/lib.rs:53:            GuestOperation::Logs(request) => self.logs(request),
+crates/port-guest-agent/src/lib.rs:319:        GuestOperation::Pty(pty) => service.pty_stream(request.id, pty, stream),
+crates/port-guest-agent/src/lib.rs:320:        GuestOperation::Logs(logs) if logs.follow => service.logs_stream(request.id, logs, stream),
+crates/port-guest-agent/src/lib.rs:547:                match read_frame::<_, StreamRequestFrame>(&mut reader) {
+crates/port-guest-agent/src/lib.rs:548:                    Ok(StreamRequestFrame::Input { data }) => {
+crates/port-guest-agent/src/lib.rs:554:                    Ok(StreamRequestFrame::Close) => break Ok(()),
+crates/port-guest-agent/src/lib.rs:583:                    StreamResponseFrame::Data {
+crates/port-guest-agent/src/lib.rs:593:            write_stream_frame(&mut writer, StreamResponseFrame::Exit { exit_code })?;
+crates/port-guest-agent/src/lib.rs:600:                StreamResponseFrame::Error {
+crates/port-guest-agent/src/lib.rs:622:                match read_frame::<_, StreamRequestFrame>(&mut reader) {
+crates/port-guest-agent/src/lib.rs:623:                    Ok(StreamRequestFrame::Close) => break true,
+crates/port-guest-agent/src/lib.rs:624:                    Ok(StreamRequestFrame::Input { .. }) => {}
+crates/port-guest-agent/src/lib.rs:653:                StreamResponseFrame::Data {
+crates/port-guest-agent/src/lib.rs:663:                    write_stream_frame(&mut writer, StreamResponseFrame::Eof)?;
+crates/port-guest-agent/src/lib.rs:680:                        StreamResponseFrame::Data {
+crates/port-guest-agent/src/lib.rs:707:fn write_stream_frame<W>(writer: &mut BufWriter<W>, frame: StreamResponseFrame) -> Result<()>
+crates/port-guest-agent/src/lib.rs:748:        PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind, StreamRequestFrame,
+crates/port-guest-agent/src/lib.rs:749:        StreamResponseFrame, read_frame, write_frame,
+crates/port-guest-agent/src/lib.rs:779:            operation: GuestOperation::Pty(PtyRequest {
+crates/port-guest-agent/src/lib.rs:797:            operation: GuestOperation::Logs(LogsRequest {
+crates/port-guest-agent/src/lib.rs:799:                follow: false,
+crates/port-guest-agent/src/lib.rs:955:    fn connection_streams_pty_and_followed_logs() {
+crates/port-guest-agent/src/lib.rs:973:                operation: GuestOperation::Pty(PtyRequest {
+crates/port-guest-agent/src/lib.rs:996:                StreamResponseFrame::Data { data, .. } => transcript.push_str(&data),
+crates/port-guest-agent/src/lib.rs:997:                StreamResponseFrame::Exit { exit_code } => {
+crates/port-guest-agent/src/lib.rs:1010:            handle_protocol_stream(server, &service_for_logs).expect("logs follow should succeed")
+crates/port-guest-agent/src/lib.rs:1018:                operation: GuestOperation::Logs(LogsRequest {
+crates/port-guest-agent/src/lib.rs:1020:                    follow: true,
+crates/port-guest-agent/src/lib.rs:1034:        let first: StreamResponseFrame = read_frame(&mut logs_reader).expect("first log frame");
+crates/port-guest-agent/src/lib.rs:1035:        let StreamResponseFrame::Data { data, .. } = first else {
+crates/port-guest-agent/src/lib.rs:1040:        let second: StreamResponseFrame = read_frame(&mut logs_reader).expect("second log frame");
+crates/port-guest-agent/src/lib.rs:1041:        let StreamResponseFrame::Data { data, .. } = second else {
+crates/port-guest-agent/src/lib.rs:1045:        write_frame(&mut client, &StreamRequestFrame::Close).expect("logs close should write");
+crates/port-guest-agent/src/lib.rs:1046:        let eof: StreamResponseFrame = read_frame(&mut logs_reader).expect("logs eof");
+crates/port-guest-agent/src/lib.rs:1047:        assert!(matches!(eof, StreamResponseFrame::Eof));
+crates/port-agent-protocol/src/lib.rs:56:    pub follow: bool,
+crates/port-agent-protocol/src/lib.rs:158:    pub fn logs_follow() -> Self {
+crates/port-agent-protocol/src/lib.rs:205:pub enum StreamRequestFrame {
+crates/port-agent-protocol/src/lib.rs:212:pub enum StreamResponseFrame {
+crates/port-agent-protocol/src/lib.rs:317:        StreamKind, StreamOutputChannel, StreamRequestFrame, StreamResponseFrame,
+crates/port-agent-protocol/src/lib.rs:462:        let logs = StreamSessionContract::logs_follow();
+crates/port-agent-protocol/src/lib.rs:486:        let request = StreamRequestFrame::Input {
+crates/port-agent-protocol/src/lib.rs:490:        let decoded_request: StreamRequestFrame =
+crates/port-agent-protocol/src/lib.rs:494:        let response = StreamResponseFrame::Data {
+crates/port-agent-protocol/src/lib.rs:499:        let decoded_response: StreamResponseFrame =
+crates/port-runtime/src/lib.rs:15:    ResponseEnvelope, StreamRequestFrame, StreamResponseFrame, parse_forward_endpoint, read_frame,
+crates/port-runtime/src/lib.rs:1538:            "service definition is stored under the resolved runtime owner; guest execution remains a follow-on control-plane and node-agent slice",
+crates/port-runtime/src/lib.rs:1602:        "service definition is retained with desired state stopped; hosted execution and teardown remain a follow-on slice",
+crates/port-runtime/src/lib.rs:3997:pub fn stream_guest_pty<R, W, E>(
+crates/port-runtime/src/lib.rs:4050:pub fn stream_guest_logs<W>(
+crates/port-runtime/src/lib.rs:4136:        (GuestOperation::Pty(_), port_agent_protocol::StreamKind::Pty) => {
+crates/port-runtime/src/lib.rs:4137:            write_frame(writer, &StreamRequestFrame::Close)
+crates/port-runtime/src/lib.rs:4141:        (GuestOperation::Logs(_), port_agent_protocol::StreamKind::Logs) => {
+crates/port-runtime/src/lib.rs:4161:    if !matches!(operation, GuestOperation::Pty(_)) {
+crates/port-runtime/src/lib.rs:4175:        let frame: StreamResponseFrame =
+crates/port-runtime/src/lib.rs:4178:            StreamResponseFrame::Data { channel, data } => {
+crates/port-runtime/src/lib.rs:4195:            StreamResponseFrame::Exit { exit_code: 0 } => {
+crates/port-runtime/src/lib.rs:4198:            StreamResponseFrame::Exit { exit_code } => {
+crates/port-runtime/src/lib.rs:4201:            StreamResponseFrame::Error { message } => {
+crates/port-runtime/src/lib.rs:4204:            StreamResponseFrame::Eof => {
+crates/port-runtime/src/lib.rs:4220:        let frame: StreamResponseFrame =
+crates/port-runtime/src/lib.rs:4223:            StreamResponseFrame::Data { data, .. } => {
+crates/port-runtime/src/lib.rs:4230:            StreamResponseFrame::Eof => return Ok(LogsResult { contents }),
+crates/port-runtime/src/lib.rs:4231:            StreamResponseFrame::Error { message } => {
+crates/port-runtime/src/lib.rs:4234:            StreamResponseFrame::Exit { exit_code } => {
+crates/port-runtime/src/lib.rs:4244:        let frame: StreamResponseFrame =
+crates/port-runtime/src/lib.rs:4247:            StreamResponseFrame::Data { data, .. } => transcript.push_str(&data),
+crates/port-runtime/src/lib.rs:4248:            StreamResponseFrame::Exit { exit_code: 0 } => {
+crates/port-runtime/src/lib.rs:4251:            StreamResponseFrame::Exit { exit_code } => {
+crates/port-runtime/src/lib.rs:4254:            StreamResponseFrame::Error { message } => {
+crates/port-runtime/src/lib.rs:4257:            StreamResponseFrame::Eof => {
+crates/port-runtime/src/lib.rs:4267:        let frame: StreamResponseFrame =
+crates/port-runtime/src/lib.rs:4270:            StreamResponseFrame::Data { data, .. } => contents.push_str(&data),
+crates/port-runtime/src/lib.rs:4271:            StreamResponseFrame::Eof => return Ok(LogsResult { contents }),
+crates/port-runtime/src/lib.rs:4272:            StreamResponseFrame::Error { message } => {
+crates/port-runtime/src/lib.rs:4275:            StreamResponseFrame::Exit { exit_code } => {
+crates/port-runtime/src/lib.rs:4297:            &StreamRequestFrame::Input {
+crates/port-runtime/src/lib.rs:4303:    write_frame(&mut writer, &StreamRequestFrame::Close)
+crates/port-runtime/src/lib.rs:4320:        GuestOperation::Pty(pty) => client.execute_json(
+crates/port-runtime/src/lib.rs:4326:        GuestOperation::Logs(logs) => client.execute_json(
+crates/port-runtime/src/lib.rs:5308:        StreamResponseFrame, read_frame, write_frame,
+crates/port-runtime/src/lib.rs:6763:            let GuestOperation::Pty(pty_request) = pty_request.operation else {
+crates/port-runtime/src/lib.rs:6785:                &StreamResponseFrame::Data {
+crates/port-runtime/src/lib.rs:6791:            write_frame(&mut pty_stream, &StreamResponseFrame::Exit { exit_code: 0 })
+crates/port-runtime/src/lib.rs:6798:            let GuestOperation::Logs(logs_request) = logs_request.operation else {
+crates/port-runtime/src/lib.rs:6839:                operation: GuestOperation::Pty(PtyRequest {
+crates/port-runtime/src/lib.rs:6861:                operation: GuestOperation::Logs(LogsRequest {
+crates/port-runtime/src/lib.rs:6863:                    follow: false,
+crates/port-runtime/src/lib.rs:7489:    fn guest_streaming_operations_aggregate_pty_and_followed_logs_from_runtime_socket() {
+crates/port-runtime/src/lib.rs:7501:            let GuestOperation::Pty(pty_request) = pty_request.operation else {
+crates/port-runtime/src/lib.rs:7523:                &StreamResponseFrame::Data {
+crates/port-runtime/src/lib.rs:7529:            write_frame(&mut pty_stream, &StreamResponseFrame::Exit { exit_code: 0 })
+crates/port-runtime/src/lib.rs:7536:            let GuestOperation::Logs(logs_request) = logs_request.operation else {
+crates/port-runtime/src/lib.rs:7539:            assert!(logs_request.follow);
+crates/port-runtime/src/lib.rs:7551:                &StreamResponseFrame::Data {
+crates/port-runtime/src/lib.rs:7559:                &StreamResponseFrame::Data {
+crates/port-runtime/src/lib.rs:7565:            write_frame(&mut logs_stream, &StreamResponseFrame::Eof)
+crates/port-runtime/src/lib.rs:7574:                operation: GuestOperation::Pty(PtyRequest {
+crates/port-runtime/src/lib.rs:7596:                operation: GuestOperation::Logs(LogsRequest {
+crates/port-runtime/src/lib.rs:7598:                    follow: true,

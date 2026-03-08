@@ -200,6 +200,29 @@ pub enum StreamTerminationMode {
     ExplicitError,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum StreamRequestFrame {
+    Input { data: String },
+    Close,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum StreamResponseFrame {
+    Data {
+        channel: StreamOutputChannel,
+        data: String,
+    },
+    Exit {
+        exit_code: i32,
+    },
+    Eof,
+    Error {
+        message: String,
+    },
+}
+
 #[derive(Debug)]
 pub enum ProtocolError {
     Io(std::io::Error),
@@ -291,8 +314,9 @@ mod tests {
     use super::{
         CopyDirection, CopyRequest, ExecRequest, ExecResult, ForwardEndpoint, ForwardResult,
         GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, StreamInputMode,
-        StreamKind, StreamOutputChannel, StreamSessionContract, StreamTerminationMode,
-        parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
+        StreamKind, StreamOutputChannel, StreamRequestFrame, StreamResponseFrame,
+        StreamSessionContract, StreamTerminationMode, parse_forward_endpoint, read_frame,
+        render_forward_endpoint, write_frame,
     };
     use std::collections::BTreeMap;
     use std::io::Cursor;
@@ -455,5 +479,25 @@ mod tests {
         let decoded: StreamSessionContract =
             serde_json::from_str(&encoded).expect("contract should decode");
         assert_eq!(decoded, contract);
+    }
+
+    #[test]
+    fn stream_frames_round_trip_through_json() {
+        let request = StreamRequestFrame::Input {
+            data: String::from("ls\n"),
+        };
+        let request_encoded = serde_json::to_string(&request).expect("request should encode");
+        let decoded_request: StreamRequestFrame =
+            serde_json::from_str(&request_encoded).expect("request should decode");
+        assert_eq!(decoded_request, request);
+
+        let response = StreamResponseFrame::Data {
+            channel: StreamOutputChannel::Stdout,
+            data: String::from("pty-ok"),
+        };
+        let response_encoded = serde_json::to_string(&response).expect("response should encode");
+        let decoded_response: StreamResponseFrame =
+            serde_json::from_str(&response_encoded).expect("response should decode");
+        assert_eq!(decoded_response, response);
     }
 }

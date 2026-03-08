@@ -8,7 +8,9 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use port_agent_protocol::{
     CopyDirection, ExecRequest, GuestOperation, LogsRequest, OperationResult, PtyRequest,
 };
-use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode};
+use port_model::{
+    ExecutionSubstrate, HostConnection, MachineArchitecture, PortConfig, ProtectionMode,
+};
 use port_runtime::{
     ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
     GuestRequest, HostedNodeBinding, LaunchRequest, NodeAgentServeRequest,
@@ -1342,22 +1344,33 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
             command,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(
-                config,
-                GuestRequest {
-                    machine_name: &machine,
-                    runtime_root: &runtime_root,
-                    operation: GuestOperation::Pty(PtyRequest {
-                        command,
-                        cols: 80,
-                        rows: 24,
-                    }),
-                },
-            )? {
-                OperationResult::Pty(result) => {
-                    print!("{}", result.transcript);
+            let request = GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Pty(PtyRequest {
+                    command,
+                    cols: 80,
+                    rows: 24,
+                }),
+            };
+            if machine_uses_hosted_control_plane(config, &machine)? {
+                match port_runtime::execute_guest_operation(config, request)? {
+                    OperationResult::Pty(result) => {
+                        print!("{}", result.transcript);
+                    }
+                    other => bail!("unexpected guest pty result: {other:?}"),
                 }
-                other => bail!("unexpected guest pty result: {other:?}"),
+            } else {
+                let stdin = std::io::stdin();
+                let mut stdout = std::io::stdout();
+                let mut stderr = std::io::stderr();
+                let _ = port_runtime::stream_guest_pty(
+                    config,
+                    request,
+                    stdin,
+                    &mut stdout,
+                    &mut stderr,
+                )?;
             }
         }
         GuestCommand::Logs {
@@ -1368,22 +1381,25 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
             follow,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(
-                config,
-                GuestRequest {
-                    machine_name: &machine,
-                    runtime_root: &runtime_root,
-                    operation: GuestOperation::Logs(LogsRequest {
-                        path,
-                        follow,
-                        tail_lines,
-                    }),
-                },
-            )? {
-                OperationResult::Logs(result) => {
-                    print!("{}", result.contents);
+            let request = GuestRequest {
+                machine_name: &machine,
+                runtime_root: &runtime_root,
+                operation: GuestOperation::Logs(LogsRequest {
+                    path,
+                    follow,
+                    tail_lines,
+                }),
+            };
+            if follow && !machine_uses_hosted_control_plane(config, &machine)? {
+                let mut stdout = std::io::stdout();
+                let _ = port_runtime::stream_guest_logs(config, request, &mut stdout)?;
+            } else {
+                match port_runtime::execute_guest_operation(config, request)? {
+                    OperationResult::Logs(result) => {
+                        print!("{}", result.contents);
+                    }
+                    other => bail!("unexpected guest logs result: {other:?}"),
                 }
-                other => bail!("unexpected guest logs result: {other:?}"),
             }
         }
         GuestCommand::Forward {
@@ -1465,6 +1481,21 @@ fn ensure_machine_exists(config: &PortConfig, machine: &str) -> Result<()> {
     } else {
         bail!("unknown machine '{machine}'")
     }
+}
+
+fn machine_uses_hosted_control_plane(config: &PortConfig, machine: &str) -> Result<bool> {
+    let machine = config
+        .machines
+        .get(machine)
+        .with_context(|| format!("unknown machine '{machine}'"))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    Ok(matches!(
+        host.connection,
+        HostConnection::HostedControlPlane { .. }
+    ))
 }
 
 fn start_detached_forward(

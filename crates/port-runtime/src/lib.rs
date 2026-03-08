@@ -11,8 +11,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    ForwardEndpoint, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
-    parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
+    ForwardEndpoint, GuestOperation, LogsResult, OperationResult, PtyResult, RequestEnvelope,
+    ResponseEnvelope, StreamRequestFrame, StreamResponseFrame, parse_forward_endpoint, read_frame,
+    render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::HostedSuccess;
 use port_model::{
@@ -3970,26 +3971,8 @@ pub fn execute_guest_operation(
         return hosted_control_plane_guest_operation(config, request);
     }
 
-    let driver = driver_for_machine(config, request.machine_name)?;
-    let endpoint = driver.guest_endpoint(config, &request)?;
-    let stream = connect_guest_endpoint(&endpoint)?;
-    let writer_stream = stream
-        .try_clone()
-        .context("failed to clone guest agent socket")?;
-    let mut writer = BufWriter::new(writer_stream);
-    let mut reader = BufReader::new(stream);
-
-    write_frame(
-        &mut writer,
-        &RequestEnvelope {
-            id: 1,
-            operation: request.operation,
-        },
-    )
-    .map_err(|error| anyhow!("protocol error: {error}"))?;
-
-    let response: ResponseEnvelope =
-        read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+    let operation = request.operation.clone();
+    let (mut reader, mut writer, response) = open_guest_operation_transport(config, &request)?;
 
     match response {
         ResponseEnvelope::Completed {
@@ -4005,10 +3988,321 @@ pub fn execute_guest_operation(
         ResponseEnvelope::Failed { message, .. } => {
             bail!("guest agent returned an error: {message}")
         }
-        ResponseEnvelope::Accepted { .. } => {
-            bail!("streaming guest operations are not implemented yet")
+        ResponseEnvelope::Accepted { stream, .. } => {
+            collect_streamed_guest_operation(&operation, stream, &mut writer, &mut reader)
         }
     }
+}
+
+pub fn stream_guest_pty<R, W, E>(
+    config: &PortConfig,
+    request: GuestRequest<'_>,
+    input: R,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<PtyResult>
+where
+    R: Read + Send + 'static,
+    W: Write,
+    E: Write,
+{
+    if machine_is_hosted(config, request.machine_name)? {
+        return match execute_guest_operation(config, request)? {
+            OperationResult::Pty(result) => {
+                stdout
+                    .write_all(result.transcript.as_bytes())
+                    .context("failed to write PTY transcript")?;
+                Ok(result)
+            }
+            other => bail!("unexpected guest pty result: {other:?}"),
+        };
+    }
+
+    let operation = request.operation.clone();
+    let (mut reader, writer, response) = open_guest_operation_transport(config, &request)?;
+    match response {
+        ResponseEnvelope::Accepted {
+            stream: port_agent_protocol::StreamKind::Pty,
+            ..
+        } => consume_streamed_pty(operation, writer, &mut reader, input, stdout, stderr),
+        ResponseEnvelope::Completed {
+            exit_code: 0,
+            result: OperationResult::Pty(result),
+            ..
+        } => {
+            stdout
+                .write_all(result.transcript.as_bytes())
+                .context("failed to write PTY transcript")?;
+            Ok(result)
+        }
+        ResponseEnvelope::Completed {
+            exit_code, result, ..
+        } => bail!("guest PTY failed with exit code {exit_code}: {result:?}"),
+        ResponseEnvelope::Failed { message, .. } => {
+            bail!("guest agent returned an error: {message}")
+        }
+        ResponseEnvelope::Accepted { stream, .. } => {
+            bail!("unexpected streamed PTY handshake: {stream:?}")
+        }
+    }
+}
+
+pub fn stream_guest_logs<W>(
+    config: &PortConfig,
+    request: GuestRequest<'_>,
+    output: &mut W,
+) -> Result<LogsResult>
+where
+    W: Write,
+{
+    if machine_is_hosted(config, request.machine_name)? {
+        return match execute_guest_operation(config, request)? {
+            OperationResult::Logs(result) => {
+                output
+                    .write_all(result.contents.as_bytes())
+                    .context("failed to write guest logs")?;
+                Ok(result)
+            }
+            other => bail!("unexpected guest logs result: {other:?}"),
+        };
+    }
+
+    let (mut reader, _writer, response) = open_guest_operation_transport(config, &request)?;
+    match response {
+        ResponseEnvelope::Accepted {
+            stream: port_agent_protocol::StreamKind::Logs,
+            ..
+        } => consume_streamed_logs(&mut reader, output),
+        ResponseEnvelope::Completed {
+            exit_code: 0,
+            result: OperationResult::Logs(result),
+            ..
+        } => {
+            output
+                .write_all(result.contents.as_bytes())
+                .context("failed to write guest logs")?;
+            Ok(result)
+        }
+        ResponseEnvelope::Completed {
+            exit_code, result, ..
+        } => bail!("guest logs failed with exit code {exit_code}: {result:?}"),
+        ResponseEnvelope::Failed { message, .. } => {
+            bail!("guest agent returned an error: {message}")
+        }
+        ResponseEnvelope::Accepted { stream, .. } => {
+            bail!("unexpected streamed logs handshake: {stream:?}")
+        }
+    }
+}
+
+fn open_guest_operation_transport(
+    config: &PortConfig,
+    request: &GuestRequest<'_>,
+) -> Result<(
+    BufReader<UnixStream>,
+    BufWriter<UnixStream>,
+    ResponseEnvelope,
+)> {
+    let driver = driver_for_machine(config, request.machine_name)?;
+    let endpoint = driver.guest_endpoint(config, request)?;
+    let stream = connect_guest_endpoint(&endpoint)?;
+    let writer_stream = stream
+        .try_clone()
+        .context("failed to clone guest agent socket")?;
+    let mut writer = BufWriter::new(writer_stream);
+    let mut reader = BufReader::new(stream);
+
+    write_frame(
+        &mut writer,
+        &RequestEnvelope {
+            id: 1,
+            operation: request.operation.clone(),
+        },
+    )
+    .map_err(|error| anyhow!("protocol error: {error}"))?;
+
+    let response: ResponseEnvelope =
+        read_frame(&mut reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+    Ok((reader, writer, response))
+}
+
+fn collect_streamed_guest_operation(
+    operation: &GuestOperation,
+    stream: port_agent_protocol::StreamKind,
+    writer: &mut BufWriter<UnixStream>,
+    reader: &mut BufReader<UnixStream>,
+) -> Result<OperationResult> {
+    match (operation, stream) {
+        (GuestOperation::Pty(_), port_agent_protocol::StreamKind::Pty) => {
+            write_frame(writer, &StreamRequestFrame::Close)
+                .map_err(|error| anyhow!("protocol error: {error}"))?;
+            consume_streamed_pty_frames(reader).map(OperationResult::Pty)
+        }
+        (GuestOperation::Logs(_), port_agent_protocol::StreamKind::Logs) => {
+            consume_streamed_logs_frames(reader).map(OperationResult::Logs)
+        }
+        _ => bail!("unexpected streamed guest operation handshake: {stream:?}"),
+    }
+}
+
+fn consume_streamed_pty<R, W, E>(
+    operation: GuestOperation,
+    writer: BufWriter<UnixStream>,
+    reader: &mut BufReader<UnixStream>,
+    input: R,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<PtyResult>
+where
+    R: Read + Send + 'static,
+    W: Write,
+    E: Write,
+{
+    if !matches!(operation, GuestOperation::Pty(_)) {
+        bail!("streamed PTY requested for a non-PTY operation");
+    }
+
+    let input_stream = writer
+        .get_ref()
+        .try_clone()
+        .context("failed to clone guest PTY stream for input")?;
+    thread::spawn(move || {
+        let _ = forward_stream_input(input, input_stream);
+    });
+
+    let mut transcript = String::new();
+    loop {
+        let frame: StreamResponseFrame =
+            read_frame(reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+        match frame {
+            StreamResponseFrame::Data { channel, data } => {
+                transcript.push_str(&data);
+                match channel {
+                    port_agent_protocol::StreamOutputChannel::Stderr => {
+                        stderr
+                            .write_all(data.as_bytes())
+                            .context("failed to write PTY stderr")?;
+                        stderr.flush().context("failed to flush PTY stderr")?;
+                    }
+                    _ => {
+                        stdout
+                            .write_all(data.as_bytes())
+                            .context("failed to write PTY stdout")?;
+                        stdout.flush().context("failed to flush PTY stdout")?;
+                    }
+                }
+            }
+            StreamResponseFrame::Exit { exit_code: 0 } => {
+                return Ok(PtyResult { transcript });
+            }
+            StreamResponseFrame::Exit { exit_code } => {
+                bail!("guest PTY failed with exit code {exit_code}");
+            }
+            StreamResponseFrame::Error { message } => {
+                bail!("guest PTY stream failed: {message}");
+            }
+            StreamResponseFrame::Eof => {
+                bail!("guest PTY stream ended without an exit frame");
+            }
+        }
+    }
+}
+
+fn consume_streamed_logs<W>(
+    reader: &mut BufReader<UnixStream>,
+    output: &mut W,
+) -> Result<LogsResult>
+where
+    W: Write,
+{
+    let mut contents = String::new();
+    loop {
+        let frame: StreamResponseFrame =
+            read_frame(reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+        match frame {
+            StreamResponseFrame::Data { data, .. } => {
+                contents.push_str(&data);
+                output
+                    .write_all(data.as_bytes())
+                    .context("failed to write guest logs")?;
+                output.flush().context("failed to flush guest logs")?;
+            }
+            StreamResponseFrame::Eof => return Ok(LogsResult { contents }),
+            StreamResponseFrame::Error { message } => {
+                bail!("guest log stream failed: {message}");
+            }
+            StreamResponseFrame::Exit { exit_code } => {
+                bail!("guest log stream ended with unexpected exit code {exit_code}");
+            }
+        }
+    }
+}
+
+fn consume_streamed_pty_frames(reader: &mut BufReader<UnixStream>) -> Result<PtyResult> {
+    let mut transcript = String::new();
+    loop {
+        let frame: StreamResponseFrame =
+            read_frame(reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+        match frame {
+            StreamResponseFrame::Data { data, .. } => transcript.push_str(&data),
+            StreamResponseFrame::Exit { exit_code: 0 } => {
+                return Ok(PtyResult { transcript });
+            }
+            StreamResponseFrame::Exit { exit_code } => {
+                bail!("guest PTY failed with exit code {exit_code}");
+            }
+            StreamResponseFrame::Error { message } => {
+                bail!("guest PTY stream failed: {message}");
+            }
+            StreamResponseFrame::Eof => {
+                bail!("guest PTY stream ended without an exit frame");
+            }
+        }
+    }
+}
+
+fn consume_streamed_logs_frames(reader: &mut BufReader<UnixStream>) -> Result<LogsResult> {
+    let mut contents = String::new();
+    loop {
+        let frame: StreamResponseFrame =
+            read_frame(reader).map_err(|error| anyhow!("protocol error: {error}"))?;
+        match frame {
+            StreamResponseFrame::Data { data, .. } => contents.push_str(&data),
+            StreamResponseFrame::Eof => return Ok(LogsResult { contents }),
+            StreamResponseFrame::Error { message } => {
+                bail!("guest log stream failed: {message}");
+            }
+            StreamResponseFrame::Exit { exit_code } => {
+                bail!("guest log stream ended with unexpected exit code {exit_code}");
+            }
+        }
+    }
+}
+
+fn forward_stream_input<R>(mut input: R, stream: UnixStream) -> Result<()>
+where
+    R: Read,
+{
+    let mut writer = BufWriter::new(stream);
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let bytes_read = input
+            .read(&mut buffer)
+            .context("failed to read PTY input")?;
+        if bytes_read == 0 {
+            break;
+        }
+        write_frame(
+            &mut writer,
+            &StreamRequestFrame::Input {
+                data: String::from_utf8_lossy(&buffer[..bytes_read]).into_owned(),
+            },
+        )
+        .map_err(|error| anyhow!("protocol error: {error}"))?;
+    }
+    write_frame(&mut writer, &StreamRequestFrame::Close)
+        .map_err(|error| anyhow!("protocol error: {error}"))?;
+    Ok(())
 }
 
 fn hosted_control_plane_guest_operation(
@@ -5010,8 +5304,8 @@ mod tests {
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, LogsRequest, LogsResult,
-        OperationResult, PtyRequest, PtyResult, RequestEnvelope, ResponseEnvelope, StreamKind,
-        read_frame, write_frame,
+        OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind,
+        StreamResponseFrame, read_frame, write_frame,
     };
     use port_model::{
         ArtifactKind, ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode,
@@ -5163,19 +5457,31 @@ exec sleep 30
         path
     }
 
-    fn wait_for_tcp_or_server_error(
-        addr: &str,
+    fn wait_for_http_or_server_error(
+        url: &str,
+        headers: &[(&str, &str)],
+        expected_status: Option<u16>,
         error_rx: &mpsc::Receiver<anyhow::Result<()>>,
         name: &str,
     ) -> anyhow::Result<()> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("blocking client should build");
         for _ in 0..100 {
-            if TcpStream::connect(addr).is_ok() {
-                return Ok(());
+            let mut request = client.get(url);
+            for (header, value) in headers {
+                request = request.header(*header, *value);
+            }
+            if let Ok(response) = request.send() {
+                if expected_status.is_none_or(|status| response.status().as_u16() == status) {
+                    return Ok(());
+                }
             }
             if let Ok(result) = error_rx.try_recv() {
                 return match result {
                     Ok(()) => Err(anyhow::anyhow!(
-                        "{name} exited before becoming ready on '{addr}'"
+                        "{name} exited before becoming ready at '{url}'"
                     )),
                     Err(error) => Err(error),
                 };
@@ -5184,7 +5490,10 @@ exec sleep 30
         }
 
         Err(anyhow::anyhow!(
-            "timed out waiting for {name} listener at '{addr}'"
+            "timed out waiting for {name} listener at '{url}'{}",
+            expected_status
+                .map(|status| format!(" expecting status {status}"))
+                .unwrap_or_default()
         ))
     }
 
@@ -5197,17 +5506,27 @@ exec sleep 30
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
         }
 
-        let node_addr = reserve_addr();
-        let control_plane_addr = reserve_addr();
         let mut client_config = config.clone();
+        let node_addr = if bind_node {
+            Some(start_live_node_agent(&client_config)?)
+        } else {
+            None
+        };
+
+        let control_plane_addr = start_live_control_plane(&client_config, node_addr.as_deref())?;
         client_config
             .control_planes
             .get_mut("demo")
             .expect("demo control plane should exist")
             .endpoint = format!("http://{control_plane_addr}");
 
-        if bind_node {
-            let node_config = client_config.clone();
+        Ok(client_config)
+    }
+
+    fn start_live_node_agent(config: &PortConfig) -> anyhow::Result<String> {
+        for _ in 0..10 {
+            let node_addr = reserve_addr();
+            let node_config = config.clone();
             let bind = node_addr.clone();
             let (node_tx, node_rx) = mpsc::channel();
             thread::spawn(move || {
@@ -5222,36 +5541,77 @@ exec sleep 30
                 .map(|_| ());
                 let _ = node_tx.send(result);
             });
-            wait_for_tcp_or_server_error(&node_addr, &node_rx, "node-agent")?;
+            let url = format!("http://{node_addr}/v1/node/machines/cloud-aws");
+            match wait_for_http_or_server_error(
+                &url,
+                &[("x-port-node-agent-token", "node-secret")],
+                None,
+                &node_rx,
+                "node-agent",
+            ) {
+                Ok(()) => return Ok(node_addr),
+                Err(error) if error.to_string().contains("failed to bind") => continue,
+                Err(error) => return Err(error),
+            }
         }
 
-        let control_config = client_config.clone();
-        let bind = control_plane_addr.clone();
-        let node_bindings = if bind_node {
-            vec![HostedNodeBinding {
-                node_name: String::from("aws-linux-node"),
-                endpoint: format!("http://{node_addr}"),
-                token: String::from("node-secret"),
-            }]
-        } else {
-            Vec::new()
-        };
-        let (control_tx, control_rx) = mpsc::channel();
-        thread::spawn(move || {
-            let result = serve_control_plane(
-                control_config,
-                ControlPlaneServeRequest {
-                    control_plane: String::from("demo"),
-                    bind,
-                    node_bindings,
-                },
-            )
-            .map(|_| ());
-            let _ = control_tx.send(result);
-        });
-        wait_for_tcp_or_server_error(&control_plane_addr, &control_rx, "control plane")?;
+        Err(anyhow::anyhow!(
+            "failed to bind a node-agent test server after repeated attempts"
+        ))
+    }
 
-        Ok(client_config)
+    fn start_live_control_plane(
+        config: &PortConfig,
+        node_addr: Option<&str>,
+    ) -> anyhow::Result<String> {
+        for _ in 0..10 {
+            let control_plane_addr = reserve_addr();
+            let mut control_config = config.clone();
+            control_config
+                .control_planes
+                .get_mut("demo")
+                .expect("demo control plane should exist")
+                .endpoint = format!("http://{control_plane_addr}");
+            let bind = control_plane_addr.clone();
+            let node_bindings = if let Some(node_addr) = node_addr {
+                vec![HostedNodeBinding {
+                    node_name: String::from("aws-linux-node"),
+                    endpoint: format!("http://{node_addr}"),
+                    token: String::from("node-secret"),
+                }]
+            } else {
+                Vec::new()
+            };
+            let (control_tx, control_rx) = mpsc::channel();
+            thread::spawn(move || {
+                let result = serve_control_plane(
+                    control_config,
+                    ControlPlaneServeRequest {
+                        control_plane: String::from("demo"),
+                        bind,
+                        node_bindings,
+                    },
+                )
+                .map(|_| ());
+                let _ = control_tx.send(result);
+            });
+            let url = format!("http://{control_plane_addr}/v1/machines");
+            match wait_for_http_or_server_error(
+                &url,
+                &[("authorization", "Bearer demo-token")],
+                Some(200),
+                &control_rx,
+                "control plane",
+            ) {
+                Ok(()) => return Ok(control_plane_addr),
+                Err(error) if error.to_string().contains("failed to bind") => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "failed to bind a control-plane test server after repeated attempts"
+        ))
     }
 
     fn write_manifest(paths: &RuntimePaths, machine_name: &str, pid: u32) {
@@ -6413,15 +6773,23 @@ exec sleep 30
             );
             write_frame(
                 &mut pty_stream,
-                &ResponseEnvelope::Completed {
+                &ResponseEnvelope::Accepted {
                     id: 1,
-                    exit_code: 0,
-                    result: OperationResult::Pty(PtyResult {
-                        transcript: String::from("pty-ok\r\n"),
-                    }),
+                    stream: StreamKind::Pty,
+                    size_bytes: None,
                 },
             )
-            .expect("pty response should encode");
+            .expect("pty accepted should encode");
+            write_frame(
+                &mut pty_stream,
+                &StreamResponseFrame::Data {
+                    channel: port_agent_protocol::StreamOutputChannel::Stdout,
+                    data: String::from("pty-ok\r\n"),
+                },
+            )
+            .expect("pty data should encode");
+            write_frame(&mut pty_stream, &StreamResponseFrame::Exit { exit_code: 0 })
+                .expect("pty exit should encode");
 
             let (mut logs_stream, _) = listener.accept().expect("logs accept");
             let logs_reader_stream = logs_stream.try_clone().expect("logs clone");
@@ -7112,6 +7480,130 @@ exec sleep 30
         match result {
             OperationResult::Exec(result) => assert_eq!(result.stdout, "live-ok\n"),
             other => panic!("unexpected result: {other:?}"),
+        }
+
+        server.join().expect("server thread should complete");
+    }
+
+    #[test]
+    fn guest_streaming_operations_aggregate_pty_and_followed_logs_from_runtime_socket() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let server = thread::spawn(move || {
+            let (mut pty_stream, _) = listener.accept().expect("pty accept");
+            let pty_reader_stream = pty_stream.try_clone().expect("pty clone");
+            let mut pty_reader = BufReader::new(pty_reader_stream);
+            let pty_request: RequestEnvelope = read_frame(&mut pty_reader).expect("pty request");
+            let GuestOperation::Pty(pty_request) = pty_request.operation else {
+                panic!("unexpected pty operation");
+            };
+            assert_eq!(
+                pty_request.command,
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("printf pty-stream-ok"),
+                ]
+            );
+            write_frame(
+                &mut pty_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Pty,
+                    size_bytes: None,
+                },
+            )
+            .expect("pty accepted should encode");
+            write_frame(
+                &mut pty_stream,
+                &StreamResponseFrame::Data {
+                    channel: port_agent_protocol::StreamOutputChannel::Stdout,
+                    data: String::from("pty-stream-ok"),
+                },
+            )
+            .expect("pty data should encode");
+            write_frame(&mut pty_stream, &StreamResponseFrame::Exit { exit_code: 0 })
+                .expect("pty exit should encode");
+
+            let (mut logs_stream, _) = listener.accept().expect("logs accept");
+            let logs_reader_stream = logs_stream.try_clone().expect("logs clone");
+            let mut logs_reader = BufReader::new(logs_reader_stream);
+            let logs_request: RequestEnvelope = read_frame(&mut logs_reader).expect("logs request");
+            let GuestOperation::Logs(logs_request) = logs_request.operation else {
+                panic!("unexpected logs operation");
+            };
+            assert!(logs_request.follow);
+            write_frame(
+                &mut logs_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Logs,
+                    size_bytes: None,
+                },
+            )
+            .expect("logs accepted should encode");
+            write_frame(
+                &mut logs_stream,
+                &StreamResponseFrame::Data {
+                    channel: port_agent_protocol::StreamOutputChannel::Logs,
+                    data: String::from("line-1\n"),
+                },
+            )
+            .expect("logs data should encode");
+            write_frame(
+                &mut logs_stream,
+                &StreamResponseFrame::Data {
+                    channel: port_agent_protocol::StreamOutputChannel::Logs,
+                    data: String::from("line-2\n"),
+                },
+            )
+            .expect("logs data should encode");
+            write_frame(&mut logs_stream, &StreamResponseFrame::Eof)
+                .expect("logs eof should encode");
+        });
+
+        let pty_result = execute_guest_operation(
+            &PortConfig::sample(),
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Pty(PtyRequest {
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("printf pty-stream-ok"),
+                    ],
+                    cols: 80,
+                    rows: 24,
+                }),
+            },
+        )
+        .expect("streamed guest pty should succeed");
+        match pty_result {
+            OperationResult::Pty(result) => assert_eq!(result.transcript, "pty-stream-ok"),
+            other => panic!("unexpected pty result: {other:?}"),
+        }
+
+        let logs_result = execute_guest_operation(
+            &PortConfig::sample(),
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Logs(LogsRequest {
+                    path: String::from("/var/log/app.log"),
+                    follow: true,
+                    tail_lines: None,
+                }),
+            },
+        )
+        .expect("streamed guest logs should succeed");
+        match logs_result {
+            OperationResult::Logs(result) => assert_eq!(result.contents, "line-1\nline-2\n"),
+            other => panic!("unexpected logs result: {other:?}"),
         }
 
         server.join().expect("server thread should complete");

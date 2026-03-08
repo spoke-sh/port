@@ -410,6 +410,49 @@ fn cli_guest_commands_cover_all_capabilities() {
 }
 
 #[test]
+fn cli_guest_logs_follow_streams_appended_output() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let runtime_root = temp.path().join("runtime");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    fs::write(guest_root.join("var/log/app.log"), "line-1\n").expect("log file");
+
+    write_config(&config_path, &PortConfig::sample());
+    let socket_path = runtime_socket(&runtime_root, "demo");
+    spawn_agent(&socket_path, &guest_root);
+
+    let mut child = Command::new(port_bin());
+    child
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("logs")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .arg("--path")
+        .arg("/var/log/app.log")
+        .arg("--follow")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = child.spawn().expect("logs follow command should start");
+
+    thread::sleep(Duration::from_millis(200));
+    fs::write(guest_root.join("var/log/app.log"), "line-1\nline-2\n").expect("log append");
+    thread::sleep(Duration::from_millis(300));
+
+    let _ = child.kill();
+    let output = child
+        .wait_with_output()
+        .expect("logs follow command should exit");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("line-1\n"), "{stdout}");
+    assert!(stdout.contains("line-2\n"), "{stdout}");
+}
+
+#[test]
 fn cli_guest_commands_cover_hosted_control_plane_runtime() {
     let temp = tempdir().expect("tempdir should exist");
     let guest_root = temp.path().join("guest-root");
