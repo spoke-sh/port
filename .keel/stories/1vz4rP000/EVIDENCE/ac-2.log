@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-03-07T19:33:19,559685393-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz4rP000/verify-ac-2.sh
+---
+
+"/nix/store/8vq23iszpyqngjcjcwwq4g10pq5fwz3g-nix-shell.drv"
+/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker
+/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip
+/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables

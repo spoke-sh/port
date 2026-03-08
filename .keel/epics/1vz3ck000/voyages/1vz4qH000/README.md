@@ -2,11 +2,12 @@
 id: 1vz4qH000
 index: 2
 title: Mac Operator Shell Compatibility
-status: in-progress
+status: done
 epic: 1vz3ck000
 created_at: 2026-03-07T19:30:09
 updated_at: 2026-03-07T19:31:42
 started_at: 2026-03-07T19:31:53
+completed_at: 2026-03-07T19:34:54
 ---
 
 # Mac Operator Shell Compatibility
@@ -20,14 +21,16 @@ started_at: 2026-03-07T19:31:53
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 stories complete
+**Progress:** 1/1 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Gate Linux Only Dev Shell Inputs](../../../../stories/1vz4rP000/README.md) | feat | backlog |
+| [Gate Linux Only Dev Shell Inputs](../../../../stories/1vz4rP000/README.md) | feat | done |
 <!-- END GENERATED -->

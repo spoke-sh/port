@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-03-07T19:33:23,266454052-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz4rP000/verify-ac-3.sh
+---
+
+flake.nix:61:            echo "Port's macOS dev shell provides repo tooling only; Linux-only runtime tools such as firecracker, iproute2, and iptables remain available only on Linux hosts."
+README.md:41:  `nix develop` now evaluates on macOS for repo tooling, but it intentionally
+README.md:42:  omits Linux-only runtime packages such as `firecracker`, `iproute2`, and
+docs/operators.md:193:- `nix develop` now evaluates on macOS for repo tooling, but the shell
+docs/operators.md:194:  intentionally omits Linux-only runtime packages such as `firecracker`,
