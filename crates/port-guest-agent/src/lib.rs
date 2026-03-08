@@ -7,9 +7,9 @@ use std::thread;
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    CopyRequest, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
-    LogsResult, OperationResult, PtyRequest, PtyResult, RequestEnvelope, ResponseEnvelope,
-    StreamKind, read_frame, write_frame,
+    CopyRequest, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest, LogsResult,
+    OperationResult, PtyRequest, PtyResult, RequestEnvelope, ResponseEnvelope, StreamKind,
+    read_frame, write_frame,
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use vsock::{VMADDR_CID_ANY, VsockListener, VsockStream};
@@ -40,7 +40,10 @@ impl AgentService {
         }
     }
 
-    fn handle_non_streaming_operation(&self, operation: GuestOperation) -> Result<(i32, OperationResult)> {
+    fn handle_non_streaming_operation(
+        &self,
+        operation: GuestOperation,
+    ) -> Result<(i32, OperationResult)> {
         match operation {
             GuestOperation::Exec(request) => self.exec(request),
             GuestOperation::Pty(request) => self.pty(request),
@@ -429,7 +432,9 @@ impl AgentService {
             .try_clone_stream()
             .context("failed to clone guest transport stream for forward read")?;
         let mut inbound_write = stream;
-        let mut outbound_read = outbound.try_clone().context("failed to clone target stream")?;
+        let mut outbound_read = outbound
+            .try_clone()
+            .context("failed to clone target stream")?;
 
         let first = thread::spawn(move || {
             let result = std::io::copy(&mut inbound_read, &mut outbound);
@@ -583,11 +588,16 @@ mod tests {
                 ..
             }
         ));
-        client.write_all(b"copy-ok").expect("upload bytes should write");
+        client
+            .write_all(b"copy-ok")
+            .expect("upload bytes should write");
         client.flush().expect("upload bytes should flush");
         let upload_complete: ResponseEnvelope =
             read_frame(&mut upload_reader).expect("upload completion");
-        assert!(matches!(upload_complete, ResponseEnvelope::Completed { .. }));
+        assert!(matches!(
+            upload_complete,
+            ResponseEnvelope::Completed { .. }
+        ));
         assert_eq!(
             fs::read_to_string(guest_root.join("workspace/copied.txt")).expect("copied file"),
             "copy-ok"
@@ -632,8 +642,13 @@ mod tests {
         assert_eq!(bytes, b"copy-ok");
         let download_complete: ResponseEnvelope =
             read_frame(&mut download_reader).expect("download completion");
-        assert!(matches!(download_complete, ResponseEnvelope::Completed { .. }));
-        download_thread.join().expect("download thread should finish");
+        assert!(matches!(
+            download_complete,
+            ResponseEnvelope::Completed { .. }
+        ));
+        download_thread
+            .join()
+            .expect("download thread should finish");
 
         let target = TcpListener::bind("127.0.0.1:0").expect("target listener");
         let target_addr = target.local_addr().expect("target addr");
@@ -661,7 +676,8 @@ mod tests {
             },
         )
         .expect("forward request should write");
-        let forward_response: ResponseEnvelope = read_frame(&mut forward_reader).expect("forward ack");
+        let forward_response: ResponseEnvelope =
+            read_frame(&mut forward_reader).expect("forward ack");
         assert!(matches!(
             forward_response,
             ResponseEnvelope::Accepted {
@@ -670,7 +686,9 @@ mod tests {
             }
         ));
         client.write_all(b"forward-ok").expect("write forwarded");
-        client.shutdown(Shutdown::Write).expect("shutdown forward write");
+        client
+            .shutdown(Shutdown::Write)
+            .expect("shutdown forward write");
         let mut buf = [0_u8; 32];
         let len = forward_reader.read(&mut buf).expect("read forwarded");
         assert_eq!(&buf[..len], b"forward-ok");

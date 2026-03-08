@@ -217,5 +217,8 @@ fn cli_guest_commands_cover_all_capabilities() {
 
     let _ = forward.kill();
     let status = forward.wait().expect("forward process should exit");
-    assert!(!status.success(), "forward process should have been terminated");
+    assert!(
+        !status.success(),
+        "forward process should have been terminated"
+    );
 }
