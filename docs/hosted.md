@@ -298,9 +298,9 @@ What is runnable today:
 - hosted guest attach failures surface the control plane and node-routing
   context directly, so missing guest sockets or unresolved hosted node
   ownership stay visible to the operator
-- hosted `guest copy` in the single-node demo still assumes the referenced
-  host paths are visible on the node host; streamed remote file transport
-  remains follow-on work
+- hosted `guest copy` now relays bytes through the control plane and node
+  agent using the shared guest copy protocol, so client-side host paths no
+  longer need to be visible on the selected node
 - hosted `guest forward` still keeps its listener lifecycle on the repo-local
   guest transport lane while streamed hosted forwarding remains follow-on work
 - hosted `service secret put|list|remove` now stores machine-scoped secret

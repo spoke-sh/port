@@ -357,9 +357,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   protocol frames stay unchanged. Hosted `guest exec|copy|pty|logs` now execute
   through that live HTTP path for the demo lane without introducing hosted-only
   aliases.
-- Hosted `guest copy` currently assumes the referenced host paths are visible
-  on the node host because the first live lane still uses JSON request bodies
-  instead of streamed remote file transport.
+- Hosted `guest copy` now transfers bytes through the control-plane and
+  node-agent path using the shared guest copy protocol, so the demo lane no
+  longer assumes the client host paths are visible on the selected node.
 - Hosted `guest forward` still uses the repo-local guest transport lane for its
   listener lifecycle while streamed hosted forwarding remains follow-on work.
 - Hosted inventory that lacks a matching node runtime binding currently

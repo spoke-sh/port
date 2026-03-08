@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -12,8 +13,8 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use port_hosted_protocol::{
-    HostedError, HostedGuestRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
-    HostedNodeRoute, HostedRouteContext, HostedSuccess,
+    HostedError, HostedGuestRoute, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
+    HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext, HostedSuccess,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
@@ -27,12 +28,15 @@ use tokio::net::TcpListener;
 use crate::{
     GuestCopyRequest, GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest,
     MachineRuntimeState, MachineStatus, RuntimePaths, StopResult, copy_guest_file,
-    execute_guest_operation, hosted_placeholder_runtime_root, launch_local_machine,
-    machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
-    machine_top as runtime_machine_top, prepare_guest_forward,
-    stop_machine as runtime_stop_machine,
+    copy_guest_via_endpoint, execute_guest_operation, hosted_placeholder_runtime_root,
+    launch_local_machine, machine_monitor as runtime_machine_monitor,
+    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
+    prepare_guest_forward, stop_machine as runtime_stop_machine,
 };
-use port_agent_protocol::{ForwardResult, GuestOperation, OperationResult};
+use port_agent_protocol::{
+    CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
+    StreamKind, read_frame, write_frame,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedNodeBinding {
@@ -209,6 +213,10 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
         .route("/v1/machines/{machine}/top", get(machine_top))
         .route("/v1/machines/{machine}/guest:exec", post(guest_exec))
         .route("/v1/machines/{machine}/guest:copy", post(guest_copy))
+        .route(
+            "/v1/machines/{machine}/guest:copy:stream",
+            post(guest_copy_stream),
+        )
         .route("/v1/machines/{machine}/guest:pty", post(guest_pty))
         .route("/v1/machines/{machine}/guest:logs", post(guest_logs))
         .route("/v1/machines/{machine}/guest:forward", post(guest_forward))
@@ -420,6 +428,15 @@ async fn guest_copy(
     proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Copy, body).await
 }
 
+async fn guest_copy_stream(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_guest_stream_route(&state, &headers, &machine, HostedGuestVerb::Copy, body).await
+}
+
 async fn guest_pty(
     State(state): State<ControlPlaneState>,
     Path(machine): Path<String>,
@@ -466,6 +483,55 @@ async fn proxy_guest_route(
         Some(body),
     )
     .await
+}
+
+async fn proxy_guest_stream_route(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    machine: &str,
+    verb: HostedGuestVerb,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = authorize(state, headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(state, machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let (binding, route_context) = match resolve_node_binding(state, &summary) {
+        Ok(result) => result,
+        Err((route_context, message)) => {
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
+        }
+    };
+
+    match proxy_bytes(
+        state,
+        &binding,
+        HostedNodeRoute::GuestStream(HostedGuestStreamRoute {
+            machine_name: machine.to_string(),
+            verb,
+        }),
+        Method::POST,
+        Some(body),
+        Some("application/octet-stream"),
+        route_context.clone(),
+    )
+    .await
+    {
+        Ok((status, bytes)) => raw_response(
+            status,
+            bytes,
+            if status.is_success() {
+                "application/octet-stream"
+            } else {
+                "application/json"
+            },
+        ),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route_context)),
+    }
 }
 
 async fn proxy_machine_route(
@@ -618,7 +684,17 @@ async fn proxy_raw(
     body: Option<Bytes>,
     route_context: HostedRouteContext,
 ) -> Response {
-    match proxy_bytes(state, binding, route, method, body, route_context.clone()).await {
+    match proxy_bytes(
+        state,
+        binding,
+        route,
+        method,
+        body,
+        Some("application/json"),
+        route_context.clone(),
+    )
+    .await
+    {
         Ok((status, bytes)) => bytes_response(status, bytes),
         Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route_context)),
     }
@@ -632,7 +708,16 @@ async fn proxy_json<T: DeserializeOwned>(
     body: Option<Bytes>,
     route_context: HostedRouteContext,
 ) -> Result<T, String> {
-    let (status, bytes) = proxy_bytes(state, binding, route, method, body, route_context).await?;
+    let (status, bytes) = proxy_bytes(
+        state,
+        binding,
+        route,
+        method,
+        body,
+        Some("application/json"),
+        route_context,
+    )
+    .await?;
     if !status.is_success() {
         if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
             return Err(error.message);
@@ -657,6 +742,7 @@ async fn proxy_bytes(
     route: HostedNodeRoute,
     method: Method,
     body: Option<Bytes>,
+    content_type: Option<&str>,
     route_context: HostedRouteContext,
 ) -> Result<(StatusCode, Bytes), String> {
     let url = format!("{}{}", binding.endpoint.trim_end_matches('/'), route.path());
@@ -671,7 +757,9 @@ async fn proxy_bytes(
         request = request.header(name, value);
     }
     if let Some(body) = body {
-        request = request.header(CONTENT_TYPE.as_str(), "application/json");
+        if let Some(content_type) = content_type {
+            request = request.header(CONTENT_TYPE.as_str(), content_type);
+        }
         request = request.body(body.to_vec());
     }
     let response = request.send().await.map_err(|error| {
@@ -731,11 +819,19 @@ fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
 }
 
 fn bytes_response(status: StatusCode, bytes: impl Into<Bytes>) -> Response {
+    raw_response(status, bytes, "application/json")
+}
+
+fn raw_response(
+    status: StatusCode,
+    bytes: impl Into<Bytes>,
+    content_type: &'static str,
+) -> Response {
     let mut response = Response::new(Body::from(bytes.into()));
     *response.status_mut() = status;
     response.headers_mut().insert(
         CONTENT_TYPE,
-        axum::http::HeaderValue::from_static("application/json"),
+        axum::http::HeaderValue::from_static(content_type),
     );
     response
 }
@@ -810,6 +906,10 @@ fn node_agent_router(state: NodeAgentState) -> Router {
         .route(
             "/v1/node/machines/{machine}/guest:copy",
             post(node_guest_copy),
+        )
+        .route(
+            "/v1/node/machines/{machine}/guest:copy:stream",
+            post(node_guest_copy_stream),
         )
         .route(
             "/v1/node/machines/{machine}/guest:pty",
@@ -930,6 +1030,15 @@ async fn node_guest_copy(
     body: Bytes,
 ) -> Response {
     node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Copy)
+}
+
+async fn node_guest_copy_stream(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    node_guest_copy_stream_response(&state, &headers, &machine, body)
 }
 
 async fn node_guest_pty(
@@ -1255,15 +1364,146 @@ fn node_guest_operation_response(
     }
 }
 
+fn node_guest_copy_stream_response(
+    state: &NodeAgentState,
+    headers: &HeaderMap,
+    machine_name: &str,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = node_authorize(state, headers) {
+        return response;
+    }
+
+    let (localized, route) = match localize_machine_for_node(state, machine_name) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let mut request_reader = BufReader::new(Cursor::new(body.to_vec()));
+    let request: RequestEnvelope = match read_frame(&mut request_reader) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' received an invalid guest copy stream payload: {error}",
+                    state.inner.node_name
+                ),
+                Some(route),
+            );
+        }
+    };
+    let GuestOperation::Copy(copy_request) = request.operation else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "node '{}' received a streamed guest payload that does not match the 'copy' route",
+                state.inner.node_name
+            ),
+            Some(route),
+        );
+    };
+
+    match relay_guest_copy_stream(
+        &localized,
+        machine_name,
+        &state.inner.runtime_root,
+        copy_request,
+        &mut request_reader,
+    ) {
+        Ok(bytes) => raw_response(StatusCode::OK, bytes, "application/octet-stream"),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to serve guest copy stream for machine '{}': {error}",
+                state.inner.node_name, machine_name
+            ),
+            Some(route),
+        ),
+    }
+}
+
+fn relay_guest_copy_stream(
+    config: &PortConfig,
+    machine_name: &str,
+    runtime_root: &std::path::Path,
+    copy_request: CopyRequest,
+    request_reader: &mut dyn std::io::Read,
+) -> Result<Vec<u8>> {
+    let mut response_bytes = Vec::new();
+    match copy_request.direction {
+        port_agent_protocol::CopyDirection::HostToGuest => {
+            let result = copy_guest_via_endpoint(
+                config,
+                machine_name,
+                runtime_root,
+                copy_request.clone(),
+                Some(request_reader),
+                None,
+            )?;
+            write_frame(
+                &mut response_bytes,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .map_err(|error| anyhow::anyhow!("protocol error: {error}"))?;
+            write_frame(
+                &mut response_bytes,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(result),
+                },
+            )
+            .map_err(|error| anyhow::anyhow!("protocol error: {error}"))?;
+        }
+        port_agent_protocol::CopyDirection::GuestToHost => {
+            let mut downloaded = Vec::new();
+            let result = copy_guest_via_endpoint(
+                config,
+                machine_name,
+                runtime_root,
+                copy_request,
+                None,
+                Some(&mut downloaded),
+            )?;
+            write_frame(
+                &mut response_bytes,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: Some(result.bytes_copied),
+                },
+            )
+            .map_err(|error| anyhow::anyhow!("protocol error: {error}"))?;
+            response_bytes.extend_from_slice(&downloaded);
+            write_frame(
+                &mut response_bytes,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(result),
+                },
+            )
+            .map_err(|error| anyhow::anyhow!("protocol error: {error}"))?;
+        }
+    }
+
+    Ok(response_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::{Json, Router};
     use port_agent_protocol::{
-        ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
-        ResponseEnvelope, read_frame, write_frame,
+        CopyDirection, CopyRequest, ExecRequest, ExecResult, GuestOperation, OperationResult,
+        RequestEnvelope, ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
-    use std::io::BufReader;
+    use std::io::{BufReader, Cursor, Read, Write};
     use std::net::SocketAddr;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
@@ -1402,6 +1642,219 @@ mod tests {
                 .iter()
                 .any(|body| body.contains("\"type\":\"exec\""))
         );
+    }
+
+    #[tokio::test]
+    async fn control_plane_proxies_copy_stream_through_node_agent_guest_transport() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        std::fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest socket should bind");
+        let server = std::thread::spawn(move || {
+            let (mut upload_stream, _) = listener.accept().expect("upload accept");
+            let upload_reader_stream = upload_stream.try_clone().expect("upload clone");
+            let mut upload_reader = BufReader::new(upload_reader_stream);
+            let upload_request: RequestEnvelope =
+                read_frame(&mut upload_reader).expect("upload request should decode");
+            let GuestOperation::Copy(upload_request) = upload_request.operation else {
+                panic!("unexpected upload operation");
+            };
+            assert_eq!(upload_request.direction, CopyDirection::HostToGuest);
+            assert_eq!(upload_request.size_bytes, Some(7));
+            write_frame(
+                &mut upload_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .expect("upload accepted should encode");
+            let mut uploaded = Vec::new();
+            upload_reader
+                .by_ref()
+                .take(7)
+                .read_to_end(&mut uploaded)
+                .expect("upload bytes should read");
+            assert_eq!(uploaded, b"copy-ok");
+            write_frame(
+                &mut upload_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(port_agent_protocol::CopyResult {
+                        bytes_copied: 7,
+                        path: String::from("/workspace/copied.txt"),
+                        direction: CopyDirection::HostToGuest,
+                    }),
+                },
+            )
+            .expect("upload completion should encode");
+            drop(upload_stream);
+
+            let (mut download_stream, _) = listener.accept().expect("download accept");
+            let download_reader_stream = download_stream.try_clone().expect("download clone");
+            let mut download_reader = BufReader::new(download_reader_stream);
+            let download_request: RequestEnvelope =
+                read_frame(&mut download_reader).expect("download request should decode");
+            let GuestOperation::Copy(download_request) = download_request.operation else {
+                panic!("unexpected download operation");
+            };
+            assert_eq!(download_request.direction, CopyDirection::GuestToHost);
+            write_frame(
+                &mut download_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: Some(7),
+                },
+            )
+            .expect("download accepted should encode");
+            download_stream
+                .write_all(b"copy-ok")
+                .expect("download bytes should write");
+            write_frame(
+                &mut download_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(port_agent_protocol::CopyResult {
+                        bytes_copied: 7,
+                        path: String::from("/client/downloaded.txt"),
+                        direction: CopyDirection::GuestToHost,
+                    }),
+                },
+            )
+            .expect("download completion should encode");
+        });
+
+        let node_addr =
+            serve_test_node_agent(config.clone(), "aws-linux-node", "node-secret").await;
+        let control_addr = serve_test_control_plane(
+            config,
+            vec![HostedNodeBinding {
+                node_name: String::from("aws-linux-node"),
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+            }],
+        )
+        .await;
+
+        let client = Client::new();
+        let mut upload_body = Vec::new();
+        write_frame(
+            &mut upload_body,
+            &RequestEnvelope {
+                id: 1,
+                operation: GuestOperation::Copy(CopyRequest {
+                    source: String::from("/client/source.txt"),
+                    destination: String::from("/workspace/copied.txt"),
+                    direction: CopyDirection::HostToGuest,
+                    size_bytes: Some(7),
+                }),
+            },
+        )
+        .expect("upload request should encode");
+        upload_body.extend_from_slice(b"copy-ok");
+
+        let upload = client
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws/guest:copy:stream"
+            ))
+            .header("authorization", "Bearer demo-token")
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(upload_body)
+            .send()
+            .await
+            .expect("upload request should complete");
+        assert_eq!(upload.status(), StatusCode::OK);
+        let upload_bytes = upload.bytes().await.expect("upload body should read");
+        let mut upload_reader = BufReader::new(Cursor::new(upload_bytes.to_vec()));
+        let upload_accepted: ResponseEnvelope =
+            read_frame(&mut upload_reader).expect("upload accepted should decode");
+        assert!(matches!(
+            upload_accepted,
+            ResponseEnvelope::Accepted {
+                stream: StreamKind::Bytes,
+                ..
+            }
+        ));
+        let upload_completed: ResponseEnvelope =
+            read_frame(&mut upload_reader).expect("upload completion should decode");
+        match upload_completed {
+            ResponseEnvelope::Completed {
+                result: OperationResult::Copy(result),
+                ..
+            } => {
+                assert_eq!(result.bytes_copied, 7);
+                assert_eq!(result.path, "/workspace/copied.txt");
+            }
+            other => panic!("unexpected upload completion: {other:?}"),
+        }
+
+        let mut download_body = Vec::new();
+        write_frame(
+            &mut download_body,
+            &RequestEnvelope {
+                id: 1,
+                operation: GuestOperation::Copy(CopyRequest {
+                    source: String::from("/workspace/copied.txt"),
+                    destination: String::from("/client/downloaded.txt"),
+                    direction: CopyDirection::GuestToHost,
+                    size_bytes: None,
+                }),
+            },
+        )
+        .expect("download request should encode");
+        let download = client
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws/guest:copy:stream"
+            ))
+            .header("authorization", "Bearer demo-token")
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(download_body)
+            .send()
+            .await
+            .expect("download request should complete");
+        assert_eq!(download.status(), StatusCode::OK);
+        let download_bytes = download.bytes().await.expect("download body should read");
+        let mut download_reader = BufReader::new(Cursor::new(download_bytes.to_vec()));
+        let download_accepted: ResponseEnvelope =
+            read_frame(&mut download_reader).expect("download accepted should decode");
+        let size_bytes = match download_accepted {
+            ResponseEnvelope::Accepted {
+                stream: StreamKind::Bytes,
+                size_bytes: Some(size_bytes),
+                ..
+            } => size_bytes,
+            other => panic!("unexpected download accepted frame: {other:?}"),
+        };
+        let mut downloaded = vec![0_u8; size_bytes as usize];
+        download_reader
+            .read_exact(&mut downloaded)
+            .expect("download bytes should read");
+        assert_eq!(&downloaded, b"copy-ok");
+        let download_completed: ResponseEnvelope =
+            read_frame(&mut download_reader).expect("download completion should decode");
+        match download_completed {
+            ResponseEnvelope::Completed {
+                result: OperationResult::Copy(result),
+                ..
+            } => {
+                assert_eq!(result.bytes_copied, 7);
+                assert_eq!(result.path, "/client/downloaded.txt");
+            }
+            other => panic!("unexpected download completion: {other:?}"),
+        }
+
+        server.join().expect("guest copy server should complete");
     }
 
     #[tokio::test]
