@@ -8,6 +8,7 @@
 | Bearing | Status | Survey | Assessment |
 |---------|--------|--------|------------|
 | [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
+| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | exploring | ✓ | ✓ |
 
 <details>
 <summary>Completed Bearings</summary>
