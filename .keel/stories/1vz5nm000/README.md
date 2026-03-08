@@ -2,11 +2,13 @@
 id: 1vz5nm000
 title: Publish Hosted SDK And API Clients
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T20:31:38
-updated_at: 2026-03-08T06:39:14
+updated_at: 2026-03-08T06:46:05
 scope: 1vz4Yn000/1vz5mg000
 started_at: 2026-03-08T06:39:14
+submitted_at: 2026-03-08T06:46:02
+completed_at: 2026-03-08T06:46:05
 ---
 
 # Publish Hosted SDK And API Clients

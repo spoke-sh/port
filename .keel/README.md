@@ -45,10 +45,10 @@
 | [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | done |
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
 
-### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (active)
+### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | done |
-| [Hosted Runtime And Service Expansion](epics/1vz4Yn000/voyages/1vz5mg000/) | in-progress |
+| [Hosted Runtime And Service Expansion](epics/1vz4Yn000/voyages/1vz5mg000/) | done |
 
