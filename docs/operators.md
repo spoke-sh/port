@@ -8,7 +8,7 @@ Windows operators.
 | Operator environment | Supported MVP workflow | Unsupported MVP workflow | Why |
 |----------------------|------------------------|--------------------------|-----|
 | Linux host with `/dev/kvm` and Firecracker | Run the full local Port workflow directly through the `port` CLI | n/a | Firecracker local launch requires Linux and KVM |
-| macOS workstation | Edit or inspect the repo locally, use `port doctor` to validate AVF-targeted machine contracts, and run working launch flows on Linux today | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; AVF contract and doctor checks ship now, but the executable AVF runtime is not landed yet |
+| macOS workstation | Edit or inspect the repo locally, use `port doctor` to validate AVF-targeted machine contracts, and use the AVF local-driver foundation when a launcher helper is configured | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; the AVF runtime still needs guest transport, console capture, and published workflow proof |
 | Windows workstation | Use WSL or a remote Linux host for the Linux-side `port` workflow | Native Windows Firecracker launch | Firecracker local launch requires a Linux environment with `/dev/kvm`; not every WSL setup exposes that capability |
 
 ## Linux Workflow
@@ -193,14 +193,16 @@ Current boundary:
 - `nix develop` now evaluates on macOS for repo tooling, but the shell
   intentionally omits Linux-only runtime packages such as `firecracker`,
   `iproute2`, and `iptables`.
-- Apple Virtualization Framework is now a first-class Port lane at the machine
-  contract and `port doctor` level, but it is not executable in the current
-  runtime yet.
+- Apple Virtualization Framework now has a local machine-driver foundation for
+  `machine launch|status|stop`, but it still depends on a configured launcher
+  helper and is not yet a complete guest-usable runtime.
 - The planned AVF lane keeps the same `machine` and `guest` verbs, maps guest
   transport onto AVF virtio sockets, and maps console/log capture onto AVF
   serial ports.
 - `port doctor` now emits AVF-specific host-platform, host-architecture, and
   entitlement-boundary checks when a machine targets `substrate = "avf"`.
+- `port machine launch|status|stop` now route AVF-targeted machines through the
+  local AVF driver instead of failing at driver selection time.
 - Distributed macOS app targets will need Apple's virtualization entitlement;
   Rosetta-in-Linux-VM workflows are optional and depend on AVF directory
   sharing rather than replacing Port's guest-agent contract.

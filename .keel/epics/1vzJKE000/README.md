@@ -20,9 +20,9 @@ created_at: 2026-03-08T12:02:25
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 5/8 stories done
+**Progress:** 1/2 voyages complete, 6/8 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Prepared Linux Pvm Runtime](voyages/1vzJP2000/) | done | 4/4 |
-| [Executable Avf Runtime Foundation](voyages/1vzLYD000/) | in-progress | 1/4 |
+| [Executable Avf Runtime Foundation](voyages/1vzLYD000/) | in-progress | 2/4 |
 <!-- END GENERATED -->

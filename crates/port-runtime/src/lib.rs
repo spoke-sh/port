@@ -362,6 +362,7 @@ pub struct GuestForwardRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineDriverKind {
     FirecrackerLocal,
+    AvfLocal,
     HostedControlPlane,
 }
 
@@ -412,6 +413,9 @@ trait MachineDriver {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct FirecrackerLocalDriver;
+
+#[derive(Debug, Default, Clone, Copy)]
+struct AvfLocalDriver;
 
 #[derive(Debug, Default, Clone, Copy)]
 struct HostedControlPlaneDriver;
@@ -858,9 +862,197 @@ fn firecracker_local_launch_machine(
     Ok(metadata)
 }
 
+fn avf_launcher_from_env() -> Option<PathBuf> {
+    env::var_os("PORT_AVF_LAUNCHER").map(PathBuf::from)
+}
+
+fn avf_local_launch_machine(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+) -> Result<LaunchMetadata> {
+    avf_local_launch_machine_with_host_os(config, request, env::consts::OS, avf_launcher_from_env())
+}
+
+fn avf_local_launch_machine_with_host_os(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+    host_os: &str,
+    launcher_override: Option<PathBuf>,
+) -> Result<LaunchMetadata> {
+    config
+        .validate()
+        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+
+    let machine = config
+        .machines
+        .get(request.machine_name)
+        .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    let kernel = config
+        .artifact(&machine.kernel)
+        .with_context(|| format!("unknown kernel artifact '{}'", machine.kernel))?;
+    let guest_image = config
+        .artifact(&machine.guest_image)
+        .with_context(|| format!("unknown guest image artifact '{}'", machine.guest_image))?;
+    let machine_check =
+        machine_contract_check(request.machine_name, host, machine, kernel, guest_image);
+    if !machine_check.ok {
+        bail!("machine contract failed: {}", machine_check.detail);
+    }
+    if host_os != "macos" {
+        bail!(
+            "AVF local launch requires running Port on macOS; detected host OS '{}'",
+            host_os
+        );
+    }
+
+    let launcher = launcher_override.ok_or_else(|| {
+        anyhow!(
+            "AVF local driver is configured, but no AVF launcher helper is set. Set PORT_AVF_LAUNCHER to a macOS AVF launcher binary."
+        )
+    })?;
+    if !launcher.exists() {
+        bail!(
+            "AVF launcher helper '{}' does not exist",
+            launcher.display()
+        );
+    }
+
+    let resolved_architecture = resolve_machine_architecture(machine.architecture)?;
+    let kernel_variant = kernel
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "kernel artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.kernel, resolved_architecture, machine.substrate, machine.protection_mode
+            )
+        })?;
+    let guest_variant = guest_image
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "guest image artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.guest_image,
+                resolved_architecture,
+                machine.substrate,
+                machine.protection_mode
+            )
+        })?;
+
+    let failures = launch_preflight_checks(machine, &kernel_variant.path, &guest_variant.path)
+        .into_iter()
+        .filter(|check| check.required && !check.ok)
+        .collect::<Vec<_>>();
+    if !failures.is_empty() {
+        let details = failures
+            .into_iter()
+            .map(|failure| format!("{}: {}", failure.name, failure.detail))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!("avf host preflight failed: {details}");
+    }
+
+    let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
+    fs::create_dir_all(&paths.runtime_dir).with_context(|| {
+        format!(
+            "failed to create runtime directory '{}'",
+            paths.runtime_dir.display()
+        )
+    })?;
+    prepare_avf_runtime_state(&paths, request.machine_name)?;
+
+    let contract = AvfExecutionContract::linux_guest();
+    let config_payload = AvfLaunchConfig {
+        machine_name: request.machine_name.to_string(),
+        kernel_path: kernel_variant.path.clone(),
+        guest_image_path: guest_variant.path.clone(),
+        vcpu_count: machine.vcpu_count,
+        memory_mib: machine.memory_mib,
+        kernel_args: machine.kernel_args.clone(),
+        rootfs_read_only: machine.rootfs_read_only,
+        guest_vsock_cid: machine.guest.vsock_cid,
+        guest_control_port: machine.guest.control_port,
+        guest_transport: contract.guest_transport,
+        console_transport: contract.console_transport,
+        console_log: paths.firecracker_log.clone(),
+    };
+    write_json_file(&paths.config_path, &config_payload)?;
+
+    let stdout = File::create(&paths.stdout_log)
+        .with_context(|| format!("failed to create '{}'", paths.stdout_log.display()))?;
+    let stderr = File::create(&paths.stderr_log)
+        .with_context(|| format!("failed to create '{}'", paths.stderr_log.display()))?;
+
+    let mut child = Command::new(&launcher)
+        .arg("--machine")
+        .arg(request.machine_name)
+        .arg("--config")
+        .arg(&paths.config_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .with_context(|| format!("failed to start AVF launcher '{}'", launcher.display()))?;
+
+    if let Some(status) = wait_for_boot(&mut child, request.boot_wait)? {
+        bail!(
+            "AVF launcher exited before boot wait elapsed with status {status}; inspect '{}' and '{}'",
+            paths.stdout_log.display(),
+            paths.stderr_log.display()
+        );
+    }
+
+    let launched_at_unix_s = unix_timestamp_now()?;
+    fs::write(&paths.pid_path, format!("{}\n", child.id()))
+        .with_context(|| format!("failed to write pid file '{}'", paths.pid_path.display()))?;
+
+    let metadata = LaunchMetadata {
+        machine_name: request.machine_name.to_string(),
+        pid: child.id(),
+        launched_at_unix_s,
+        runtime_dir: paths.runtime_dir.clone(),
+        firecracker_binary: launcher.clone(),
+        config_path: paths.config_path.clone(),
+        log_path: paths.firecracker_log.clone(),
+        stdout_path: paths.stdout_log.clone(),
+        stderr_path: paths.stderr_log.clone(),
+        manifest_path: paths.manifest_path.clone(),
+    };
+    write_json_file(&paths.manifest_path, &metadata)?;
+
+    let avf_metadata = AvfRuntimeMetadata {
+        machine_name: request.machine_name.to_string(),
+        pid: child.id(),
+        launcher,
+        config_path: paths.config_path.clone(),
+        metadata_path: avf_runtime_metadata_path(&paths),
+        console_log: paths.firecracker_log.clone(),
+        guest_transport: contract.guest_transport,
+        console_transport: contract.console_transport,
+        launched_at_unix_s,
+    };
+    write_json_file(&avf_runtime_metadata_path(&paths), &avf_metadata)?;
+
+    Ok(metadata)
+}
+
 pub fn list_machines(config: &PortConfig, runtime_root: &Path) -> Result<Vec<MachineStatus>> {
     let mut machines = BTreeMap::new();
     for machine in local_runtime_driver().list_machines(config, runtime_root)? {
+        machines.insert(machine.machine_name.clone(), machine);
+    }
+    for machine in AvfLocalDriver.list_machines(config, runtime_root)? {
         machines.insert(machine.machine_name.clone(), machine);
     }
     for machine in hosted_control_plane_driver().list_machines(config, runtime_root)? {
@@ -941,11 +1133,154 @@ fn firecracker_local_machine_status(
     )
 }
 
+fn resolve_live_pid_by_existence(
+    pid_from_file: Option<u32>,
+    manifest_pid: Option<u32>,
+) -> Result<Option<u32>> {
+    if let Some(pid) = pid_from_file {
+        if process_cmdline(pid)?.is_some() {
+            return Ok(Some(pid));
+        }
+    }
+    if let Some(pid) = manifest_pid {
+        if Some(pid) != pid_from_file && process_cmdline(pid)?.is_some() {
+            return Ok(Some(pid));
+        }
+    }
+    Ok(None)
+}
+
+fn avf_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    if !paths.runtime_dir.exists() {
+        bail!(
+            "runtime state for machine '{}' does not exist under '{}'",
+            machine_name,
+            runtime_root.display()
+        );
+    }
+
+    let pid_from_file = match read_pid_file(&paths.pid_path) {
+        Ok(pid) => pid,
+        Err(error) => {
+            return Ok(malformed_machine_status(
+                machine_name,
+                &paths,
+                MachineControlContract::local_runtime_root(),
+                error.to_string(),
+            ));
+        }
+    };
+    if !paths.manifest_path.exists() {
+        return Ok(malformed_machine_status(
+            machine_name,
+            &paths,
+            MachineControlContract::local_runtime_root(),
+            format!(
+                "runtime manifest '{}' is missing",
+                paths.manifest_path.display()
+            ),
+        ));
+    }
+
+    let metadata_path = avf_runtime_metadata_path(&paths);
+    if !metadata_path.exists() {
+        return Ok(malformed_machine_status(
+            machine_name,
+            &paths,
+            MachineControlContract::local_runtime_root(),
+            format!(
+                "AVF runtime metadata '{}' is missing",
+                metadata_path.display()
+            ),
+        ));
+    }
+
+    let manifest = match read_launch_metadata(&paths.manifest_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Ok(malformed_machine_status(
+                machine_name,
+                &paths,
+                MachineControlContract::local_runtime_root(),
+                format!(
+                    "failed to parse manifest '{}': {error}",
+                    paths.manifest_path.display()
+                ),
+            ));
+        }
+    };
+    let avf_metadata: AvfRuntimeMetadata = match read_json_file(&metadata_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Ok(malformed_machine_status(
+                machine_name,
+                &paths,
+                MachineControlContract::local_runtime_root(),
+                format!(
+                    "failed to parse AVF runtime metadata '{}': {error}",
+                    metadata_path.display()
+                ),
+            ));
+        }
+    };
+
+    let live_pid = resolve_live_pid_by_existence(pid_from_file, Some(manifest.pid))?;
+    let pid = live_pid.or(pid_from_file).or(Some(manifest.pid));
+    let (state, detail) = match live_pid {
+        Some(_) => (
+            MachineRuntimeState::Running,
+            format!(
+                "live AVF launcher '{}' matches runtime manifest; metadata '{}'",
+                avf_metadata.launcher.display(),
+                metadata_path.display()
+            ),
+        ),
+        None if pid_from_file.is_some() => (
+            MachineRuntimeState::Stale,
+            format!(
+                "recorded AVF launcher pid is no longer live; metadata '{}'",
+                metadata_path.display()
+            ),
+        ),
+        None => (
+            MachineRuntimeState::Stopped,
+            format!(
+                "launch manifest exists but no live AVF launcher process is recorded; metadata '{}'",
+                metadata_path.display()
+            ),
+        ),
+    };
+
+    Ok(MachineStatus {
+        machine_name: machine_name.to_string(),
+        state,
+        pid,
+        control: MachineControlContract::local_runtime_root(),
+        runtime_dir: paths.runtime_dir,
+        config_path: paths.config_path,
+        manifest_path: paths.manifest_path,
+        pid_path: paths.pid_path,
+        firecracker_log: paths.firecracker_log,
+        stdout_log: paths.stdout_log,
+        stderr_log: paths.stderr_log,
+        detail,
+    })
+}
+
 fn firecracker_local_machine_monitor(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<MachineMonitorReport> {
     let status = firecracker_local_machine_status(runtime_root, machine_name)?;
+    machine_monitor_report(status, None, None, Vec::new())
+}
+
+fn avf_local_machine_monitor(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineMonitorReport> {
+    let status = avf_local_machine_status(runtime_root, machine_name)?;
     machine_monitor_report(status, None, None, Vec::new())
 }
 
@@ -955,6 +1290,64 @@ fn firecracker_local_machine_top(
 ) -> Result<MachineTopReport> {
     let status = firecracker_local_machine_status(runtime_root, machine_name)?;
     machine_top_report(status, None, None, Vec::new())
+}
+
+fn avf_local_machine_top(runtime_root: &Path, machine_name: &str) -> Result<MachineTopReport> {
+    let status = avf_local_machine_status(runtime_root, machine_name)?;
+    let avf_command = match status.pid {
+        Some(pid) => process_cmdline(pid)?,
+        None => None,
+    };
+    let metadata_path =
+        avf_runtime_metadata_path(&RuntimePaths::for_machine(runtime_root, machine_name));
+    let mut entries = Vec::new();
+    if status.pid.is_some() || status.manifest_path.exists() {
+        entries.push(MachineTopEntry {
+            kind: MachineTopEntryKind::Hypervisor,
+            name: String::from("avf"),
+            state: status.state,
+            pid: status.pid,
+            command: avf_command,
+            source: metadata_path,
+            detail: status.detail.clone(),
+        });
+    }
+    for forward in load_detached_forward_statuses(&status.runtime_dir, &status.machine_name)? {
+        let command = match forward.pid {
+            Some(pid) => process_cmdline(pid)?,
+            None => None,
+        };
+        entries.push(MachineTopEntry {
+            kind: MachineTopEntryKind::DetachedForward,
+            name: forward.name,
+            state: forward.state,
+            pid: forward.pid,
+            command,
+            source: forward.manifest_path,
+            detail: format!(
+                "{} listen={} target={}",
+                forward.detail, forward.listen, forward.target
+            ),
+        });
+    }
+    entries.sort_by(|left, right| {
+        machine_top_entry_rank(left.kind)
+            .cmp(&machine_top_entry_rank(right.kind))
+            .then(left.name.cmp(&right.name))
+    });
+
+    Ok(MachineTopReport {
+        machine_name: status.machine_name,
+        state: status.state,
+        pid: status.pid,
+        control: status.control,
+        control_plane: None,
+        node_name: None,
+        host_groups: Vec::new(),
+        runtime_dir: status.runtime_dir,
+        detail: status.detail,
+        entries,
+    })
 }
 
 pub fn machine_monitor(
@@ -1293,6 +1686,96 @@ fn firecracker_local_stop_machine(
     }
 }
 
+fn wait_for_pid_exit(pid: u32, timeout: Duration) -> Result<bool> {
+    let step = Duration::from_millis(100);
+    let mut waited = Duration::ZERO;
+
+    while waited < timeout {
+        if process_cmdline(pid)?.is_none() {
+            return Ok(true);
+        }
+        thread::sleep(step);
+        waited += step;
+    }
+
+    Ok(process_cmdline(pid)?.is_none())
+}
+
+fn avf_local_stop_machine(
+    runtime_root: &Path,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let status = avf_local_machine_status(runtime_root, machine_name)?;
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+
+    match status.state {
+        MachineRuntimeState::Running => {
+            let pid = status
+                .pid
+                .context("running machine status did not include a pid")?;
+            signal_process(pid, libc::SIGTERM).with_context(|| {
+                format!("failed to stop AVF machine '{}' with SIGTERM", machine_name)
+            })?;
+            if !wait_for_pid_exit(pid, timeout)? {
+                signal_process(pid, libc::SIGKILL).with_context(|| {
+                    format!(
+                        "failed to force-stop AVF machine '{}' with SIGKILL",
+                        machine_name
+                    )
+                })?;
+                if !wait_for_pid_exit(pid, Duration::from_secs(1))? {
+                    bail!(
+                        "AVF machine '{}' did not stop after SIGTERM/SIGKILL for pid {}",
+                        machine_name,
+                        pid
+                    );
+                }
+            }
+            cleanup_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Running,
+                current_state: MachineRuntimeState::Stopped,
+                pid: Some(pid),
+                control: MachineControlContract::local_runtime_root(),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from(
+                    "sent SIGTERM to AVF launcher pid and cleaned transient runtime paths",
+                ),
+            })
+        }
+        MachineRuntimeState::Stopped => {
+            cleanup_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Stopped,
+                current_state: MachineRuntimeState::Stopped,
+                pid: status.pid,
+                control: MachineControlContract::local_runtime_root(),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from("AVF machine was already stopped"),
+            })
+        }
+        MachineRuntimeState::Stale => {
+            cleanup_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Stale,
+                current_state: MachineRuntimeState::Stopped,
+                pid: status.pid,
+                control: MachineControlContract::local_runtime_root(),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from("removed stale AVF runtime pid and transient paths"),
+            })
+        }
+        MachineRuntimeState::Malformed => bail!("cannot stop malformed AVF runtime state"),
+    }
+}
+
 fn wait_for_boot(
     child: &mut std::process::Child,
     boot_wait: Duration,
@@ -1324,6 +1807,29 @@ fn prepare_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()>
             pid,
             paths.runtime_dir.display()
         );
+    }
+
+    remove_stale_runtime_path(&paths.pid_path, "pid file")?;
+    remove_stale_runtime_path(&paths.vsock_path, "vsock socket")?;
+    remove_stale_runtime_path(&paths.guest_agent_socket, "guest-agent socket")?;
+
+    Ok(())
+}
+
+fn avf_runtime_metadata_path(paths: &RuntimePaths) -> PathBuf {
+    paths.runtime_dir.join("avf-runtime.json")
+}
+
+fn prepare_avf_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()> {
+    if let Some(pid) = read_pid_file(&paths.pid_path)? {
+        if process_exists(pid)? {
+            bail!(
+                "machine '{}' already appears to be running with pid {} in '{}'; stop it first or choose a different --runtime-root",
+                machine_name,
+                pid,
+                paths.runtime_dir.display()
+            );
+        }
     }
 
     remove_stale_runtime_path(&paths.pid_path, "pid file")?;
@@ -4097,6 +4603,100 @@ impl MachineDriver for FirecrackerLocalDriver {
     }
 }
 
+impl MachineDriver for AvfLocalDriver {
+    fn kind(&self) -> MachineDriverKind {
+        MachineDriverKind::AvfLocal
+    }
+
+    fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata> {
+        avf_local_launch_machine(config, request)
+    }
+
+    fn list_machines(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+    ) -> Result<Vec<MachineStatus>> {
+        if !runtime_root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut machines = Vec::new();
+        for entry in fs::read_dir(runtime_root)
+            .with_context(|| format!("failed to read runtime root '{}'", runtime_root.display()))?
+        {
+            let entry = entry.with_context(|| {
+                format!(
+                    "failed to read an entry from runtime root '{}'",
+                    runtime_root.display()
+                )
+            })?;
+            if !entry
+                .file_type()
+                .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+                .is_dir()
+            {
+                continue;
+            }
+            let machine_name = entry.file_name().to_string_lossy().into_owned();
+            let paths = RuntimePaths::for_machine(runtime_root, &machine_name);
+            if avf_runtime_metadata_path(&paths).exists() {
+                machines.push(avf_local_machine_status(runtime_root, &machine_name)?);
+            }
+        }
+        machines.sort_by(|left, right| left.machine_name.cmp(&right.machine_name));
+        Ok(machines)
+    }
+
+    fn machine_status(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineStatus> {
+        avf_local_machine_status(runtime_root, machine_name)
+    }
+
+    fn stop_machine(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+        timeout: Duration,
+    ) -> Result<StopResult> {
+        avf_local_stop_machine(runtime_root, machine_name, timeout)
+    }
+
+    fn machine_monitor(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineMonitorReport> {
+        avf_local_machine_monitor(runtime_root, machine_name)
+    }
+
+    fn machine_top(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineTopReport> {
+        avf_local_machine_top(runtime_root, machine_name)
+    }
+
+    fn guest_endpoint(
+        &self,
+        _config: &PortConfig,
+        request: &GuestRequest<'_>,
+    ) -> Result<GuestEndpoint> {
+        bail!(
+            "machine '{}' is running on the AVF lane, but guest transport wiring has not landed yet",
+            request.machine_name
+        )
+    }
+}
+
 impl MachineDriver for HostedControlPlaneDriver {
     fn kind(&self) -> MachineDriverKind {
         MachineDriverKind::HostedControlPlane
@@ -4185,10 +4785,7 @@ fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<Box<dyn
                 "machine '{}' targets Cloud Hypervisor, but Port has not implemented a Cloud Hypervisor driver yet",
                 machine_name
             ),
-            ExecutionSubstrate::Avf => bail!(
-                "machine '{}' targets Apple Virtualization Framework, but Port has not implemented an AVF driver yet",
-                machine_name
-            ),
+            ExecutionSubstrate::Avf => Ok(Box::new(AvfLocalDriver)),
         },
     }
 }
@@ -4315,6 +4912,35 @@ struct VsockConfig {
     uds_path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct AvfLaunchConfig {
+    machine_name: String,
+    kernel_path: PathBuf,
+    guest_image_path: PathBuf,
+    vcpu_count: u8,
+    memory_mib: u32,
+    kernel_args: String,
+    rootfs_read_only: bool,
+    guest_vsock_cid: u32,
+    guest_control_port: u16,
+    guest_transport: port_model::AvfGuestTransport,
+    console_transport: port_model::AvfConsoleTransport,
+    console_log: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct AvfRuntimeMetadata {
+    machine_name: String,
+    pid: u32,
+    launcher: PathBuf,
+    config_path: PathBuf,
+    metadata_path: PathBuf,
+    console_log: PathBuf,
+    guest_transport: port_model::AvfGuestTransport,
+    console_transport: port_model::AvfConsoleTransport,
+    launched_at_unix_s: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -4331,14 +4957,15 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, ArtifactRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts,
-        GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata,
-        LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
-        StopResult, artifact_script, build_firecracker_config, collect_doctor_report,
+        ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, ControlPlaneServeRequest, DoctorCheck,
+        DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding,
+        LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
+        NodeAgentServeRequest, RuntimePaths, StopResult, artifact_script,
+        avf_local_launch_machine_with_host_os, build_firecracker_config, collect_doctor_report,
         collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
         ensure_native_build_lane, execute_guest_operation, launch_local_machine, list_machines,
         machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, read_pid_file, repo_root, resolve_artifact_metadata,
+        prepare_runtime_state, read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, stop_machine,
     };
@@ -4454,7 +5081,8 @@ mod tests {
 
     fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
         let path = root.join(name);
-        fs::write(&path, "#!/usr/bin/env bash\nsleep 30\n").expect("fake firecracker should write");
+        fs::write(&path, "#!/usr/bin/env bash\nexec sleep 30\n")
+            .expect("fake firecracker should write");
         let mut permissions = fs::metadata(&path)
             .expect("fake firecracker metadata should exist")
             .permissions();
@@ -4589,32 +5217,11 @@ mod tests {
     }
 
     #[test]
-    fn driver_selection_rejects_avf_lane_without_driver() {
-        let mut config = PortConfig::sample();
-        config.hosts.insert(
-            String::from("mac-local"),
-            HostSpec {
-                platform: HostPlatform::Macos,
-                provider: HostProvider::Local,
-                connection: HostConnection::Local,
-                firecracker: FirecrackerSupport {
-                    local_launch: false,
-                    pvm_lanes: Vec::new(),
-                    notes: Vec::new(),
-                },
-            },
-        );
-        let machine = config
-            .machines
-            .get_mut("demo")
-            .expect("sample machine should exist");
-        machine.host = String::from("mac-local");
-        machine.substrate = ExecutionSubstrate::Avf;
+    fn driver_selection_routes_avf_machine_to_local_driver() {
+        let config = sample_avf_config();
+        let driver = driver_for_machine(&config, "demo").expect("driver should resolve");
 
-        let error = driver_for_machine(&config, "demo")
-            .err()
-            .expect("AVF should not resolve");
-        assert!(error.to_string().contains("AVF driver"));
+        assert_eq!(driver.kind(), MachineDriverKind::AvfLocal);
     }
 
     #[test]
@@ -5596,6 +6203,102 @@ mod tests {
         assert!(metadata.manifest_path.exists());
 
         let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+    }
+
+    #[test]
+    fn avf_launch_fails_fast_on_non_macos_hosts() {
+        let config = sample_avf_config();
+        let tempdir = tempdir().expect("tempdir should exist");
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("non-macOS host should fail fast");
+
+        assert!(error.to_string().contains("requires running Port on macOS"));
+    }
+
+    #[test]
+    fn avf_launch_status_and_stop_write_canonical_runtime_state() {
+        let mut config = sample_avf_config();
+        let tempdir = tempdir().expect("tempdir should exist");
+        let launcher = write_fake_firecracker_binary(tempdir.path(), "port-avf-launcher");
+        let kernel_path = tempdir.path().join("avf-vmlinux");
+        let guest_path = tempdir.path().join("avf-rootfs.ext4");
+        fs::write(&kernel_path, b"fake-avf-kernel").expect("kernel variant should write");
+        fs::write(&guest_path, b"fake-avf-rootfs").expect("guest variant should write");
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Avf
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("avf kernel variant should exist")
+            .path = kernel_path;
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Avf
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("avf guest variant should exist")
+            .path = guest_path;
+
+        let metadata = avf_local_launch_machine_with_host_os(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_millis(250),
+            },
+            "macos",
+            Some(launcher.clone()),
+        )
+        .expect("avf launch should succeed with a configured launcher");
+
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        let avf_metadata: AvfRuntimeMetadata =
+            read_json_file(&paths.runtime_dir.join("avf-runtime.json"))
+                .expect("avf runtime metadata should decode");
+
+        assert_eq!(metadata.machine_name, "demo");
+        assert_eq!(metadata.firecracker_binary, launcher);
+        assert!(metadata.manifest_path.exists());
+        assert_eq!(avf_metadata.machine_name, "demo");
+        assert_eq!(avf_metadata.launcher, metadata.firecracker_binary);
+        assert_eq!(avf_metadata.pid, metadata.pid);
+        assert_eq!(avf_metadata.config_path, metadata.config_path);
+
+        let status = machine_status(&config, tempdir.path(), "demo")
+            .expect("status should route through avf driver");
+        assert_eq!(status.state, MachineRuntimeState::Running);
+        assert_eq!(status.pid, Some(metadata.pid));
+        assert!(status.detail.contains("AVF"));
+        assert!(status.detail.contains("avf-runtime.json"));
+
+        let stopped = stop_machine(&config, tempdir.path(), "demo", Duration::from_secs(1))
+            .expect("stop should route through avf driver");
+        assert_eq!(stopped.previous_state, MachineRuntimeState::Running);
+        assert_eq!(stopped.current_state, MachineRuntimeState::Stopped);
+        assert_eq!(stopped.pid, Some(metadata.pid));
+        assert!(stopped.detail.contains("AVF"));
     }
 
     #[test]

@@ -26,6 +26,13 @@ Port's AVF launch-ownership contract is:
 - the operator-facing verbs remain `machine launch`, `list`, `status`, `stop`,
   and guest `exec`, `copy`, `pty`, `logs`, `forward`
 
+Current runtime foundation:
+
+- `port machine launch|status|stop` now route AVF-targeted machines through a
+  local AVF driver instead of failing at driver selection time
+- the current driver still expects an explicit launcher helper and does not yet
+  wire guest transport or console capture
+
 That is the same ownership rule Port now uses for Linux and hosted design work:
 one operator model, different runtime owners.
 
@@ -81,17 +88,18 @@ Port now ships AVF-focused `port doctor` checks for the first contract slice:
 
 Follow-on validation still needs to prove the executable runtime path:
 
-4. The AVF driver can boot the selected Linux guest.
-5. The guest agent is reachable through AVF virtio sockets.
-6. Console/log capture works through AVF serial ports.
+4. The AVF-backed guest can be controlled through the shared guest protocol
+   over AVF virtio sockets.
+5. Console/log capture works through AVF serial ports.
 
 ## Follow-On Work
 
 The ordered implementation sequence after this contract is:
 
-1. Implement an AVF driver that maps machine launch onto AVF VM configuration.
-2. Reuse the canonical guest protocol over AVF virtio sockets.
-3. Add console/log capture through AVF serial ports.
+1. Reuse the canonical guest protocol over AVF virtio sockets.
+2. Add console/log capture through AVF serial ports.
+3. Publish the native macOS AVF workflow across CLI help and operator docs with
+   reproducible proof commands.
 4. Decide how much of directory sharing and Rosetta support belongs in the
    first executable macOS lane versus later operator-ergonomics slices.
 

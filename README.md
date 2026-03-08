@@ -37,11 +37,12 @@ operator lanes around it:
 - Linux: run the full local MVP workflow, including artifact build, `port doctor`,
   and `port machine launch`, on a host where `port doctor` passes.
 - macOS: `port doctor` now surfaces the AVF machine contract and entitlement
-  boundary for locally modeled AVF machines, but the executable AVF runtime is
-  still follow-on work. Use macOS for repo tooling and AVF validation today;
-  use Linux for the currently working Firecracker launch path. `nix develop`
-  evaluates on macOS for repo tooling, but it intentionally omits Linux-only
-  runtime packages such as `firecracker`, `iproute2`, and `iptables`.
+  boundary for locally modeled AVF machines, and `machine launch|status|stop`
+  now route through a local AVF driver foundation. The AVF lane still needs a
+  configured launcher helper plus follow-on guest transport and console work,
+  so Linux remains the currently complete VM workflow. `nix develop` evaluates
+  on macOS for repo tooling, but it intentionally omits Linux-only runtime
+  packages such as `firecracker`, `iproute2`, and `iptables`.
 - Windows: use WSL for the repository and CLI if helpful, but treat `port doctor`
   as the gate for whether local Firecracker launch is actually available in that
   Linux environment. Otherwise run the same `port` commands on a remote Linux
