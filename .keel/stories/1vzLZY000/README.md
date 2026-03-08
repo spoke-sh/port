@@ -22,5 +22,7 @@ boundaries.
   describe the native AVF workflow, prerequisites, and unsupported boundaries
   through the canonical `port` command model.
 - [ ] [SRS-05/AC-02] Recorded proof demonstrates the AVF workflow contract
+  through the canonical CLI and docs surfaces for a new operator.
+- [ ] [SRS-06/AC-01] Recorded proof demonstrates the AVF workflow contract
   while also preserving explicit Linux-lane and unsupported-host boundaries for
   operators.

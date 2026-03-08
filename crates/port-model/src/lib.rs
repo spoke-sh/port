@@ -734,6 +734,11 @@ impl PortConfig {
                             "Apple Virtualization Framework requires a macOS host platform.",
                         ));
                     }
+                    if !matches!(host.connection, HostConnection::Local) {
+                        issues.push(String::from(
+                            "AVF local runtime currently requires a local host connection.",
+                        ));
+                    }
                     if machine.protection_mode == ProtectionMode::Pvm {
                         issues.push(String::from(
                             "Apple Virtualization Framework does not currently define a PVM lane.",
@@ -2278,14 +2283,73 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
-        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
-        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
-        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
-        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
-        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
-        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
+        ArtifactSelector, ArtifactStore, ArtifactVariant, AvfConsoleTransport,
+        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ExecutionSubstrate,
+        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
+        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
+        HostedGuestProtocolContract, HostedPlacementPolicy, MachineArchitecture,
+        MachineCommandRoute, MachineControlContract, MachineGuestBroker, MachineInventoryOwner,
+        MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource, PortConfig,
+        ProtectionMode, PvmCapabilityState, PvmLaneDecision,
     };
+
+    fn sample_avf_config() -> PortConfig {
+        let mut config = PortConfig::sample();
+        config.hosts.insert(
+            String::from("mac-local"),
+            super::HostSpec {
+                platform: HostPlatform::Macos,
+                provider: HostProvider::Local,
+                connection: HostConnection::Local,
+                firecracker: super::FirecrackerSupport {
+                    local_launch: false,
+                    pvm_lanes: Vec::new(),
+                    notes: vec![String::from(
+                        "AVF local execution is modeled separately from Firecracker.",
+                    )],
+                },
+            },
+        );
+        let machine = config
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist");
+        machine.host = String::from("mac-local");
+        machine.substrate = ExecutionSubstrate::Avf;
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.protection_mode = ProtectionMode::Standard;
+
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .push(ArtifactVariant {
+                path: PathBuf::from("artifacts/kernel/demo/x86_64/avf/standard/vmlinux"),
+                selector: ArtifactSelector {
+                    architecture: MachineArchitecture::X86_64,
+                    substrate: ExecutionSubstrate::Avf,
+                    protection_mode: ProtectionMode::Standard,
+                },
+            });
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .push(ArtifactVariant {
+                path: PathBuf::from("artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4"),
+                selector: ArtifactSelector {
+                    architecture: MachineArchitecture::X86_64,
+                    substrate: ExecutionSubstrate::Avf,
+                    protection_mode: ProtectionMode::Standard,
+                },
+            });
+
+        config
+    }
 
     #[test]
     fn sample_config_round_trips_through_toml() {
@@ -2954,6 +3018,77 @@ mod tests {
         assert!(contract.directory_share.supported);
         assert!(contract.directory_share.required_for_rosetta);
         assert!(contract.follow_on_work[0].contains("VZVirtualMachineConfiguration"));
+    }
+
+    #[test]
+    fn validate_accepts_local_macos_standard_avf_machine_contract() {
+        let config = sample_avf_config();
+
+        config
+            .validate()
+            .expect("local macOS AVF contract should validate");
+    }
+
+    #[test]
+    fn validate_rejects_non_macos_avf_machine_contract() {
+        let mut config = sample_avf_config();
+        config
+            .hosts
+            .get_mut("mac-local")
+            .expect("mac-local host should exist")
+            .platform = HostPlatform::Linux;
+
+        let error = config
+            .validate()
+            .expect_err("non-macOS AVF machine should fail validation");
+
+        assert!(
+            error
+                .to_string()
+                .contains("Apple Virtualization Framework requires a macOS host platform")
+        );
+    }
+
+    #[test]
+    fn validate_rejects_hosted_control_plane_avf_machine_contract() {
+        let mut config = sample_avf_config();
+        config
+            .hosts
+            .get_mut("mac-local")
+            .expect("mac-local host should exist")
+            .connection = HostConnection::HostedControlPlane {
+            control_plane: String::from("demo"),
+        };
+
+        let error = config
+            .validate()
+            .expect_err("hosted-control-plane AVF machine should fail validation");
+
+        assert!(
+            error
+                .to_string()
+                .contains("AVF local runtime currently requires a local host connection")
+        );
+    }
+
+    #[test]
+    fn validate_rejects_avf_pvm_machine_contract() {
+        let mut config = sample_avf_config();
+        config
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist")
+            .protection_mode = ProtectionMode::Pvm;
+
+        let error = config
+            .validate()
+            .expect_err("AVF/PVM machine should fail validation");
+
+        assert!(
+            error
+                .to_string()
+                .contains("Apple Virtualization Framework does not currently define a PVM lane")
+        );
     }
 
     #[test]

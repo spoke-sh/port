@@ -21,5 +21,5 @@ AVF-backed machines.
 - [ ] [SRS-04/AC-01] AVF-targeted machines expose `guest exec|copy|pty|logs|forward`
   through the canonical CLI and shared guest protocol via an AVF transport
   adapter.
-- [ ] [SRS-03/AC-02] AVF boot and console output land in canonical runtime log
+- [ ] [SRS-04/AC-02] AVF boot and console output land in canonical runtime log
   surfaces that `machine status` and operator inspection can reference.

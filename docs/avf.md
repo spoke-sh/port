@@ -71,25 +71,28 @@ Rosetta boundary:
 
 ## Verification Expectations
 
-Future Port validation for the AVF lane should check all of the following:
+Port now ships AVF-focused `port doctor` checks for the first contract slice:
 
-1. Host platform is macOS and the AVF APIs are available.
-2. The build/distribution path satisfies Apple's virtualization entitlement
+1. Host platform is macOS and the AVF lane is modeled as a local host path.
+2. The current host architecture is in the AVF support set (`x86_64` or
+   `aarch64`).
+3. The build/distribution path is bounded by Apple's virtualization entitlement
    requirements when applicable.
-3. The AVF driver can boot the selected Linux guest.
-4. The guest agent is reachable through AVF virtio sockets.
-5. Console/log capture works through AVF serial ports.
+
+Follow-on validation still needs to prove the executable runtime path:
+
+4. The AVF driver can boot the selected Linux guest.
+5. The guest agent is reachable through AVF virtio sockets.
+6. Console/log capture works through AVF serial ports.
 
 ## Follow-On Work
 
 The ordered implementation sequence after this contract is:
 
-1. Add AVF-focused `port doctor` checks for macOS, AVF availability, and
-   entitlement/distribution boundaries.
-2. Implement an AVF driver that maps machine launch onto AVF VM configuration.
-3. Reuse the canonical guest protocol over AVF virtio sockets.
-4. Add console/log capture through AVF serial ports.
-5. Decide how much of directory sharing and Rosetta support belongs in the
+1. Implement an AVF driver that maps machine launch onto AVF VM configuration.
+2. Reuse the canonical guest protocol over AVF virtio sockets.
+3. Add console/log capture through AVF serial ports.
+4. Decide how much of directory sharing and Rosetta support belongs in the
    first executable macOS lane versus later operator-ergonomics slices.
 
 ## Research Basis

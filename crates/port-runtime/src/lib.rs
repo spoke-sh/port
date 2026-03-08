@@ -17,8 +17,9 @@ use port_agent_protocol::{
 use port_hosted_protocol::HostedSuccess;
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
-    ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, HostedApiIdentityContract,
-    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmHostKit,
+    AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
+    HostedApiIdentityContract, MachineArchitecture, MachineControlContract, PortConfig,
+    ProtectionMode, PvmHostKit,
 };
 use port_sdk::HostedClient;
 use serde::{Deserialize, Serialize};
@@ -552,13 +553,14 @@ fn collect_doctor_report_with_facts(
                 kernel,
                 guest_image,
             ));
+            checks.extend(avf_machine_checks(name, host, machine, facts));
         }
     }
 
     let mut notes = vec![
         String::from("port doctor reports the host state without mutating runtime directories."),
         String::from(
-            "macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.",
+            "macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.",
         ),
         String::from(
             "Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.",
@@ -2566,6 +2568,11 @@ fn machine_contract_check(
                     "Apple Virtualization Framework requires a macOS host platform.",
                 ));
             }
+            if !matches!(host.connection, HostConnection::Local) {
+                issues.push(String::from(
+                    "AVF local runtime currently requires a local host connection.",
+                ));
+            }
             if machine.protection_mode == ProtectionMode::Pvm {
                 issues.push(String::from(
                     "Apple Virtualization Framework does not currently define a PVM lane.",
@@ -2763,6 +2770,97 @@ fn local_pvm_lane_checks(
     }
 
     checks
+}
+
+fn observed_host_architecture(facts: &DoctorHostFacts) -> Option<MachineArchitecture> {
+    match facts.host_architecture.as_str() {
+        "x86_64" | "amd64" => Some(MachineArchitecture::X86_64),
+        "aarch64" | "arm64" => Some(MachineArchitecture::Aarch64),
+        _ => None,
+    }
+}
+
+fn avf_machine_checks(
+    machine_name: &str,
+    host: &port_model::HostSpec,
+    machine: &port_model::MachineSpec,
+    facts: &DoctorHostFacts,
+) -> Vec<DoctorCheck> {
+    if machine.substrate != ExecutionSubstrate::Avf {
+        return Vec::new();
+    }
+
+    let contract = AvfExecutionContract::linux_guest();
+    let platform_ok = host.platform == contract.host_platform
+        && matches!(host.connection, HostConnection::Local)
+        && facts.host_os == "macos";
+    let supported_architectures = contract
+        .supported_host_architectures
+        .iter()
+        .map(|architecture| architecture_dir(*architecture))
+        .collect::<Vec<_>>();
+    let architecture_ok = observed_host_architecture(facts)
+        .map(|architecture| {
+            contract
+                .supported_host_architectures
+                .contains(&architecture)
+        })
+        .unwrap_or(false);
+    let availability_ok = platform_ok;
+
+    vec![
+        DoctorCheck {
+            name: format!("avf:{machine_name}:host-platform"),
+            ok: platform_ok,
+            required: false,
+            detail: if platform_ok {
+                String::from("Host OS is macOS and matches the local AVF lane requirement.")
+            } else if !matches!(host.connection, HostConnection::Local) {
+                String::from(
+                    "AVF machine targets a non-local host connection. AVF local runtime currently requires a local host connection on macOS.",
+                )
+            } else {
+                format!(
+                    "AVF machine requires a macOS local host. Detected host OS '{}'; Firecracker and Firecracker/PVM remain separate Linux lanes.",
+                    facts.host_os
+                )
+            },
+        },
+        DoctorCheck {
+            name: format!("avf:{machine_name}:host-architecture"),
+            ok: architecture_ok,
+            required: false,
+            detail: if architecture_ok {
+                format!(
+                    "Detected host architecture '{}' is supported by the AVF lane (supported: {}).",
+                    facts.host_architecture,
+                    supported_architectures.join(", ")
+                )
+            } else {
+                format!(
+                    "Detected host architecture '{}' is not in the AVF support set (supported: {}).",
+                    facts.host_architecture,
+                    supported_architectures.join(", ")
+                )
+            },
+        },
+        DoctorCheck {
+            name: format!("avf:{machine_name}:runtime-availability"),
+            ok: availability_ok,
+            required: false,
+            detail: if availability_ok {
+                format!(
+                    "AVF runtime can target Apple's Virtualization framework on this host. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. {}",
+                    contract.operator_prerequisites[1]
+                )
+            } else {
+                format!(
+                    "AVF runtime availability is bounded to local macOS hosts with Apple's Virtualization framework. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. {}",
+                    contract.operator_prerequisites[1]
+                )
+            },
+        },
+    ]
 }
 
 fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
@@ -4249,8 +4347,9 @@ mod tests {
         ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
     use port_model::{
-        ArtifactKind, ExecutionSubstrate, FirecrackerSupport, HostConnection, HostPlatform,
-        HostProvider, HostSpec, MachineArchitecture, PortConfig, ProtectionMode,
+        ArtifactKind, ArtifactSelector, ArtifactVariant, ExecutionSubstrate, FirecrackerSupport,
+        HostConnection, HostPlatform, HostProvider, HostSpec, MachineArchitecture, PortConfig,
+        ProtectionMode,
     };
 
     fn sample_config_with_hosted_runtime_roots(root: &Path) -> PortConfig {
@@ -4270,6 +4369,64 @@ mod tests {
             .get_mut("gcp-linux-node")
             .expect("gcp-linux-node should exist")
             .runtime_root = root.join("hosted/gcp-linux-node");
+        config
+    }
+
+    fn sample_avf_config() -> PortConfig {
+        let mut config = PortConfig::sample();
+        config.hosts.insert(
+            String::from("mac-local"),
+            HostSpec {
+                platform: HostPlatform::Macos,
+                provider: HostProvider::Local,
+                connection: HostConnection::Local,
+                firecracker: FirecrackerSupport {
+                    local_launch: false,
+                    pvm_lanes: Vec::new(),
+                    notes: vec![String::from(
+                        "AVF local execution is modeled separately from Firecracker.",
+                    )],
+                },
+            },
+        );
+        let machine = config
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist");
+        machine.host = String::from("mac-local");
+        machine.substrate = ExecutionSubstrate::Avf;
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.protection_mode = ProtectionMode::Standard;
+
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .push(ArtifactVariant {
+                path: PathBuf::from("artifacts/kernel/demo/x86_64/avf/standard/vmlinux"),
+                selector: ArtifactSelector {
+                    architecture: MachineArchitecture::X86_64,
+                    substrate: ExecutionSubstrate::Avf,
+                    protection_mode: ProtectionMode::Standard,
+                },
+            });
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .push(ArtifactVariant {
+                path: PathBuf::from("artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4"),
+                selector: ArtifactSelector {
+                    architecture: MachineArchitecture::X86_64,
+                    substrate: ExecutionSubstrate::Avf,
+                    protection_mode: ProtectionMode::Standard,
+                },
+            });
+
         config
     }
 
@@ -4712,6 +4869,84 @@ mod tests {
         assert!(demo.ok);
         assert!(demo.detail.contains("Machine models"));
         assert!(demo.detail.contains("Firecracker"));
+    }
+
+    #[test]
+    fn doctor_report_surfaces_avf_platform_and_boundary_checks() {
+        let report = collect_doctor_report_with_facts(
+            Some(&sample_avf_config()),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: String::from("x86_64"),
+                proc_cmdline: None,
+                pvm_firecracker_binary: None,
+            },
+        );
+
+        let platform = report
+            .checks
+            .iter()
+            .find(|check| check.name == "avf:demo:host-platform")
+            .expect("avf platform check should exist");
+        let architecture = report
+            .checks
+            .iter()
+            .find(|check| check.name == "avf:demo:host-architecture")
+            .expect("avf architecture check should exist");
+        let availability = report
+            .checks
+            .iter()
+            .find(|check| check.name == "avf:demo:runtime-availability")
+            .expect("avf availability check should exist");
+
+        assert!(!platform.ok);
+        assert!(platform.detail.contains("macOS"));
+        assert!(architecture.ok);
+        assert!(architecture.detail.contains("x86_64"));
+        assert!(!availability.ok);
+        assert!(availability.detail.contains("entitlement"));
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains("AVF lane locally"))
+        );
+    }
+
+    #[test]
+    fn doctor_report_marks_avf_checks_ready_on_macos() {
+        let report = collect_doctor_report_with_facts(
+            Some(&sample_avf_config()),
+            &DoctorHostFacts {
+                host_os: String::from("macos"),
+                host_architecture: String::from("aarch64"),
+                proc_cmdline: None,
+                pvm_firecracker_binary: None,
+            },
+        );
+
+        let platform = report
+            .checks
+            .iter()
+            .find(|check| check.name == "avf:demo:host-platform")
+            .expect("avf platform check should exist");
+        let architecture = report
+            .checks
+            .iter()
+            .find(|check| check.name == "avf:demo:host-architecture")
+            .expect("avf architecture check should exist");
+        let availability = report
+            .checks
+            .iter()
+            .find(|check| check.name == "avf:demo:runtime-availability")
+            .expect("avf availability check should exist");
+
+        assert!(platform.ok);
+        assert!(architecture.ok);
+        assert!(architecture.detail.contains("aarch64"));
+        assert!(availability.ok);
+        assert!(availability.detail.contains("Virtualization framework"));
+        assert!(availability.detail.contains("entitlement"));
     }
 
     #[test]

@@ -21,5 +21,6 @@ introducing a substrate-specific command family.
 - [ ] [SRS-03/AC-01] `port machine launch`, `status`, and `stop` route
   AVF-targeted machines through a local AVF driver that writes canonical
   runtime manifests plus AVF-specific runtime metadata.
-- [ ] [SRS-06/AC-02] Firecracker standard and prepared-node PVM lanes remain
-  executable while the AVF local driver lands.
+- [ ] [SRS-03/AC-02] The AVF local driver keeps deterministic runtime metadata
+  and explicit substrate-specific failure detail instead of falling back
+  silently to existing Linux lanes.

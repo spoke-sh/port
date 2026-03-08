@@ -1,0 +1,49 @@
+---
+recorded_at: 2026-03-08T14:40:56.889312121-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzLZS000/verify-ac-2.sh
+---
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.00s
+
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+check[ok]: artifact:demo-kernel (required=true) - Artifact variant 'artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux' exists.
+check[ok]: artifact:demo-guest (required=true) - Artifact variant 'artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' exists.
+check[ok]: host:aws-linux (required=false) - provider 'aws' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[fail]: host:azure-linux (required=false) - provider 'azure' is explicitly unsupported for the Firecracker MVP; do not expect a working launch path. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:gcp-linux (required=false) - provider 'gcp' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:generic-linux (required=false) - provider 'generic-linux' is modeled for a future remote Linux control lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: pvm:local:x86_64:host-kit-contract (required=false) - host-kit contract requires Linux/x86_64, boot args [pti=off], and the patched Firecracker binary 'firecracker-pvm' via $PORT_PVM_FIRECRACKER_BINARY or PATH.
+check[ok]: pvm:local:x86_64:host-platform (required=false) - Host 'local' matches the Linux platform required for the Firecracker/PVM host kit.
+check[ok]: pvm:local:x86_64:host-architecture (required=false) - Host architecture 'x86_64' matches the PVM host-kit requirement.
+check[fail]: pvm:local:x86_64:boot-line (required=false) - Host boot line is missing required PVM argument(s): pti=off. Reboot into the prepared host kit; the standard Firecracker lane is not a PVM fallback.
+check[fail]: pvm:local:x86_64:firecracker-binary (required=false) - Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible.
+check[fail]: pvm:local:aarch64 (required=false) - Firecracker/PVM on 'aarch64' remains research-only. Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path.
+check[ok]: pvm:aws-linux-node:x86_64:host-kit-contract (required=false) - Hosted node 'aws-linux-node' advertises host-kit contract requires Linux/x86_64, boot args [pti=off], and the patched Firecracker binary 'firecracker-pvm' via $PORT_PVM_FIRECRACKER_BINARY or PATH.
+check[fail]: pvm:gcp-linux-node:x86_64:host-kit-contract (required=false) - Hosted node 'gcp-linux-node' advertises a Planned PVM lane without a host-kit contract.
+check[fail]: pvm:generic-linux-node:x86_64:host-kit-contract (required=false) - Hosted node 'generic-linux-node' advertises a Planned PVM lane without a host-kit contract.
+check[ok]: control-plane:demo (required=false) - Hosted control plane 'demo' targets 'https://port.example.internal' with audience 'port-hosted-demo' and expects a bearer token from env:PORT_DEMO_TOKEN via the 'authorization' header.
+check[ok]: machine:cloud-aws (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-azure (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-gcp (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-generic (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:demo (required=false) - Machine models Avf/Standard/X86_64 with compatible artifacts.
+check[fail]: avf:demo:host-platform (required=false) - AVF machine requires a macOS local host. Detected host OS 'linux'; Firecracker and Firecracker/PVM remain separate Linux lanes.
+check[ok]: avf:demo:host-architecture (required=false) - Detected host architecture 'x86_64' is supported by the AVF lane (supported: aarch64, x86_64).
+check[fail]: avf:demo:runtime-availability (required=false) - AVF runtime availability is bounded to local macOS hosts with Apple's Virtualization framework. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. Distributed macOS app targets need Apple's virtualization entitlement; sandboxed distributions also need the relevant network and file-access entitlements.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.
+note: Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.
+check[fail]: avf:demo:host-platform (required=false) - AVF machine requires a macOS local host. Detected host OS 'linux'; Firecracker and Firecracker/PVM remain separate Linux lanes.
+check[ok]: avf:demo:host-architecture (required=false) - Detected host architecture 'x86_64' is supported by the AVF lane (supported: aarch64, x86_64).
+check[fail]: avf:demo:runtime-availability (required=false) - AVF runtime availability is bounded to local macOS hosts with Apple's Virtualization framework. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. Distributed macOS app targets need Apple's virtualization entitlement; sandboxed distributions also need the relevant network and file-access entitlements.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
