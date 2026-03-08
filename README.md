@@ -55,7 +55,23 @@ the first guest-agent-backed CLI workflows, and in-repo kernel plus guest-image
 artifact pipelines. Cloud host support is still partial: `port doctor` and the
 shared model describe the remote Linux lane, while remote `port machine launch`
 still fails fast with provider-aware guidance instead of attempting a hidden
-runtime path. The PVM / protected VM lane is explicitly dropped from the MVP.
+runtime path. Substrate-aware expansion is now in flight: the current executable
+lane remains Firecracker with standard KVM on Linux, while Firecracker/PVM,
+Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly as
+planned or research-backed lanes rather than hidden future scope.
+
+## Execution Lanes
+
+Port now distinguishes provider identity from execution lane. The current
+canonical substrate matrix is:
+
+| Substrate | Protection mode | Architecture | Status | Current Port position |
+|-----------|-----------------|--------------|--------|------------------------|
+| Firecracker | `standard` | `x86_64`, `aarch64`, or `native` | Supported today | This is the real Linux execution lane behind today's `port machine launch` workflow |
+| Firecracker | `pvm` | `x86_64` | Planned / partial design | Strategic lane for cloud cost control; requires dedicated host-kernel, VMM, and artifact work |
+| Firecracker | `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path here |
+| Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
+| Apple Virtualization Framework | `standard` | `arm64` or `x86_64` on macOS | Planned | First-class macOS lane in the model and docs, not yet implemented |
 
 ## CLI Surface
 
@@ -100,7 +116,9 @@ Current behavior:
 ## Cloud Linux Support
 
 Port keeps one canonical host model for local Linux and remote Linux/cloud
-targets. The current MVP support matrix is:
+targets, but provider is no longer the only planning axis. Today the executable
+cloud-facing lane is still Firecracker with `standard` protection on Linux
+hosts. The current provider matrix for that lane is:
 
 | Provider | Example machine | MVP status | Current command behavior |
 |----------|-----------------|------------|--------------------------|
@@ -121,7 +139,7 @@ The first command surfaces the provider-aware support matrix through the CLI.
 The second command is expected to fail with an AWS-specific message because the
 MVP does not yet implement remote launch orchestration.
 
-The explicit cloud design, remote workflow, and PVM decision live in
+The explicit cloud design, remote workflow, and substrate guidance live in
 [`docs/cloud.md`](docs/cloud.md).
 
 ## Linux Local Workflow
@@ -238,6 +256,13 @@ The host model now carries explicit provider identity:
 - `provider = "aws"` and `provider = "gcp"` for the justified future cloud lanes
 - `provider = "azure"` for the explicitly unsupported MVP lane
 
+The machine and artifact model now also carries explicit compatibility terms:
+
+- `substrate = "firecracker" | "cloud-hypervisor" | "avf"`
+- `protection_mode = "standard" | "pvm"`
+- `architecture = "native" | "x86_64" | "aarch64"`
+- artifact compatibility metadata for architecture, substrate, and protection-mode support
+
 The workspace crates are:
 
 - `port-model`: serializable artifact, host, and machine definitions
@@ -261,15 +286,15 @@ Build the sample kernel and guest image first, then use the same config to run
 
 ## Current Platform Boundary
 
-- Linux is the only platform expected to run Firecracker locally.
-- macOS operators are expected to target Linux hosts for actual Firecracker
-  execution.
-- Windows operators are expected to use Linux or WSL-backed workflows and let
-  `port doctor` confirm whether local launch is available in that environment.
+- Linux is the only platform with a shipped executable runtime lane today.
+- macOS now has a first-class planned lane through Apple Virtualization
+  Framework, but Port does not execute it yet.
+- Windows operators are still expected to use Linux or WSL-backed workflows and
+  let `port doctor` confirm whether the selected Linux lane is actually usable.
 
-`port doctor` is the canonical entrypoint for surfacing those support
-boundaries in the CLI, including the remote cloud matrix and the current
-local-only launch restriction.
+`port doctor` is the canonical entrypoint for surfacing those boundaries in the
+CLI, including provider-aware cloud guidance and unsupported substrate or
+protection-mode combinations.
 
 ## Development
 

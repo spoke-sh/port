@@ -18,6 +18,6 @@ lifecycle ownership, transport brokering, and inventory.
 
 ## Acceptance Criteria
 
-- [ ] [SRS-03/AC-01] Port publishes a canonical hosted-control document describing node-agent responsibilities, control-plane responsibilities, and machine lifecycle ownership for local versus hosted execution.
-- [ ] [SRS-03/AC-02] The contract explains how guest `exec`, `copy`, `pty`, `logs`, and `forward` are brokered through the hosted product without replacing the current guest protocol semantics.
-- [ ] [SRS-06/AC-03] README and linked docs surface the hosted contract and the current support matrix so operators can distinguish shipped local behavior from planned hosted behavior.
+- [ ] [SRS-04/AC-01] Port publishes a canonical hosted-control document describing node-agent responsibilities, control-plane responsibilities, and machine lifecycle ownership for local versus hosted execution.
+- [ ] [SRS-04/AC-02] The contract explains how guest `exec`, `copy`, `pty`, `logs`, and `forward` are brokered through the hosted product without replacing the current guest protocol semantics.
+- [ ] [SRS-04/AC-03] README and linked docs surface the hosted contract and the current support matrix so operators can distinguish shipped local behavior from planned hosted behavior.

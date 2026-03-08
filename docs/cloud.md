@@ -1,9 +1,24 @@
 # Cloud Linux Support
 
-Port's cloud Linux lane is intentionally partial in the MVP. The shared model
-and canonical CLI now represent remote Linux providers explicitly, `port doctor`
-reports their current support boundary, and `port machine launch` fails fast
-with provider-aware guidance when you target a remote cloud host.
+Port's cloud Linux story is now split across provider identity and execution
+lane. The current executable lane remains Firecracker with `standard`
+protection on Linux hosts; the shared model also represents planned or
+research-backed substrate lanes such as Firecracker/PVM, Cloud Hypervisor, and
+Apple Virtualization Framework.
+
+`port doctor` reports both provider-aware and lane-aware support boundaries, and
+`port machine launch` still fails fast when you target a lane that Port does not
+yet execute.
+
+## Execution Lane Matrix
+
+| Lane | Architectures | Current status | Notes |
+|------|---------------|----------------|-------|
+| Firecracker + `standard` | `x86_64`, `aarch64`, `native` | Supported today | The only shipped execution lane behind the current Linux launch workflow |
+| Firecracker + `pvm` | `x86_64` | Planned / partial design | Strategic lane for cloud cost control; requires dedicated host-kernel, VMM, and artifact work |
+| Firecracker + `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path |
+| Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
+| AVF + `standard` | macOS `arm64` or `x86_64` | Planned | First-class macOS lane in the model and docs, not yet implemented |
 
 ## Provider Matrix
 
@@ -32,12 +47,19 @@ perform remote launch yet.
 - macOS operators should treat a Linux host as the execution environment and use the same canonical `port doctor` and `port machine launch` commands there.
 - Windows operators should use WSL or a remote Linux host for the same workflow, then rely on `port doctor` to distinguish a usable Linux launch environment from a documentation-only remote lane.
 
-## PVM Decision
+## PVM Lane
 
-The PVM / protected VM / confidential VM lane is dropped from the MVP.
+The PVM / protected VM / confidential VM lane is back in scope, but under an
+explicitly narrower contract than Port's overall architecture story:
 
-Current research does not justify keeping it in scope: Firecracker still needs a
-supportable Linux KVM path, while protected/confidential VM offerings change the
-virtualization boundary in ways that are not presently compatible with the Port
-MVP launch lane. If future research changes that conclusion, it should reopen as
-new planning work rather than as hidden MVP scope.
+- Firecracker/PVM on `x86_64` is the near-term implementation lane.
+- Firecracker/PVM on `aarch64` remains a research lane until Port has a
+  supportable runtime path rather than only upstream protected-virtualization
+  evidence.
+- Port will fail fast when machine or artifact compatibility claims a substrate,
+  protection-mode, or architecture combination that the current lane does not
+  support yet.
+
+That is the intended product posture: no hidden promises, no silent fallback,
+and no conflation of "arm64 protected virtualization exists upstream" with
+"Port ships an arm64 Firecracker/PVM runtime today."

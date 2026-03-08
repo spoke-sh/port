@@ -3,10 +3,20 @@ path = "artifacts/kernel/demo/vmlinux"
 build = "port artifacts build --artifact demo-kernel"
 validate = "port artifacts validate --artifact demo-kernel"
 
+[artifacts.kernels.demo-kernel.compatibility]
+architectures = ["x86_64", "aarch64"]
+substrates = ["firecracker"]
+protection_modes = ["standard"]
+
 [artifacts.guest_images.demo-guest]
 path = "artifacts/guest/demo/rootfs.ext4"
 build = "port artifacts build --artifact demo-guest"
 validate = "port artifacts validate --artifact demo-guest"
+
+[artifacts.guest_images.demo-guest.compatibility]
+architectures = ["x86_64", "aarch64"]
+substrates = ["firecracker"]
+protection_modes = ["standard"]
 
 [hosts.local]
 platform = "linux"
@@ -79,6 +89,9 @@ notes = ["Azure is modeled explicitly so diagnostics can report it as unsupporte
 host = "local"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
 vcpu_count = 2
 memory_mib = 512
 kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
@@ -93,6 +106,9 @@ console_log = "runtime/demo/console.log"
 host = "generic-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
 vcpu_count = 2
 memory_mib = 512
 kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
@@ -107,6 +123,9 @@ console_log = "runtime/cloud-generic/console.log"
 host = "aws-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
 vcpu_count = 2
 memory_mib = 512
 kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
@@ -121,6 +140,9 @@ console_log = "runtime/cloud-aws/console.log"
 host = "gcp-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
 vcpu_count = 2
 memory_mib = 512
 kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
@@ -135,6 +157,9 @@ console_log = "runtime/cloud-gcp/console.log"
 host = "azure-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
 vcpu_count = 2
 memory_mib = 512
 kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"

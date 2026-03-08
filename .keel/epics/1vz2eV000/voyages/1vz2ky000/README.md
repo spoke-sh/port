@@ -31,7 +31,7 @@ started_at: 2026-03-07T17:24:47
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Model Substrates And Protection Modes](../../../../stories/1vz2oQ000/README.md) | feat | backlog |
+| [Model Substrates And Protection Modes](../../../../stories/1vz2oQ000/README.md) | feat | in-progress |
 | [Add Machine Inventory Status And Stop](../../../../stories/1vz2oY000/README.md) | feat | backlog |
 | [Publish Hosted Node Agent Contract](../../../../stories/1vz2oh000/README.md) | feat | backlog |
 | [Define Artifact Mobility Commands And Contracts](../../../../stories/1vz2on000/README.md) | feat | backlog |

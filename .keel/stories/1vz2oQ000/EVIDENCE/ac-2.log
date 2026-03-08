@@ -1,0 +1,25 @@
+---
+recorded_at: 2026-03-07T17:32:42.876690078-08:00
+mode: manual
+files: ["/tmp/1vz2oQ000-ac2.log"]
+---
+
+--- File: 1vz2oQ000-ac2.log ---
+examples/port.toml:9:protection_modes = ["standard"]
+examples/port.toml:19:protection_modes = ["standard"]
+examples/port.toml:93:protection_mode = "standard"
+examples/port.toml:110:protection_mode = "standard"
+examples/port.toml:127:protection_mode = "standard"
+examples/port.toml:144:protection_mode = "standard"
+examples/port.toml:161:protection_mode = "standard"
+docs/operators.md:97:- Apple Virtualization Framework is now a first-class planned Port lane, but it
+docs/cloud.md:6:research-backed substrate lanes such as Firecracker/PVM, Cloud Hypervisor, and
+docs/cloud.md:7:Apple Virtualization Framework.
+docs/cloud.md:20:| Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
+docs/cloud.md:56:- Firecracker/PVM on `aarch64` remains a research lane until Port has a
+README.md:60:Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly as
+README.md:63:## Execution Lanes
+README.md:73:| Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
+README.md:74:| Apple Virtualization Framework | `standard` | `arm64` or `x86_64` on macOS | Planned | First-class macOS lane in the model and docs, not yet implemented |
+README.md:262:- `protection_mode = "standard" | "pvm"`
+

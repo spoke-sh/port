@@ -50,12 +50,12 @@
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Scope | Source | Verification |
 |----|-------------|-------|--------|--------------|
-| SRS-01 | The shared model must represent execution substrate, protection mode, and artifact references or variants without overloading the current provider-only host fields. | SCOPE-01 | FR-01 | automated test + doc review |
+| SRS-01 | The shared model must represent execution substrate, protection mode, and artifact references or variants without overloading the current provider-only host fields, and that canonical vocabulary must be reflected in the sample config and baseline support docs. | SCOPE-01, SCOPE-05 | FR-01 | automated test + doc review |
 | SRS-02 | Port must expose `port machine list`, `port machine status`, and `port machine stop` as canonical lifecycle surfaces for local runtime state and shape them so they can extend to hosted runtimes later. | SCOPE-02, SCOPE-05 | FR-02 | automated test + CLI proof |
 | SRS-03 | Runtime state and manifests must carry enough data to support deterministic lifecycle inspection and stop behavior without requiring Firecracker's REST API. | SCOPE-02 | FR-02 | automated test + inspection |
-| SRS-04 | Port must author and partially implement a hosted control-plane contract that separates long-lived control ownership from the local CLI process while preserving the canonical guest-operation model. | SCOPE-03 | FR-03 | automated test + design review |
+| SRS-04 | Port must author and partially implement a hosted control-plane contract that separates long-lived control ownership from the local CLI process while preserving the canonical guest-operation model, and it must publish that contract through canonical Port docs. | SCOPE-03, SCOPE-05 | FR-03 | automated test + design review |
 | SRS-05 | Port must define artifact publish, pull, cache, and variant-selection contracts in the model and documentation so later remote backends can be implemented without changing the canonical operator story. | SCOPE-01, SCOPE-04, SCOPE-05 | FR-04 | model test + doc review |
-| SRS-06 | CLI help and operator documentation must explain the new substrate-aware support matrix, including which lanes are supported, partial, experimental, or design-only. | SCOPE-05 | FR-08 | doc review + CLI proof |
+| SRS-06 | CLI help and operator documentation must explain the new substrate-aware and artifact-aware support matrix, including which lanes and mobility workflows are supported, partial, experimental, or design-only. | SCOPE-05 | FR-07 | doc review + CLI proof |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
 ### Non-Functional Requirements

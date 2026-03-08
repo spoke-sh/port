@@ -20,6 +20,11 @@ impl PortConfig {
                     path: PathBuf::from("artifacts/kernel/demo/vmlinux"),
                     build: String::from("port artifacts build --artifact demo-kernel"),
                     validate: String::from("port artifacts validate --artifact demo-kernel"),
+                    compatibility: ArtifactCompatibility {
+                        architectures: vec![MachineArchitecture::X86_64, MachineArchitecture::Aarch64],
+                        substrates: vec![ExecutionSubstrate::Firecracker],
+                        protection_modes: vec![ProtectionMode::Standard],
+                    },
                 },
             )]),
             guest_images: BTreeMap::from([(
@@ -28,6 +33,11 @@ impl PortConfig {
                     path: PathBuf::from("artifacts/guest/demo/rootfs.ext4"),
                     build: String::from("port artifacts build --artifact demo-guest"),
                     validate: String::from("port artifacts validate --artifact demo-guest"),
+                    compatibility: ArtifactCompatibility {
+                        architectures: vec![MachineArchitecture::X86_64, MachineArchitecture::Aarch64],
+                        substrates: vec![ExecutionSubstrate::Firecracker],
+                        protection_modes: vec![ProtectionMode::Standard],
+                    },
                 },
             )]),
         };
@@ -142,6 +152,108 @@ impl PortConfig {
     pub fn artifact(&self, name: &str) -> Option<&ArtifactSpec> {
         self.artifacts.lookup(name)
     }
+
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        for (machine_name, machine) in &self.machines {
+            let host = self.hosts.get(&machine.host).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "machine '{}' references unknown host '{}'",
+                    machine_name, machine.host
+                ))
+            })?;
+            let kernel = self.artifact(&machine.kernel).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "machine '{}' references unknown kernel artifact '{}'",
+                    machine_name, machine.kernel
+                ))
+            })?;
+            let guest_image = self.artifact(&machine.guest_image).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "machine '{}' references unknown guest image artifact '{}'",
+                    machine_name, machine.guest_image
+                ))
+            })?;
+            let resolved_architecture = resolve_machine_architecture(machine.architecture).map_err(
+                |message| ValidationError::new(format!("machine '{}': {message}", machine_name)),
+            )?;
+
+            let mut issues = Vec::new();
+            match machine.substrate {
+                ExecutionSubstrate::Firecracker => {
+                    if host.platform != HostPlatform::Linux {
+                        issues.push(String::from(
+                            "Firecracker execution requires a Linux host platform.",
+                        ));
+                    }
+                    if machine.protection_mode == ProtectionMode::Pvm
+                        && resolved_architecture == MachineArchitecture::Aarch64
+                    {
+                        issues.push(String::from(
+                            "Firecracker/PVM currently requires x86_64; arm64 remains a research lane.",
+                        ));
+                    }
+                }
+                ExecutionSubstrate::CloudHypervisor => {
+                    if host.platform != HostPlatform::Linux {
+                        issues.push(String::from(
+                            "Cloud Hypervisor execution currently expects a Linux host platform.",
+                        ));
+                    }
+                    if machine.protection_mode == ProtectionMode::Pvm {
+                        issues.push(String::from(
+                            "Port does not currently define a Cloud Hypervisor PVM lane.",
+                        ));
+                    }
+                }
+                ExecutionSubstrate::Avf => {
+                    if host.platform != HostPlatform::Macos {
+                        issues.push(String::from(
+                            "Apple Virtualization Framework requires a macOS host platform.",
+                        ));
+                    }
+                    if machine.protection_mode == ProtectionMode::Pvm {
+                        issues.push(String::from(
+                            "Apple Virtualization Framework does not currently define a PVM lane.",
+                        ));
+                    }
+                }
+            }
+
+            if !kernel.supports(
+                resolved_architecture,
+                machine.substrate,
+                machine.protection_mode,
+            ) {
+                issues.push(format!(
+                    "Kernel artifact '{}' is not compatible with {:?}/{:?}/{:?}.",
+                    machine.kernel, machine.substrate, machine.protection_mode, resolved_architecture
+                ));
+            }
+            if !guest_image.supports(
+                resolved_architecture,
+                machine.substrate,
+                machine.protection_mode,
+            ) {
+                issues.push(format!(
+                    "Guest image artifact '{}' is not compatible with {:?}/{:?}/{:?}.",
+                    machine.guest_image,
+                    machine.substrate,
+                    machine.protection_mode,
+                    resolved_architecture
+                ));
+            }
+
+            if !issues.is_empty() {
+                return Err(ValidationError::new(format!(
+                    "machine '{}': {}",
+                    machine_name,
+                    issues.join(" ")
+                )));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn ssh_host(provider: HostProvider, address: &str, user: &str, notes: Vec<String>) -> HostSpec {
@@ -165,6 +277,9 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
         host: host.to_string(),
         kernel: String::from("demo-kernel"),
         guest_image: String::from("demo-guest"),
+        substrate: ExecutionSubstrate::Firecracker,
+        protection_mode: ProtectionMode::Standard,
+        architecture: MachineArchitecture::Native,
         vcpu_count: 2,
         memory_mib: 512,
         kernel_args: String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
@@ -203,6 +318,25 @@ impl std::fmt::Display for ModelError {
 }
 
 impl std::error::Error for ModelError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationError {
+    message: String,
+}
+
+impl ValidationError {
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ValidationError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactCatalog {
@@ -245,6 +379,31 @@ pub struct ArtifactSpec {
     pub path: PathBuf,
     pub build: String,
     pub validate: String,
+    pub compatibility: ArtifactCompatibility,
+}
+
+impl ArtifactSpec {
+    #[must_use]
+    pub fn supports(
+        &self,
+        architecture: MachineArchitecture,
+        substrate: ExecutionSubstrate,
+        protection_mode: ProtectionMode,
+    ) -> bool {
+        self.compatibility.architectures.contains(&architecture)
+            && self.compatibility.substrates.contains(&substrate)
+            && self
+                .compatibility
+                .protection_modes
+                .contains(&protection_mode)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactCompatibility {
+    pub architectures: Vec<MachineArchitecture>,
+    pub substrates: Vec<ExecutionSubstrate>,
+    pub protection_modes: Vec<ProtectionMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,6 +454,9 @@ pub struct MachineSpec {
     pub host: String,
     pub kernel: String,
     pub guest_image: String,
+    pub substrate: ExecutionSubstrate,
+    pub protection_mode: ProtectionMode,
+    pub architecture: MachineArchitecture,
     pub vcpu_count: u8,
     pub memory_mib: u32,
     pub kernel_args: String,
@@ -309,11 +471,49 @@ pub struct GuestControl {
     pub console_log: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExecutionSubstrate {
+    Firecracker,
+    CloudHypervisor,
+    Avf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProtectionMode {
+    Standard,
+    Pvm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineArchitecture {
+    Native,
+    X86_64,
+    Aarch64,
+}
+
+fn resolve_machine_architecture(
+    architecture: MachineArchitecture,
+) -> Result<MachineArchitecture, &'static str> {
+    match architecture {
+        MachineArchitecture::Native => match std::env::consts::ARCH {
+            "x86_64" => Ok(MachineArchitecture::X86_64),
+            "aarch64" => Ok(MachineArchitecture::Aarch64),
+            _ => Err("host architecture is not yet modeled by Port"),
+        },
+        concrete => Ok(concrete),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{HostProvider, PortConfig};
+    use super::{
+        ExecutionSubstrate, HostProvider, MachineArchitecture, PortConfig, ProtectionMode,
+    };
 
     #[test]
     fn sample_config_round_trips_through_toml() {
@@ -337,8 +537,12 @@ mod tests {
         assert!(encoded.contains("provider = \"aws\""));
         assert!(encoded.contains("provider = \"gcp\""));
         assert!(encoded.contains("provider = \"azure\""));
+        assert!(encoded.contains("substrate = \"firecracker\""));
+        assert!(encoded.contains("protection_mode = \"standard\""));
+        assert!(encoded.contains("architecture = \"native\""));
         assert!(encoded.contains("[machines.demo.guest]"));
         assert!(encoded.contains("[machines.cloud-aws]"));
+        assert!(encoded.contains("[artifacts.kernels.demo-kernel.compatibility]"));
     }
 
     #[test]
@@ -371,6 +575,18 @@ mod tests {
         assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
         assert_eq!(config.machines["cloud-aws"].host, "aws-linux");
+        assert_eq!(
+            config.machines["demo"].substrate,
+            ExecutionSubstrate::Firecracker
+        );
+        assert_eq!(
+            config.machines["demo"].protection_mode,
+            ProtectionMode::Standard
+        );
+        assert_eq!(
+            config.machines["demo"].architecture,
+            MachineArchitecture::Native
+        );
     }
 
     #[test]
@@ -390,5 +606,41 @@ mod tests {
         assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
         assert_eq!(config.machines["cloud-azure"].host, "azure-linux");
+        assert_eq!(
+            config.machines["demo"].substrate,
+            ExecutionSubstrate::Firecracker
+        );
+        assert_eq!(
+            config.machines["demo"].protection_mode,
+            ProtectionMode::Standard
+        );
+        assert_eq!(
+            config.artifacts.kernels["demo-kernel"].compatibility.architectures,
+            vec![MachineArchitecture::X86_64, MachineArchitecture::Aarch64]
+        );
+        assert_eq!(
+            config.artifacts.guest_images["demo-guest"]
+                .compatibility
+                .substrates,
+            vec![ExecutionSubstrate::Firecracker]
+        );
     }
+
+    #[test]
+    fn artifact_compatibility_rejects_unsupported_pvm_lane() {
+        let config = PortConfig::sample();
+        let guest = &config.artifacts.guest_images["demo-guest"];
+
+        assert!(guest.supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Standard
+        ));
+        assert!(!guest.supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Pvm
+        ));
+    }
+
 }

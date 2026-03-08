@@ -12,7 +12,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
     GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
 };
-use port_model::{ArtifactKind, HostConnection, HostPlatform, HostProvider, PortConfig};
+use port_model::{
+    ArtifactKind, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
+    MachineArchitecture, PortConfig, ProtectionMode,
+};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -195,6 +198,20 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
                 checks.push(check);
             }
         }
+
+        for (name, machine) in &config.machines {
+            let host = config
+                .hosts
+                .get(&machine.host)
+                .expect("sampled machines should reference a known host");
+            let kernel = config
+                .artifact(&machine.kernel)
+                .expect("sampled machines should reference a known kernel");
+            let guest_image = config
+                .artifact(&machine.guest_image)
+                .expect("sampled machines should reference a known guest image");
+            checks.push(machine_contract_check(name, host, machine, kernel, guest_image));
+        }
     }
 
     let mut notes = vec![
@@ -257,6 +274,18 @@ pub fn launch_local_machine(
         );
     }
 
+    let kernel = config
+        .artifact(&machine.kernel)
+        .with_context(|| format!("unknown kernel artifact '{}'", machine.kernel))?;
+    let guest_image = config
+        .artifact(&machine.guest_image)
+        .with_context(|| format!("unknown guest image artifact '{}'", machine.guest_image))?;
+    let machine_check =
+        machine_contract_check(request.machine_name, host, machine, kernel, guest_image);
+    if !machine_check.ok {
+        bail!("machine contract failed: {}", machine_check.detail);
+    }
+
     let report = collect_doctor_report(Some(config));
     let failures = report.blocking_failures();
     if !failures.is_empty() {
@@ -268,12 +297,6 @@ pub fn launch_local_machine(
         bail!("host preflight failed: {details}");
     }
 
-    let kernel = config
-        .artifact(&machine.kernel)
-        .with_context(|| format!("unknown kernel artifact '{}'", machine.kernel))?;
-    let guest_image = config
-        .artifact(&machine.guest_image)
-        .with_context(|| format!("unknown guest image artifact '{}'", machine.guest_image))?;
     let firecracker_binary = find_binary("firecracker")
         .context("firecracker binary was not found on PATH after preflight")?;
 
@@ -544,6 +567,119 @@ fn provider_check(
         required: false,
         detail,
     })
+}
+
+fn machine_contract_check(
+    machine_name: &str,
+    host: &port_model::HostSpec,
+    machine: &port_model::MachineSpec,
+    kernel: &port_model::ArtifactSpec,
+    guest_image: &port_model::ArtifactSpec,
+) -> DoctorCheck {
+    let resolved_architecture = match resolve_machine_architecture(machine.architecture) {
+        Ok(architecture) => architecture,
+        Err(error) => {
+            return DoctorCheck {
+                name: format!("machine:{machine_name}"),
+                ok: false,
+                required: false,
+                detail: error.to_string(),
+            };
+        }
+    };
+
+    let mut issues = Vec::new();
+    match machine.substrate {
+        ExecutionSubstrate::Firecracker => {
+            if host.platform != HostPlatform::Linux {
+                issues.push(String::from(
+                    "Firecracker execution requires a Linux host platform.",
+                ));
+            }
+            if machine.protection_mode == ProtectionMode::Pvm
+                && resolved_architecture == MachineArchitecture::Aarch64
+            {
+                issues.push(String::from(
+                    "Firecracker/PVM on arm64 remains a research lane; Port does not yet claim a supportable runtime path.",
+                ));
+            }
+        }
+        ExecutionSubstrate::CloudHypervisor => {
+            if host.platform != HostPlatform::Linux {
+                issues.push(String::from(
+                    "Cloud Hypervisor execution currently expects a Linux host platform.",
+                ));
+            }
+            if machine.protection_mode == ProtectionMode::Pvm {
+                issues.push(String::from(
+                    "Port does not currently define a Cloud Hypervisor PVM lane.",
+                ));
+            }
+        }
+        ExecutionSubstrate::Avf => {
+            if host.platform != HostPlatform::Macos {
+                issues.push(String::from(
+                    "Apple Virtualization Framework requires a macOS host platform.",
+                ));
+            }
+            if machine.protection_mode == ProtectionMode::Pvm {
+                issues.push(String::from(
+                    "Apple Virtualization Framework does not currently define a PVM lane.",
+                ));
+            }
+        }
+    }
+
+    if !kernel.supports(
+        resolved_architecture,
+        machine.substrate,
+        machine.protection_mode,
+    ) {
+        issues.push(format!(
+            "Kernel artifact '{}' is not compatible with {:?}/{:?}/{:?}.",
+            machine.kernel, machine.substrate, machine.protection_mode, resolved_architecture
+        ));
+    }
+    if !guest_image.supports(
+        resolved_architecture,
+        machine.substrate,
+        machine.protection_mode,
+    ) {
+        issues.push(format!(
+            "Guest image artifact '{}' is not compatible with {:?}/{:?}/{:?}.",
+            machine.guest_image, machine.substrate, machine.protection_mode, resolved_architecture
+        ));
+    }
+
+    if issues.is_empty() {
+        DoctorCheck {
+            name: format!("machine:{machine_name}"),
+            ok: true,
+            required: false,
+            detail: format!(
+                "Machine models {:?}/{:?}/{:?} with compatible artifacts.",
+                machine.substrate, machine.protection_mode, resolved_architecture
+            ),
+        }
+    } else {
+        DoctorCheck {
+            name: format!("machine:{machine_name}"),
+            ok: false,
+            required: false,
+            detail: issues.join(" "),
+        }
+    }
+}
+
+fn resolve_machine_architecture(architecture: MachineArchitecture) -> Result<MachineArchitecture> {
+    match architecture {
+        MachineArchitecture::Native => match env::consts::ARCH {
+            "x86_64" => Ok(MachineArchitecture::X86_64),
+            "aarch64" => Ok(MachineArchitecture::Aarch64),
+            other => bail!("host architecture '{other}' is not yet modeled by Port"),
+        },
+        concrete => Ok(concrete),
+    }
 }
 
 fn remote_launch_guidance(machine_name: &str, host_name: &str, provider: HostProvider) -> String {
@@ -1394,6 +1530,21 @@ mod tests {
     }
 
     #[test]
+    fn doctor_report_includes_machine_lane_checks() {
+        let report = collect_doctor_report(Some(&PortConfig::sample()));
+
+        let demo = report
+            .checks
+            .iter()
+            .find(|check| check.name == "machine:demo")
+            .expect("machine lane check should exist");
+
+        assert!(demo.ok);
+        assert!(demo.detail.contains("Machine models"));
+        assert!(demo.detail.contains("Firecracker"));
+    }
+
+    #[test]
     fn remote_launch_rejects_aws_hosts_with_provider_guidance() {
         let tempdir = tempdir().expect("tempdir should exist");
         let error = launch_local_machine(
@@ -1411,6 +1562,28 @@ mod tests {
         assert!(message.contains("AWS"));
         assert!(message.contains("not implemented"));
         assert!(message.contains("Run Port on the AWS Linux host itself"));
+    }
+
+    #[test]
+    fn launch_rejects_unsupported_pvm_artifact_contract() {
+        let mut config = PortConfig::sample();
+        config.machines.get_mut("demo").expect("demo should exist").protection_mode =
+            port_model::ProtectionMode::Pvm;
+        let tempdir = tempdir().expect("tempdir should exist");
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("launch should reject an unsupported PVM artifact contract");
+
+        let message = error.to_string();
+        assert!(message.contains("machine contract failed"));
+        assert!(message.contains("not compatible"));
     }
 
     #[test]

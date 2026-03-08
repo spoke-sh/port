@@ -8,7 +8,7 @@ Windows operators.
 | Operator environment | Supported MVP workflow | Unsupported MVP workflow | Why |
 |----------------------|------------------------|--------------------------|-----|
 | Linux host with `/dev/kvm` and Firecracker | Run the full local Port workflow directly through the `port` CLI | n/a | Firecracker local launch requires Linux and KVM |
-| macOS workstation | Edit or inspect the repo locally, then run `port` on a Linux host | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm` |
+| macOS workstation | Edit or inspect the repo locally, then run `port` on a Linux host today; AVF is the first-class planned macOS lane | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; AVF is planned but not yet shipped |
 | Windows workstation | Use WSL or a remote Linux host for the Linux-side `port` workflow | Native Windows Firecracker launch | Firecracker local launch requires a Linux environment with `/dev/kvm`; not every WSL setup exposes that capability |
 
 ## Linux Workflow
@@ -77,11 +77,12 @@ What to expect:
 - `port machine launch --machine demo` remains the supported local Linux launch
   proof for the MVP.
 
-The full cloud matrix and the PVM drop decision live in [`docs/cloud.md`](cloud.md).
+The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
 
 ## macOS Workflow
 
-The supported macOS workflow is to run the actual Port commands on a Linux host.
+The shipped macOS workflow is still to run the actual Firecracker commands on a
+Linux host.
 
 Recommended path:
 
@@ -89,10 +90,12 @@ Recommended path:
 2. On the Linux host, run the same canonical commands shown in the Linux workflow.
 3. Use `port doctor` on that Linux host before attempting local Firecracker launch.
 
-Unsupported path:
+Current boundary:
 
 - Running local Firecracker launch directly on macOS is unsupported because the
   MVP launch path requires Linux and `/dev/kvm`.
+- Apple Virtualization Framework is now a first-class planned Port lane, but it
+  is not executable in the current runtime yet.
 - Remote cloud hosts should still be treated as Linux execution environments:
   run `port doctor` and any future launch commands on the Linux side, not on
   macOS itself.

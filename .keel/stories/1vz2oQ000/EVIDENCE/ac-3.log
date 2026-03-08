@@ -1,0 +1,24 @@
+---
+recorded_at: 2026-03-07T17:32:42.854657596-08:00
+mode: manual
+files: ["/tmp/1vz2oQ000-ac3.log"]
+---
+
+--- File: 1vz2oQ000-ac3.log ---
+    Blocking waiting for file lock on artifact directory
+   Compiling port-runtime v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.16s
+     Running unittests src/lib.rs (/tmp/port-target/debug/deps/port_runtime-70559fd50d4f031a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running unittests src/lib.rs (/tmp/port-target/debug/deps/port_runtime-70559fd50d4f031a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+

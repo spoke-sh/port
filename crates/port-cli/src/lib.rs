@@ -34,21 +34,25 @@ Guest workflow examples:
   `port guest forward` is a foreground host-side proxy session; stop it with Ctrl-C when you are done.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
 
-Platform Support:
-  Linux: local Firecracker launch is supported when port doctor passes.
-  macOS: run Port on a Linux host; local Firecracker launch requires Linux and /dev/kvm.
-  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
-Cloud Linux:
-  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
-  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
-  Azure and the PVM/protected-vm lane are out of scope for the MVP.";
+	Platform Support:
+	  Linux: local Firecracker launch is supported when port doctor passes.
+	  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned macOS lane.
+	  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
+	Execution Lanes:
+	  Firecracker + standard on Linux is the current shipped lane.
+	  Firecracker + pvm on x86_64 is planned for cloud cost control; Firecracker + pvm on aarch64 remains research only.
+	  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
+	Cloud Linux:
+	  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
+	  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
+	  Azure remains an explicitly unsupported Firecracker provider lane.";
 
 #[derive(Debug, Parser)]
 #[command(
     name = "port",
     version,
     about = "CLI-first Firecracker orchestration for local and cloud Linux hosts",
-    long_about = "Port manages Firecracker-backed Linux workloads through one canonical CLI and shared machine model. Local Firecracker launch is supported on Linux hosts; remote generic-linux, AWS, and GCP hosts are modeled with provider-aware diagnostics; macOS and Windows operators use Linux or WSL-backed workflows.",
+    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly as planned or research-backed lanes; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics; macOS and Windows operators use Linux, WSL, or future substrate-specific workflows.",
     after_help = AFTER_HELP
 )]
 pub struct Cli {
@@ -446,17 +450,27 @@ fn ensure_machine_exists(config: &PortConfig, machine: &str) -> Result<()> {
 }
 
 fn load_config(path: Option<PathBuf>) -> Result<PortConfig> {
-    match path {
+    let config = match path {
         Some(path) => PortConfig::from_path(&path)
             .with_context(|| format!("failed to load Port config from '{}'", path.display())),
         None => Ok(PortConfig::sample()),
-    }
+    }?;
+    validate_config(config)
 }
 
 fn load_config_if_present(path: Option<&std::path::Path>) -> Result<Option<PortConfig>> {
     path.map(PortConfig::from_path)
         .transpose()
-        .map_err(anyhow::Error::from)
+        .map_err(anyhow::Error::from)?
+        .map(validate_config)
+        .transpose()
+}
+
+fn validate_config(config: PortConfig) -> Result<PortConfig> {
+    config
+        .validate()
+        .with_context(|| "invalid Port config".to_string())?;
+    Ok(config)
 }
 
 pub fn render_help() -> String {
@@ -498,6 +512,8 @@ mod tests {
             "GCP",
             "Azure",
             "PVM",
+            "Cloud Hypervisor",
+            "Apple Virtualization Framework",
             "foreground host-side proxy",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");

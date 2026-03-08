@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-03-07T17:32:42.795554239-08:00
+mode: manual
+files: ["/tmp/1vz2oQ000-ac1.log"]
+---
+
+--- File: 1vz2oQ000-ac1.log ---
+   Compiling port-model v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-model)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.71s
+     Running unittests src/lib.rs (/tmp/port-target/debug/deps/port_model-92e0a99ad81f132b)
+
+running 6 tests
+test tests::artifact_compatibility_rejects_unsupported_pvm_lane ... ok
+test tests::artifact_catalog_reports_kernel_and_guest_image_kinds ... ok
+test tests::sample_config_models_all_remote_provider_lanes ... ok
+test tests::sample_config_exposes_expected_sections ... ok
+test tests::checked_in_example_models_all_provider_variants ... ok
+test tests::sample_config_round_trips_through_toml ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
