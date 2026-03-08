@@ -25,12 +25,12 @@ started_at: 2026-03-07T18:22:49
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Extract Firecracker Driver Boundary](../../../../stories/1vz3kq000/README.md) | feat | done |
-| [Define Hosted Machine Inventory Contract](../../../../stories/1vz3kt000/README.md) | feat | in-progress |
+| [Define Hosted Machine Inventory Contract](../../../../stories/1vz3kt000/README.md) | feat | done |
 | [Define AVF Execution Contract](../../../../stories/1vz3l2000/README.md) | feat | backlog |
 | [Plan Pvm Host Kit](../../../../stories/1vz3lA000/README.md) | feat | backlog |
 <!-- END GENERATED -->

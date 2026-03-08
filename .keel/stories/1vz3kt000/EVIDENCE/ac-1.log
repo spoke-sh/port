@@ -1,6 +1,6 @@
 ---
 recorded_at: 2026-03-07T18:51:06.618102407-08:00
-command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-model && cargo test -q -p port-runtime && cargo test -q -p port-cli && cargo run -q -p port-cli -- machine list --runtime-root runtime | sed -n "1,10p" && rg -n "machine_control_contract|MachineControlContract|inventory scope:|status source:|Canonical Machine Control Contract|control-contract" crates/port-model/src/lib.rs crates/port-runtime/src/lib.rs crates/port-cli/src/lib.rs README.md docs/hosted.md docs/cloud.md docs/operators.md'
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3kt000/verify-ac-1.sh
 ---
 
 running 9 tests

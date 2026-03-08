@@ -2,11 +2,13 @@
 id: 1vz3kt000
 title: Define Hosted Machine Inventory Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T18:20:31
-updated_at: 2026-03-07T18:26:58
+updated_at: 2026-03-07T18:59:29
 scope: 1vz3ck000/1vz3j0000
 started_at: 2026-03-07T18:26:58
+submitted_at: 2026-03-07T18:59:20
+completed_at: 2026-03-07T18:59:29
 ---
 
 # Define Hosted Machine Inventory Contract
@@ -19,4 +21,5 @@ node-agent-backed ownership without changing the operator model.
 
 ## Acceptance Criteria
 
-- [x] [SRS-02/AC-01] Port publishes implementation-ready lifecycle and inventory contracts for local versus hosted ownership, including how machine status is sourced and routed. <!-- [SRS-02/AC-01] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-model && cargo test -q -p port-runtime && cargo test -q -p port-cli && cargo run -q -p port-cli -- machine list --runtime-root runtime | sed -n "1,10p" && rg -n "machine_control_contract|MachineControlContract|inventory scope:|status source:|Canonical Machine Control Contract|control-contract" crates/port-model/src/lib.rs crates/port-runtime/src/lib.rs crates/port-cli/src/lib.rs README.md docs/hosted.md docs/cloud.md docs/operators.md', proof: ac-1.log-->
+<!-- verify: manual, SRS-02:start:end, proof: ac-1.log-->
+- [x] [SRS-02/AC-01] Port publishes implementation-ready lifecycle and inventory contracts for local versus hosted ownership, including how machine status is sourced and routed. <!-- [SRS-02/AC-01] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3kt000/verify-ac-1.sh, proof: ac-1.log-->
