@@ -25,13 +25,13 @@ started_at: 2026-03-07T20:35:47
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 4/6 stories complete
+**Progress:** 5/6 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Implement Hosted Control Plane Runtime Path](../../../../stories/1vz5nU000/README.md) | feat | done |
 | [Implement Hosted Guest Operations Runtime Path](../../../../stories/1vz5nk000/README.md) | feat | done |
-| [Add Hosted Secrets Services And Sandboxes](../../../../stories/1vz5nl000/README.md) | feat | backlog |
+| [Add Hosted Secrets Services And Sandboxes](../../../../stories/1vz5nl000/README.md) | feat | done |
 | [Publish Hosted SDK And API Clients](../../../../stories/1vz5nm000/README.md) | feat | backlog |
 | [Add Hosted Monitoring And Top](../../../../stories/1vz5nx000/README.md) | feat | done |
 | [Add Detached And Unix-Socket Forwarding](../../../../stories/1vz5o6000/README.md) | feat | done |
