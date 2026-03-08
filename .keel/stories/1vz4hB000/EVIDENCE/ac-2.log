@@ -1,0 +1,34 @@
+---
+recorded_at: 2026-03-07T19:38:38,320787029-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz4hB000/verify-ac-2.sh
+---
+
+  current guest protocol semantics.
+  The sample config now declares `[control_planes.demo]` with endpoint
+  `https://port.example.internal`.
+  Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the
+  `authorization` header.
+  Remote/cloud sample hosts now use `mode = "hosted-control-plane"` and `control_plane = "demo"`
+  instead of SSH placeholders.
+  Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later
+  scheduler, monitoring, and services work can reuse one placement vocabulary.
+  `port machine list`, `status`, and `stop` now report the current inventory scope, lifecycle owner,
+  status source, and routing contract.
+  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus
+  aarch64 research-only decision.
+  See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta
+  workflow contract.
+  Azure remains an explicitly unsupported Firecracker provider lane.
+  Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later
+  Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later
+docs/hosted.md:128:## Node And Host-Group Inventory Contract
+docs/hosted.md:163:- is an explicit membership list, not a hidden scheduler rule
+docs/hosted.md:165:- becomes the first placement boundary for later lifecycle, scheduler,
+docs/hosted.md:166:  monitoring, and services work
+docs/hosted.md:170:- no scheduler policy exists yet beyond explicit membership
+docs/hosted.md:172:- no services or monitoring product exists yet
+README.md:5:control plane for services, sandboxes, and Kubernetes-oriented workloads.
+README.md:18:- Host long-lived applications and services
+README.md:29:- Support for both ephemeral workloads and long-lived deployed services
+README.md:30:- Integration points for coding agent orchestration and higher-level schedulers
+README.md:227:  fields that later scheduler, monitoring, and services work can reuse.
