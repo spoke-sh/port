@@ -169,6 +169,35 @@ pub struct GuestForwardRequest<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachineDriverKind {
+    FirecrackerLocal,
+}
+
+trait MachineDriver {
+    #[allow(dead_code)]
+    fn kind(&self) -> MachineDriverKind;
+
+    fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata>;
+
+    fn list_machines(&self, runtime_root: &Path) -> Result<Vec<MachineStatus>>;
+
+    fn machine_status(&self, runtime_root: &Path, machine_name: &str) -> Result<MachineStatus>;
+
+    fn stop_machine(
+        &self,
+        runtime_root: &Path,
+        machine_name: &str,
+        timeout: Duration,
+    ) -> Result<StopResult>;
+
+    fn guest_endpoint(&self, config: &PortConfig, request: &GuestRequest<'_>)
+    -> Result<GuestEndpoint>;
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct FirecrackerLocalDriver;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactAction {
     Build,
     Validate,
@@ -367,6 +396,13 @@ pub fn launch_local_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
 ) -> Result<LaunchMetadata> {
+    driver_for_machine(config, request.machine_name)?.launch(config, request)
+}
+
+fn firecracker_local_launch_machine(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+) -> Result<LaunchMetadata> {
     let machine = config
         .machines
         .get(request.machine_name)
@@ -540,6 +576,10 @@ pub fn launch_local_machine(
 }
 
 pub fn list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+    local_runtime_driver().list_machines(runtime_root)
+}
+
+fn firecracker_local_list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
     if !runtime_root.exists() {
         return Ok(Vec::new());
     }
@@ -571,6 +611,10 @@ pub fn list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
 }
 
 pub fn machine_status(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+    local_runtime_driver().machine_status(runtime_root, machine_name)
+}
+
+fn firecracker_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
     let paths = RuntimePaths::for_machine(runtime_root, machine_name);
     if !paths.runtime_dir.exists() {
         bail!(
@@ -588,7 +632,15 @@ pub fn stop_machine(
     machine_name: &str,
     timeout: Duration,
 ) -> Result<StopResult> {
-    let status = machine_status(runtime_root, machine_name)?;
+    local_runtime_driver().stop_machine(runtime_root, machine_name, timeout)
+}
+
+fn firecracker_local_stop_machine(
+    runtime_root: &Path,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let status = firecracker_local_machine_status(runtime_root, machine_name)?;
     let paths = RuntimePaths::for_machine(runtime_root, machine_name);
 
     match status.state {
@@ -1434,7 +1486,8 @@ pub fn execute_guest_operation(
         bail!("copy and forward use dedicated runtime flows");
     }
 
-    let endpoint = resolve_guest_endpoint(config, &request)?;
+    let driver = driver_for_machine(config, request.machine_name)?;
+    let endpoint = driver.guest_endpoint(config, &request)?;
     let stream = connect_guest_endpoint(&endpoint)?;
     let writer_stream = stream
         .try_clone()
@@ -1478,7 +1531,8 @@ pub fn copy_guest_file(
     config: &PortConfig,
     request: GuestCopyRequest<'_>,
 ) -> Result<port_agent_protocol::CopyResult> {
-    let endpoint = resolve_guest_endpoint(
+    let driver = driver_for_machine(config, request.machine_name)?;
+    let endpoint = driver.guest_endpoint(
         config,
         &GuestRequest {
             machine_name: request.machine_name,
@@ -1630,7 +1684,8 @@ pub fn prepare_guest_forward(
     config: &PortConfig,
     request: GuestForwardRequest<'_>,
 ) -> Result<GuestForwardSession> {
-    let endpoint = resolve_guest_endpoint(
+    let driver = driver_for_machine(config, request.machine_name)?;
+    let endpoint = driver.guest_endpoint(
         config,
         &GuestRequest {
             machine_name: request.machine_name,
@@ -1747,7 +1802,7 @@ enum GuestEndpoint {
     },
 }
 
-fn resolve_guest_endpoint(
+fn resolve_firecracker_guest_endpoint(
     config: &PortConfig,
     request: &GuestRequest<'_>,
 ) -> Result<GuestEndpoint> {
@@ -1796,6 +1851,63 @@ fn connect_guest_endpoint(endpoint: &GuestEndpoint) -> Result<UnixStream> {
             host_socket_path,
             guest_port,
         } => connect_firecracker_vsock(host_socket_path, *guest_port),
+    }
+}
+
+impl MachineDriver for FirecrackerLocalDriver {
+    fn kind(&self) -> MachineDriverKind {
+        MachineDriverKind::FirecrackerLocal
+    }
+
+    fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata> {
+        firecracker_local_launch_machine(config, request)
+    }
+
+    fn list_machines(&self, runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+        firecracker_local_list_machines(runtime_root)
+    }
+
+    fn machine_status(&self, runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+        firecracker_local_machine_status(runtime_root, machine_name)
+    }
+
+    fn stop_machine(
+        &self,
+        runtime_root: &Path,
+        machine_name: &str,
+        timeout: Duration,
+    ) -> Result<StopResult> {
+        firecracker_local_stop_machine(runtime_root, machine_name, timeout)
+    }
+
+    fn guest_endpoint(
+        &self,
+        config: &PortConfig,
+        request: &GuestRequest<'_>,
+    ) -> Result<GuestEndpoint> {
+        resolve_firecracker_guest_endpoint(config, request)
+    }
+}
+
+fn local_runtime_driver() -> FirecrackerLocalDriver {
+    FirecrackerLocalDriver
+}
+
+fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<FirecrackerLocalDriver> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{machine_name}'"))?;
+    match machine.substrate {
+        ExecutionSubstrate::Firecracker => Ok(FirecrackerLocalDriver),
+        ExecutionSubstrate::CloudHypervisor => bail!(
+            "machine '{}' targets Cloud Hypervisor, but Port has not implemented a Cloud Hypervisor driver yet",
+            machine_name
+        ),
+        ExecutionSubstrate::Avf => bail!(
+            "machine '{}' targets Apple Virtualization Framework, but Port has not implemented an AVF driver yet",
+            machine_name
+        ),
     }
 }
 
@@ -1936,16 +2048,54 @@ mod tests {
 
     use super::{
         ArtifactAction, DoctorCheck, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-        LaunchMetadata, LaunchRequest, MachineRuntimeState, RuntimePaths, StopResult,
-        artifact_script, build_firecracker_config, collect_doctor_report, copy_guest_file,
-        execute_guest_operation, launch_local_machine, list_machines, machine_status, path_check,
-        prepare_guest_forward, prepare_runtime_state, read_pid_file, repo_root, stop_machine,
+        LaunchMetadata, LaunchRequest, MachineDriver, MachineDriverKind, MachineRuntimeState,
+        RuntimePaths, StopResult, artifact_script, build_firecracker_config,
+        collect_doctor_report, copy_guest_file, driver_for_machine, execute_guest_operation,
+        launch_local_machine, list_machines, machine_status, path_check, prepare_guest_forward,
+        prepare_runtime_state, read_pid_file, repo_root, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
         ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
-    use port_model::{ArtifactKind, PortConfig};
+    use port_model::{
+        ArtifactKind, ExecutionSubstrate, FirecrackerSupport, HostConnection, HostPlatform,
+        HostProvider, HostSpec, PortConfig,
+    };
+
+    #[test]
+    fn driver_selection_routes_demo_machine_to_firecracker_local_driver() {
+        let config = PortConfig::sample();
+        let driver = driver_for_machine(&config, "demo").expect("driver should resolve");
+
+        assert_eq!(driver.kind(), MachineDriverKind::FirecrackerLocal);
+    }
+
+    #[test]
+    fn driver_selection_rejects_avf_lane_without_driver() {
+        let mut config = PortConfig::sample();
+        config.hosts.insert(
+            String::from("mac-local"),
+            HostSpec {
+                platform: HostPlatform::Macos,
+                provider: HostProvider::Local,
+                connection: HostConnection::Local,
+                firecracker: FirecrackerSupport {
+                    local_launch: false,
+                    notes: Vec::new(),
+                },
+            },
+        );
+        let machine = config
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist");
+        machine.host = String::from("mac-local");
+        machine.substrate = ExecutionSubstrate::Avf;
+
+        let error = driver_for_machine(&config, "demo").expect_err("AVF should not resolve");
+        assert!(error.to_string().contains("AVF driver"));
+    }
 
     #[test]
     fn runtime_paths_are_deterministic() {

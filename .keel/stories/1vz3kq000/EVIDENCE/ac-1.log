@@ -1,0 +1,19 @@
+
+running 20 tests
+....................
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+---
+176:trait MachineDriver {
+198:struct FirecrackerLocalDriver;
+402:fn firecracker_local_launch_machine(
+582:fn firecracker_local_list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+638:fn firecracker_local_stop_machine(
+1805:fn resolve_firecracker_guest_endpoint(
+1896:fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<FirecrackerLocalDriver> {
