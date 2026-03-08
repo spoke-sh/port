@@ -222,6 +222,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   `[control_planes.demo]`, with endpoint `https://port.example.internal`,
   audience `port-hosted-demo`, and a bearer token sourced from
   `PORT_DEMO_TOKEN`.
+- Hosted inventory is now modeled explicitly through `[nodes.<name>]` and
+  `[host_groups.<name>]`, with capability and explicit-membership placement
+  fields that later scheduler, monitoring, and services work can reuse.
 - Guest `exec`, `copy`, `pty`, `logs`, and `forward` keep the current guest
   protocol semantics; the hosted layer brokers them instead of replacing them.
 - Local `machine list`, `status`, and `stop` now publish the control-contract

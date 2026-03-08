@@ -9,6 +9,10 @@ pub struct PortConfig {
     #[serde(default)]
     pub control_planes: BTreeMap<String, HostedControlPlaneSpec>,
     pub hosts: BTreeMap<String, HostSpec>,
+    #[serde(default)]
+    pub nodes: BTreeMap<String, HostedNodeSpec>,
+    #[serde(default)]
+    pub host_groups: BTreeMap<String, HostedHostGroupSpec>,
     pub machines: BTreeMap<String, MachineSpec>,
 }
 
@@ -158,6 +162,84 @@ impl PortConfig {
             ),
         ]);
 
+        let nodes = BTreeMap::from([
+            (
+                String::from("generic-linux-node"),
+                HostedNodeSpec {
+                    host: String::from("generic-linux"),
+                    capabilities: HostedNodeCapabilities {
+                        providers: vec![HostProvider::GenericLinux],
+                        platforms: vec![HostPlatform::Linux],
+                        substrates: vec![ExecutionSubstrate::Firecracker],
+                        architectures: vec![MachineArchitecture::X86_64],
+                        protection_modes: vec![ProtectionMode::Standard],
+                    },
+                    notes: vec![String::from(
+                        "Generic Linux is the baseline hosted node contract before scheduler policy exists.",
+                    )],
+                },
+            ),
+            (
+                String::from("aws-linux-node"),
+                HostedNodeSpec {
+                    host: String::from("aws-linux"),
+                    capabilities: HostedNodeCapabilities {
+                        providers: vec![HostProvider::Aws],
+                        platforms: vec![HostPlatform::Linux],
+                        substrates: vec![ExecutionSubstrate::Firecracker],
+                        architectures: vec![MachineArchitecture::X86_64],
+                        protection_modes: vec![ProtectionMode::Standard],
+                    },
+                    notes: vec![String::from(
+                        "AWS stays explicit because later host-group and PVM planning will care about provider identity.",
+                    )],
+                },
+            ),
+            (
+                String::from("gcp-linux-node"),
+                HostedNodeSpec {
+                    host: String::from("gcp-linux"),
+                    capabilities: HostedNodeCapabilities {
+                        providers: vec![HostProvider::Gcp],
+                        platforms: vec![HostPlatform::Linux],
+                        substrates: vec![ExecutionSubstrate::Firecracker],
+                        architectures: vec![MachineArchitecture::X86_64],
+                        protection_modes: vec![ProtectionMode::Standard],
+                    },
+                    notes: vec![String::from(
+                        "GCP is modeled as a hosted node so placement and lifecycle work can remain provider-aware.",
+                    )],
+                },
+            ),
+        ]);
+
+        let host_groups = BTreeMap::from([
+            (
+                String::from("remote-linux"),
+                HostedHostGroupSpec {
+                    placement: HostedPlacementPolicy::ExplicitMembership,
+                    nodes: vec![
+                        String::from("generic-linux-node"),
+                        String::from("aws-linux-node"),
+                        String::from("gcp-linux-node"),
+                    ],
+                    notes: vec![String::from(
+                        "This group is the first hosted placement boundary; later scheduler, monitoring, and services work should reuse it instead of inventing another inventory axis.",
+                    )],
+                },
+            ),
+            (
+                String::from("aws-builders"),
+                HostedHostGroupSpec {
+                    placement: HostedPlacementPolicy::ExplicitMembership,
+                    nodes: vec![String::from("aws-linux-node")],
+                    notes: vec![String::from(
+                        "Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy.",
+                    )],
+                },
+            ),
+        ]);
+
         let machines = BTreeMap::from([
             (String::from("demo"), sample_machine("local", "demo", 52)),
             (
@@ -182,6 +264,8 @@ impl PortConfig {
             artifacts,
             control_planes,
             hosts,
+            nodes,
+            host_groups,
             machines,
         }
     }
@@ -264,9 +348,89 @@ impl PortConfig {
         }
     }
 
+    pub fn hosted_inventory_contract(&self) -> Result<HostedInventoryContract, ValidationError> {
+        let mut nodes = BTreeMap::new();
+        for (node_name, node) in &self.nodes {
+            let host = self.hosts.get(&node.host).ok_or_else(|| {
+                ValidationError::new(format!(
+                    "node '{}' references unknown host '{}'",
+                    node_name, node.host
+                ))
+            })?;
+            let control_plane = match &host.connection {
+                HostConnection::Local => {
+                    return Err(ValidationError::new(format!(
+                        "node '{}' references local host '{}' but hosted nodes must target a hosted control plane",
+                        node_name, node.host
+                    )));
+                }
+                HostConnection::HostedControlPlane { control_plane } => control_plane.clone(),
+            };
+            nodes.insert(
+                node_name.clone(),
+                HostedNodeContract {
+                    host: node.host.clone(),
+                    control_plane,
+                    inventory_owner: MachineInventoryOwner::HostedControlPlane,
+                    lifecycle_owner: MachineLifecycleOwner::HostedNodeAgent,
+                    capabilities: node.capabilities.clone(),
+                    notes: node.notes.clone(),
+                },
+            );
+        }
+
+        let mut host_groups = BTreeMap::new();
+        for (group_name, group) in &self.host_groups {
+            let mut members = Vec::new();
+            let mut control_plane = None::<String>;
+            for node_name in &group.nodes {
+                let node = nodes.get(node_name).ok_or_else(|| {
+                    ValidationError::new(format!(
+                        "host group '{}' references unknown node '{}'",
+                        group_name, node_name
+                    ))
+                })?;
+                if let Some(current) = &control_plane {
+                    if current != &node.control_plane {
+                        return Err(ValidationError::new(format!(
+                            "host group '{}' mixes nodes from control planes '{}' and '{}'",
+                            group_name, current, node.control_plane
+                        )));
+                    }
+                } else {
+                    control_plane = Some(node.control_plane.clone());
+                }
+                members.push(node_name.clone());
+            }
+            host_groups.insert(
+                group_name.clone(),
+                HostedHostGroupContract {
+                    control_plane: control_plane.ok_or_else(|| {
+                        ValidationError::new(format!(
+                            "host group '{}' must contain at least one node",
+                            group_name
+                        ))
+                    })?,
+                    inventory_owner: MachineInventoryOwner::HostedControlPlane,
+                    placement: group.placement,
+                    nodes: members,
+                    notes: group.notes.clone(),
+                },
+            );
+        }
+
+        Ok(HostedInventoryContract { nodes, host_groups })
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
         for (control_plane_name, control_plane) in &self.control_planes {
             validate_hosted_control_plane(control_plane_name, control_plane)?;
+        }
+        for (node_name, node) in &self.nodes {
+            validate_hosted_node(self, node_name, node)?;
+        }
+        for (group_name, group) in &self.host_groups {
+            validate_hosted_host_group(self, group_name, group)?;
         }
 
         for (machine_name, machine) in &self.machines {
@@ -631,6 +795,60 @@ pub struct HostedApiIdentityContract {
     pub audience: String,
     pub auth: HostedAuthTokenContract,
     pub route: MachineCommandRoute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedNodeSpec {
+    pub host: String,
+    pub capabilities: HostedNodeCapabilities,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedNodeCapabilities {
+    pub providers: Vec<HostProvider>,
+    pub platforms: Vec<HostPlatform>,
+    pub substrates: Vec<ExecutionSubstrate>,
+    pub architectures: Vec<MachineArchitecture>,
+    pub protection_modes: Vec<ProtectionMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedHostGroupSpec {
+    pub placement: HostedPlacementPolicy,
+    pub nodes: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedPlacementPolicy {
+    ExplicitMembership,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedInventoryContract {
+    pub nodes: BTreeMap<String, HostedNodeContract>,
+    pub host_groups: BTreeMap<String, HostedHostGroupContract>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedNodeContract {
+    pub host: String,
+    pub control_plane: String,
+    pub inventory_owner: MachineInventoryOwner,
+    pub lifecycle_owner: MachineLifecycleOwner,
+    pub capabilities: HostedNodeCapabilities,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedHostGroupContract {
+    pub control_plane: String,
+    pub inventory_owner: MachineInventoryOwner,
+    pub placement: HostedPlacementPolicy,
+    pub nodes: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1218,6 +1436,88 @@ fn validate_hosted_control_plane(
     Ok(())
 }
 
+fn validate_hosted_node(
+    config: &PortConfig,
+    node_name: &str,
+    node: &HostedNodeSpec,
+) -> Result<(), ValidationError> {
+    let host = config.hosts.get(&node.host).ok_or_else(|| {
+        ValidationError::new(format!(
+            "node '{}' references unknown host '{}'",
+            node_name, node.host
+        ))
+    })?;
+    if matches!(host.connection, HostConnection::Local) {
+        return Err(ValidationError::new(format!(
+            "node '{}' references local host '{}' but hosted nodes must resolve through a hosted control plane",
+            node_name, node.host
+        )));
+    }
+    if node.capabilities.providers.is_empty()
+        || node.capabilities.platforms.is_empty()
+        || node.capabilities.substrates.is_empty()
+        || node.capabilities.architectures.is_empty()
+        || node.capabilities.protection_modes.is_empty()
+    {
+        return Err(ValidationError::new(format!(
+            "node '{}' must declare non-empty provider, platform, substrate, architecture, and protection-mode capabilities",
+            node_name
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_hosted_host_group(
+    config: &PortConfig,
+    group_name: &str,
+    group: &HostedHostGroupSpec,
+) -> Result<(), ValidationError> {
+    if group.nodes.is_empty() {
+        return Err(ValidationError::new(format!(
+            "host group '{}' must declare at least one node",
+            group_name
+        )));
+    }
+
+    let mut control_plane = None::<String>;
+    for node_name in &group.nodes {
+        let node = config.nodes.get(node_name).ok_or_else(|| {
+            ValidationError::new(format!(
+                "host group '{}' references unknown node '{}'",
+                group_name, node_name
+            ))
+        })?;
+        let host = config.hosts.get(&node.host).ok_or_else(|| {
+            ValidationError::new(format!(
+                "node '{}' references unknown host '{}'",
+                node_name, node.host
+            ))
+        })?;
+        let node_control_plane = match &host.connection {
+            HostConnection::Local => {
+                return Err(ValidationError::new(format!(
+                    "host group '{}' references node '{}' on local host '{}'",
+                    group_name, node_name, node.host
+                )));
+            }
+            HostConnection::HostedControlPlane { control_plane } => control_plane.clone(),
+        };
+        if let Some(current) = &control_plane {
+            if current != &node_control_plane {
+                return Err(ValidationError::new(format!(
+                    "host group '{}' mixes nodes from control planes '{}' and '{}'",
+                    group_name, current, node_control_plane
+                )));
+            }
+        } else {
+            control_plane = Some(node_control_plane);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1225,9 +1525,10 @@ mod tests {
     use super::{
         ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
         AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection,
-        HostProvider, HostedAuthTokenSource, MachineArchitecture, MachineCommandRoute,
-        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
-        MachineLifecycleOwner, MachineStatusSource, PortConfig, ProtectionMode, PvmLaneDecision,
+        HostProvider, HostedAuthTokenSource, HostedPlacementPolicy, MachineArchitecture,
+        MachineCommandRoute, MachineControlContract, MachineGuestBroker, MachineInventoryOwner,
+        MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource, PortConfig,
+        ProtectionMode, PvmLaneDecision,
     };
 
     #[test]
@@ -1253,6 +1554,8 @@ mod tests {
         assert!(encoded.contains("provider = \"gcp\""));
         assert!(encoded.contains("provider = \"azure\""));
         assert!(encoded.contains("[control_planes.demo]"));
+        assert!(encoded.contains("[nodes.aws-linux-node]"));
+        assert!(encoded.contains("[host_groups.remote-linux]"));
         assert!(encoded.contains("mode = \"hosted-control-plane\""));
         assert!(encoded.contains("substrate = \"firecracker\""));
         assert!(encoded.contains("protection_mode = \"standard\""));
@@ -1414,6 +1717,7 @@ mod tests {
             HostConnection::HostedControlPlane {
                 control_plane: String::from("missing"),
             };
+        config.host_groups.clear();
 
         let error = config
             .validate()
@@ -1422,6 +1726,57 @@ mod tests {
         assert!(error
             .to_string()
             .contains("references unknown control plane 'missing'"));
+    }
+
+    #[test]
+    fn sample_config_derives_hosted_node_inventory_contract() {
+        let config = PortConfig::sample();
+
+        let contract = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory contract should resolve");
+
+        let aws_node = &contract.nodes["aws-linux-node"];
+        assert_eq!(aws_node.host, "aws-linux");
+        assert_eq!(aws_node.control_plane, "demo");
+        assert_eq!(aws_node.inventory_owner, MachineInventoryOwner::HostedControlPlane);
+        assert_eq!(aws_node.lifecycle_owner, MachineLifecycleOwner::HostedNodeAgent);
+        assert_eq!(aws_node.capabilities.providers, vec![HostProvider::Aws]);
+
+        let remote_group = &contract.host_groups["remote-linux"];
+        assert_eq!(remote_group.control_plane, "demo");
+        assert_eq!(remote_group.inventory_owner, MachineInventoryOwner::HostedControlPlane);
+        assert_eq!(remote_group.placement, HostedPlacementPolicy::ExplicitMembership);
+        assert!(remote_group
+            .nodes
+            .contains(&String::from("generic-linux-node")));
+    }
+
+    #[test]
+    fn validate_rejects_hosted_node_on_local_host() {
+        let mut config = PortConfig::sample();
+        config.nodes.insert(
+            String::from("bad-node"),
+            super::HostedNodeSpec {
+                host: String::from("local"),
+                capabilities: super::HostedNodeCapabilities {
+                    providers: vec![HostProvider::Local],
+                    platforms: vec![super::HostPlatform::Linux],
+                    substrates: vec![ExecutionSubstrate::Firecracker],
+                    architectures: vec![MachineArchitecture::X86_64],
+                    protection_modes: vec![ProtectionMode::Standard],
+                },
+                notes: vec![],
+            },
+        );
+
+        let error = config
+            .validate()
+            .expect_err("local hosted node should fail validation");
+
+        assert!(error
+            .to_string()
+            .contains("hosted nodes must resolve through a hosted control plane"));
     }
 
     #[test]
@@ -1495,6 +1850,8 @@ mod tests {
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
         assert_eq!(config.machines["cloud-azure"].host, "azure-linux");
         assert!(config.control_planes.contains_key("demo"));
+        assert!(config.nodes.contains_key("aws-linux-node"));
+        assert!(config.host_groups.contains_key("remote-linux"));
         assert_eq!(
             config.hosts["generic-linux"].connection,
             HostConnection::HostedControlPlane {

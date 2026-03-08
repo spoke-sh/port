@@ -125,6 +125,55 @@ The intended rule is simple:
 - hosted mode: the control plane owns desired state, while the node agent owns
   the actual host-local process state
 
+## Node And Host-Group Inventory Contract
+
+Hosted Port now has an explicit inventory vocabulary for placement and
+ownership instead of leaving "node" and "host group" as prose-only terms.
+
+Sample config shape:
+
+```toml
+[nodes.aws-linux-node]
+host = "aws-linux"
+notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
+
+[nodes.aws-linux-node.capabilities]
+providers = ["aws"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard"]
+
+[host_groups.aws-builders]
+placement = "explicit-membership"
+nodes = ["aws-linux-node"]
+notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
+```
+
+Node contract:
+
+- resolves through one hosted control plane via the referenced `host`
+- keeps `inventory_owner = "hosted-control-plane"`
+- keeps `lifecycle_owner = "hosted-node-agent"`
+- publishes capability fields for provider, platform, substrate, architecture,
+  and protection mode
+
+Host-group contract:
+
+- is an explicit membership list, not a hidden scheduler rule
+- stays within one hosted control plane
+- becomes the first placement boundary for later lifecycle, scheduler,
+  monitoring, and services work
+
+What this does not claim:
+
+- no scheduler policy exists yet beyond explicit membership
+- no hosted `machine list` or remote lifecycle implementation ships yet
+- no services or monitoring product exists yet
+
+Those later features are expected to reuse the same node and host-group
+vocabulary instead of inventing a second inventory model.
+
 ## Canonical Machine Control Contract
 
 Port now names the lifecycle and inventory contract explicitly so later hosted

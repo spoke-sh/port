@@ -141,6 +141,49 @@ control_plane = "demo"
 local_launch = false
 notes = ["Azure is modeled explicitly through the demo hosted control plane so diagnostics can report it as unsupported."]
 
+[nodes.generic-linux-node]
+host = "generic-linux"
+notes = ["Generic Linux is the baseline hosted node contract before scheduler policy exists."]
+
+[nodes.generic-linux-node.capabilities]
+providers = ["generic-linux"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard"]
+
+[nodes.aws-linux-node]
+host = "aws-linux"
+notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
+
+[nodes.aws-linux-node.capabilities]
+providers = ["aws"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard"]
+
+[nodes.gcp-linux-node]
+host = "gcp-linux"
+notes = ["GCP is modeled as a hosted node so placement and lifecycle work can remain provider-aware."]
+
+[nodes.gcp-linux-node.capabilities]
+providers = ["gcp"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard"]
+
+[host_groups.remote-linux]
+placement = "explicit-membership"
+nodes = ["generic-linux-node", "aws-linux-node", "gcp-linux-node"]
+notes = ["This group is the first hosted placement boundary; later scheduler, monitoring, and services work should reuse it instead of inventing another inventory axis."]
+
+[host_groups.aws-builders]
+placement = "explicit-membership"
+nodes = ["aws-linux-node"]
+notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
+
 [machines.demo]
 host = "local"
 kernel = "demo-kernel"

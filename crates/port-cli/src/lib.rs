@@ -62,6 +62,7 @@ Hosted Control:
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders.
+  Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later scheduler, monitoring, and services work can reuse one placement vocabulary.
   `port machine list`, `status`, and `stop` now report the current inventory scope, lifecycle owner, status source, and routing contract.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
