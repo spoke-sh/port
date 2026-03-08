@@ -3931,6 +3931,7 @@ mod tests {
                 connection: HostConnection::Local,
                 firecracker: FirecrackerSupport {
                     local_launch: false,
+                    pvm_lanes: Vec::new(),
                     notes: Vec::new(),
                 },
             },

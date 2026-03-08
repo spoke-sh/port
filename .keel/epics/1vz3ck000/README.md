@@ -25,5 +25,5 @@ host kits, and first-class AVF on macOS.
 |--------|--------|---------|
 | [Substrate Drivers And Host Kits](voyages/1vz3j0000/) | done | 4/4 |
 | [Mac Operator Shell Compatibility](voyages/1vz4qH000/) | done | 1/1 |
-| [X86 64 PVM Host Kit Foundation](voyages/1vzGo0000/) | planned | 0/4 |
+| [X86 64 PVM Host Kit Foundation](voyages/1vzGo0000/) | in-progress | 0/4 |
 <!-- END GENERATED -->

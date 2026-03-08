@@ -93,6 +93,81 @@ mode = "local"
 local_launch = true
 notes = ["Requires /dev/kvm and the firecracker binary"]
 
+[[hosts.local.firecracker.pvm_lanes]]
+architecture = "x86_64"
+decision = "planned"
+operator_prerequisites = [
+  "Prepare a dedicated Linux/x86_64 host kit before enabling Firecracker/PVM in Port.",
+  "Do not reuse the standard Firecracker host or standard guest artifacts for the PVM lane.",
+]
+follow_on_work = [
+  "Teach port doctor to validate the x86_64 PVM host kit and host boot-line requirements.",
+  "Add build, pull, and validate pipelines for x86_64/firecracker/pvm kernel and guest-image variants.",
+  "Add a Firecracker/PVM driver path that selects the PVM host kit and fails fast when the host kit is absent.",
+]
+
+[hosts.local.firecracker.pvm_lanes.host_kit]
+host_platform = "linux"
+host_architecture = "x86_64"
+requires_custom_host_kernel = true
+requires_patched_firecracker = true
+host_boot_args = ["pti=off"]
+notes = [
+  "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
+  "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
+]
+
+[hosts.local.firecracker.pvm_lanes.artifact_kit]
+requires_dedicated_variants = true
+notes = [
+  "PVM guests require dedicated kernel and guest-image variants; standard Firecracker artifacts are insufficient.",
+  "The guest image must boot with the guest-side PVM expectations rather than the current standard guest contract.",
+]
+
+[hosts.local.firecracker.pvm_lanes.artifact_kit.kernel_selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[hosts.local.firecracker.pvm_lanes.artifact_kit.guest_image_selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "host-architecture"
+blocking = true
+detail = "Confirm the execution host is Linux/x86_64 before attempting the Firecracker/PVM lane."
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "host-kernel"
+blocking = true
+detail = "Confirm the host is booted into the custom PVM-capable kernel and that the host boot line includes pti=off."
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "firecracker-binary"
+blocking = true
+detail = "Confirm the selected Firecracker binary is the patched PVM-capable build rather than the standard local-launch binary."
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "artifact-variants"
+blocking = true
+detail = "Confirm both kernel and guest-image artifacts exist for x86_64/firecracker/pvm and pass their variant-specific validation steps."
+
+[[hosts.local.firecracker.pvm_lanes]]
+architecture = "aarch64"
+decision = "research-only"
+operator_prerequisites = ["Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path."]
+follow_on_work = [
+  "Track upstream arm64 protected-virtualization and guest-memory work relevant to Firecracker.",
+  "Reassess arm64 only after a supportable Firecracker runtime path exists, not only because upstream kernel capability exists.",
+]
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "runtime-path"
+blocking = true
+detail = "Upstream arm64 protected virtualization work exists, but Port does not yet have a supportable Firecracker/PVM runtime path to validate."
+
 [hosts.generic-linux]
 platform = "linux"
 provider = "generic-linux"

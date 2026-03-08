@@ -2,10 +2,11 @@
 id: 1vzGo0000
 index: 3
 title: X86 64 PVM Host Kit Foundation
-status: planned
+status: in-progress
 epic: 1vz3ck000
 created_at: 2026-03-08T09:16:36
 updated_at: 2026-03-08T09:21:51
+started_at: 2026-03-08T09:22:45
 ---
 
 # X86 64 PVM Host Kit Foundation

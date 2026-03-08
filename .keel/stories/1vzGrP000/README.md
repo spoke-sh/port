@@ -2,10 +2,11 @@
 id: 1vzGrP000
 title: Model X86 64 PVM Host Kit Contract
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T09:20:07
-updated_at: 2026-03-08T09:21:51
+updated_at: 2026-03-08T09:22:45
 scope: 1vz3ck000/1vzGo0000
+started_at: 2026-03-08T09:22:45
 ---
 
 # Model X86 64 PVM Host Kit Contract

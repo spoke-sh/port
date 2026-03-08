@@ -116,6 +116,7 @@ impl PortConfig {
                     connection: HostConnection::Local,
                     firecracker: FirecrackerSupport {
                         local_launch: true,
+                        pvm_lanes: firecracker_pvm_lanes(),
                         notes: vec![String::from("Requires /dev/kvm and the firecracker binary")],
                     },
                 },
@@ -765,9 +766,17 @@ fn hosted_host(provider: HostProvider, control_plane: &str, notes: Vec<String>) 
         },
         firecracker: FirecrackerSupport {
             local_launch: false,
+            pvm_lanes: Vec::new(),
             notes,
         },
     }
+}
+
+fn firecracker_pvm_lanes() -> Vec<FirecrackerPvmLaneContract> {
+    vec![
+        FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::X86_64),
+        FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::Aarch64),
+    ]
 }
 
 fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
@@ -1168,7 +1177,25 @@ pub enum HostConnection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirecrackerSupport {
     pub local_launch: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pvm_lanes: Vec<FirecrackerPvmLaneContract>,
     pub notes: Vec<String>,
+}
+
+impl FirecrackerSupport {
+    #[must_use]
+    pub fn pvm_lane_for(
+        &self,
+        architecture: MachineArchitecture,
+    ) -> Option<&FirecrackerPvmLaneContract> {
+        let architecture = match architecture {
+            MachineArchitecture::Native => resolve_native_pvm_architecture(),
+            other => other,
+        };
+        self.pvm_lanes
+            .iter()
+            .find(|lane| lane.architecture == architecture)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1869,6 +1896,10 @@ mod tests {
         assert!(encoded.contains("substrate = \"firecracker\""));
         assert!(encoded.contains("protection_mode = \"standard\""));
         assert!(encoded.contains("architecture = \"native\""));
+        assert!(encoded.contains("[[hosts.local.firecracker.pvm_lanes]]"));
+        assert!(encoded.contains("decision = \"planned\""));
+        assert!(encoded.contains("decision = \"research-only\""));
+        assert!(encoded.contains("requires_patched_firecracker = true"));
         assert!(encoded.contains("[machines.demo.guest]"));
         assert!(encoded.contains("[machines.cloud-aws]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
@@ -2336,6 +2367,27 @@ mod tests {
     }
 
     #[test]
+    fn local_firecracker_support_resolves_serialized_pvm_lanes_by_architecture() {
+        let config = PortConfig::sample();
+        let firecracker = &config.hosts["local"].firecracker;
+
+        assert_eq!(
+            firecracker
+                .pvm_lane_for(MachineArchitecture::X86_64)
+                .expect("x86_64 lane should exist")
+                .decision,
+            PvmLaneDecision::Planned
+        );
+        assert_eq!(
+            firecracker
+                .pvm_lane_for(MachineArchitecture::Aarch64)
+                .expect("aarch64 lane should exist")
+                .decision,
+            PvmLaneDecision::ResearchOnly
+        );
+    }
+
+    #[test]
     fn avf_contract_maps_guest_transport_and_console() {
         let contract = AvfExecutionContract::linux_guest();
 
@@ -2394,6 +2446,23 @@ mod tests {
         assert_eq!(
             config.machines["demo"].protection_mode,
             ProtectionMode::Standard
+        );
+        assert_eq!(config.hosts["local"].firecracker.pvm_lanes.len(), 2);
+        assert_eq!(
+            config.hosts["local"].firecracker.pvm_lanes[0].architecture,
+            MachineArchitecture::X86_64
+        );
+        assert_eq!(
+            config.hosts["local"].firecracker.pvm_lanes[0].decision,
+            PvmLaneDecision::Planned
+        );
+        assert_eq!(
+            config.hosts["local"].firecracker.pvm_lanes[1].architecture,
+            MachineArchitecture::Aarch64
+        );
+        assert_eq!(
+            config.hosts["local"].firecracker.pvm_lanes[1].decision,
+            PvmLaneDecision::ResearchOnly
         );
         assert_eq!(
             config.artifacts.kernels["demo-kernel"].variants[0]
