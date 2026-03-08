@@ -1,3 +1,26 @@
+---
+recorded_at: 2026-03-07T20:36:20-08:00
+---
+== hosted follow-on boundary docs ==
+289:- follow-on order after this foundation is:
+293:- those follow-on capabilities are downstream of the authenticated API,
+
+== hosted guest boundary context ==
+stream.
+
+What still remains after this contract:
+
+- no hosted `port guest ...` runtime path ships yet
+- follow-on order after this foundation is:
+  hosted machine runtime -> hosted guest runtime -> detached and Unix-socket
+  forwarding -> monitoring and `top` -> secrets/services/sandboxes -> SDK/API
+  clients
+- those follow-on capabilities are downstream of the authenticated API,
+  inventory, lifecycle, and guest-attach foundation; they are not already
+  shipped
+
+
+== board root summary ==
 # Planning Board
 
 > [!NOTE]

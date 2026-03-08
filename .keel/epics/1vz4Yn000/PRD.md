@@ -46,16 +46,20 @@ premature.
 - [SCOPE-04] A guest bridge attachment primitive that preserves the current
   guest protocol.
 - [SCOPE-05] CLI, help text, and docs alignment for hosted targets.
+- [SCOPE-06] Hosted runtime control for machine and guest verbs.
+- [SCOPE-07] Detached forwarding and Unix-socket forwarding.
+- [SCOPE-08] Hosted monitoring and `top`.
+- [SCOPE-09] Hosted secrets, services, and sandboxes.
+- [SCOPE-10] Hosted SDK and API clients.
 
 ### Out of Scope
 
-- [SCOPE-06] Full SDK packaging.
-- [SCOPE-07] Secrets.
-- [SCOPE-08] Services and sandboxes.
-- [SCOPE-09] Monitoring or `top`.
-- [SCOPE-10] Detached forwards and Unix-socket forwarding.
+- [SCOPE-11] Full multi-tenant auth and RBAC.
+- [SCOPE-12] Billing and quota management.
+- [SCOPE-13] Generalized scheduler policy beyond nodes and host groups.
 
-Those remain required, but they are downstream of this epic's first voyage.
+Those remain required, but they are downstream of this epic's current runtime
+and operator-surface sequence.
 
 ## Requirements
 
@@ -66,8 +70,10 @@ Those remain required, but they are downstream of this epic's first voyage.
 |----|-------------|-------|----------|-----------|
 | FR-01 | Port must define an authenticated hosted API contract for the first control-plane slice. | GOAL-01, GOAL-02 | must | Hosted lifecycle work is not credible without auth and stable API identity. |
 | FR-02 | Port must define node and host-group inventory contracts that can back hosted machine placement and lifecycle ownership. | GOAL-01, GOAL-03 | must | Hosted lifecycle control depends on explicit ownership and placement vocabulary. |
-| FR-03 | Port must expose hosted machine inventory, status, and stop surfaces without inventing a second CLI model. | GOAL-01, GOAL-02 | must | The existing `machine` vocabulary is Port's strongest product asset. |
-| FR-04 | Port must define the first hosted guest bridge primitive that preserves the current guest protocol for later `exec`, `copy`, `pty`, `logs`, and `forward` work. | GOAL-01, GOAL-02, GOAL-03 | must | Hosted guest operations depend on a stable bridge primitive, not ad hoc per-command transport logic. |
+| FR-03 | Port must expose hosted machine inventory, status, and stop surfaces without inventing a second CLI model, then land the first hosted runtime path behind those verbs. | GOAL-01, GOAL-02 | must | The existing `machine` vocabulary is Port's strongest product asset and must remain the runtime entry point. |
+| FR-04 | Port must define and implement hosted guest operations and forwarding primitives that preserve the current guest protocol for `exec`, `copy`, `pty`, `logs`, `forward`, detached forwarding, and Unix-socket forwarding work. | GOAL-01, GOAL-02, GOAL-03 | must | Hosted guest operations depend on a stable bridge primitive, not ad hoc per-command transport logic. |
+| FR-05 | Port must add hosted monitoring, secrets, services, and sandboxes on top of the hosted runtime and guest foundation. | GOAL-01, GOAL-03 | should | These surfaces are the first higher-level product capabilities customers expect once hosted runtime exists. |
+| FR-06 | Port must publish supported SDK and API client surfaces once the hosted runtime and service APIs stabilize. | GOAL-01, GOAL-03 | should | The hosted control plane needs a programmatic surface after the CLI/runtime model is stable. |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
 ### Non-Functional Requirements

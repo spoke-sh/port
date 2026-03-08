@@ -286,8 +286,13 @@ stream.
 What still remains after this contract:
 
 - no hosted `port guest ...` runtime path ships yet
-- detached forwarding and Unix-socket forwarding remain follow-on work
-- monitoring, secrets, services, sandboxes, and SDK work remain follow-on work
+- follow-on order after this foundation is:
+  hosted machine runtime -> hosted guest runtime -> detached and Unix-socket
+  forwarding -> monitoring and `top` -> secrets/services/sandboxes -> SDK/API
+  clients
+- those follow-on capabilities are downstream of the authenticated API,
+  inventory, lifecycle, and guest-attach foundation; they are not already
+  shipped
 
 ## Hosted API Shape
 

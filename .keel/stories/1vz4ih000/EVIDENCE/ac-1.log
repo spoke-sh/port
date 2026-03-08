@@ -1,0 +1,193 @@
+---
+recorded_at: 2026-03-07T20:36:20-08:00
+---
+== hosted runtime and service expansion voyage ==
+---
+id: 1vz5mg000
+index: 2
+title: Hosted Runtime And Service Expansion
+status: in-progress
+epic: 1vz4Yn000
+created_at: 2026-03-07T20:30:30
+updated_at: 2026-03-07T20:35:30
+started_at: 2026-03-07T20:35:47
+---
+
+# Hosted Runtime And Service Expansion
+
+> Implement the first hosted runtime control path, then sequence forwarding, monitoring, secrets, services, sandboxes, and SDK surfaces on top of the hosted foundation contracts.
+
+## Documents
+
+<!-- BEGIN DOCUMENTS -->
+| Document | Description |
+|----------|-------------|
+| [SRS.md](SRS.md) | Requirements and verification criteria |
+| [SDD.md](SDD.md) | Architecture and implementation details |
+<!-- END DOCUMENTS -->
+
+## Stories
+
+<!-- BEGIN GENERATED -->
+**Progress:** 0/6 stories complete
+
+| Title | Type | Status |
+|-------|------|--------|
+| [Implement Hosted Control Plane Runtime Path](../../../../stories/1vz5nU000/README.md) | feat | backlog |
+| [Implement Hosted Guest Operations Runtime Path](../../../../stories/1vz5nk000/README.md) | feat | backlog |
+| [Add Hosted Secrets Services And Sandboxes](../../../../stories/1vz5nl000/README.md) | feat | backlog |
+| [Publish Hosted SDK And API Clients](../../../../stories/1vz5nm000/README.md) | feat | backlog |
+| [Add Hosted Monitoring And Top](../../../../stories/1vz5nx000/README.md) | feat | backlog |
+| [Add Detached And Unix-Socket Forwarding](../../../../stories/1vz5o6000/README.md) | feat | backlog |
+<!-- END GENERATED -->
+
+== hosted runtime and service expansion requirements ==
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SDD.md:130:## Story Order
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:58:| SRS-01 | Port must implement the first hosted control-plane runtime path for canonical `machine list`, `status`, and `stop` operations. | SCOPE-01 | FR-03 | Rust tests + CLI proof |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:59:| SRS-02 | Port must implement the first hosted guest runtime path for canonical `guest exec`, `copy`, `pty`, `logs`, and `forward` operations without redefining the guest protocol. | SCOPE-02 | FR-04 | Rust tests + CLI proof |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:60:| SRS-03 | Port must add detached forwarding and Unix-socket forwarding through the canonical forwarding surface after the hosted guest runtime path exists. | SCOPE-03 | FR-04 | Rust tests + CLI proof |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:61:| SRS-04 | Port must expose hosted monitoring and `top` surfaces grounded in hosted runtime ownership and node inventory. | SCOPE-04 | FR-05 | Rust tests + CLI proof |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:62:| SRS-05 | Port must add hosted secrets, services, and sandboxes on top of the hosted runtime and guest foundation. | SCOPE-05 | FR-05 | design review + CLI proof |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:63:| SRS-06 | Port must publish supported SDK and API client surfaces for hosted machine, guest, and service operations after the runtime APIs stabilize. | SCOPE-06 | FR-06 | client/API review + examples |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:73:| SRS-NFR-03 | The board must preserve the implementation order `runtime -> guest runtime -> forwarding -> monitoring -> secrets/services/sandboxes -> SDK`. | SCOPE-01, SCOPE-02, SCOPE-03, SCOPE-04, SCOPE-05, SCOPE-06 | NFR-03 | board review |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:76:## Story Coverage Plan
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:80:| Implement Hosted Control Plane Runtime Path | Land the first hosted machine list/status/stop runtime driver and control-plane path. | SRS-01, SRS-NFR-01, SRS-NFR-02, SRS-NFR-03 |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:81:| Implement Hosted Guest Operations Runtime Path | Land hosted guest exec/copy/pty/logs/forward over the existing guest protocol. | SRS-02, SRS-NFR-01, SRS-NFR-02, SRS-NFR-03 |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:82:| Add Detached And Unix-Socket Forwarding | Extend the forwarding surface with detached and Unix-socket modes after hosted guest runtime exists. | SRS-03, SRS-NFR-01, SRS-NFR-03 |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:83:| Add Hosted Monitoring And Top | Add hosted monitoring and `top` surfaces once runtime ownership and guest brokerage exist. | SRS-04, SRS-NFR-02, SRS-NFR-03 |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:84:| Add Hosted Secrets Services And Sandboxes | Add secrets plus service/sandbox lifecycle surfaces on top of runtime, forwarding, and monitoring foundations. | SRS-05, SRS-NFR-02, SRS-NFR-03 |
+.keel/epics/1vz4Yn000/voyages/1vz5mg000/SRS.md:85:| Publish Hosted SDK And API Clients | Ship supported SDK and API client surfaces after the control-plane runtime APIs stabilize. | SRS-06, SRS-NFR-01, SRS-NFR-02, SRS-NFR-03 |
+
+== follow-on story scopes ==
+-- 1vz5nU000 --
+---
+id: 1vz5nU000
+title: Implement Hosted Control Plane Runtime Path
+type: feat
+status: backlog
+created_at: 2026-03-07T20:31:20
+updated_at: 2026-03-07T20:35:30
+scope: 1vz4Yn000/1vz5mg000
+---
+
+# Implement Hosted Control Plane Runtime Path
+
+## Summary
+
+Implement the first authenticated hosted runtime path for canonical `machine
+list|status|stop` operations through the control plane and node agent.
+
+## Acceptance Criteria
+
+- [ ] [SRS-01/AC-01] Hosted `machine list|status|stop` operations work through the canonical CLI and route through the modeled hosted control-plane and node-agent ownership path.
+- [ ] [SRS-01/AC-02] Help text, docs, and CLI evidence distinguish hosted runtime behavior from still-planned forwarding, monitoring, secrets, services, sandboxes, and SDK work.
+-- 1vz5nk000 --
+---
+id: 1vz5nk000
+title: Implement Hosted Guest Operations Runtime Path
+type: feat
+status: backlog
+created_at: 2026-03-07T20:31:36
+updated_at: 2026-03-07T20:35:30
+scope: 1vz4Yn000/1vz5mg000
+---
+
+# Implement Hosted Guest Operations Runtime Path
+
+## Summary
+
+Implement the first hosted runtime path for canonical
+`guest exec|copy|pty|logs|forward` operations over the existing guest protocol.
+
+## Acceptance Criteria
+
+- [ ] [SRS-02/AC-01] Hosted guest operations reuse the canonical `guest` verbs and existing guest protocol frames while routing through control-plane authorization and node-agent guest brokerage.
+- [ ] [SRS-02/AC-02] Operator docs and CLI evidence explain the hosted guest runtime boundary and leave detached forwarding, Unix-socket forwarding, monitoring, secrets, services, sandboxes, and SDK work as explicit follow-on slices.
+-- 1vz5o6000 --
+---
+id: 1vz5o6000
+title: Add Detached And Unix-Socket Forwarding
+type: feat
+status: backlog
+created_at: 2026-03-07T20:31:58
+updated_at: 2026-03-07T20:35:30
+scope: 1vz4Yn000/1vz5mg000
+---
+
+# Add Detached And Unix-Socket Forwarding
+
+## Summary
+
+Extend the canonical forwarding surface with detached and Unix-socket modes once
+the hosted guest runtime path exists.
+
+## Acceptance Criteria
+
+- [ ] [SRS-03/AC-01] `guest forward` supports detached lifecycle management and Unix-socket forwarding without introducing a second forwarding command family.
+- [ ] [SRS-03/AC-02] CLI help, docs, and evidence explain how detached and Unix-socket forwarding relate to the hosted guest runtime path and what remains downstream.
+-- 1vz5nx000 --
+---
+id: 1vz5nx000
+title: Add Hosted Monitoring And Top
+type: feat
+status: backlog
+created_at: 2026-03-07T20:31:49
+updated_at: 2026-03-07T20:35:30
+scope: 1vz4Yn000/1vz5mg000
+---
+
+# Add Hosted Monitoring And Top
+
+## Summary
+
+Add hosted monitoring and `top` surfaces once the hosted runtime and guest
+brokerage path exist.
+
+## Acceptance Criteria
+
+- [ ] [SRS-04/AC-01] Port exposes hosted monitoring and `top` surfaces through the canonical operator model and grounds them in hosted node ownership and runtime state.
+- [ ] [SRS-04/AC-02] Docs and CLI evidence explain the monitoring boundary relative to runtime, forwarding, secrets, services, sandboxes, and SDK follow-on work.
+-- 1vz5nl000 --
+---
+id: 1vz5nl000
+title: Add Hosted Secrets Services And Sandboxes
+type: feat
+status: backlog
+created_at: 2026-03-07T20:31:37
+updated_at: 2026-03-07T20:35:30
+scope: 1vz4Yn000/1vz5mg000
+---
+
+# Add Hosted Secrets Services And Sandboxes
+
+## Summary
+
+Add the first hosted secrets, services, and sandboxes surfaces on top of the
+hosted runtime, forwarding, and monitoring foundation.
+
+## Acceptance Criteria
+
+- [ ] [SRS-05/AC-01] Port defines and implements coherent hosted secrets, services, and sandboxes surfaces that build on the canonical runtime and guest model rather than bypassing it.
+- [ ] [SRS-05/AC-02] Operator docs and evidence explain the supported hosted service/sandbox workflows and the remaining SDK or advanced platform work.
+-- 1vz5nm000 --
+---
+id: 1vz5nm000
+title: Publish Hosted SDK And API Clients
+type: feat
+status: backlog
+created_at: 2026-03-07T20:31:38
+updated_at: 2026-03-07T20:35:30
+scope: 1vz4Yn000/1vz5mg000
+---
+
+# Publish Hosted SDK And API Clients
+
+## Summary
+
+Publish supported hosted SDK and API client surfaces once the hosted runtime and
+service verbs stabilize.
+
+## Acceptance Criteria
+
+- [ ] [SRS-06/AC-01] Port publishes a supported SDK and API client surface for hosted machine, guest, and service operations that mirrors the canonical operator model.
+- [ ] [SRS-06/AC-02] README, docs, and examples show the intended SDK/API client entry points and call out any surfaces that remain planned rather than shipped.

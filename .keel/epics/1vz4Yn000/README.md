@@ -20,8 +20,9 @@ created_at: 2026-03-07T19:15:30
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/5 stories done
+**Progress:** 0/2 voyages complete, 4/11 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted API And Inventory](voyages/1vz4cU000/) | in-progress | 3/5 |
+| [Hosted API And Inventory](voyages/1vz4cU000/) | in-progress | 4/5 |
+| [Hosted Runtime And Service Expansion](voyages/1vz5mg000/) | in-progress | 0/6 |
 <!-- END GENERATED -->

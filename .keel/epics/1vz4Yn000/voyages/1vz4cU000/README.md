@@ -33,5 +33,5 @@ started_at: 2026-03-07T19:22:58
 | [Define Hosted Guest Bridge Attach Contract](../../../../stories/1vz4gc000/README.md) | feat | done |
 | [Define Hosted Machine Lifecycle Surface](../../../../stories/1vz4h3000/README.md) | feat | done |
 | [Define Hosted Node Inventory Model](../../../../stories/1vz4hB000/README.md) | feat | done |
-| [Sequence Hosted Follow-On Work](../../../../stories/1vz4ih000/README.md) | feat | backlog |
+| [Sequence Hosted Follow-On Work](../../../../stories/1vz4ih000/README.md) | feat | in-progress |
 <!-- END GENERATED -->
