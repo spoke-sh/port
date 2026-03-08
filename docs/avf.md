@@ -30,8 +30,14 @@ Current runtime foundation:
 
 - `port machine launch|status|stop` now route AVF-targeted machines through a
   local AVF driver instead of failing at driver selection time
-- the current driver still expects an explicit launcher helper and does not yet
-  wire guest transport or console capture
+- the current driver expects an explicit launcher helper, but that helper now
+  receives a canonical runtime contract including the runtime root, guest-agent
+  socket path, and console-log path
+- AVF-backed `guest exec|copy|pty|logs|forward` now attach through the canonical
+  runtime `guest-agent.sock` once the launcher helper exposes the transport
+  bridge
+- AVF boot output now lands in the canonical runtime console log so `machine`
+  inspection surfaces can reference it
 
 That is the same ownership rule Port now uses for Linux and hosted design work:
 one operator model, different runtime owners.
@@ -44,9 +50,10 @@ Required mapping:
 
 - guest `exec`, `copy`, `pty`, `logs`, and `forward` travel over AVF virtio
   sockets
-- the host side listens and attaches through AVF socket listeners instead of
-  Firecracker vsock paths
-- console capture uses AVF serial ports, not the guest-agent socket
+- the launcher/helper is responsible for bridging that transport onto Port's
+  canonical runtime `guest-agent.sock`
+- console capture uses AVF serial ports and lands in the runtime console-log
+  path, not the guest-agent socket
 
 That means the transport changes, but the guest protocol does not.
 
@@ -86,7 +93,7 @@ Port now ships AVF-focused `port doctor` checks for the first contract slice:
 3. The build/distribution path is bounded by Apple's virtualization entitlement
    requirements when applicable.
 
-Follow-on validation still needs to prove the executable runtime path:
+The executable runtime path now has proof for the next contract slice:
 
 4. The AVF-backed guest can be controlled through the shared guest protocol
    over AVF virtio sockets.
@@ -96,11 +103,9 @@ Follow-on validation still needs to prove the executable runtime path:
 
 The ordered implementation sequence after this contract is:
 
-1. Reuse the canonical guest protocol over AVF virtio sockets.
-2. Add console/log capture through AVF serial ports.
-3. Publish the native macOS AVF workflow across CLI help and operator docs with
+1. Publish the native macOS AVF workflow across CLI help and operator docs with
    reproducible proof commands.
-4. Decide how much of directory sharing and Rosetta support belongs in the
+2. Decide how much of directory sharing and Rosetta support belongs in the
    first executable macOS lane versus later operator-ergonomics slices.
 
 ## Research Basis

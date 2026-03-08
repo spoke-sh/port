@@ -193,16 +193,18 @@ Current boundary:
 - `nix develop` now evaluates on macOS for repo tooling, but the shell
   intentionally omits Linux-only runtime packages such as `firecracker`,
   `iproute2`, and `iptables`.
-- Apple Virtualization Framework now has a local machine-driver foundation for
-  `machine launch|status|stop`, but it still depends on a configured launcher
-  helper and is not yet a complete guest-usable runtime.
-- The planned AVF lane keeps the same `machine` and `guest` verbs, maps guest
-  transport onto AVF virtio sockets, and maps console/log capture onto AVF
-  serial ports.
+- Apple Virtualization Framework now has a local machine-driver plus guest
+  transport foundation. `machine launch|status|stop` and the canonical
+  `guest exec|copy|pty|logs|forward` verbs work when a configured launcher
+  helper exposes the expected runtime guest socket and console log.
+- The AVF lane keeps the same `machine` and `guest` verbs, maps guest transport
+  onto AVF virtio sockets, and maps console/log capture onto AVF serial ports
+  through that launcher-helper contract.
 - `port doctor` now emits AVF-specific host-platform, host-architecture, and
   entitlement-boundary checks when a machine targets `substrate = "avf"`.
-- `port machine launch|status|stop` now route AVF-targeted machines through the
-  local AVF driver instead of failing at driver selection time.
+- `port machine launch|status|stop` plus `machine monitor|top` now route
+  AVF-targeted machines through the local AVF driver and reference canonical
+  runtime metadata and console-log paths.
 - Distributed macOS app targets will need Apple's virtualization entitlement;
   Rosetta-in-Linux-VM workflows are optional and depend on AVF directory
   sharing rather than replacing Port's guest-agent contract.

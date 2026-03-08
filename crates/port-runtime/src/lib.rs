@@ -975,6 +975,7 @@ fn avf_local_launch_machine_with_host_os(
     let contract = AvfExecutionContract::linux_guest();
     let config_payload = AvfLaunchConfig {
         machine_name: request.machine_name.to_string(),
+        runtime_dir: paths.runtime_dir.clone(),
         kernel_path: kernel_variant.path.clone(),
         guest_image_path: guest_variant.path.clone(),
         vcpu_count: machine.vcpu_count,
@@ -983,11 +984,14 @@ fn avf_local_launch_machine_with_host_os(
         rootfs_read_only: machine.rootfs_read_only,
         guest_vsock_cid: machine.guest.vsock_cid,
         guest_control_port: machine.guest.control_port,
+        guest_agent_socket: paths.guest_agent_socket.clone(),
         guest_transport: contract.guest_transport,
         console_transport: contract.console_transport,
         console_log: paths.firecracker_log.clone(),
     };
     write_json_file(&paths.config_path, &config_payload)?;
+    File::create(&paths.firecracker_log)
+        .with_context(|| format!("failed to create '{}'", paths.firecracker_log.display()))?;
 
     let stdout = File::create(&paths.stdout_log)
         .with_context(|| format!("failed to create '{}'", paths.stdout_log.display()))?;
@@ -999,6 +1003,12 @@ fn avf_local_launch_machine_with_host_os(
         .arg(request.machine_name)
         .arg("--config")
         .arg(&paths.config_path)
+        .arg("--runtime-dir")
+        .arg(&paths.runtime_dir)
+        .arg("--guest-agent-socket")
+        .arg(&paths.guest_agent_socket)
+        .arg("--console-log")
+        .arg(&paths.firecracker_log)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
@@ -1037,6 +1047,7 @@ fn avf_local_launch_machine_with_host_os(
         launcher,
         config_path: paths.config_path.clone(),
         metadata_path: avf_runtime_metadata_path(&paths),
+        guest_agent_socket: paths.guest_agent_socket.clone(),
         console_log: paths.firecracker_log.clone(),
         guest_transport: contract.guest_transport,
         console_transport: contract.console_transport,
@@ -4523,6 +4534,34 @@ fn resolve_firecracker_guest_endpoint(
     );
 }
 
+fn resolve_avf_guest_endpoint(
+    config: &PortConfig,
+    request: &GuestRequest<'_>,
+) -> Result<GuestEndpoint> {
+    let runtime_root =
+        resolve_guest_runtime_root(config, request.machine_name, request.runtime_root)?;
+    let paths = RuntimePaths::for_machine(runtime_root, request.machine_name);
+
+    if paths.guest_agent_socket.exists() {
+        return Ok(GuestEndpoint::RuntimeSocket(paths.guest_agent_socket));
+    }
+
+    if paths.manifest_path.exists() {
+        bail!(
+            "launched AVF machine '{}' does not expose a live guest transport socket at '{}'; inspect '{}' or relaunch the VM",
+            request.machine_name,
+            paths.guest_agent_socket.display(),
+            paths.firecracker_log.display()
+        );
+    }
+
+    bail!(
+        "guest agent socket '{}' does not exist for machine '{}'",
+        paths.guest_agent_socket.display(),
+        request.machine_name
+    );
+}
+
 fn connect_guest_endpoint(endpoint: &GuestEndpoint) -> Result<UnixStream> {
     match endpoint {
         GuestEndpoint::RuntimeSocket(socket_path) => {
@@ -4687,13 +4726,10 @@ impl MachineDriver for AvfLocalDriver {
 
     fn guest_endpoint(
         &self,
-        _config: &PortConfig,
+        config: &PortConfig,
         request: &GuestRequest<'_>,
     ) -> Result<GuestEndpoint> {
-        bail!(
-            "machine '{}' is running on the AVF lane, but guest transport wiring has not landed yet",
-            request.machine_name
-        )
+        resolve_avf_guest_endpoint(config, request)
     }
 }
 
@@ -4915,6 +4951,7 @@ struct VsockConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct AvfLaunchConfig {
     machine_name: String,
+    runtime_dir: PathBuf,
     kernel_path: PathBuf,
     guest_image_path: PathBuf,
     vcpu_count: u8,
@@ -4923,6 +4960,7 @@ struct AvfLaunchConfig {
     rootfs_read_only: bool,
     guest_vsock_cid: u32,
     guest_control_port: u16,
+    guest_agent_socket: PathBuf,
     guest_transport: port_model::AvfGuestTransport,
     console_transport: port_model::AvfConsoleTransport,
     console_log: PathBuf,
@@ -4935,6 +4973,7 @@ struct AvfRuntimeMetadata {
     launcher: PathBuf,
     config_path: PathBuf,
     metadata_path: PathBuf,
+    guest_agent_socket: PathBuf,
     console_log: PathBuf,
     guest_transport: port_model::AvfGuestTransport,
     console_transport: port_model::AvfConsoleTransport,
@@ -4970,8 +5009,9 @@ mod tests {
         serve_node_agent, stop_machine,
     };
     use port_agent_protocol::{
-        CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
-        ResponseEnvelope, StreamKind, read_frame, write_frame,
+        CopyDirection, ExecRequest, ExecResult, GuestOperation, LogsRequest, LogsResult,
+        OperationResult, PtyRequest, PtyResult, RequestEnvelope, ResponseEnvelope, StreamKind,
+        read_frame, write_frame,
     };
     use port_model::{
         ArtifactKind, ArtifactSelector, ArtifactVariant, ExecutionSubstrate, FirecrackerSupport,
@@ -5057,6 +5097,59 @@ mod tests {
         config
     }
 
+    fn launch_sample_avf_machine(
+        runtime_root: &Path,
+    ) -> (PortConfig, RuntimePaths, LaunchMetadata) {
+        let mut config = sample_avf_config();
+        let launcher = write_fake_avf_launcher_binary(runtime_root, "port-avf-launcher");
+        let kernel_path = runtime_root.join("avf-vmlinux");
+        let guest_path = runtime_root.join("avf-rootfs.ext4");
+        fs::write(&kernel_path, b"fake-avf-kernel").expect("kernel variant should write");
+        fs::write(&guest_path, b"fake-avf-rootfs").expect("guest variant should write");
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Avf
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("avf kernel variant should exist")
+            .path = kernel_path;
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Avf
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("avf guest variant should exist")
+            .path = guest_path;
+
+        let metadata = avf_local_launch_machine_with_host_os(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo",
+                runtime_root,
+                boot_wait: Duration::from_millis(250),
+            },
+            "macos",
+            Some(launcher),
+        )
+        .expect("avf launch should succeed");
+        let paths = RuntimePaths::for_machine(runtime_root, "demo");
+        (config, paths, metadata)
+    }
+
     fn hosted_server_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
@@ -5089,6 +5182,40 @@ mod tests {
         permissions.set_mode(0o755);
         fs::set_permissions(&path, permissions)
             .expect("fake firecracker permissions should update");
+        path
+    }
+
+    fn write_fake_avf_launcher_binary(root: &Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        fs::write(
+            &path,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+console_log=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --console-log)
+      console_log="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -n "$console_log" ]]; then
+  printf 'avf-launcher booted\n' >>"$console_log"
+fi
+exec sleep 30
+"#,
+        )
+        .expect("fake avf launcher should write");
+        let mut permissions = fs::metadata(&path)
+            .expect("fake avf launcher metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions)
+            .expect("fake avf launcher permissions should update");
         path
     }
 
@@ -6225,66 +6352,25 @@ mod tests {
 
     #[test]
     fn avf_launch_status_and_stop_write_canonical_runtime_state() {
-        let mut config = sample_avf_config();
         let tempdir = tempdir().expect("tempdir should exist");
-        let launcher = write_fake_firecracker_binary(tempdir.path(), "port-avf-launcher");
-        let kernel_path = tempdir.path().join("avf-vmlinux");
-        let guest_path = tempdir.path().join("avf-rootfs.ext4");
-        fs::write(&kernel_path, b"fake-avf-kernel").expect("kernel variant should write");
-        fs::write(&guest_path, b"fake-avf-rootfs").expect("guest variant should write");
-        config
-            .artifacts
-            .kernels
-            .get_mut("demo-kernel")
-            .expect("demo-kernel should exist")
-            .variants
-            .iter_mut()
-            .find(|variant| {
-                variant.selector.architecture == MachineArchitecture::X86_64
-                    && variant.selector.substrate == ExecutionSubstrate::Avf
-                    && variant.selector.protection_mode == ProtectionMode::Standard
-            })
-            .expect("avf kernel variant should exist")
-            .path = kernel_path;
-        config
-            .artifacts
-            .guest_images
-            .get_mut("demo-guest")
-            .expect("demo-guest should exist")
-            .variants
-            .iter_mut()
-            .find(|variant| {
-                variant.selector.architecture == MachineArchitecture::X86_64
-                    && variant.selector.substrate == ExecutionSubstrate::Avf
-                    && variant.selector.protection_mode == ProtectionMode::Standard
-            })
-            .expect("avf guest variant should exist")
-            .path = guest_path;
+        let (config, paths, metadata) = launch_sample_avf_machine(tempdir.path());
 
-        let metadata = avf_local_launch_machine_with_host_os(
-            &config,
-            &LaunchRequest {
-                machine_name: "demo",
-                runtime_root: tempdir.path(),
-                boot_wait: Duration::from_millis(250),
-            },
-            "macos",
-            Some(launcher.clone()),
-        )
-        .expect("avf launch should succeed with a configured launcher");
-
-        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
         let avf_metadata: AvfRuntimeMetadata =
             read_json_file(&paths.runtime_dir.join("avf-runtime.json"))
                 .expect("avf runtime metadata should decode");
 
         assert_eq!(metadata.machine_name, "demo");
-        assert_eq!(metadata.firecracker_binary, launcher);
+        assert_eq!(metadata.firecracker_binary, avf_metadata.launcher);
         assert!(metadata.manifest_path.exists());
         assert_eq!(avf_metadata.machine_name, "demo");
         assert_eq!(avf_metadata.launcher, metadata.firecracker_binary);
         assert_eq!(avf_metadata.pid, metadata.pid);
         assert_eq!(avf_metadata.config_path, metadata.config_path);
+        assert_eq!(avf_metadata.guest_agent_socket, paths.guest_agent_socket);
+        assert_eq!(
+            fs::read_to_string(&paths.firecracker_log).expect("console log should read"),
+            "avf-launcher booted\n"
+        );
 
         let status = machine_status(&config, tempdir.path(), "demo")
             .expect("status should route through avf driver");
@@ -6299,6 +6385,378 @@ mod tests {
         assert_eq!(stopped.current_state, MachineRuntimeState::Stopped);
         assert_eq!(stopped.pid, Some(metadata.pid));
         assert!(stopped.detail.contains("AVF"));
+    }
+
+    #[test]
+    fn avf_guest_exec_pty_and_logs_use_runtime_socket_after_launch() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let (config, paths, metadata) = launch_sample_avf_machine(tempdir.path());
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let server = thread::spawn(move || {
+            let (mut exec_stream, _) = listener.accept().expect("exec accept");
+            let exec_reader_stream = exec_stream.try_clone().expect("exec clone");
+            let mut exec_reader = BufReader::new(exec_reader_stream);
+            let exec_request: RequestEnvelope = read_frame(&mut exec_reader).expect("exec request");
+            let GuestOperation::Exec(exec_request) = exec_request.operation else {
+                panic!("unexpected exec operation");
+            };
+            assert_eq!(
+                exec_request.command,
+                vec![String::from("/bin/echo"), String::from("avf-ok")]
+            );
+            write_frame(
+                &mut exec_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("avf-ok\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("exec response should encode");
+
+            let (mut pty_stream, _) = listener.accept().expect("pty accept");
+            let pty_reader_stream = pty_stream.try_clone().expect("pty clone");
+            let mut pty_reader = BufReader::new(pty_reader_stream);
+            let pty_request: RequestEnvelope = read_frame(&mut pty_reader).expect("pty request");
+            let GuestOperation::Pty(pty_request) = pty_request.operation else {
+                panic!("unexpected pty operation");
+            };
+            assert_eq!(
+                pty_request.command,
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("tty")
+                ]
+            );
+            write_frame(
+                &mut pty_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Pty(PtyResult {
+                        transcript: String::from("pty-ok\r\n"),
+                    }),
+                },
+            )
+            .expect("pty response should encode");
+
+            let (mut logs_stream, _) = listener.accept().expect("logs accept");
+            let logs_reader_stream = logs_stream.try_clone().expect("logs clone");
+            let mut logs_reader = BufReader::new(logs_reader_stream);
+            let logs_request: RequestEnvelope = read_frame(&mut logs_reader).expect("logs request");
+            let GuestOperation::Logs(logs_request) = logs_request.operation else {
+                panic!("unexpected logs operation");
+            };
+            assert_eq!(logs_request.path, String::from("var/log/app.log"));
+            assert_eq!(logs_request.tail_lines, Some(10));
+            write_frame(
+                &mut logs_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Logs(LogsResult {
+                        contents: String::from("log-one\nlog-two\n"),
+                    }),
+                },
+            )
+            .expect("logs response should encode");
+        });
+
+        let exec_result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("avf-ok")],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
+        .expect("avf guest exec should succeed");
+        match exec_result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "avf-ok\n"),
+            other => panic!("unexpected exec result: {other:?}"),
+        }
+
+        let pty_result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Pty(PtyRequest {
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("tty"),
+                    ],
+                    cols: 80,
+                    rows: 24,
+                }),
+            },
+        )
+        .expect("avf guest pty should succeed");
+        match pty_result {
+            OperationResult::Pty(result) => assert_eq!(result.transcript, "pty-ok\r\n"),
+            other => panic!("unexpected pty result: {other:?}"),
+        }
+
+        let logs_result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Logs(LogsRequest {
+                    path: String::from("var/log/app.log"),
+                    follow: false,
+                    tail_lines: Some(10),
+                }),
+            },
+        )
+        .expect("avf guest logs should succeed");
+        match logs_result {
+            OperationResult::Logs(result) => assert_eq!(result.contents, "log-one\nlog-two\n"),
+            other => panic!("unexpected logs result: {other:?}"),
+        }
+
+        server.join().expect("server thread should complete");
+        let _ = stop_machine(&config, tempdir.path(), "demo", Duration::from_secs(1))
+            .expect("avf machine should stop");
+        let _ = metadata;
+    }
+
+    #[test]
+    fn avf_copy_and_forward_use_runtime_socket_after_launch() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let (config, paths, _metadata) = launch_sample_avf_machine(tempdir.path());
+        let host_source = tempdir.path().join("host.txt");
+        fs::write(&host_source, "copy-ok").expect("host source should write");
+        let host_destination = tempdir.path().join("downloaded.txt");
+        let host_destination_for_server = host_destination.clone();
+
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+        let server = thread::spawn(move || {
+            let (mut upload_stream, _) = listener.accept().expect("upload accept");
+            let upload_reader_stream = upload_stream.try_clone().expect("upload clone");
+            let mut upload_reader = BufReader::new(upload_reader_stream);
+            let upload_request: RequestEnvelope =
+                read_frame(&mut upload_reader).expect("upload request should decode");
+            let GuestOperation::Copy(upload_request) = upload_request.operation else {
+                panic!("unexpected upload operation");
+            };
+            assert_eq!(upload_request.direction, CopyDirection::HostToGuest);
+            assert_eq!(upload_request.size_bytes, Some(7));
+            write_frame(
+                &mut upload_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .expect("upload accepted should encode");
+            let mut uploaded = Vec::new();
+            upload_reader
+                .by_ref()
+                .take(7)
+                .read_to_end(&mut uploaded)
+                .expect("upload bytes should read");
+            assert_eq!(uploaded, b"copy-ok");
+            write_frame(
+                &mut upload_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(port_agent_protocol::CopyResult {
+                        bytes_copied: 7,
+                        path: String::from("/workspace/copied.txt"),
+                        direction: CopyDirection::HostToGuest,
+                    }),
+                },
+            )
+            .expect("upload completion should encode");
+            drop(upload_stream);
+
+            let (mut download_stream, _) = listener.accept().expect("download accept");
+            let download_reader_stream = download_stream.try_clone().expect("download clone");
+            let mut download_reader = BufReader::new(download_reader_stream);
+            let download_request: RequestEnvelope =
+                read_frame(&mut download_reader).expect("download request should decode");
+            let GuestOperation::Copy(download_request) = download_request.operation else {
+                panic!("unexpected download operation");
+            };
+            assert_eq!(download_request.direction, CopyDirection::GuestToHost);
+            write_frame(
+                &mut download_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: Some(7),
+                },
+            )
+            .expect("download accepted should encode");
+            download_stream
+                .write_all(b"copy-ok")
+                .expect("download bytes should write");
+            write_frame(
+                &mut download_stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Copy(port_agent_protocol::CopyResult {
+                        bytes_copied: 7,
+                        path: host_destination_for_server.display().to_string(),
+                        direction: CopyDirection::GuestToHost,
+                    }),
+                },
+            )
+            .expect("download completion should encode");
+            drop(download_stream);
+
+            let (mut forward_stream, _) = listener.accept().expect("forward accept");
+            let forward_reader_stream = forward_stream.try_clone().expect("forward clone");
+            let mut forward_reader = BufReader::new(forward_reader_stream);
+            let request: RequestEnvelope =
+                read_frame(&mut forward_reader).expect("forward request");
+            let GuestOperation::Forward(request) = request.operation else {
+                panic!("unexpected forward operation");
+            };
+            assert_eq!(request.target, "127.0.0.1:8081");
+            write_frame(
+                &mut forward_stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .expect("forward accepted should encode");
+            forward_stream
+                .write_all(b"ready")
+                .expect("forward eager bytes should write");
+            forward_stream
+                .flush()
+                .expect("forward eager bytes should flush");
+            let mut proxied = [0_u8; 4];
+            forward_reader
+                .read_exact(&mut proxied)
+                .expect("forward payload should read");
+            assert_eq!(&proxied, b"ping");
+            forward_stream
+                .write_all(b"pong")
+                .expect("forward response should write");
+            let _ = forward_stream.shutdown(Shutdown::Write);
+        });
+
+        let upload = copy_guest_file(
+            &config,
+            GuestCopyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                source: &host_source,
+                destination: Path::new("/workspace/copied.txt"),
+                direction: CopyDirection::HostToGuest,
+            },
+        )
+        .expect("avf upload should succeed");
+        assert_eq!(upload.bytes_copied, 7);
+
+        let download = copy_guest_file(
+            &config,
+            GuestCopyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                source: Path::new("/workspace/copied.txt"),
+                destination: &host_destination,
+                direction: CopyDirection::GuestToHost,
+            },
+        )
+        .expect("avf download should succeed");
+        assert_eq!(download.bytes_copied, 7);
+        assert_eq!(
+            fs::read_to_string(&host_destination).expect("downloaded file should read"),
+            "copy-ok"
+        );
+
+        let session = prepare_guest_forward(
+            &config,
+            GuestForwardRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                listen: "127.0.0.1:0",
+                target: "127.0.0.1:8081",
+            },
+        )
+        .expect("avf forward session should prepare");
+        let listen_addr = session.listen_addr();
+        let super::GuestForwardSession {
+            listener,
+            endpoint,
+            target,
+        } = session;
+        let thread = thread::spawn(move || match listener {
+            super::ForwardListener::Tcp(listener) => {
+                let (inbound, _) = listener.accept().expect("forward listener should accept");
+                super::proxy_guest_forward_connection(endpoint, target, inbound)
+                    .expect("forward session should proxy");
+            }
+            super::ForwardListener::Unix {
+                listener,
+                socket_path,
+            } => {
+                let (inbound, _) = listener.accept().expect("forward listener should accept");
+                let result = super::proxy_guest_forward_connection(endpoint, target, inbound);
+                let _ = fs::remove_file(socket_path);
+                result.expect("forward session should proxy");
+            }
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let mut client = TcpStream::connect(&listen_addr).expect("forward listener should accept");
+        let mut eager = [0_u8; 5];
+        client
+            .read_exact(&mut eager)
+            .expect("forward eager bytes should read");
+        assert_eq!(&eager, b"ready");
+        client
+            .write_all(b"ping")
+            .expect("forward payload should write");
+        let mut response = [0_u8; 4];
+        client
+            .read_exact(&mut response)
+            .expect("forward response should read");
+        assert_eq!(&response, b"pong");
+        drop(client);
+
+        server.join().expect("copy/forward server should complete");
+        thread.join().expect("forward thread should complete");
+
+        let monitor = machine_monitor(&config, tempdir.path(), "demo")
+            .expect("avf machine monitor should load");
+        assert_eq!(monitor.firecracker_log, paths.firecracker_log);
+        assert_eq!(
+            fs::read_to_string(&monitor.firecracker_log).expect("console log should read"),
+            "avf-launcher booted\n"
+        );
+        let top =
+            machine_top(&config, tempdir.path(), "demo").expect("avf machine top should load");
+        let hypervisor = top
+            .entries
+            .iter()
+            .find(|entry| entry.kind == super::MachineTopEntryKind::Hypervisor)
+            .expect("avf top entry should exist");
+        assert_eq!(hypervisor.name, "avf");
+
+        let _ = stop_machine(&config, tempdir.path(), "demo", Duration::from_secs(1))
+            .expect("avf machine should stop");
     }
 
     #[test]
