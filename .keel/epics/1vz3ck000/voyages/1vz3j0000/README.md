@@ -2,9 +2,11 @@
 id: 1vz3j0000
 index: 1
 title: Substrate Drivers And Host Kits
-status: draft
+status: in-progress
 epic: 1vz3ck000
 created_at: 2026-03-07T18:18:34
+updated_at: 2026-03-07T18:22:39
+started_at: 2026-03-07T18:22:49
 ---
 
 # Substrate Drivers And Host Kits
@@ -23,12 +25,12 @@ created_at: 2026-03-07T18:18:34
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Extract Firecracker Driver Boundary](../../../../stories/1vz3kq000/README.md) | feat | icebox |
-| [Define Hosted Machine Inventory Contract](../../../../stories/1vz3kt000/README.md) | feat | icebox |
-| [Define AVF Execution Contract](../../../../stories/1vz3l2000/README.md) | feat | icebox |
-| [Plan Pvm Host Kit](../../../../stories/1vz3lA000/README.md) | feat | icebox |
+| [Extract Firecracker Driver Boundary](../../../../stories/1vz3kq000/README.md) | feat | done |
+| [Define Hosted Machine Inventory Contract](../../../../stories/1vz3kt000/README.md) | feat | in-progress |
+| [Define AVF Execution Contract](../../../../stories/1vz3l2000/README.md) | feat | backlog |
+| [Plan Pvm Host Kit](../../../../stories/1vz3lA000/README.md) | feat | backlog |
 <!-- END GENERATED -->

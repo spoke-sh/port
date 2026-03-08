@@ -60,6 +60,9 @@ runtime ownership:
 - `port machine list`, `status`, and `stop` are the local lifecycle surfaces
   that a future hosted control plane will remote behind one canonical CLI
   vocabulary.
+- Those lifecycle commands now publish the local control-contract fields
+  directly: `local-runtime-root`, `local-port-runtime`,
+  `runtime-manifest-and-host-process`, and `direct-local-runtime`.
 - node agents will own host-local hypervisor processes, runtime roots, and
   guest-transport attachment on execution hosts.
 - the central control plane will own inventory, desired state, placement, and

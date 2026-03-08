@@ -197,6 +197,24 @@ impl PortConfig {
         self.artifacts.lookup(name)
     }
 
+    pub fn machine_control_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<MachineControlContract, ValidationError> {
+        let machine = self
+            .machines
+            .get(machine_name)
+            .ok_or_else(|| ValidationError::new(format!("unknown machine '{}'", machine_name)))?;
+        let host = self.hosts.get(&machine.host).ok_or_else(|| {
+            ValidationError::new(format!(
+                "machine '{}' references unknown host '{}'",
+                machine_name, machine.host
+            ))
+        })?;
+
+        Ok(MachineControlContract::for_connection(&host.connection))
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
         for (machine_name, machine) in &self.machines {
             let host = self.hosts.get(&machine.host).ok_or_else(|| {
@@ -590,6 +608,166 @@ pub struct GuestControl {
     pub console_log: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineControlContract {
+    pub inventory_scope: MachineInventoryScope,
+    pub inventory_owner: MachineInventoryOwner,
+    pub lifecycle_owner: MachineLifecycleOwner,
+    pub guest_broker: MachineGuestBroker,
+    pub status_source: MachineStatusSource,
+    pub launch_route: MachineCommandRoute,
+    pub inventory_route: MachineCommandRoute,
+    pub status_route: MachineCommandRoute,
+    pub stop_route: MachineCommandRoute,
+    pub guest_route: MachineCommandRoute,
+}
+
+impl MachineControlContract {
+    #[must_use]
+    pub fn for_connection(connection: &HostConnection) -> Self {
+        match connection {
+            HostConnection::Local => Self::local_runtime_root(),
+            HostConnection::Ssh { .. } => Self::hosted_control_plane(),
+        }
+    }
+
+    #[must_use]
+    pub fn local_runtime_root() -> Self {
+        Self {
+            inventory_scope: MachineInventoryScope::LocalRuntimeRoot,
+            inventory_owner: MachineInventoryOwner::LocalRuntimeRoot,
+            lifecycle_owner: MachineLifecycleOwner::LocalPortRuntime,
+            guest_broker: MachineGuestBroker::LocalRuntimeTransport,
+            status_source: MachineStatusSource::RuntimeManifestAndHostProcess,
+            launch_route: MachineCommandRoute::DirectLocalRuntime,
+            inventory_route: MachineCommandRoute::DirectLocalRuntime,
+            status_route: MachineCommandRoute::DirectLocalRuntime,
+            stop_route: MachineCommandRoute::DirectLocalRuntime,
+            guest_route: MachineCommandRoute::DirectLocalRuntime,
+        }
+    }
+
+    #[must_use]
+    pub fn hosted_control_plane() -> Self {
+        Self {
+            inventory_scope: MachineInventoryScope::HostedFleet,
+            inventory_owner: MachineInventoryOwner::HostedControlPlane,
+            lifecycle_owner: MachineLifecycleOwner::HostedNodeAgent,
+            guest_broker: MachineGuestBroker::ControlPlaneNodeAgentTunnel,
+            status_source: MachineStatusSource::ControlPlaneInventoryAndNodeAgentRuntime,
+            launch_route: MachineCommandRoute::HostedControlPlane,
+            inventory_route: MachineCommandRoute::HostedControlPlane,
+            status_route: MachineCommandRoute::HostedControlPlane,
+            stop_route: MachineCommandRoute::HostedControlPlane,
+            guest_route: MachineCommandRoute::HostedControlPlane,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineInventoryScope {
+    LocalRuntimeRoot,
+    HostedFleet,
+}
+
+impl std::fmt::Display for MachineInventoryScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::LocalRuntimeRoot => "local-runtime-root",
+            Self::HostedFleet => "hosted-fleet",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineInventoryOwner {
+    LocalRuntimeRoot,
+    HostedControlPlane,
+}
+
+impl std::fmt::Display for MachineInventoryOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::LocalRuntimeRoot => "local-runtime-root",
+            Self::HostedControlPlane => "hosted-control-plane",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineLifecycleOwner {
+    LocalPortRuntime,
+    HostedNodeAgent,
+}
+
+impl std::fmt::Display for MachineLifecycleOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::LocalPortRuntime => "local-port-runtime",
+            Self::HostedNodeAgent => "hosted-node-agent",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineGuestBroker {
+    LocalRuntimeTransport,
+    ControlPlaneNodeAgentTunnel,
+}
+
+impl std::fmt::Display for MachineGuestBroker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::LocalRuntimeTransport => "local-runtime-transport",
+            Self::ControlPlaneNodeAgentTunnel => "control-plane-node-agent-tunnel",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineStatusSource {
+    RuntimeManifestAndHostProcess,
+    ControlPlaneInventoryAndNodeAgentRuntime,
+}
+
+impl std::fmt::Display for MachineStatusSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::RuntimeManifestAndHostProcess => "runtime-manifest-and-host-process",
+            Self::ControlPlaneInventoryAndNodeAgentRuntime => {
+                "control-plane-inventory-and-node-agent-runtime"
+            }
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineCommandRoute {
+    DirectLocalRuntime,
+    HostedControlPlane,
+}
+
+impl std::fmt::Display for MachineCommandRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::DirectLocalRuntime => "direct-local-runtime",
+            Self::HostedControlPlane => "hosted-control-plane",
+        };
+        f.write_str(label)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExecutionSubstrate {
@@ -663,8 +841,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ArtifactStore, ExecutionSubstrate, HostProvider, MachineArchitecture, PortConfig,
-        ProtectionMode,
+        ArtifactStore, ExecutionSubstrate, HostProvider, MachineArchitecture, MachineCommandRoute,
+        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
+        MachineLifecycleOwner, MachineStatusSource, PortConfig, ProtectionMode,
     };
 
     #[test]
@@ -750,6 +929,73 @@ mod tests {
     }
 
     #[test]
+    fn sample_config_derives_local_machine_control_contract() {
+        let config = PortConfig::sample();
+
+        let contract = config
+            .machine_control_contract("demo")
+            .expect("demo contract should resolve");
+
+        assert_eq!(contract, MachineControlContract::local_runtime_root());
+        assert_eq!(
+            contract.inventory_scope,
+            MachineInventoryScope::LocalRuntimeRoot
+        );
+        assert_eq!(
+            contract.inventory_owner,
+            MachineInventoryOwner::LocalRuntimeRoot
+        );
+        assert_eq!(
+            contract.lifecycle_owner,
+            MachineLifecycleOwner::LocalPortRuntime
+        );
+        assert_eq!(
+            contract.guest_broker,
+            MachineGuestBroker::LocalRuntimeTransport
+        );
+        assert_eq!(
+            contract.status_source,
+            MachineStatusSource::RuntimeManifestAndHostProcess
+        );
+        assert_eq!(
+            contract.status_route,
+            MachineCommandRoute::DirectLocalRuntime
+        );
+    }
+
+    #[test]
+    fn sample_config_derives_hosted_machine_control_contract() {
+        let config = PortConfig::sample();
+
+        let contract = config
+            .machine_control_contract("cloud-aws")
+            .expect("cloud contract should resolve");
+
+        assert_eq!(contract, MachineControlContract::hosted_control_plane());
+        assert_eq!(contract.inventory_scope, MachineInventoryScope::HostedFleet);
+        assert_eq!(
+            contract.inventory_owner,
+            MachineInventoryOwner::HostedControlPlane
+        );
+        assert_eq!(
+            contract.lifecycle_owner,
+            MachineLifecycleOwner::HostedNodeAgent
+        );
+        assert_eq!(
+            contract.guest_broker,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel
+        );
+        assert_eq!(
+            contract.status_source,
+            MachineStatusSource::ControlPlaneInventoryAndNodeAgentRuntime
+        );
+        assert_eq!(
+            contract.status_route,
+            MachineCommandRoute::HostedControlPlane
+        );
+    }
+
+    #[test]
     fn checked_in_example_models_all_provider_variants() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/port.toml")
@@ -814,23 +1060,19 @@ mod tests {
             kernel.distribution.push,
             ArtifactStore::FileSystem { .. }
         ));
-        assert!(
-            kernel
-                .variant(
-                    MachineArchitecture::Aarch64,
-                    ExecutionSubstrate::Firecracker,
-                    ProtectionMode::Standard
-                )
-                .is_some()
-        );
-        assert!(
-            kernel
-                .variant(
-                    MachineArchitecture::X86_64,
-                    ExecutionSubstrate::Firecracker,
-                    ProtectionMode::Pvm
-                )
-                .is_none()
-        );
+        assert!(kernel
+            .variant(
+                MachineArchitecture::Aarch64,
+                ExecutionSubstrate::Firecracker,
+                ProtectionMode::Standard
+            )
+            .is_some());
+        assert!(kernel
+            .variant(
+                MachineArchitecture::X86_64,
+                ExecutionSubstrate::Firecracker,
+                ProtectionMode::Pvm
+            )
+            .is_none());
     }
 }

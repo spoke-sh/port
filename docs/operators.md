@@ -76,10 +76,15 @@ Current lifecycle behavior:
 - `port machine list` enumerates Port-managed runtime directories and reports
   `running`, `stopped`, `stale`, or `malformed` state from manifests plus live
   PID inspection.
+- `port machine list`, `status`, and `stop` also publish the local control
+  contract: `inventory scope`, `inventory owner`, `lifecycle owner`, `status
+  source`, and routing fields that currently resolve to the local runtime root.
 - After a machine has been launched, `list`, `status`, and `stop` operate on
   the runtime root directly and do not require the model file again.
 - `port machine status --machine demo` prints the runtime directory, config
-  path, manifest, pid file, and console/log references needed for debugging.
+  path, manifest, pid file, console/log references, and the control-contract
+  routing fields needed for debugging or for mapping the same verbs onto future
+  hosted ownership.
 - `port machine stop --machine demo` signals a live Firecracker process and
   cleans stale pid/vsock/socket files so the next launch is deterministic.
 - Those commands are the local ownership implementation of Port's longer-term
@@ -149,6 +154,10 @@ What to expect:
 - `port machine list`, `status`, and `stop` currently inspect only local
   Port-managed runtime roots; they do not yet enumerate or control
   remote/cloud hosts.
+- The operator-visible ownership vocabulary is already aligned with hosted
+  design work: local commands report `local-runtime-root` /
+  `local-port-runtime` today, and future hosted drivers are expected to report
+  `hosted-control-plane` / `hosted-node-agent` through the same fields.
 - The future hosted split for lifecycle ownership and guest-operation brokering
   is documented in [`hosted.md`](hosted.md).
 

@@ -8,14 +8,14 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use port_agent_protocol::{
-    GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
+    read_frame, write_frame, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, MachineArchitecture,
-    PortConfig, ProtectionMode,
+    MachineControlContract, PortConfig, ProtectionMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -92,6 +92,7 @@ pub struct MachineStatus {
     pub machine_name: String,
     pub state: MachineRuntimeState,
     pub pid: Option<u32>,
+    pub control: MachineControlContract,
     pub runtime_dir: PathBuf,
     pub config_path: PathBuf,
     pub manifest_path: PathBuf,
@@ -108,6 +109,7 @@ pub struct StopResult {
     pub previous_state: MachineRuntimeState,
     pub current_state: MachineRuntimeState,
     pub pid: Option<u32>,
+    pub control: MachineControlContract,
     pub runtime_dir: PathBuf,
     pub detail: String,
 }
@@ -190,8 +192,11 @@ trait MachineDriver {
         timeout: Duration,
     ) -> Result<StopResult>;
 
-    fn guest_endpoint(&self, config: &PortConfig, request: &GuestRequest<'_>)
-    -> Result<GuestEndpoint>;
+    fn guest_endpoint(
+        &self,
+        config: &PortConfig,
+        request: &GuestRequest<'_>,
+    ) -> Result<GuestEndpoint>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -614,7 +619,10 @@ pub fn machine_status(runtime_root: &Path, machine_name: &str) -> Result<Machine
     local_runtime_driver().machine_status(runtime_root, machine_name)
 }
 
-fn firecracker_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+fn firecracker_local_machine_status(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineStatus> {
     let paths = RuntimePaths::for_machine(runtime_root, machine_name);
     if !paths.runtime_dir.exists() {
         bail!(
@@ -673,6 +681,7 @@ fn firecracker_local_stop_machine(
                 previous_state: MachineRuntimeState::Running,
                 current_state: MachineRuntimeState::Stopped,
                 pid: Some(pid),
+                control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
                 detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
             })
@@ -684,6 +693,7 @@ fn firecracker_local_stop_machine(
                 previous_state: MachineRuntimeState::Stopped,
                 current_state: MachineRuntimeState::Stopped,
                 pid: status.pid,
+                control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
                 detail: String::from("machine was already stopped"),
             })
@@ -695,6 +705,7 @@ fn firecracker_local_stop_machine(
                 previous_state: MachineRuntimeState::Stale,
                 current_state: MachineRuntimeState::Stopped,
                 pid: status.pid,
+                control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
                 detail: String::from("cleaned stale runtime sockets for already-stopped machine"),
             })
@@ -817,6 +828,7 @@ fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineSta
         machine_name: machine_name.to_string(),
         state,
         pid,
+        control: MachineControlContract::local_runtime_root(),
         runtime_dir: paths.runtime_dir,
         config_path: paths.config_path,
         manifest_path: paths.manifest_path,
@@ -965,6 +977,7 @@ fn malformed_machine_status(
         machine_name: machine_name.to_string(),
         state: MachineRuntimeState::Malformed,
         pid: None,
+        control: MachineControlContract::local_runtime_root(),
         runtime_dir: paths.runtime_dir.clone(),
         config_path: paths.config_path.clone(),
         manifest_path: paths.manifest_path.clone(),
@@ -2047,16 +2060,16 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, DoctorCheck, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-        LaunchMetadata, LaunchRequest, MachineDriver, MachineDriverKind, MachineRuntimeState,
-        RuntimePaths, StopResult, artifact_script, build_firecracker_config,
-        collect_doctor_report, copy_guest_file, driver_for_machine, execute_guest_operation,
-        launch_local_machine, list_machines, machine_status, path_check, prepare_guest_forward,
-        prepare_runtime_state, read_pid_file, repo_root, stop_machine,
+        artifact_script, build_firecracker_config, collect_doctor_report, copy_guest_file,
+        driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
+        machine_status, path_check, prepare_guest_forward, prepare_runtime_state, read_pid_file,
+        repo_root, stop_machine, ArtifactAction, DoctorCheck, GuestCopyRequest,
+        GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest, MachineDriver,
+        MachineDriverKind, MachineRuntimeState, RuntimePaths, StopResult,
     };
     use port_agent_protocol::{
-        CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
-        ResponseEnvelope, StreamKind, read_frame, write_frame,
+        read_frame, write_frame, CopyDirection, ExecRequest, ExecResult, GuestOperation,
+        OperationResult, RequestEnvelope, ResponseEnvelope, StreamKind,
     };
     use port_model::{
         ArtifactKind, ExecutionSubstrate, FirecrackerSupport, HostConnection, HostPlatform,
@@ -2260,12 +2273,10 @@ mod tests {
         assert!(gcp.detail.contains("future Firecracker lane"));
         assert!(!azure.ok);
         assert!(azure.detail.contains("unsupported"));
-        assert!(
-            report
-                .notes
-                .iter()
-                .any(|note| note.contains("local Linux only"))
-        );
+        assert!(report
+            .notes
+            .iter()
+            .any(|note| note.contains("local Linux only")));
     }
 
     #[test]
@@ -2403,6 +2414,10 @@ mod tests {
         let status = machine_status(tempdir.path(), "demo").expect("status should load");
         assert_eq!(status.machine_name, "demo");
         assert_eq!(status.state, MachineRuntimeState::Stopped);
+        assert_eq!(
+            status.control,
+            port_model::MachineControlContract::local_runtime_root()
+        );
         assert_eq!(status.runtime_dir, paths.runtime_dir);
         assert_eq!(status.config_path, paths.config_path);
         assert_eq!(status.manifest_path, paths.manifest_path);
@@ -2459,6 +2474,7 @@ mod tests {
                 previous_state: MachineRuntimeState::Running,
                 current_state: MachineRuntimeState::Stopped,
                 pid: Some(child.id()),
+                control: port_model::MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir.clone(),
                 detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
             }
@@ -2478,11 +2494,9 @@ mod tests {
         let tempdir = tempdir().expect("tempdir should exist");
         let error =
             machine_status(tempdir.path(), "missing").expect_err("missing machine should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("runtime state for machine 'missing' does not exist")
-        );
+        assert!(error
+            .to_string()
+            .contains("runtime state for machine 'missing' does not exist"));
 
         let broken_paths = RuntimePaths::for_machine(tempdir.path(), "broken");
         fs::create_dir_all(&broken_paths.runtime_dir).expect("broken runtime dir should exist");
@@ -2491,6 +2505,10 @@ mod tests {
 
         let broken = machine_status(tempdir.path(), "broken").expect("broken status should load");
         assert_eq!(broken.state, MachineRuntimeState::Malformed);
+        assert_eq!(
+            broken.control,
+            port_model::MachineControlContract::local_runtime_root()
+        );
         assert!(broken.detail.contains("failed to parse"));
     }
 

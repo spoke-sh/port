@@ -86,6 +86,43 @@ The intended rule is simple:
 - hosted mode: the control plane owns desired state, while the node agent owns
   the actual host-local process state
 
+## Canonical Machine Control Contract
+
+Port now names the lifecycle and inventory contract explicitly so later hosted
+drivers can reuse the same vocabulary that local `machine list`, `status`, and
+`stop` already publish.
+
+Local runtime-root contract:
+
+- `inventory_scope = "local-runtime-root"`
+- `inventory_owner = "local-runtime-root"`
+- `lifecycle_owner = "local-port-runtime"`
+- `guest_broker = "local-runtime-transport"`
+- `status_source = "runtime-manifest-and-host-process"`
+- `launch_route = "direct-local-runtime"`
+- `inventory_route = "direct-local-runtime"`
+- `status_route = "direct-local-runtime"`
+- `stop_route = "direct-local-runtime"`
+- `guest_route = "direct-local-runtime"`
+
+Hosted control-plane contract:
+
+- `inventory_scope = "hosted-fleet"`
+- `inventory_owner = "hosted-control-plane"`
+- `lifecycle_owner = "hosted-node-agent"`
+- `guest_broker = "control-plane-node-agent-tunnel"`
+- `status_source = "control-plane-inventory-and-node-agent-runtime"`
+- `launch_route = "hosted-control-plane"`
+- `inventory_route = "hosted-control-plane"`
+- `status_route = "hosted-control-plane"`
+- `stop_route = "hosted-control-plane"`
+- `guest_route = "hosted-control-plane"`
+
+Those tokens are the implementation-ready contract for the next hosted node
+agent and control-plane slices. The local lane already reports the local form
+through runtime status surfaces, and future hosted drivers are expected to fill
+the hosted form rather than inventing a second vocabulary.
+
 ## Guest Operation Brokerage
 
 Hosted Port preserves the existing guest protocol by tunneling it, not by
@@ -124,6 +161,9 @@ should remain substrate-aware without becoming Firecracker-specific API names.
 - Port does not ship a hosted daemon or control plane yet.
 - `port machine list`, `status`, and `stop` currently inspect local runtime
   roots only.
+- Those commands already report the local control-contract fields above so the
+  operator-visible lifecycle vocabulary does not need to change when hosted
+  routing lands.
 - Remote Linux providers are modeled and diagnosed, but remote launch remains a
   designed boundary rather than a shipped orchestration path.
 - The hosted contract is canonical design work for the next implementation

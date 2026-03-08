@@ -37,9 +37,9 @@
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 
-### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (draft)
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | draft |
+| [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | in-progress |
 

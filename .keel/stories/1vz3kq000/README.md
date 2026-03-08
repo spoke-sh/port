@@ -2,11 +2,13 @@
 id: 1vz3kq000
 title: Extract Firecracker Driver Boundary
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T18:20:28
-updated_at: 2026-03-07T18:22:52
+updated_at: 2026-03-07T18:26:31
 scope: 1vz3ck000/1vz3j0000
 started_at: 2026-03-07T18:22:52
+submitted_at: 2026-03-07T18:26:25
+completed_at: 2026-03-07T18:26:31
 ---
 
 # Extract Firecracker Driver Boundary

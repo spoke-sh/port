@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use port_agent_protocol::{
     CopyDirection, ExecRequest, GuestOperation, LogsRequest, OperationResult, PtyRequest,
@@ -57,6 +57,7 @@ Artifact Mobility:
 Hosted Control:
   Local Port still owns runtime lifecycle directly today.
   Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the current guest protocol semantics.
+  `port machine list`, `status`, and `stop` now report the current inventory scope, lifecycle owner, status source, and routing contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";
 
 #[derive(Debug, Parser)]
@@ -540,6 +541,11 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                             .pid
                             .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
                     );
+                    println!("inventory scope: {}", machine.control.inventory_scope);
+                    println!("inventory owner: {}", machine.control.inventory_owner);
+                    println!("lifecycle owner: {}", machine.control.lifecycle_owner);
+                    println!("status source: {}", machine.control.status_source);
+                    println!("status route: {}", machine.control.status_route);
                     println!("runtime dir: {}", machine.runtime_dir.display());
                     println!("detail: {}", machine.detail);
                     println!();
@@ -559,6 +565,16 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                     .pid
                     .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
             );
+            println!("inventory scope: {}", status.control.inventory_scope);
+            println!("inventory owner: {}", status.control.inventory_owner);
+            println!("lifecycle owner: {}", status.control.lifecycle_owner);
+            println!("guest broker: {}", status.control.guest_broker);
+            println!("status source: {}", status.control.status_source);
+            println!("launch route: {}", status.control.launch_route);
+            println!("inventory route: {}", status.control.inventory_route);
+            println!("status route: {}", status.control.status_route);
+            println!("stop route: {}", status.control.stop_route);
+            println!("guest route: {}", status.control.guest_route);
             println!("runtime dir: {}", status.runtime_dir.display());
             println!("config path: {}", status.config_path.display());
             println!("manifest: {}", status.manifest_path.display());
@@ -587,6 +603,10 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                     .pid
                     .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
             );
+            println!("inventory scope: {}", result.control.inventory_scope);
+            println!("lifecycle owner: {}", result.control.lifecycle_owner);
+            println!("status source: {}", result.control.status_source);
+            println!("stop route: {}", result.control.stop_route);
             println!("runtime dir: {}", result.runtime_dir.display());
             println!("detail: {}", result.detail);
         }
@@ -780,9 +800,9 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        ArchitectureArg, ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand,
-        MachineCommand, ProtectionModeArg, SubstrateArg, render_help,
-        render_nested_subcommand_help, render_subcommand_help,
+        render_help, render_nested_subcommand_help, render_subcommand_help, ArchitectureArg,
+        ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand, MachineCommand,
+        ProtectionModeArg, SubstrateArg,
     };
 
     #[test]

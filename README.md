@@ -190,6 +190,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   identity.
 - Guest `exec`, `copy`, `pty`, `logs`, and `forward` keep the current guest
   protocol semantics; the hosted layer brokers them instead of replacing them.
+- Local `machine list`, `status`, and `stop` now publish the control-contract
+  fields that future hosted routing will reuse: inventory scope, inventory
+  owner, lifecycle owner, status source, and per-verb route.
 
 ## Linux Local Workflow
 
@@ -223,7 +226,10 @@ runtime-state-driven management. After `port machine launch` creates
 local Port-managed runtime state without going through Firecracker directly.
 That local ownership model is also the basis for the hosted control design: the
 same verbs remain canonical even when a future node agent and control plane own
-the runtime on behalf of the CLI.
+the runtime on behalf of the CLI. The commands now surface that contract
+explicitly with local values such as `local-runtime-root`,
+`local-port-runtime`, `runtime-manifest-and-host-process`, and
+`direct-local-runtime`.
 
 If the required tools are not available, `port doctor` may report missing
 prerequisites such as `firecracker` on `PATH`, and `port machine launch` is

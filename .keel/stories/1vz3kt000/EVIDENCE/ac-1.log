@@ -1,0 +1,108 @@
+---
+recorded_at: 2026-03-07T18:51:06.618102407-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-model && cargo test -q -p port-runtime && cargo test -q -p port-cli && cargo run -q -p port-cli -- machine list --runtime-root runtime | sed -n "1,10p" && rg -n "machine_control_contract|MachineControlContract|inventory scope:|status source:|Canonical Machine Control Contract|control-contract" crates/port-model/src/lib.rs crates/port-runtime/src/lib.rs crates/port-cli/src/lib.rs README.md docs/hosted.md docs/cloud.md docs/operators.md'
+---
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 20 tests
+....................
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+machine: demo
+state: stopped
+pid: 405758
+inventory scope: local-runtime-root
+inventory owner: local-runtime-root
+lifecycle owner: local-port-runtime
+status source: runtime-manifest-and-host-process
+status route: direct-local-runtime
+runtime dir: runtime/demo
+detail: launch manifest exists but no live Firecracker process is recorded
+docs/operators.md:85:  path, manifest, pid file, console/log references, and the control-contract
+docs/cloud.md:63:- Those lifecycle commands now publish the local control-contract fields
+docs/hosted.md:89:## Canonical Machine Control Contract
+docs/hosted.md:164:- Those commands already report the local control-contract fields above so the
+README.md:193:- Local `machine list`, `status`, and `stop` now publish the control-contract
+crates/port-cli/src/lib.rs:544:                    println!("inventory scope: {}", machine.control.inventory_scope);
+crates/port-cli/src/lib.rs:547:                    println!("status source: {}", machine.control.status_source);
+crates/port-cli/src/lib.rs:568:            println!("inventory scope: {}", status.control.inventory_scope);
+crates/port-cli/src/lib.rs:572:            println!("status source: {}", status.control.status_source);
+crates/port-cli/src/lib.rs:606:            println!("inventory scope: {}", result.control.inventory_scope);
+crates/port-cli/src/lib.rs:608:            println!("status source: {}", result.control.status_source);
+crates/port-runtime/src/lib.rs:18:    MachineControlContract, PortConfig, ProtectionMode,
+crates/port-runtime/src/lib.rs:95:    pub control: MachineControlContract,
+crates/port-runtime/src/lib.rs:112:    pub control: MachineControlContract,
+crates/port-runtime/src/lib.rs:684:                control: MachineControlContract::local_runtime_root(),
+crates/port-runtime/src/lib.rs:696:                control: MachineControlContract::local_runtime_root(),
+crates/port-runtime/src/lib.rs:708:                control: MachineControlContract::local_runtime_root(),
+crates/port-runtime/src/lib.rs:831:        control: MachineControlContract::local_runtime_root(),
+crates/port-runtime/src/lib.rs:980:        control: MachineControlContract::local_runtime_root(),
+crates/port-runtime/src/lib.rs:2419:            port_model::MachineControlContract::local_runtime_root()
+crates/port-runtime/src/lib.rs:2477:                control: port_model::MachineControlContract::local_runtime_root(),
+crates/port-runtime/src/lib.rs:2510:            port_model::MachineControlContract::local_runtime_root()
+crates/port-model/src/lib.rs:200:    pub fn machine_control_contract(
+crates/port-model/src/lib.rs:203:    ) -> Result<MachineControlContract, ValidationError> {
+crates/port-model/src/lib.rs:215:        Ok(MachineControlContract::for_connection(&host.connection))
+crates/port-model/src/lib.rs:612:pub struct MachineControlContract {
+crates/port-model/src/lib.rs:625:impl MachineControlContract {
+crates/port-model/src/lib.rs:845:        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
+crates/port-model/src/lib.rs:932:    fn sample_config_derives_local_machine_control_contract() {
+crates/port-model/src/lib.rs:936:            .machine_control_contract("demo")
+crates/port-model/src/lib.rs:939:        assert_eq!(contract, MachineControlContract::local_runtime_root());
+crates/port-model/src/lib.rs:967:    fn sample_config_derives_hosted_machine_control_contract() {
+crates/port-model/src/lib.rs:971:            .machine_control_contract("cloud-aws")
+crates/port-model/src/lib.rs:974:        assert_eq!(contract, MachineControlContract::hosted_control_plane());
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

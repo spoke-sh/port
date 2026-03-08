@@ -2,9 +2,9 @@
 id: 1vz3l2000
 title: Define AVF Execution Contract
 type: feat
-status: icebox
+status: backlog
 created_at: 2026-03-07T18:20:40
-updated_at: 2026-03-07T18:20:40
+updated_at: 2026-03-07T18:22:39
 scope: 1vz3ck000/1vz3j0000
 ---
 
