@@ -2265,6 +2265,18 @@ fn hosted_control_plane_launch_machine(
                 request.machine_name
             )
         })?;
+    if machine.protection_mode != ProtectionMode::Pvm {
+        bail!(
+            "{}",
+            remote_launch_guidance(
+                request.machine_name,
+                &machine.host,
+                host.provider,
+                Some(&hosted_identity),
+            )
+        );
+    }
+
     if let Some(summary) = config.hosted_machine_summary_contract(request.machine_name)? {
         if summary.candidate_nodes.is_empty() {
             bail!(
@@ -2275,15 +2287,17 @@ fn hosted_control_plane_launch_machine(
             );
         }
     }
-    bail!(
-        "{}",
-        remote_launch_guidance(
-            request.machine_name,
-            &machine.host,
-            host.provider,
-            Some(&hosted_identity),
-        )
-    );
+
+    let client = hosted_client_for_machine(config, request.machine_name)?;
+    let response: HostedSuccess<LaunchMetadata> = client
+        .execute_json(client.machines().launch(request.machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to launch machine '{}' through the live hosted control-plane route: {error}",
+                request.machine_name
+            )
+        })?;
+    Ok(response.result)
 }
 
 fn hosted_control_plane_machine_status(
@@ -4208,6 +4222,7 @@ mod tests {
     use std::fs;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpListener as StdTcpListener, TcpStream};
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
@@ -4235,7 +4250,7 @@ mod tests {
     };
     use port_model::{
         ArtifactKind, ExecutionSubstrate, FirecrackerSupport, HostConnection, HostPlatform,
-        HostProvider, HostSpec, MachineArchitecture, PortConfig,
+        HostProvider, HostSpec, MachineArchitecture, PortConfig, ProtectionMode,
     };
 
     fn sample_config_with_hosted_runtime_roots(root: &Path) -> PortConfig {
@@ -4278,6 +4293,18 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         panic!("timed out waiting for tcp listener at '{addr}'");
+    }
+
+    fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        fs::write(&path, "#!/usr/bin/env bash\nsleep 30\n").expect("fake firecracker should write");
+        let mut permissions = fs::metadata(&path)
+            .expect("fake firecracker metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions)
+            .expect("fake firecracker permissions should update");
+        path
     }
 
     fn start_live_hosted_servers(config: &PortConfig, bind_node: bool) -> PortConfig {
@@ -5255,6 +5282,85 @@ mod tests {
         assert!(message.contains("generic-linux-node"));
         assert!(message.contains("planned"));
         assert!(message.contains("PVM"));
+    }
+
+    #[test]
+    fn hosted_pvm_launch_routes_through_live_control_plane_and_prepared_node() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = ProtectionMode::Pvm;
+
+        let kernel_path = tempdir.path().join("pvm-vmlinux");
+        let guest_path = tempdir.path().join("pvm-rootfs.ext4");
+        fs::write(&kernel_path, b"fake-kernel").expect("kernel variant should write");
+        fs::write(&guest_path, b"fake-rootfs").expect("guest variant should write");
+
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Pvm
+            })
+            .expect("pvm kernel variant should exist")
+            .path = kernel_path.clone();
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Pvm
+            })
+            .expect("pvm guest variant should exist")
+            .path = guest_path.clone();
+
+        let host_kit = config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .host_kit
+            .as_mut()
+            .expect("aws node should declare a host-kit");
+        host_kit.requires_custom_host_kernel = false;
+        host_kit.host_boot_args.clear();
+        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_HOSTED_PVM_FIRECRACKER"));
+        let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker-pvm");
+        unsafe {
+            std::env::set_var("PORT_TEST_HOSTED_PVM_FIRECRACKER", &fake_binary);
+        }
+
+        let config = start_live_hosted_servers(&config, true);
+        let metadata = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect("hosted pvm launch should route through live control plane");
+
+        assert_eq!(metadata.machine_name, "cloud-aws");
+        assert_eq!(metadata.firecracker_binary, fake_binary);
+        assert!(metadata.manifest_path.exists());
+
+        let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
     }
 
     #[test]

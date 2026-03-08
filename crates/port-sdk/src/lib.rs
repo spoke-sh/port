@@ -305,6 +305,17 @@ impl<'a> MachineClient<'a> {
     }
 
     #[must_use]
+    pub fn launch(&self, machine_name: &str) -> HostedApiRequest {
+        self.client.request(
+            HttpMethod::Post,
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Launch {
+                machine_name: machine_name.to_string(),
+            }),
+            None,
+        )
+    }
+
+    #[must_use]
     pub fn status(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
@@ -667,6 +678,10 @@ mod tests {
         assert_eq!(
             exec.url,
             "https://port.example.internal/v1/machines/cloud-aws/guest:exec"
+        );
+        assert_eq!(
+            client.machines().launch("cloud-aws").url,
+            "https://port.example.internal/v1/machines/cloud-aws:launch"
         );
         assert_eq!(
             client.machines().monitor("cloud-aws").method,

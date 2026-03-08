@@ -203,7 +203,7 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
         .route("/v1/machines", get(list_machines))
         .route(
             "/v1/machines/{machine}",
-            get(machine_status).post(machine_stop),
+            get(machine_status).post(machine_command),
         )
         .route("/v1/machines/{machine}/monitor", get(machine_monitor))
         .route("/v1/machines/{machine}/top", get(machine_top))
@@ -355,36 +355,51 @@ async fn machine_top(
     .await
 }
 
-async fn machine_stop(
+async fn machine_command(
     State(state): State<ControlPlaneState>,
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let Some(machine_name) = machine.strip_suffix(":stop") else {
-        return error_response(
-            StatusCode::NOT_FOUND,
-            format!(
-                "control plane '{}' only serves stop through '/v1/machines/{{machine}}:stop'",
-                state.inner.control_plane
-            ),
-            Some(HostedRouteContext {
-                control_plane: Some(state.inner.control_plane.clone()),
-                machine_name: Some(machine),
-                ..HostedRouteContext::default()
+    if let Some(machine_name) = machine.strip_suffix(":launch") {
+        return proxy_machine_route(
+            &state,
+            &headers,
+            machine_name,
+            HostedNodeRoute::Machine(HostedMachineRoute::Launch {
+                machine_name: machine_name.to_string(),
             }),
-        );
-    };
-    proxy_machine_route(
-        &state,
-        &headers,
-        machine_name,
-        HostedNodeRoute::Machine(HostedMachineRoute::Stop {
-            machine_name: machine_name.to_string(),
+            Method::POST,
+            None,
+        )
+        .await;
+    }
+
+    if let Some(machine_name) = machine.strip_suffix(":stop") {
+        return proxy_machine_route(
+            &state,
+            &headers,
+            machine_name,
+            HostedNodeRoute::Machine(HostedMachineRoute::Stop {
+                machine_name: machine_name.to_string(),
+            }),
+            Method::POST,
+            None,
+        )
+        .await;
+    }
+
+    error_response(
+        StatusCode::NOT_FOUND,
+        format!(
+            "control plane '{}' only serves launch and stop through '/v1/machines/{{machine}}:launch' and '/v1/machines/{{machine}}:stop'",
+            state.inner.control_plane
+        ),
+        Some(HostedRouteContext {
+            control_plane: Some(state.inner.control_plane.clone()),
+            machine_name: Some(machine),
+            ..HostedRouteContext::default()
         }),
-        Method::POST,
-        None,
     )
-    .await
 }
 
 async fn guest_exec(
@@ -1336,6 +1351,24 @@ mod tests {
             status.json().await.expect("status body should decode");
         assert_eq!(status_body.result.machine_name, "cloud-aws");
 
+        let launch = client
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws:launch"
+            ))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("launch request should complete");
+        assert_eq!(launch.status(), StatusCode::OK);
+        let launch_body: HostedSuccess<LaunchMetadata> =
+            launch.json().await.expect("launch body should decode");
+        assert_eq!(launch_body.result.machine_name, "cloud-aws");
+        assert_eq!(launch_body.result.pid, 9876);
+        assert_eq!(
+            launch_body.route.node_name.as_deref(),
+            Some("aws-linux-node")
+        );
+
         let guest = client
             .post(format!(
                 "http://{control_addr}/v1/machines/cloud-aws/guest:exec"
@@ -1740,12 +1773,63 @@ mod tests {
             })
         }
 
+        async fn launch_handler(
+            State(state): State<MockNodeState>,
+            headers: HeaderMap,
+            Path(machine): Path<String>,
+        ) -> Json<HostedSuccess<LaunchMetadata>> {
+            state.headers.lock().expect("headers lock").push(
+                headers
+                    .get("x-port-node-agent-token")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            let machine_name = machine
+                .strip_suffix(":launch")
+                .expect("launch route should preserve machine suffix")
+                .to_string();
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(machine_name.clone()),
+                    node_name: Some(String::from("aws-linux-node")),
+                    ..HostedRouteContext::default()
+                },
+                result: LaunchMetadata {
+                    machine_name,
+                    pid: 9876,
+                    launched_at_unix_s: 1,
+                    runtime_dir: PathBuf::from("runtime/hosted/aws-linux-node/cloud-aws"),
+                    firecracker_binary: PathBuf::from("/usr/bin/firecracker-pvm"),
+                    config_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker-config.json",
+                    ),
+                    log_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker.log",
+                    ),
+                    stdout_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/console.stdout.log",
+                    ),
+                    stderr_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/console.stderr.log",
+                    ),
+                    manifest_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/manifest.json",
+                    ),
+                },
+            })
+        }
+
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener should bind");
         let addr = listener.local_addr().expect("addr should exist");
         let router = Router::new()
-            .route("/v1/node/machines/{machine}", get(status_handler))
+            .route(
+                "/v1/node/machines/{machine}",
+                get(status_handler).post(launch_handler),
+            )
             .route(
                 "/v1/node/machines/{machine}/guest:exec",
                 post(guest_handler),

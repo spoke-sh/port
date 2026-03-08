@@ -1,11 +1,12 @@
 use std::fs;
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use port_model::PortConfig;
+use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -125,6 +126,17 @@ fn write_forward_manifest(
         ),
     )
     .expect("forward manifest should write");
+}
+
+fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
+    let path = root.join(name);
+    fs::write(&path, "#!/usr/bin/env bash\nsleep 30\n").expect("fake firecracker should write");
+    let mut permissions = fs::metadata(&path)
+        .expect("fake firecracker metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions).expect("fake firecracker permissions should update");
+    path
 }
 
 #[test]
@@ -318,6 +330,150 @@ fn cli_machine_launch_rejects_unplaceable_hosted_pvm_machine() {
     assert!(stderr.contains("generic-linux-node"));
     assert!(stderr.contains("planned"));
     assert!(stderr.contains("PVM"));
+}
+
+#[test]
+fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .protection_mode = ProtectionMode::Pvm;
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+
+    let kernel_path = temp.path().join("pvm-vmlinux");
+    let guest_path = temp.path().join("pvm-rootfs.ext4");
+    fs::write(&kernel_path, b"fake-kernel").expect("kernel variant should write");
+    fs::write(&guest_path, b"fake-rootfs").expect("guest variant should write");
+
+    server_config
+        .artifacts
+        .kernels
+        .get_mut("demo-kernel")
+        .expect("demo-kernel should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Pvm
+        })
+        .expect("pvm kernel variant should exist")
+        .path = kernel_path;
+    server_config
+        .artifacts
+        .guest_images
+        .get_mut("demo-guest")
+        .expect("demo-guest should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Pvm
+        })
+        .expect("pvm guest variant should exist")
+        .path = guest_path;
+
+    let host_kit = server_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .capabilities
+        .pvm_lanes[0]
+        .host_kit
+        .as_mut()
+        .expect("aws node should declare a host-kit");
+    host_kit.requires_custom_host_kernel = false;
+    host_kit.host_boot_args.clear();
+    host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker-pvm");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let mut node_command = Command::new(port_bin());
+    node_command
+        .env("PORT_TEST_CLI_PVM_FIRECRACKER", &fake_binary)
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(&node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(&node_addr);
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .arg("--node-binding")
+        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("launched machine: cloud-aws"));
+    assert!(stdout.contains(fake_binary.to_string_lossy().as_ref()));
+
+    let pid_path = hosted_runtime_root.join("cloud-aws/firecracker.pid");
+    let pid = fs::read_to_string(&pid_path)
+        .expect("pid file should exist")
+        .trim()
+        .parse::<u32>()
+        .expect("pid should parse");
+    assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
+
+    let _ = Command::new("kill").arg(pid.to_string()).status();
 }
 
 #[test]
