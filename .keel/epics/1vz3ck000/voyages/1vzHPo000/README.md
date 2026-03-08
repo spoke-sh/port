@@ -2,10 +2,11 @@
 id: 1vzHPo000
 index: 4
 title: PVM Runtime Admission And Placement
-status: planned
+status: in-progress
 epic: 1vz3ck000
 created_at: 2026-03-08T09:55:40
 updated_at: 2026-03-08T09:59:34
+started_at: 2026-03-08T10:00:09
 ---
 
 # PVM Runtime Admission And Placement

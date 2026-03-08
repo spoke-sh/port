@@ -51,7 +51,7 @@
 | [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | done |
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
 | [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | done |
-| [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | planned |
+| [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | in-progress |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 

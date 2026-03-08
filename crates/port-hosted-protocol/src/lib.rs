@@ -358,6 +358,8 @@ impl HostedGuestVerb {
 mod tests {
     use std::path::PathBuf;
 
+    use serde_json::to_value;
+
     use port_model::{
         MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner, PortConfig,
     };
@@ -365,7 +367,7 @@ mod tests {
     use super::{
         HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestVerb,
         HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext,
-        HostedServiceRoute, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedServiceRoute, HostedSuccess, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -474,6 +476,25 @@ mod tests {
         assert_eq!(
             selected.runtime_root,
             Some(PathBuf::from("runtime/hosted/aws-linux-node"))
+        );
+    }
+
+    #[test]
+    fn hosted_success_serializes_inventory_with_pvm_capability_states() {
+        let config = PortConfig::sample();
+        let inventory = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory contract should resolve");
+
+        let body = to_value(HostedSuccess {
+            route: HostedRouteContext::default(),
+            result: inventory,
+        })
+        .expect("inventory success payload should serialize");
+
+        assert_eq!(
+            body["result"]["nodes"]["aws-linux-node"]["capabilities"]["pvm_lanes"][0]["state"],
+            "ready"
         );
     }
 }

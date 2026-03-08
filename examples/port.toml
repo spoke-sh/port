@@ -242,7 +242,12 @@ providers = ["generic-linux"]
 platforms = ["linux"]
 substrates = ["firecracker"]
 architectures = ["x86_64"]
-protection_modes = ["standard"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.generic-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the sample inventory."]
 
 [nodes.aws-linux-node]
 host = "aws-linux"
@@ -254,7 +259,12 @@ providers = ["aws"]
 platforms = ["linux"]
 substrates = ["firecracker"]
 architectures = ["x86_64"]
-protection_modes = ["standard"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.aws-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "ready"
+notes = ["AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit."]
 
 [nodes.gcp-linux-node]
 host = "gcp-linux"
@@ -266,7 +276,12 @@ providers = ["gcp"]
 platforms = ["linux"]
 substrates = ["firecracker"]
 architectures = ["x86_64"]
-protection_modes = ["standard"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.gcp-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+notes = ["GCP remains modeled as a planned PVM node until a prepared host kit is explicitly advertised."]
 
 [host_groups.remote-linux]
 placement = "explicit-membership"

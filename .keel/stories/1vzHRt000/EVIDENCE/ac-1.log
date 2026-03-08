@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-03-08T10:05:23.242512278-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzHRt000/verify-ac-1.sh
+---
+
+running 21 tests
+.....................
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

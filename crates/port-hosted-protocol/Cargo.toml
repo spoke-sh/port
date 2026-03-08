@@ -9,3 +9,6 @@ rust-version.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
 port-model = { path = "../port-model" }
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

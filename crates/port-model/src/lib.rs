@@ -186,7 +186,14 @@ impl PortConfig {
                         platforms: vec![HostPlatform::Linux],
                         substrates: vec![ExecutionSubstrate::Firecracker],
                         architectures: vec![MachineArchitecture::X86_64],
-                        protection_modes: vec![ProtectionMode::Standard],
+                        protection_modes: vec![ProtectionMode::Standard, ProtectionMode::Pvm],
+                        pvm_lanes: vec![HostedPvmCapability {
+                            architecture: MachineArchitecture::X86_64,
+                            state: PvmCapabilityState::Planned,
+                            notes: vec![String::from(
+                                "Generic Linux is modeled as PVM-planned but not host-kit-ready in the sample inventory.",
+                            )],
+                        }],
                     },
                     notes: vec![String::from(
                         "Generic Linux is the baseline hosted node contract before scheduler policy exists.",
@@ -203,7 +210,14 @@ impl PortConfig {
                         platforms: vec![HostPlatform::Linux],
                         substrates: vec![ExecutionSubstrate::Firecracker],
                         architectures: vec![MachineArchitecture::X86_64],
-                        protection_modes: vec![ProtectionMode::Standard],
+                        protection_modes: vec![ProtectionMode::Standard, ProtectionMode::Pvm],
+                        pvm_lanes: vec![HostedPvmCapability {
+                            architecture: MachineArchitecture::X86_64,
+                            state: PvmCapabilityState::Ready,
+                            notes: vec![String::from(
+                                "AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit.",
+                            )],
+                        }],
                     },
                     notes: vec![String::from(
                         "AWS stays explicit because later host-group and PVM planning will care about provider identity.",
@@ -220,7 +234,14 @@ impl PortConfig {
                         platforms: vec![HostPlatform::Linux],
                         substrates: vec![ExecutionSubstrate::Firecracker],
                         architectures: vec![MachineArchitecture::X86_64],
-                        protection_modes: vec![ProtectionMode::Standard],
+                        protection_modes: vec![ProtectionMode::Standard, ProtectionMode::Pvm],
+                        pvm_lanes: vec![HostedPvmCapability {
+                            architecture: MachineArchitecture::X86_64,
+                            state: PvmCapabilityState::Planned,
+                            notes: vec![String::from(
+                                "GCP remains modeled as a planned PVM node until a prepared host kit is explicitly advertised.",
+                            )],
+                        }],
                     },
                     notes: vec![String::from(
                         "GCP is modeled as a hosted node so placement and lifecycle work can remain provider-aware.",
@@ -1016,6 +1037,36 @@ pub struct HostedNodeCapabilities {
     pub substrates: Vec<ExecutionSubstrate>,
     pub architectures: Vec<MachineArchitecture>,
     pub protection_modes: Vec<ProtectionMode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pvm_lanes: Vec<HostedPvmCapability>,
+}
+
+impl HostedNodeCapabilities {
+    #[must_use]
+    pub fn pvm_lane_for(&self, architecture: MachineArchitecture) -> Option<&HostedPvmCapability> {
+        let architecture = match architecture {
+            MachineArchitecture::Native => resolve_native_pvm_architecture(),
+            other => other,
+        };
+        self.pvm_lanes
+            .iter()
+            .find(|lane| lane.architecture == architecture)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedPvmCapability {
+    pub architecture: MachineArchitecture,
+    pub state: PvmCapabilityState,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PvmCapabilityState {
+    Ready,
+    Planned,
+    ResearchOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1031,13 +1082,13 @@ pub enum HostedPlacementPolicy {
     ExplicitMembership,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedInventoryContract {
     pub nodes: BTreeMap<String, HostedNodeContract>,
     pub host_groups: BTreeMap<String, HostedHostGroupContract>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedNodeContract {
     pub host: String,
     pub runtime_root: PathBuf,
@@ -1048,7 +1099,7 @@ pub struct HostedNodeContract {
     pub notes: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedHostGroupContract {
     pub control_plane: String,
     pub inventory_owner: MachineInventoryOwner,
@@ -1309,6 +1360,14 @@ pub struct FirecrackerPvmLaneContract {
 }
 
 impl FirecrackerPvmLaneContract {
+    #[must_use]
+    pub fn capability_state(&self) -> PvmCapabilityState {
+        match self.decision {
+            PvmLaneDecision::Planned => PvmCapabilityState::Planned,
+            PvmLaneDecision::ResearchOnly => PvmCapabilityState::ResearchOnly,
+        }
+    }
+
     #[must_use]
     pub fn for_architecture(architecture: MachineArchitecture) -> Self {
         match architecture {
@@ -1811,6 +1870,37 @@ fn validate_hosted_node(
             node_name
         )));
     }
+    for lane in &node.capabilities.pvm_lanes {
+        if lane.state != PvmCapabilityState::ResearchOnly
+            && lane.architecture != MachineArchitecture::X86_64
+        {
+            return Err(ValidationError::new(format!(
+                "node '{}' cannot declare a non-research PVM lane for architecture '{:?}'",
+                node_name, lane.architecture
+            )));
+        }
+        if !node.capabilities.architectures.contains(&lane.architecture) {
+            return Err(ValidationError::new(format!(
+                "node '{}' declares PVM lane '{:?}' without advertising that architecture in capabilities.architectures",
+                node_name, lane.architecture
+            )));
+        }
+    }
+    if node
+        .capabilities
+        .pvm_lanes
+        .iter()
+        .any(|lane| lane.state != PvmCapabilityState::ResearchOnly)
+        && !node
+            .capabilities
+            .protection_modes
+            .contains(&ProtectionMode::Pvm)
+    {
+        return Err(ValidationError::new(format!(
+            "node '{}' declares a PVM-ready or planned lane but does not advertise protection mode 'pvm'",
+            node_name
+        )));
+    }
 
     Ok(())
 }
@@ -1876,7 +1966,7 @@ mod tests {
         HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
         MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
         MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
-        PortConfig, ProtectionMode, PvmLaneDecision,
+        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
     };
 
     #[test]
@@ -2299,6 +2389,7 @@ mod tests {
                     substrates: vec![ExecutionSubstrate::Firecracker],
                     architectures: vec![MachineArchitecture::X86_64],
                     protection_modes: vec![ProtectionMode::Standard],
+                    pvm_lanes: vec![],
                 },
                 notes: vec![],
             },
@@ -2397,6 +2488,35 @@ mod tests {
                 .decision,
             PvmLaneDecision::ResearchOnly
         );
+        assert_eq!(
+            firecracker
+                .pvm_lane_for(MachineArchitecture::X86_64)
+                .expect("x86_64 lane should exist")
+                .capability_state(),
+            PvmCapabilityState::Planned
+        );
+    }
+
+    #[test]
+    fn sample_config_derives_hosted_node_pvm_capability_states() {
+        let config = PortConfig::sample();
+
+        let inventory = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory contract should resolve");
+
+        assert_eq!(
+            inventory.nodes["aws-linux-node"].capabilities.pvm_lanes[0].state,
+            PvmCapabilityState::Ready
+        );
+        assert_eq!(
+            inventory.nodes["generic-linux-node"].capabilities.pvm_lanes[0].state,
+            PvmCapabilityState::Planned
+        );
+        assert_eq!(
+            inventory.nodes["gcp-linux-node"].capabilities.pvm_lanes[0].state,
+            PvmCapabilityState::Planned
+        );
     }
 
     #[test]
@@ -2444,6 +2564,14 @@ mod tests {
             config.nodes["aws-linux-node"].runtime_root,
             PathBuf::from("runtime/hosted/aws-linux-node")
         );
+        assert_eq!(
+            config.nodes["aws-linux-node"].capabilities.pvm_lanes[0].state,
+            PvmCapabilityState::Ready
+        );
+        assert_eq!(
+            config.nodes["generic-linux-node"].capabilities.pvm_lanes[0].state,
+            PvmCapabilityState::Planned
+        );
         assert!(config.host_groups.contains_key("remote-linux"));
         assert_eq!(
             config.hosts["generic-linux"].connection,
@@ -2482,26 +2610,22 @@ mod tests {
                 .architecture,
             MachineArchitecture::X86_64
         );
-        assert!(
-            config.artifacts.kernels["demo-kernel"].supports(
-                MachineArchitecture::X86_64,
-                ExecutionSubstrate::Firecracker,
-                ProtectionMode::Pvm
-            )
-        );
+        assert!(config.artifacts.kernels["demo-kernel"].supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Pvm
+        ));
         assert_eq!(
             config.artifacts.guest_images["demo-guest"].variants[0]
                 .selector
                 .substrate,
             ExecutionSubstrate::Firecracker
         );
-        assert!(
-            config.artifacts.guest_images["demo-guest"].supports(
-                MachineArchitecture::X86_64,
-                ExecutionSubstrate::Firecracker,
-                ProtectionMode::Pvm
-            )
-        );
+        assert!(config.artifacts.guest_images["demo-guest"].supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Firecracker,
+            ProtectionMode::Pvm
+        ));
     }
 
     #[test]

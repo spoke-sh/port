@@ -886,6 +886,7 @@ dependencies = [
  "port-agent-protocol",
  "port-model",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
