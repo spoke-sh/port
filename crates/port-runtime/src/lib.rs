@@ -56,6 +56,25 @@ pub struct DoctorCheck {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DoctorHostFacts {
+    host_os: String,
+    host_architecture: String,
+    proc_cmdline: Option<String>,
+    pvm_firecracker_binary: Option<PathBuf>,
+}
+
+impl DoctorHostFacts {
+    fn collect() -> Self {
+        Self {
+            host_os: env::consts::OS.to_string(),
+            host_architecture: env::consts::ARCH.to_string(),
+            proc_cmdline: fs::read_to_string("/proc/cmdline").ok(),
+            pvm_firecracker_binary: find_pvm_firecracker_binary(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LaunchRequest<'a> {
     pub machine_name: &'a str,
@@ -428,7 +447,14 @@ pub struct ArtifactTransfer {
 }
 
 pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
-    let host_os = env::consts::OS.to_string();
+    collect_doctor_report_with_facts(config, &DoctorHostFacts::collect())
+}
+
+fn collect_doctor_report_with_facts(
+    config: Option<&PortConfig>,
+    facts: &DoctorHostFacts,
+) -> DoctorReport {
+    let host_os = facts.host_os.clone();
     let local_firecracker_supported = host_os == "linux";
     let mut checks = Vec::new();
 
@@ -501,6 +527,7 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
             if let Some(check) = provider_check(name, host.provider, &host.connection) {
                 checks.push(check);
             }
+            checks.extend(local_pvm_lane_checks(name, host, facts));
         }
         for (name, control_plane) in &config.control_planes {
             checks.push(control_plane_check(name, control_plane));
@@ -539,6 +566,9 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
     if config.is_some() {
         notes.push(String::from(
             "Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.",
+        ));
+        notes.push(String::from(
+            "Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.",
         ));
     }
 
@@ -2506,6 +2536,142 @@ fn machine_contract_check(
     }
 }
 
+fn local_pvm_lane_checks(
+    host_name: &str,
+    host: &port_model::HostSpec,
+    facts: &DoctorHostFacts,
+) -> Vec<DoctorCheck> {
+    if !matches!(host.connection, HostConnection::Local) {
+        return Vec::new();
+    }
+
+    let mut checks = Vec::new();
+    for lane in &host.firecracker.pvm_lanes {
+        let architecture = architecture_dir(lane.architecture);
+        match lane.decision {
+            port_model::PvmLaneDecision::Planned => {
+                let Some(host_kit) = lane.host_kit.as_ref() else {
+                    checks.push(DoctorCheck {
+                        name: format!("pvm:{host_name}:{architecture}"),
+                        ok: false,
+                        required: false,
+                        detail: String::from(
+                            "PVM lane is marked planned but does not define a host-kit contract.",
+                        ),
+                    });
+                    continue;
+                };
+
+                let platform_ok =
+                    host.platform == host_kit.host_platform && facts.host_os == "linux";
+                checks.push(DoctorCheck {
+                    name: format!("pvm:{host_name}:{architecture}:host-platform"),
+                    ok: platform_ok,
+                    required: false,
+                    detail: if platform_ok {
+                        format!(
+                            "Host '{}' matches the Linux platform required for the Firecracker/PVM host kit.",
+                            host_name
+                        )
+                    } else {
+                        format!(
+                            "Host '{}' must run on Linux for Firecracker/PVM; the standard Firecracker lane is not a PVM fallback.",
+                            host_name
+                        )
+                    },
+                });
+
+                let expected_architecture = architecture_dir(host_kit.host_architecture);
+                let architecture_ok = facts.host_architecture == expected_architecture;
+                checks.push(DoctorCheck {
+                    name: format!("pvm:{host_name}:{architecture}:host-architecture"),
+                    ok: architecture_ok,
+                    required: false,
+                    detail: if architecture_ok {
+                        format!(
+                            "Host architecture '{}' matches the PVM host-kit requirement.",
+                            expected_architecture
+                        )
+                    } else {
+                        format!(
+                            "Host architecture '{}' does not satisfy the Firecracker/PVM host-kit requirement '{}'; the standard Firecracker lane is not a PVM fallback.",
+                            facts.host_architecture, expected_architecture
+                        )
+                    },
+                });
+
+                let missing_boot_args: Vec<&String> = host_kit
+                    .host_boot_args
+                    .iter()
+                    .filter(|arg| {
+                        facts
+                            .proc_cmdline
+                            .as_deref()
+                            .map(|cmdline| {
+                                !cmdline.split_whitespace().any(|item| item == arg.as_str())
+                            })
+                            .unwrap_or(true)
+                    })
+                    .collect();
+                let boot_line_ok = missing_boot_args.is_empty();
+                checks.push(DoctorCheck {
+                    name: format!("pvm:{host_name}:{architecture}:boot-line"),
+                    ok: boot_line_ok,
+                    required: false,
+                    detail: if boot_line_ok {
+                        format!(
+                            "Host boot line includes the required PVM argument(s): {}.",
+                            host_kit.host_boot_args.join(", ")
+                        )
+                    } else {
+                        format!(
+                            "Host boot line is missing required PVM argument(s): {}. Reboot into the prepared host kit; the standard Firecracker lane is not a PVM fallback.",
+                            missing_boot_args
+                                .into_iter()
+                                .map(std::string::String::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    },
+                });
+
+                let binary_ok = facts.pvm_firecracker_binary.is_some();
+                checks.push(DoctorCheck {
+                    name: format!("pvm:{host_name}:{architecture}:firecracker-binary"),
+                    ok: binary_ok,
+                    required: false,
+                    detail: match &facts.pvm_firecracker_binary {
+                        Some(path) => format!(
+                            "Found the patched PVM Firecracker binary at '{}'.",
+                            path.display()
+                        ),
+                        None => String::from(
+                            "Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible.",
+                        ),
+                    },
+                });
+            }
+            port_model::PvmLaneDecision::ResearchOnly => checks.push(DoctorCheck {
+                name: format!("pvm:{host_name}:{architecture}"),
+                ok: false,
+                required: false,
+                detail: format!(
+                    "Firecracker/PVM on '{}' remains research-only. {}",
+                    architecture,
+                    lane.operator_prerequisites
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| String::from(
+                            "Port does not yet claim a supportable runtime path for this lane."
+                        ))
+                ),
+            }),
+        }
+    }
+
+    checks
+}
+
 fn resolve_machine_architecture(architecture: MachineArchitecture) -> Result<MachineArchitecture> {
     match architecture {
         MachineArchitecture::Native => match env::consts::ARCH {
@@ -2635,6 +2801,17 @@ fn find_binary(binary: &str) -> Option<PathBuf> {
     env::split_paths(&path)
         .map(|entry| entry.join(binary))
         .find(|candidate| candidate.is_file())
+}
+
+fn find_pvm_firecracker_binary() -> Option<PathBuf> {
+    if let Some(configured) = env::var_os("PORT_PVM_FIRECRACKER_BINARY") {
+        let path = PathBuf::from(configured);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    find_binary("firecracker-pvm")
 }
 
 fn run_artifact_pipeline(
@@ -3736,14 +3913,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, ControlPlaneServeRequest, DoctorCheck, GuestCopyRequest,
+        ArtifactAction, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts, GuestCopyRequest,
         GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
         MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths, StopResult,
-        artifact_script, build_firecracker_config, collect_doctor_report, copy_guest_file,
-        driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
-        machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, read_pid_file, repo_root, serve_control_plane, serve_node_agent,
-        stop_machine,
+        artifact_script, build_firecracker_config, collect_doctor_report,
+        collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
+        execute_guest_operation, launch_local_machine, list_machines, machine_monitor,
+        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
+        read_pid_file, repo_root, serve_control_plane, serve_node_agent, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
@@ -4133,6 +4310,100 @@ mod tests {
         assert!(demo.ok);
         assert!(demo.detail.contains("Machine models"));
         assert!(demo.detail.contains("Firecracker"));
+    }
+
+    #[test]
+    fn doctor_report_includes_pvm_host_kit_checks_for_local_contract() {
+        let report = collect_doctor_report_with_facts(
+            Some(&PortConfig::sample()),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: String::from("x86_64"),
+                proc_cmdline: Some(String::from("console=ttyS0 pti=off")),
+                pvm_firecracker_binary: Some(PathBuf::from("/usr/bin/firecracker-pvm")),
+            },
+        );
+
+        let platform = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:host-platform")
+            .expect("pvm platform check should exist");
+        let architecture = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:host-architecture")
+            .expect("pvm architecture check should exist");
+        let boot_line = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:boot-line")
+            .expect("pvm boot-line check should exist");
+        let binary = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:firecracker-binary")
+            .expect("pvm binary check should exist");
+        let arm64 = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:aarch64")
+            .expect("arm64 research-only check should exist");
+
+        assert!(platform.ok);
+        assert!(architecture.ok);
+        assert!(boot_line.ok);
+        assert!(boot_line.detail.contains("pti=off"));
+        assert!(binary.ok);
+        assert!(binary.detail.contains("firecracker-pvm"));
+        assert!(!arm64.ok);
+        assert!(arm64.detail.contains("research-only"));
+    }
+
+    #[test]
+    fn doctor_report_fails_fast_for_missing_pvm_boot_arg_and_binary() {
+        let report = collect_doctor_report_with_facts(
+            Some(&PortConfig::sample()),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: String::from("aarch64"),
+                proc_cmdline: Some(String::from("console=ttyS0")),
+                pvm_firecracker_binary: None,
+            },
+        );
+
+        let architecture = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:host-architecture")
+            .expect("pvm architecture check should exist");
+        let boot_line = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:boot-line")
+            .expect("pvm boot-line check should exist");
+        let binary = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:local:x86_64:firecracker-binary")
+            .expect("pvm binary check should exist");
+
+        assert!(!architecture.ok);
+        assert!(architecture.detail.contains("x86_64"));
+        assert!(!boot_line.ok);
+        assert!(boot_line.detail.contains("pti=off"));
+        assert!(
+            boot_line
+                .detail
+                .contains("standard Firecracker lane is not a PVM fallback")
+        );
+        assert!(!binary.ok);
+        assert!(binary.detail.contains("firecracker-pvm"));
+        assert!(
+            binary
+                .detail
+                .contains("standard firecracker binary is not compatible")
+        );
     }
 
     #[test]

@@ -1,0 +1,34 @@
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 0.01s
+
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+check[fail]: artifact:demo-kernel (required=true) - Artifact variant 'artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux' is missing. Build or pull the native variant first.
+check[fail]: artifact:demo-guest (required=true) - Artifact variant 'artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' is missing. Build or pull the native variant first.
+check[ok]: host:aws-linux (required=false) - provider 'aws' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[fail]: host:azure-linux (required=false) - provider 'azure' is explicitly unsupported for the Firecracker MVP; do not expect a working launch path. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:gcp-linux (required=false) - provider 'gcp' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:generic-linux (required=false) - provider 'generic-linux' is modeled for a future remote Linux control lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: pvm:local:x86_64:host-platform (required=false) - Host 'local' matches the Linux platform required for the Firecracker/PVM host kit.
+check[ok]: pvm:local:x86_64:host-architecture (required=false) - Host architecture 'x86_64' matches the PVM host-kit requirement.
+check[fail]: pvm:local:x86_64:boot-line (required=false) - Host boot line is missing required PVM argument(s): pti=off. Reboot into the prepared host kit; the standard Firecracker lane is not a PVM fallback.
+check[fail]: pvm:local:x86_64:firecracker-binary (required=false) - Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible.
+check[fail]: pvm:local:aarch64 (required=false) - Firecracker/PVM on 'aarch64' remains research-only. Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path.
+check[ok]: control-plane:demo (required=false) - Hosted control plane 'demo' targets 'https://port.example.internal' with audience 'port-hosted-demo' and expects a bearer token from env:PORT_DEMO_TOKEN via the 'authorization' header.
+check[ok]: machine:cloud-aws (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-azure (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-gcp (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-generic (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:demo (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.
+note: Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.
