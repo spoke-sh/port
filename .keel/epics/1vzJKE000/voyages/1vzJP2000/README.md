@@ -2,11 +2,12 @@
 id: 1vzJP2000
 index: 1
 title: Prepared Linux Pvm Runtime
-status: in-progress
+status: done
 epic: 1vzJKE000
 created_at: 2026-03-08T12:03:00
 updated_at: 2026-03-08T12:07:52
 started_at: 2026-03-08T12:09:02
+completed_at: 2026-03-08T14:19:36
 ---
 
 # Prepared Linux Pvm Runtime
@@ -20,16 +21,18 @@ started_at: 2026-03-08T12:09:02
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Publish Prepared Pvm Operator Workflow](../../../../stories/1vzJQJ000/README.md) | feat | backlog |
+| [Publish Prepared Pvm Operator Workflow](../../../../stories/1vzJQJ000/README.md) | feat | done |
 | [Define Prepared Pvm Host Kit Contract](../../../../stories/1vzJQg000/README.md) | feat | done |
 | [Route Hosted Launch Through Prepared Pvm Nodes](../../../../stories/1vzJQh000/README.md) | feat | done |
 | [Implement Node Agent Pvm Launch Path](../../../../stories/1vzJSi000/README.md) | feat | done |

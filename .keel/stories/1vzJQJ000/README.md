@@ -2,11 +2,12 @@
 id: 1vzJQJ000
 title: Publish Prepared Pvm Operator Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T12:04:19
-updated_at: 2026-03-08T14:11:38
+updated_at: 2026-03-08T14:18:54
 scope: 1vzJKE000/1vzJP2000
 started_at: 2026-03-08T14:11:38
+completed_at: 2026-03-08T14:18:54
 ---
 
 # Publish Prepared Pvm Operator Workflow

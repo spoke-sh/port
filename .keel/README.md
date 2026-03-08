@@ -61,9 +61,9 @@
 | [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | done |
 | [Hosted Runtime And Service Expansion](epics/1vz4Yn000/voyages/1vz5mg000/) | done |
 
-### [Executable Pvm And Avf Lanes](epics/1vzJKE000/) (active)
+### [Executable Pvm And Avf Lanes](epics/1vzJKE000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | in-progress |
+| [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | done |
 

@@ -20,8 +20,8 @@ created_at: 2026-03-08T12:02:25
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Prepared Linux Pvm Runtime](voyages/1vzJP2000/) | in-progress | 3/4 |
+| [Prepared Linux Pvm Runtime](voyages/1vzJP2000/) | done | 4/4 |
 <!-- END GENERATED -->
