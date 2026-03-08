@@ -77,6 +77,36 @@ following:
 
 Those checks belong in the future `port doctor` and artifact validation paths.
 
+## Repository-Local Workflow
+
+The current foundation slice is intentionally narrower than a real PVM launch.
+It gives operators a reproducible way to prove the model, doctor, and artifact
+contracts locally:
+
+```bash
+port --config examples/port.toml doctor
+port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+```
+
+What those commands prove today:
+
+- the model resolves dedicated `x86_64/firecracker/pvm` kernel and guest-image
+  variants
+- the artifact pipelines materialize and validate those variants without
+  silently reusing the standard Firecracker paths
+- `port doctor` reports the `pvm:local:x86_64:*` host-kit checks for Linux
+  platform, `x86_64` architecture, `pti=off`, and the patched
+  `firecracker-pvm` binary contract
+- the current launch path still blocks on those host-kit checks because the
+  real Firecracker/PVM runtime lane is not shipped yet
+
+The same operator workflow should also leave the standard Firecracker lane
+usable. Building or validating `x86_64/firecracker/pvm` artifacts does not
+replace the standard `x86_64/firecracker/standard` artifacts or their paths.
+
 ## arm64 Boundary
 
 Port keeps the arm64 decision explicit:

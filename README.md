@@ -94,6 +94,29 @@ Port's PVM position is intentionally concrete:
 The full host-kit, artifact-kit, validation, and follow-on implementation
 contract lives in [`docs/pvm.md`](docs/pvm.md).
 
+Repository-local PVM foundation workflow:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml doctor
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+```
+
+Interpretation:
+
+- passing artifact commands mean the `x86_64/firecracker/pvm` artifact kit is
+  materialized locally
+- `port doctor` now emits `pvm:local:x86_64:*` checks for platform,
+  architecture, boot-line, and patched-binary readiness
+- a missing `pti=off` boot arg or `firecracker-pvm` binary is an explicit host
+  kit failure, not a signal to fall back to the standard Firecracker lane
+- `aarch64/firecracker/pvm` remains research-only in the model, docs, and
+  scripts
+- `port machine launch` still blocks on the unprepared PVM host kit even when
+  the PVM artifact build/validate workflow passes
+
 ## AVF Contract
 
 Port's macOS lane follows the same rule as the Linux and hosted lanes:

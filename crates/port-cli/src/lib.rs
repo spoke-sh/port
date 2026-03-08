@@ -61,6 +61,14 @@ Execution Lanes:
   Firecracker + standard on Linux is the current shipped lane.
   Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit plus pvm artifact variants.
   Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker runtime path.
+PVM foundation workflow:
+  port --config examples/port.toml doctor
+  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+  Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for the future runtime lane.
+  Firecracker/PVM launch remains blocked on a prepared host kit and a patched `firecracker-pvm` binary even after the artifact commands pass.
   Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
   The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
 Cloud Linux:
