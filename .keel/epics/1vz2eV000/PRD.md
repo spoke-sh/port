@@ -46,20 +46,17 @@ hosted control surfaces.
 
 ### In Scope
 
-- Substrate-aware model and documentation changes across local, hosted, and
-  planned lanes.
-- Hosted control-plane foundations, including machine inventory and lifecycle
-  surfaces.
-- Artifact mobility and variant-selection contracts for local and remote use.
-- Protected-VM planning and implementation slices backed by current upstream and
-  product research.
-- First-class Apple Virtualization Framework planning and CLI/model integration.
+- [SCOPE-01] Substrate-aware model and documentation changes across local, hosted, and planned lanes.
+- [SCOPE-02] Hosted control-plane foundations, including machine inventory and lifecycle surfaces.
+- [SCOPE-03] Artifact mobility and variant-selection contracts for local and remote use.
+- [SCOPE-04] Protected-VM planning and implementation slices backed by current upstream and product research.
+- [SCOPE-05] First-class Apple Virtualization Framework planning and CLI/model integration.
 
 ### Out of Scope
 
-- Shipping full parity with SlicerVM in a single voyage.
-- Treating every cloud provider and protected-VM technology as equally mature.
-- Hidden substrate-specific operator paths outside the canonical Port surfaces.
+- [SCOPE-06] Shipping full parity with SlicerVM in a single voyage.
+- [SCOPE-07] Treating every cloud provider and protected-VM technology as equally mature.
+- [SCOPE-08] Hidden substrate-specific operator paths outside the canonical Port surfaces.
 
 ## Requirements
 
