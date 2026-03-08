@@ -39,6 +39,12 @@
 |--------|--------|
 | [Implement Hosted Control Plane Demo Lane](epics/1vzETR000/voyages/1vzETX000/) | done |
 
+### [Streamed Guest Sessions And Hosted Transfer](epics/1vzMVF000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Streamed Guest Control Transport](epics/1vzMVF000/voyages/1vzMVY000/) | in-progress |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
