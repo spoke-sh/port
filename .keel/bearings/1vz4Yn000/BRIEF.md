@@ -1,0 +1,41 @@
+# Hosted Control Plane And Operator Surface — Brief
+
+## Hypothesis
+
+Port's next highest-leverage slice is no longer another substrate-only contract.
+The missing step toward the user's SlicerVM-parity goal is a hosted
+control-plane foundation that makes machine inventory, status/stop, auth, API,
+node or host-group placement, and guest-operation brokerage real product
+surfaces instead of design-only docs.
+
+## Problem Space
+
+The current board is empty after completing the substrate, PVM, and AVF
+contracts, but the user objective is still incomplete. Port still lacks the
+hosted/node-agent/control-plane capabilities that make Slicer productized:
+
+- remote inventory, status, and stop
+- an authenticated API surface
+- node and host-group vocabulary
+- monitoring and machine visibility
+- secrets and higher-level service or sandbox flows
+- productized hosted CLI and docs rather than local-only runtime ownership
+
+## Success Criteria
+
+How will we know if this research was valuable?
+
+- [x] Identify the smallest coherent hosted-control epic that should come next
+      instead of treating every missing Slicer feature as one story.
+- [x] Produce a recommendation that orders API/auth/inventory, guest
+      brokerage, monitoring, secrets, and service or sandbox work into
+      implementation-ready voyages.
+
+## Open Questions
+
+- What is the first executable hosted-control slice that materially changes Port
+  from design-only hosted docs into a real product surface?
+- Which missing operator features depend on the same API/auth/node-agent
+  foundation and should therefore be sequenced together?
+- What should be deferred until after the first hosted-control foundation is
+  landed?
