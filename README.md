@@ -215,6 +215,10 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   and artifact materialization on one execution node.
 - A future control plane owns fleet inventory, routing, and durable API
   identity.
+- The sample config now names that hosted API identity explicitly under
+  `[control_planes.demo]`, with endpoint `https://port.example.internal`,
+  audience `port-hosted-demo`, and a bearer token sourced from
+  `PORT_DEMO_TOKEN`.
 - Guest `exec`, `copy`, `pty`, `logs`, and `forward` keep the current guest
   protocol semantics; the hosted layer brokers them instead of replacing them.
 - Local `machine list`, `status`, and `stop` now publish the control-contract

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortConfig {
     pub artifacts: ArtifactCatalog,
+    #[serde(default)]
+    pub control_planes: BTreeMap<String, HostedControlPlaneSpec>,
     pub hosts: BTreeMap<String, HostSpec>,
     pub machines: BTreeMap<String, MachineSpec>,
 }
@@ -86,6 +88,21 @@ impl PortConfig {
             )]),
         };
 
+        let control_planes = BTreeMap::from([(
+            String::from("demo"),
+            HostedControlPlaneSpec {
+                endpoint: String::from("https://port.example.internal"),
+                audience: String::from("port-hosted-demo"),
+                auth: HostedAuthTokenContract {
+                    scheme: HostedAuthScheme::Bearer,
+                    header: String::from("authorization"),
+                    source: HostedAuthTokenSource::Env {
+                        variable: String::from("PORT_DEMO_TOKEN"),
+                    },
+                },
+            },
+        )]);
+
         let hosts = BTreeMap::from([
             (
                 String::from("local"),
@@ -101,45 +118,41 @@ impl PortConfig {
             ),
             (
                 String::from("generic-linux"),
-                ssh_host(
+                hosted_host(
                     HostProvider::GenericLinux,
-                    "linux.example.internal",
-                    "port",
+                    "demo",
                     vec![String::from(
-                        "Remote Linux host reserved for the future cloud/control lane.",
+                        "Remote Linux host is modeled through the demo hosted control plane contract.",
                     )],
                 ),
             ),
             (
                 String::from("aws-linux"),
-                ssh_host(
+                hosted_host(
                     HostProvider::Aws,
-                    "aws.example.internal",
-                    "ec2-user",
+                    "demo",
                     vec![String::from(
-                        "AWS is a justified future Firecracker provider lane for Port.",
+                        "AWS is a justified future Firecracker provider lane and is modeled through the demo hosted control plane contract.",
                     )],
                 ),
             ),
             (
                 String::from("gcp-linux"),
-                ssh_host(
+                hosted_host(
                     HostProvider::Gcp,
-                    "gcp.example.internal",
-                    "port",
+                    "demo",
                     vec![String::from(
-                        "GCP is a justified future Firecracker provider lane for Port.",
+                        "GCP is a justified future Firecracker provider lane and is modeled through the demo hosted control plane contract.",
                     )],
                 ),
             ),
             (
                 String::from("azure-linux"),
-                ssh_host(
+                hosted_host(
                     HostProvider::Azure,
-                    "azure.example.internal",
-                    "port",
+                    "demo",
                     vec![String::from(
-                        "Azure is modeled explicitly so diagnostics can report it as unsupported.",
+                        "Azure is modeled explicitly through the demo hosted control plane so diagnostics can report it as unsupported.",
                     )],
                 ),
             ),
@@ -167,6 +180,7 @@ impl PortConfig {
 
         Self {
             artifacts,
+            control_planes,
             hosts,
             machines,
         }
@@ -215,7 +229,46 @@ impl PortConfig {
         Ok(MachineControlContract::for_connection(&host.connection))
     }
 
+    pub fn hosted_api_identity_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedApiIdentityContract>, ValidationError> {
+        let machine = self
+            .machines
+            .get(machine_name)
+            .ok_or_else(|| ValidationError::new(format!("unknown machine '{}'", machine_name)))?;
+        let host = self.hosts.get(&machine.host).ok_or_else(|| {
+            ValidationError::new(format!(
+                "machine '{}' references unknown host '{}'",
+                machine_name, machine.host
+            ))
+        })?;
+
+        match &host.connection {
+            HostConnection::Local => Ok(None),
+            HostConnection::HostedControlPlane { control_plane } => {
+                let spec = self.control_planes.get(control_plane).ok_or_else(|| {
+                    ValidationError::new(format!(
+                        "host '{}' references unknown control plane '{}'",
+                        machine.host, control_plane
+                    ))
+                })?;
+                Ok(Some(HostedApiIdentityContract {
+                    control_plane: control_plane.clone(),
+                    endpoint: spec.endpoint.clone(),
+                    audience: spec.audience.clone(),
+                    auth: spec.auth.clone(),
+                    route: MachineCommandRoute::HostedControlPlane,
+                }))
+            }
+        }
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
+        for (control_plane_name, control_plane) in &self.control_planes {
+            validate_hosted_control_plane(control_plane_name, control_plane)?;
+        }
+
         for (machine_name, machine) in &self.machines {
             let host = self.hosts.get(&machine.host).ok_or_else(|| {
                 ValidationError::new(format!(
@@ -223,6 +276,14 @@ impl PortConfig {
                     machine_name, machine.host
                 ))
             })?;
+            if let HostConnection::HostedControlPlane { control_plane } = &host.connection {
+                if !self.control_planes.contains_key(control_plane) {
+                    return Err(ValidationError::new(format!(
+                        "machine '{}' references host '{}' which references unknown control plane '{}'",
+                        machine_name, machine.host, control_plane
+                    )));
+                }
+            }
             let kernel = self.artifact(&machine.kernel).ok_or_else(|| {
                 ValidationError::new(format!(
                     "machine '{}' references unknown kernel artifact '{}'",
@@ -348,14 +409,12 @@ fn sample_artifact_variant(
     }
 }
 
-fn ssh_host(provider: HostProvider, address: &str, user: &str, notes: Vec<String>) -> HostSpec {
+fn hosted_host(provider: HostProvider, control_plane: &str, notes: Vec<String>) -> HostSpec {
     HostSpec {
         platform: HostPlatform::Linux,
         provider,
-        connection: HostConnection::Ssh {
-            address: address.to_string(),
-            user: user.to_string(),
-            port: 22,
+        connection: HostConnection::HostedControlPlane {
+            control_plane: control_plane.to_string(),
         },
         firecracker: FirecrackerSupport {
             local_launch: false,
@@ -531,6 +590,50 @@ pub enum ArtifactStore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedControlPlaneSpec {
+    pub endpoint: String,
+    pub audience: String,
+    pub auth: HostedAuthTokenContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedAuthTokenContract {
+    pub scheme: HostedAuthScheme,
+    pub header: String,
+    pub source: HostedAuthTokenSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedAuthScheme {
+    Bearer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum HostedAuthTokenSource {
+    Env { variable: String },
+}
+
+impl HostedAuthTokenSource {
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Env { variable } => format!("env:{variable}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedApiIdentityContract {
+    pub control_plane: String,
+    pub endpoint: String,
+    pub audience: String,
+    pub auth: HostedAuthTokenContract,
+    pub route: MachineCommandRoute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactVariant {
     pub selector: ArtifactSelector,
     pub path: PathBuf,
@@ -573,10 +676,8 @@ pub struct HostSpec {
 #[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum HostConnection {
     Local,
-    Ssh {
-        address: String,
-        user: String,
-        port: u16,
+    HostedControlPlane {
+        control_plane: String,
     },
 }
 
@@ -627,7 +728,7 @@ impl MachineControlContract {
     pub fn for_connection(connection: &HostConnection) -> Self {
         match connection {
             HostConnection::Local => Self::local_runtime_root(),
-            HostConnection::Ssh { .. } => Self::hosted_control_plane(),
+            HostConnection::HostedControlPlane { .. } => Self::hosted_control_plane(),
         }
     }
 
@@ -1082,16 +1183,51 @@ fn validate_artifact_spec(
     Ok(())
 }
 
+fn validate_hosted_control_plane(
+    control_plane_name: &str,
+    control_plane: &HostedControlPlaneSpec,
+) -> Result<(), ValidationError> {
+    if control_plane.endpoint.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "control plane '{}' must declare a non-empty endpoint",
+            control_plane_name
+        )));
+    }
+    if control_plane.audience.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "control plane '{}' must declare a non-empty audience",
+            control_plane_name
+        )));
+    }
+    if control_plane.auth.header.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "control plane '{}' must declare a non-empty auth header",
+            control_plane_name
+        )));
+    }
+    match &control_plane.auth.source {
+        HostedAuthTokenSource::Env { variable } if variable.trim().is_empty() => {
+            return Err(ValidationError::new(format!(
+                "control plane '{}' must declare a non-empty token environment variable",
+                control_plane_name
+            )));
+        }
+        HostedAuthTokenSource::Env { .. } => {}
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::{
         ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
-        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, HostProvider,
-        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
-        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
-        PortConfig, ProtectionMode, PvmLaneDecision,
+        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection,
+        HostProvider, HostedAuthTokenSource, MachineArchitecture, MachineCommandRoute,
+        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
+        MachineLifecycleOwner, MachineStatusSource, PortConfig, ProtectionMode, PvmLaneDecision,
     };
 
     #[test]
@@ -1116,6 +1252,8 @@ mod tests {
         assert!(encoded.contains("provider = \"aws\""));
         assert!(encoded.contains("provider = \"gcp\""));
         assert!(encoded.contains("provider = \"azure\""));
+        assert!(encoded.contains("[control_planes.demo]"));
+        assert!(encoded.contains("mode = \"hosted-control-plane\""));
         assert!(encoded.contains("substrate = \"firecracker\""));
         assert!(encoded.contains("protection_mode = \"standard\""));
         assert!(encoded.contains("architecture = \"native\""));
@@ -1244,6 +1382,49 @@ mod tests {
     }
 
     #[test]
+    fn sample_config_derives_hosted_api_identity_contract() {
+        let config = PortConfig::sample();
+
+        let contract = config
+            .hosted_api_identity_contract("cloud-aws")
+            .expect("cloud aws contract should resolve")
+            .expect("cloud aws should target a hosted control plane");
+
+        assert_eq!(contract.control_plane, "demo");
+        assert_eq!(contract.endpoint, "https://port.example.internal");
+        assert_eq!(contract.audience, "port-hosted-demo");
+        assert_eq!(contract.route, MachineCommandRoute::HostedControlPlane);
+        assert_eq!(contract.auth.header, "authorization");
+        assert!(matches!(
+            contract.auth.source,
+            HostedAuthTokenSource::Env { variable } if variable == "PORT_DEMO_TOKEN"
+        ));
+        assert_eq!(
+            config.hosts["aws-linux"].connection,
+            HostConnection::HostedControlPlane {
+                control_plane: String::from("demo")
+            }
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_control_plane_reference() {
+        let mut config = PortConfig::sample();
+        config.hosts.get_mut("aws-linux").expect("aws host").connection =
+            HostConnection::HostedControlPlane {
+                control_plane: String::from("missing"),
+            };
+
+        let error = config
+            .validate()
+            .expect_err("missing control plane should fail validation");
+
+        assert!(error
+            .to_string()
+            .contains("references unknown control plane 'missing'"));
+    }
+
+    #[test]
     fn x86_firecracker_pvm_contract_requires_host_and_artifact_kits() {
         let contract = FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::X86_64);
 
@@ -1313,6 +1494,13 @@ mod tests {
         assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
         assert_eq!(config.machines["cloud-azure"].host, "azure-linux");
+        assert!(config.control_planes.contains_key("demo"));
+        assert_eq!(
+            config.hosts["generic-linux"].connection,
+            HostConnection::HostedControlPlane {
+                control_plane: String::from("demo")
+            }
+        );
         assert_eq!(
             config.machines["demo"].substrate,
             ExecutionSubstrate::Firecracker

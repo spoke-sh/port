@@ -61,6 +61,45 @@ The central control plane is the system of record for hosted Port.
 The control plane does not execute guest commands inside the VM directly. It
 coordinates and authorizes them.
 
+## Hosted API Identity Contract
+
+The first hosted auth slice is now explicit in the shared Port model.
+
+Sample config shape:
+
+```toml
+[control_planes.demo]
+endpoint = "https://port.example.internal"
+audience = "port-hosted-demo"
+
+[control_planes.demo.auth]
+scheme = "bearer"
+header = "authorization"
+
+[control_planes.demo.auth.source]
+kind = "env"
+variable = "PORT_DEMO_TOKEN"
+```
+
+Hosted hosts point at that contract directly:
+
+```toml
+[hosts.aws-linux.connection]
+mode = "hosted-control-plane"
+control_plane = "demo"
+```
+
+That means Port now has a canonical way to say:
+
+- which hosted API endpoint owns a machine,
+- which audience the CLI is targeting,
+- which header carries the token,
+- and where the operator provides that token.
+
+This is still a contract, not a claim that the hosted API already runs. The
+current implementation uses it for validation, docs, help text, and provider-
+aware guidance rather than for real remote execution.
+
 ### Guest Agent
 
 The in-guest `port-guest-agent` remains the executor of guest operations.

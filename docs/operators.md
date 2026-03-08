@@ -145,9 +145,12 @@ What to expect:
 
 - `port doctor` shows provider-aware checks for `generic-linux`, `aws`, `gcp`,
   and `azure` alongside the usual local Linux prerequisites.
+- `port doctor` also prints the modeled hosted control-plane endpoint,
+  audience, and token source from `[control_planes.demo]`.
 - `port machine launch --machine cloud-aws` is expected to fail with AWS-
   specific guidance because remote launch orchestration is not implemented in
-  the MVP.
+  the MVP; the error now also reports the hosted control-plane endpoint and
+  token source that would own that workflow later.
 - `port machine launch --machine demo` remains the supported local Linux launch
   proof for the MVP.
 - Artifact mobility is already designed around that future remote workflow:
@@ -163,6 +166,9 @@ What to expect:
 - The future hosted split for lifecycle ownership and guest-operation brokering
   is documented in [`hosted.md`](hosted.md).
 - The explicit Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
+- Remote/cloud hosts in the sample config no longer use SSH placeholders;
+  they declare `mode = "hosted-control-plane"` and `control_plane = "demo"`
+  so the operator-facing contract matches the planned hosted product.
 
 The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
 The hosted node-agent/control-plane split that will eventually sit behind the

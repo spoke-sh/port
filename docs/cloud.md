@@ -41,10 +41,12 @@ Use the cloud lane to model intent and inspect support boundaries, not to
 perform remote launch yet.
 
 1. Keep the canonical config explicit about provider identity, for example `provider = "aws"` on `hosts.aws-linux`.
+   Remote/cloud hosts now also point at a named hosted control plane, for
+   example `mode = "hosted-control-plane"` plus `control_plane = "demo"`.
 2. Run `port doctor --config examples/port.toml` on the Linux environment you plan to use for Firecracker execution.
 3. Read the provider-aware checks to confirm whether the target lane is `local`, a future remote lane (`generic-linux`, `aws`, `gcp`), or explicitly unsupported (`azure`).
 4. For the current MVP, run `port machine launch --machine demo` only on a Linux host that passes `port doctor`.
-5. If you try `port machine launch --machine cloud-aws` or another remote machine, Port intentionally fails fast with guidance about the current boundary.
+5. If you try `port machine launch --machine cloud-aws` or another remote machine, Port intentionally fails fast with guidance about the current boundary plus the modeled hosted control-plane endpoint and token source.
 6. `port machine list`, `port machine status`, and `port machine stop` currently inspect local runtime roots only; they are not yet a remote-cloud inventory surface.
 7. Artifact mobility already uses the future-hosted vocabulary: build or publish a selected variant with `port artifacts push ...`, then pull that same logical reference onto the Linux host that will eventually own execution.
 
@@ -69,6 +71,9 @@ runtime ownership:
   guest-transport attachment on execution hosts.
 - the central control plane will own inventory, desired state, placement, and
   policy instead of the CLI process owning those concerns directly.
+- the first hosted auth slice is already modeled explicitly through
+  `[control_planes.<name>]`, including endpoint, audience, auth header, and
+  token source.
 
 The detailed hosted control contract lives in [`docs/hosted.md`](hosted.md).
 

@@ -14,8 +14,8 @@ use port_agent_protocol::{
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
-    ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, MachineArchitecture,
-    MachineControlContract, PortConfig, ProtectionMode,
+    ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, HostedApiIdentityContract,
+    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -308,6 +308,9 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
                 checks.push(check);
             }
         }
+        for (name, control_plane) in &config.control_planes {
+            checks.push(control_plane_check(name, control_plane));
+        }
 
         for (name, machine) in &config.machines {
             let host = config
@@ -427,9 +430,22 @@ fn firecracker_local_launch_machine(
     }
 
     if !matches!(host.connection, HostConnection::Local) {
+        let hosted_identity = config
+            .hosted_api_identity_contract(request.machine_name)
+            .with_context(|| {
+                format!(
+                    "failed to resolve hosted API identity for machine '{}'",
+                    request.machine_name
+                )
+            })?;
         bail!(
             "{}",
-            remote_launch_guidance(request.machine_name, &machine.host, host.provider)
+            remote_launch_guidance(
+                request.machine_name,
+                &machine.host,
+                host.provider,
+                hosted_identity.as_ref(),
+            )
         );
     }
 
@@ -1063,8 +1079,35 @@ fn provider_check(
         name: format!("host:{host_name}"),
         ok,
         required: false,
-        detail,
+        detail: match connection {
+            HostConnection::Local => detail,
+            HostConnection::HostedControlPlane { control_plane } => {
+                format!("{detail} Hosted routing is modeled through control plane '{control_plane}'.")
+            }
+        },
     })
+}
+
+fn control_plane_check(
+    control_plane_name: &str,
+    control_plane: &port_model::HostedControlPlaneSpec,
+) -> DoctorCheck {
+    DoctorCheck {
+        name: format!("control-plane:{control_plane_name}"),
+        ok: true,
+        required: false,
+        detail: format!(
+            "Hosted control plane '{}' targets '{}' with audience '{}' and expects a {} token from {} via the '{}' header.",
+            control_plane_name,
+            control_plane.endpoint,
+            control_plane.audience,
+            match control_plane.auth.scheme {
+                port_model::HostedAuthScheme::Bearer => "bearer",
+            },
+            control_plane.auth.source.describe(),
+            control_plane.auth.header,
+        ),
+    }
 }
 
 fn machine_contract_check(
@@ -1180,8 +1223,25 @@ fn resolve_machine_architecture(architecture: MachineArchitecture) -> Result<Mac
     }
 }
 
-fn remote_launch_guidance(machine_name: &str, host_name: &str, provider: HostProvider) -> String {
-    match provider {
+fn remote_launch_guidance(
+    machine_name: &str,
+    host_name: &str,
+    provider: HostProvider,
+    hosted_identity: Option<&HostedApiIdentityContract>,
+) -> String {
+    let hosted_route = hosted_identity
+        .map(|identity| {
+            format!(
+                " Hosted routing is modeled through control plane '{}' at '{}' with audience '{}' and token source '{}'.",
+                identity.control_plane,
+                identity.endpoint,
+                identity.audience,
+                identity.auth.source.describe(),
+            )
+        })
+        .unwrap_or_default();
+
+    let detail = match provider {
         HostProvider::Local => format!(
             "machine '{machine_name}' targets host '{host_name}' through a remote connection, but provider 'local' is reserved for direct local Linux launch"
         ),
@@ -1197,7 +1257,9 @@ fn remote_launch_guidance(machine_name: &str, host_name: &str, provider: HostPro
         HostProvider::Azure => format!(
             "machine '{machine_name}' targets Azure host '{host_name}'; Azure is explicitly unsupported for the Firecracker MVP. Move the workload to a generic Linux, AWS, or GCP host."
         ),
-    }
+    };
+
+    format!("{detail}{hosted_route}")
 }
 
 fn binary_check(name: &str, binary: &str, required: bool) -> DoctorCheck {

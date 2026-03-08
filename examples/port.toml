@@ -70,6 +70,18 @@ architecture = "aarch64"
 substrate = "firecracker"
 protection_mode = "standard"
 
+[control_planes.demo]
+endpoint = "https://port.example.internal"
+audience = "port-hosted-demo"
+
+[control_planes.demo.auth]
+scheme = "bearer"
+header = "authorization"
+
+[control_planes.demo.auth.source]
+kind = "env"
+variable = "PORT_DEMO_TOKEN"
+
 [hosts.local]
 platform = "linux"
 provider = "local"
@@ -86,56 +98,48 @@ platform = "linux"
 provider = "generic-linux"
 
 [hosts.generic-linux.connection]
-mode = "ssh"
-address = "linux.example.internal"
-user = "port"
-port = 22
+mode = "hosted-control-plane"
+control_plane = "demo"
 
 [hosts.generic-linux.firecracker]
 local_launch = false
-notes = ["Remote Linux host reserved for the future cloud/control lane."]
+notes = ["Remote Linux host is modeled through the demo hosted control plane contract."]
 
 [hosts.aws-linux]
 platform = "linux"
 provider = "aws"
 
 [hosts.aws-linux.connection]
-mode = "ssh"
-address = "aws.example.internal"
-user = "ec2-user"
-port = 22
+mode = "hosted-control-plane"
+control_plane = "demo"
 
 [hosts.aws-linux.firecracker]
 local_launch = false
-notes = ["AWS is a justified future Firecracker provider lane for Port."]
+notes = ["AWS is a justified future Firecracker provider lane and is modeled through the demo hosted control plane contract."]
 
 [hosts.gcp-linux]
 platform = "linux"
 provider = "gcp"
 
 [hosts.gcp-linux.connection]
-mode = "ssh"
-address = "gcp.example.internal"
-user = "port"
-port = 22
+mode = "hosted-control-plane"
+control_plane = "demo"
 
 [hosts.gcp-linux.firecracker]
 local_launch = false
-notes = ["GCP is a justified future Firecracker provider lane for Port."]
+notes = ["GCP is a justified future Firecracker provider lane and is modeled through the demo hosted control plane contract."]
 
 [hosts.azure-linux]
 platform = "linux"
 provider = "azure"
 
 [hosts.azure-linux.connection]
-mode = "ssh"
-address = "azure.example.internal"
-user = "port"
-port = 22
+mode = "hosted-control-plane"
+control_plane = "demo"
 
 [hosts.azure-linux.firecracker]
 local_launch = false
-notes = ["Azure is modeled explicitly so diagnostics can report it as unsupported."]
+notes = ["Azure is modeled explicitly through the demo hosted control plane so diagnostics can report it as unsupported."]
 
 [machines.demo]
 host = "local"
