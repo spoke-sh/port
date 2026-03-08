@@ -2,11 +2,12 @@
 id: 1vzHRx000
 title: Gate Hosted Pvm Placement
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T09:57:53
-updated_at: 2026-03-08T10:16:00
+updated_at: 2026-03-08T11:45:39
 scope: 1vz3ck000/1vzHPo000
 started_at: 2026-03-08T10:16:00
+completed_at: 2026-03-08T11:45:39
 ---
 
 # Gate Hosted Pvm Placement
