@@ -8,6 +8,7 @@
 | Bearing | Status | Survey | Assessment |
 |---------|--------|--------|------------|
 | [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
+| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | ready | ✓ | ✓ |
 
 ## Epics
 
