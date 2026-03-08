@@ -1,15 +1,15 @@
 use std::fs;
 use std::io::{BufReader, BufWriter, Read};
 use std::net::{Shutdown, TcpStream};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Component, Path, PathBuf};
 use std::thread;
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    CopyRequest, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest, LogsResult,
-    OperationResult, PtyRequest, PtyResult, RequestEnvelope, ResponseEnvelope, StreamKind,
-    read_frame, write_frame,
+    CopyRequest, ExecRequest, ExecResult, ForwardEndpoint, ForwardRequest, GuestOperation,
+    LogsRequest, LogsResult, OperationResult, PtyRequest, PtyResult, RequestEnvelope,
+    ResponseEnvelope, StreamKind, parse_forward_endpoint, read_frame, write_frame,
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use vsock::{VMADDR_CID_ANY, VsockListener, VsockStream};
@@ -163,6 +163,52 @@ trait AgentStream: Read + std::io::Write + Send + 'static {
         Self: Sized;
 
     fn shutdown_write(&self) -> std::io::Result<()>;
+}
+
+enum ForwardTargetStream {
+    Tcp(TcpStream),
+    Unix(UnixStream),
+}
+
+impl ForwardTargetStream {
+    fn try_clone_stream(&self) -> std::io::Result<Self> {
+        match self {
+            Self::Tcp(stream) => stream.try_clone().map(Self::Tcp),
+            Self::Unix(stream) => stream.try_clone().map(Self::Unix),
+        }
+    }
+
+    fn shutdown_write(&self) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.shutdown(Shutdown::Write),
+            Self::Unix(stream) => stream.shutdown(Shutdown::Write),
+        }
+    }
+}
+
+impl Read for ForwardTargetStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => stream.read(buf),
+            Self::Unix(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl std::io::Write for ForwardTargetStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Tcp(stream) => stream.write(buf),
+            Self::Unix(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.flush(),
+            Self::Unix(stream) => stream.flush(),
+        }
+    }
 }
 
 impl AgentStream for std::os::unix::net::UnixStream {
@@ -411,7 +457,7 @@ impl AgentService {
                 .try_clone_stream()
                 .context("failed to clone guest transport stream for forward ack")?,
         );
-        let mut outbound = match TcpStream::connect(&request.target)
+        let mut outbound = match connect_forward_target(&request.target)
             .with_context(|| format!("failed to connect to '{}'", request.target))
         {
             Ok(stream) => stream,
@@ -433,12 +479,12 @@ impl AgentService {
             .context("failed to clone guest transport stream for forward read")?;
         let mut inbound_write = stream;
         let mut outbound_read = outbound
-            .try_clone()
+            .try_clone_stream()
             .context("failed to clone target stream")?;
 
         let first = thread::spawn(move || {
             let result = std::io::copy(&mut inbound_read, &mut outbound);
-            let _ = outbound.shutdown(Shutdown::Write);
+            let _ = outbound.shutdown_write();
             result
         });
         let second = thread::spawn(move || {
@@ -465,6 +511,17 @@ where
         },
     )
     .map_err(|frame_error| anyhow!("protocol error: {frame_error}"))
+}
+
+fn connect_forward_target(target: &str) -> Result<ForwardTargetStream> {
+    match parse_forward_endpoint(target).map_err(|error| anyhow!(error.to_string()))? {
+        ForwardEndpoint::Tcp(address) => TcpStream::connect(&address)
+            .map(ForwardTargetStream::Tcp)
+            .with_context(|| format!("failed to connect to TCP target '{address}'")),
+        ForwardEndpoint::Unix(path) => UnixStream::connect(&path)
+            .map(ForwardTargetStream::Unix)
+            .with_context(|| format!("failed to connect to Unix target '{}'", path.display())),
+    }
 }
 
 fn tail(contents: &str, lines: usize) -> String {

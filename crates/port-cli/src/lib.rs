@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -11,7 +13,7 @@ use port_runtime::{
     ArtifactRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest, GuestRequest,
     LaunchRequest,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const AFTER_HELP: &str = "\
 Example assumptions:
@@ -36,8 +38,10 @@ Guest workflow examples:
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
+  port --config examples/port.toml guest forward --machine demo --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
   `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
-  `port guest forward` is a foreground host-side proxy session; stop it with Ctrl-C when you are done.
+  `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
 
 Platform Support:
@@ -65,7 +69,7 @@ Hosted Control:
   `port machine list|status|stop` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
   This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
-  Detached forwarding, Unix-socket forwarding, monitoring, secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
+  Monitoring, secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";
@@ -104,6 +108,8 @@ pub enum Command {
     Machine(MachineCommand),
     #[command(subcommand, about = "Reach guest agent capabilities")]
     Guest(GuestCommand),
+    #[command(subcommand, hide = true)]
+    Internal(InternalCommand),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -116,6 +122,12 @@ pub enum OutputFormat {
 pub enum CopyDirectionArg {
     HostToGuest,
     GuestToHost,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ForwardLifecycleArg {
+    Foreground,
+    Detached,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -298,16 +310,43 @@ pub enum GuestCommand {
         #[arg(long)]
         follow: bool,
     },
-    #[command(about = "Forward a local listener into the guest through the agent")]
+    #[command(about = "Forward TCP or Unix-socket listeners into the guest through the agent")]
     Forward {
         #[arg(long)]
         machine: String,
         #[arg(long, default_value = "runtime")]
         runtime_root: PathBuf,
         #[arg(long)]
+        listen: Option<String>,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long, value_enum, default_value_t = ForwardLifecycleArg::Foreground)]
+        lifecycle: ForwardLifecycleArg,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        list: bool,
+        #[arg(long)]
+        stop: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum InternalCommand {
+    #[command(hide = true)]
+    ForwardDaemon {
+        #[arg(long)]
+        machine: String,
+        #[arg(long)]
+        runtime_root: PathBuf,
+        #[arg(long)]
         listen: String,
         #[arg(long)]
         target: String,
+        #[arg(long)]
+        manifest_path: PathBuf,
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -327,6 +366,17 @@ struct RenderedDoctorCheck {
     detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DetachedForwardManifest {
+    name: String,
+    machine: String,
+    pid: u32,
+    listen: String,
+    target: String,
+    stdout_log: PathBuf,
+    stderr_log: PathBuf,
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor { format } => doctor(format, cli.config.as_deref()),
@@ -336,9 +386,31 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Command::Machine(command) => run_machine(command, cli.config),
         Command::Guest(command) => {
-            let config = load_config(cli.config)?;
-            run_guest(command, &config)
+            let config_path = cli.config.clone();
+            let config = load_config(config_path.clone())?;
+            run_guest(command, config_path.as_deref(), &config)
         }
+        Command::Internal(command) => match command {
+            InternalCommand::ForwardDaemon {
+                machine,
+                runtime_root,
+                listen,
+                target,
+                manifest_path,
+                name,
+            } => {
+                let config = load_config(cli.config)?;
+                run_forward_daemon(
+                    &config,
+                    &machine,
+                    &runtime_root,
+                    &listen,
+                    &target,
+                    &manifest_path,
+                    &name,
+                )
+            }
+        },
     }
 }
 
@@ -626,7 +698,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
     Ok(())
 }
 
-fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
+fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortConfig) -> Result<()> {
     match command {
         GuestCommand::Exec {
             machine,
@@ -731,21 +803,68 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             runtime_root,
             listen,
             target,
+            lifecycle,
+            name,
+            list,
+            stop,
         } => {
             ensure_machine_exists(config, &machine)?;
-            let session = port_runtime::prepare_guest_forward(
-                config,
-                GuestForwardRequest {
-                    machine_name: &machine,
-                    runtime_root: &runtime_root,
-                    listen: &listen,
-                    target: &target,
-                },
-            )?;
-            println!("forward listening: {}", session.listen_addr());
-            println!("forward target: {}", session.target());
-            println!("forward lifecycle: foreground; press Ctrl-C to stop");
-            session.serve()?;
+            if list {
+                if stop {
+                    bail!("--list and --stop are mutually exclusive");
+                }
+                if listen.is_some() || target.is_some() {
+                    bail!("--list does not accept --listen or --target");
+                }
+                return list_detached_forwards(config, &machine, &runtime_root);
+            }
+            if stop {
+                if listen.is_some() || target.is_some() {
+                    bail!("--stop does not accept --listen or --target");
+                }
+                let name = name
+                    .as_deref()
+                    .context("--stop requires --name to select a detached forward")?;
+                return stop_detached_forward(config, &machine, &runtime_root, name);
+            }
+
+            let listen = listen.context("forward serve requires --listen")?;
+            let target = target.context("forward serve requires --target")?;
+            match lifecycle {
+                ForwardLifecycleArg::Foreground => {
+                    let session = port_runtime::prepare_guest_forward(
+                        config,
+                        GuestForwardRequest {
+                            machine_name: &machine,
+                            runtime_root: &runtime_root,
+                            listen: &listen,
+                            target: &target,
+                        },
+                    )?;
+                    println!("forward listening: {}", session.listen_addr());
+                    println!("forward target: {}", session.target());
+                    println!("forward lifecycle: foreground; press Ctrl-C to stop");
+                    session.serve()?;
+                }
+                ForwardLifecycleArg::Detached => {
+                    let manifest = start_detached_forward(
+                        config_path,
+                        config,
+                        &machine,
+                        &runtime_root,
+                        &listen,
+                        &target,
+                        name.as_deref(),
+                    )?;
+                    println!("forward name: {}", manifest.name);
+                    println!("forward listening: {}", manifest.listen);
+                    println!("forward target: {}", manifest.target);
+                    println!("forward lifecycle: detached");
+                    println!("forward pid: {}", manifest.pid);
+                    println!("forward stdout: {}", manifest.stdout_log.display());
+                    println!("forward stderr: {}", manifest.stderr_log.display());
+                }
+            }
         }
     }
 
@@ -758,6 +877,257 @@ fn ensure_machine_exists(config: &PortConfig, machine: &str) -> Result<()> {
     } else {
         bail!("unknown machine '{machine}'")
     }
+}
+
+fn start_detached_forward(
+    config_path: Option<&Path>,
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    listen: &str,
+    target: &str,
+    name: Option<&str>,
+) -> Result<DetachedForwardManifest> {
+    let state_dir = port_runtime::guest_forward_state_dir(config, machine, runtime_root)?;
+    fs::create_dir_all(&state_dir)
+        .with_context(|| format!("failed to create '{}'", state_dir.display()))?;
+
+    let name = name
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("forward-{}", unix_timestamp()));
+    let manifest_path = state_dir.join(format!("{name}.json"));
+    let stdout_log = state_dir.join(format!("{name}.stdout.log"));
+    let stderr_log = state_dir.join(format!("{name}.stderr.log"));
+
+    let current_exe =
+        std::env::current_exe().context("failed to resolve the current port executable")?;
+    let mut command = ProcessCommand::new(current_exe);
+    if let Some(config_path) = config_path {
+        command.arg("--config").arg(config_path);
+    }
+    command
+        .arg("internal")
+        .arg("forward-daemon")
+        .arg("--machine")
+        .arg(machine)
+        .arg("--runtime-root")
+        .arg(runtime_root)
+        .arg("--listen")
+        .arg(listen)
+        .arg("--target")
+        .arg(target)
+        .arg("--manifest-path")
+        .arg(&manifest_path)
+        .arg("--name")
+        .arg(&name)
+        .stdin(Stdio::null())
+        .stdout(
+            fs::File::create(&stdout_log)
+                .with_context(|| format!("failed to create '{}'", stdout_log.display()))?,
+        )
+        .stderr(
+            fs::File::create(&stderr_log)
+                .with_context(|| format!("failed to create '{}'", stderr_log.display()))?,
+        );
+
+    let child = command
+        .spawn()
+        .context("failed to start detached forward daemon")?;
+    let pid = child.id();
+
+    let manifest = wait_for_detached_forward_manifest(
+        &manifest_path,
+        DetachedForwardManifest {
+            name,
+            machine: machine.to_string(),
+            pid,
+            listen: listen.to_string(),
+            target: target.to_string(),
+            stdout_log,
+            stderr_log,
+        },
+    )?;
+
+    Ok(manifest)
+}
+
+fn wait_for_detached_forward_manifest(
+    manifest_path: &Path,
+    fallback: DetachedForwardManifest,
+) -> Result<DetachedForwardManifest> {
+    for _ in 0..100 {
+        if manifest_path.exists() {
+            let bytes = fs::read(manifest_path)
+                .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
+            let manifest: DetachedForwardManifest =
+                serde_json::from_slice(&bytes).with_context(|| {
+                    format!(
+                        "failed to parse detached forward manifest '{}'",
+                        manifest_path.display()
+                    )
+                })?;
+            return Ok(manifest);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    Ok(fallback)
+}
+
+fn list_detached_forwards(config: &PortConfig, machine: &str, runtime_root: &Path) -> Result<()> {
+    let state_dir = port_runtime::guest_forward_state_dir(config, machine, runtime_root)?;
+    if !state_dir.exists() {
+        println!("no detached forwards found for machine '{}'", machine);
+        return Ok(());
+    }
+
+    let mut manifests = Vec::new();
+    for entry in fs::read_dir(&state_dir)
+        .with_context(|| format!("failed to read '{}'", state_dir.display()))?
+    {
+        let entry = entry?;
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = fs::read(entry.path())?;
+        let manifest: DetachedForwardManifest = serde_json::from_slice(&bytes)
+            .with_context(|| format!("failed to parse '{}'", entry.path().display()))?;
+        manifests.push(manifest);
+    }
+
+    manifests.sort_by(|left, right| left.name.cmp(&right.name));
+    if manifests.is_empty() {
+        println!("no detached forwards found for machine '{}'", machine);
+        return Ok(());
+    }
+
+    for manifest in manifests {
+        let state = if pid_is_live(manifest.pid) {
+            "running"
+        } else {
+            "stale"
+        };
+        println!("forward: {}", manifest.name);
+        println!("state: {}", state);
+        println!("pid: {}", manifest.pid);
+        println!("listen: {}", manifest.listen);
+        println!("target: {}", manifest.target);
+        println!("stdout: {}", manifest.stdout_log.display());
+        println!("stderr: {}", manifest.stderr_log.display());
+        println!();
+    }
+
+    Ok(())
+}
+
+fn stop_detached_forward(
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    name: &str,
+) -> Result<()> {
+    let state_dir = port_runtime::guest_forward_state_dir(config, machine, runtime_root)?;
+    let manifest_path = state_dir.join(format!("{name}.json"));
+    let bytes = fs::read(&manifest_path)
+        .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
+    let manifest: DetachedForwardManifest = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse '{}'", manifest_path.display()))?;
+
+    if pid_is_live(manifest.pid) {
+        kill_pid(manifest.pid)?;
+    }
+    if let Some(socket_path) = manifest.listen.strip_prefix("unix:") {
+        let socket_path = Path::new(socket_path);
+        if socket_path.exists() {
+            fs::remove_file(socket_path).with_context(|| {
+                format!(
+                    "failed to remove detached forward socket '{}'",
+                    socket_path.display()
+                )
+            })?;
+        }
+    }
+    fs::remove_file(&manifest_path)
+        .with_context(|| format!("failed to remove '{}'", manifest_path.display()))?;
+
+    println!("forward name: {}", manifest.name);
+    println!("forward lifecycle: detached");
+    println!("forward state: stopped");
+    println!("forward pid: {}", manifest.pid);
+    Ok(())
+}
+
+fn run_forward_daemon(
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    listen: &str,
+    target: &str,
+    manifest_path: &Path,
+    name: &str,
+) -> Result<()> {
+    ensure_machine_exists(config, machine)?;
+    let session = port_runtime::prepare_guest_forward(
+        config,
+        GuestForwardRequest {
+            machine_name: machine,
+            runtime_root,
+            listen,
+            target,
+        },
+    )?;
+
+    if let Some(parent) = manifest_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create '{}'", parent.display()))?;
+    }
+    let stdout_log = manifest_path.with_extension("stdout.log");
+    let stderr_log = manifest_path.with_extension("stderr.log");
+    let manifest = DetachedForwardManifest {
+        name: name.to_string(),
+        machine: machine.to_string(),
+        pid: std::process::id(),
+        listen: session.listen_addr(),
+        target: session.target().to_string(),
+        stdout_log,
+        stderr_log,
+    };
+    fs::write(
+        manifest_path,
+        serde_json::to_vec_pretty(&manifest).expect("manifest should encode"),
+    )
+    .with_context(|| format!("failed to write '{}'", manifest_path.display()))?;
+
+    session.serve()
+}
+
+fn pid_is_live(pid: u32) -> bool {
+    ProcessCommand::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn kill_pid(pid: u32) -> Result<()> {
+    let status = ProcessCommand::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .with_context(|| format!("failed to signal pid {pid}"))?;
+    if !status.success() {
+        bail!("failed to stop detached forward pid {pid}");
+    }
+    Ok(())
+}
+
+fn unix_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn load_config(path: Option<PathBuf>) -> Result<PortConfig> {
@@ -841,7 +1211,7 @@ mod tests {
             "push",
             "pull",
             "Artifact Mobility",
-            "foreground host-side proxy",
+            "detached lifecycle modes",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

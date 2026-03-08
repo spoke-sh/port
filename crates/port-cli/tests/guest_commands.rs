@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -220,6 +221,16 @@ fn run_guest_capability_suite(
     );
 }
 
+fn hosted_config(runtime_root: &Path) -> PortConfig {
+    let mut config = PortConfig::sample();
+    config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = runtime_root.to_path_buf();
+    config
+}
+
 #[test]
 fn cli_guest_commands_cover_all_capabilities() {
     let temp = tempdir().expect("tempdir should exist");
@@ -253,16 +264,187 @@ fn cli_guest_commands_cover_hosted_control_plane_runtime() {
     fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
     fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
 
-    let mut config = PortConfig::sample();
-    config
-        .nodes
-        .get_mut("aws-linux-node")
-        .expect("aws-linux-node should exist")
-        .runtime_root = hosted_runtime_root.clone();
+    let config = hosted_config(&hosted_runtime_root);
     write_config(&config_path, &config);
 
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
 
     run_guest_capability_suite(&config_path, "cloud-aws", None, &guest_root, temp.path());
+}
+
+#[test]
+fn cli_guest_forward_supports_hosted_unix_socket_mode() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    write_config(&config_path, &hosted_config(&hosted_runtime_root));
+
+    let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
+    spawn_agent(&socket_path, &guest_root);
+
+    let target_path = temp.path().join("target.sock");
+    let listen_path = temp.path().join("listen.sock");
+    let target_listener = UnixListener::bind(&target_path).expect("target listener");
+    thread::spawn(move || {
+        let (mut stream, _) = target_listener.accept().expect("accept target");
+        let mut buf = [0_u8; 32];
+        let len = stream.read(&mut buf).expect("read target");
+        stream.write_all(&buf[..len]).expect("write target");
+    });
+
+    let mut forward = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--listen")
+        .arg(format!("unix:{}", listen_path.display()))
+        .arg("--target")
+        .arg(format!("unix:{}", target_path.display()))
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("forward command");
+
+    let mut forwarded = None;
+    for _ in 0..100 {
+        match UnixStream::connect(&listen_path) {
+            Ok(stream) => {
+                forwarded = Some(stream);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut forwarded = forwarded.expect("connect forwarded listener");
+    forwarded.write_all(b"unix-ok").expect("write forwarded");
+    let mut buf = [0_u8; 32];
+    let len = forwarded.read(&mut buf).expect("read forwarded");
+    assert_eq!(&buf[..len], b"unix-ok");
+
+    let _ = forward.kill();
+    let status = forward.wait().expect("forward process should exit");
+    assert!(
+        !status.success(),
+        "forward process should have been terminated"
+    );
+}
+
+#[test]
+fn cli_guest_forward_supports_hosted_detached_lifecycle() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    write_config(&config_path, &hosted_config(&hosted_runtime_root));
+
+    let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
+    spawn_agent(&socket_path, &guest_root);
+
+    let target = TcpListener::bind("127.0.0.1:0").expect("target listener");
+    let target_addr = target.local_addr().expect("target addr");
+    thread::spawn(move || {
+        let (mut stream, _) = target.accept().expect("accept target");
+        let mut buf = [0_u8; 32];
+        let len = stream.read(&mut buf).expect("read target");
+        stream.write_all(&buf[..len]).expect("write target");
+    });
+    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve listen port");
+    let listen_addr = reserved.local_addr().expect("listen addr");
+    drop(reserved);
+
+    let start = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--listen")
+        .arg(listen_addr.to_string())
+        .arg("--target")
+        .arg(target_addr.to_string())
+        .arg("--lifecycle")
+        .arg("detached")
+        .arg("--name")
+        .arg("hosted-detached")
+        .output()
+        .expect("detached start command");
+    assert!(start.status.success());
+    assert!(
+        String::from_utf8_lossy(&start.stdout).contains("forward lifecycle: detached"),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&start.stdout),
+        String::from_utf8_lossy(&start.stderr)
+    );
+
+    let list = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--list")
+        .output()
+        .expect("detached list command");
+    assert!(list.status.success());
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(list_stdout.contains("forward: hosted-detached"));
+    assert!(list_stdout.contains("state: running"));
+
+    let mut forwarded = None;
+    for _ in 0..100 {
+        match TcpStream::connect(listen_addr) {
+            Ok(stream) => {
+                forwarded = Some(stream);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut forwarded = forwarded.expect("connect detached listener");
+    forwarded
+        .write_all(b"detached-ok")
+        .expect("write forwarded");
+    let mut buf = [0_u8; 32];
+    let len = forwarded.read(&mut buf).expect("read forwarded");
+    assert_eq!(&buf[..len], b"detached-ok");
+
+    let stop = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--stop")
+        .arg("--name")
+        .arg("hosted-detached")
+        .output()
+        .expect("detached stop command");
+    assert!(stop.status.success());
+    assert!(String::from_utf8_lossy(&stop.stdout).contains("forward state: stopped"));
+
+    let list_after = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--list")
+        .output()
+        .expect("detached list after stop");
+    assert!(list_after.status.success());
+    assert!(
+        String::from_utf8_lossy(&list_after.stdout)
+            .contains("no detached forwards found for machine 'cloud-aws'")
+    );
 }

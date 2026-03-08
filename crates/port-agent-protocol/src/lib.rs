@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,12 @@ pub struct LogsRequest {
 pub struct ForwardRequest {
     pub listen: String,
     pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForwardEndpoint {
+    Tcp(String),
+    Unix(PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +141,7 @@ pub enum ProtocolError {
     Encode(serde_json::Error),
     Decode(serde_json::Error),
     EmptyFrame,
+    InvalidForwardEndpoint(String),
 }
 
 impl std::fmt::Display for ProtocolError {
@@ -143,6 +151,9 @@ impl std::fmt::Display for ProtocolError {
             Self::Encode(source) => write!(f, "encode error: {source}"),
             Self::Decode(source) => write!(f, "decode error: {source}"),
             Self::EmptyFrame => f.write_str("received an empty protocol frame"),
+            Self::InvalidForwardEndpoint(message) => {
+                write!(f, "invalid forward endpoint: {message}")
+            }
         }
     }
 }
@@ -153,6 +164,44 @@ impl From<std::io::Error> for ProtocolError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
     }
+}
+
+pub fn parse_forward_endpoint(input: &str) -> Result<ForwardEndpoint, ProtocolError> {
+    if let Some(path) = input.strip_prefix("unix://") {
+        return parse_unix_path(path);
+    }
+    if let Some(path) = input.strip_prefix("unix:") {
+        return parse_unix_path(path);
+    }
+
+    if input.trim().is_empty() {
+        return Err(ProtocolError::InvalidForwardEndpoint(String::from(
+            "endpoint must not be empty",
+        )));
+    }
+
+    Ok(ForwardEndpoint::Tcp(input.to_string()))
+}
+
+pub fn render_forward_endpoint(endpoint: &ForwardEndpoint) -> String {
+    match endpoint {
+        ForwardEndpoint::Tcp(address) => address.clone(),
+        ForwardEndpoint::Unix(path) => format!("unix:{}", path.display()),
+    }
+}
+
+fn parse_unix_path(path: &str) -> Result<ForwardEndpoint, ProtocolError> {
+    let path = if path.starts_with('/') {
+        PathBuf::from(path)
+    } else {
+        PathBuf::from("/").join(path)
+    };
+    if path.as_os_str().is_empty() {
+        return Err(ProtocolError::InvalidForwardEndpoint(String::from(
+            "unix endpoint path must not be empty",
+        )));
+    }
+    Ok(ForwardEndpoint::Unix(path))
 }
 
 pub fn write_frame<W: Write, T: Serialize>(writer: &mut W, value: &T) -> Result<(), ProtocolError> {
@@ -175,11 +224,13 @@ pub fn read_frame<R: BufRead, T: DeserializeOwned>(reader: &mut R) -> Result<T, 
 #[cfg(test)]
 mod tests {
     use super::{
-        CopyDirection, CopyRequest, ExecRequest, ExecResult, ForwardResult, GuestOperation,
-        OperationResult, RequestEnvelope, ResponseEnvelope, StreamKind, read_frame, write_frame,
+        CopyDirection, CopyRequest, ExecRequest, ExecResult, ForwardEndpoint, ForwardResult,
+        GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, StreamKind,
+        parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
     };
     use std::collections::BTreeMap;
     use std::io::Cursor;
+    use std::path::PathBuf;
 
     #[test]
     fn request_round_trips_through_json() {
@@ -276,5 +327,34 @@ mod tests {
 
         assert_eq!(decoded_request, request);
         assert_eq!(decoded_response, response);
+    }
+
+    #[test]
+    fn parse_forward_endpoint_supports_tcp_and_unix() {
+        assert_eq!(
+            parse_forward_endpoint("127.0.0.1:8080").expect("tcp endpoint should parse"),
+            ForwardEndpoint::Tcp(String::from("127.0.0.1:8080"))
+        );
+        assert_eq!(
+            parse_forward_endpoint("unix:/tmp/port.sock").expect("unix endpoint should parse"),
+            ForwardEndpoint::Unix(PathBuf::from("/tmp/port.sock"))
+        );
+        assert_eq!(
+            parse_forward_endpoint("unix://tmp/port.sock")
+                .expect("unix endpoint with double slash should parse"),
+            ForwardEndpoint::Unix(PathBuf::from("/tmp/port.sock"))
+        );
+    }
+
+    #[test]
+    fn render_forward_endpoint_preserves_scheme_for_unix() {
+        assert_eq!(
+            render_forward_endpoint(&ForwardEndpoint::Tcp(String::from("127.0.0.1:8080"))),
+            "127.0.0.1:8080"
+        );
+        assert_eq!(
+            render_forward_endpoint(&ForwardEndpoint::Unix(PathBuf::from("/tmp/port.sock"))),
+            "unix:/tmp/port.sock"
+        );
     }
 }

@@ -124,7 +124,7 @@ port guest exec --machine <name> -- <command...>
 port guest copy --machine <name> --direction <host-to-guest|guest-to-host> --source <path> --destination <path>
 port guest pty --machine <name> -- <command...>
 port guest logs --machine <name> --path <path> [--tail-lines <n>] [--follow]
-port guest forward --machine <name> --listen <addr> --target <addr>
+port guest forward --machine <name> --listen <tcp-addr|unix:path> --target <tcp-addr|unix:path> [--lifecycle <foreground|detached>] [--name <name>] [--list] [--stop]
 ```
 
 Use `port --help` or any nested `--help` command to inspect the current command
@@ -379,6 +379,15 @@ cargo run -p port-cli -- --config examples/port.toml guest logs \
 cargo run -p port-cli -- --config examples/port.toml guest forward \
   --machine demo --runtime-root /tmp/port-runtime \
   --listen 127.0.0.1:8080 --target 127.0.0.1:80
+
+cargo run -p port-cli -- --config examples/port.toml guest forward \
+  --machine demo --runtime-root /tmp/port-runtime \
+  --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
+
+cargo run -p port-cli -- --config examples/port.toml guest forward \
+  --machine demo --runtime-root /tmp/port-runtime \
+  --listen 127.0.0.1:8081 --target 127.0.0.1:80 \
+  --lifecycle detached --name demo-web
 ```
 
 Current forward lifecycle:
@@ -386,6 +395,12 @@ Current forward lifecycle:
 - `port guest forward` is a foreground host-side proxy. The command prints the
   bound listener address, keeps serving until you interrupt it, and opens one
   guest transport connection per inbound client.
+- `port guest forward --lifecycle detached` starts the same forwarding model in
+  a detached Port-managed daemon process. Use the same `port guest forward`
+  command with `--list` to inspect detached sessions and `--stop --name <name>`
+  to terminate one.
+- `--listen` and `--target` accept TCP addresses such as `127.0.0.1:8080` and
+  Unix-socket addresses written as `unix:/path/to/socket`.
 - Guest-side `--target` addresses still depend on guest networking being up.
   In the sample guest image, bring loopback up before targeting
   `127.0.0.1`, for example with

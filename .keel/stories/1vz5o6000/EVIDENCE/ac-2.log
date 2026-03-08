@@ -1,0 +1,95 @@
+---
+recorded_at: 2026-03-07T21:22:24.193745991-08:00
+mode: manual
+files: [".keel/stories/1vz5o6000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-cli ==
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port guest forward --help excerpt ==
+Forward TCP or Unix-socket listeners into the guest through the agent
+
+Usage: port guest forward [OPTIONS] --machine <MACHINE>
+
+Options:
+      --config <PATH>                Load a Port model from a TOML file instead of using the
+                                     built-in sample
+      --machine <MACHINE>            
+      --runtime-root <RUNTIME_ROOT>  [default: runtime]
+      --listen <LISTEN>              
+      --target <TARGET>              
+      --lifecycle <LIFECYCLE>        [default: foreground] [possible values: foreground, detached]
+      --name <NAME>                  
+      --list                         
+      --stop                         
+  -h, --help                         Print help
+
+== detached and Unix-socket docs excerpt ==
+crates/port-cli/src/lib.rs:40:  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
+crates/port-cli/src/lib.rs:41:  port --config examples/port.toml guest forward --machine demo --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
+crates/port-cli/src/lib.rs:42:  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
+crates/port-cli/src/lib.rs:44:  `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
+crates/port-cli/src/lib.rs:72:  Monitoring, secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
+crates/port-cli/src/lib.rs:814:                    bail!("--list and --stop are mutually exclusive");
+crates/port-cli/src/lib.rs:817:                    bail!("--list does not accept --listen or --target");
+crates/port-cli/src/lib.rs:819:                return list_detached_forwards(config, &machine, &runtime_root);
+crates/port-cli/src/lib.rs:823:                    bail!("--stop does not accept --listen or --target");
+crates/port-cli/src/lib.rs:827:                    .context("--stop requires --name to select a detached forward")?;
+crates/port-cli/src/lib.rs:828:                return stop_detached_forward(config, &machine, &runtime_root, name);
+crates/port-cli/src/lib.rs:831:            let listen = listen.context("forward serve requires --listen")?;
+crates/port-cli/src/lib.rs:850:                    let manifest = start_detached_forward(
+crates/port-cli/src/lib.rs:862:                    println!("forward lifecycle: detached");
+crates/port-cli/src/lib.rs:882:fn start_detached_forward(
+crates/port-cli/src/lib.rs:915:        .arg("--listen")
+crates/port-cli/src/lib.rs:935:        .context("failed to start detached forward daemon")?;
+crates/port-cli/src/lib.rs:938:    let manifest = wait_for_detached_forward_manifest(
+crates/port-cli/src/lib.rs:954:fn wait_for_detached_forward_manifest(
+crates/port-cli/src/lib.rs:965:                        "failed to parse detached forward manifest '{}'",
+crates/port-cli/src/lib.rs:977:fn list_detached_forwards(config: &PortConfig, machine: &str, runtime_root: &Path) -> Result<()> {
+crates/port-cli/src/lib.rs:980:        println!("no detached forwards found for machine '{}'", machine);
+crates/port-cli/src/lib.rs:1000:        println!("no detached forwards found for machine '{}'", machine);
+crates/port-cli/src/lib.rs:1023:fn stop_detached_forward(
+crates/port-cli/src/lib.rs:1044:                    "failed to remove detached forward socket '{}'",
+crates/port-cli/src/lib.rs:1054:    println!("forward lifecycle: detached");
+crates/port-cli/src/lib.rs:1121:        bail!("failed to stop detached forward pid {pid}");
+crates/port-cli/src/lib.rs:1214:            "detached lifecycle modes",
+docs/hosted.md:59:- surfaces hosted inventory and status back through the CLI and future SDK/API
+docs/hosted.md:305:surface with detached lifecycle management and Unix-socket listeners. The
+docs/hosted.md:312:  monitoring and `top` -> secrets/services/sandboxes -> SDK/API clients
+README.md:127:port guest forward --machine <name> --listen <tcp-addr|unix:path> --target <tcp-addr|unix:path> [--lifecycle <foreground|detached>] [--name <name>] [--list] [--stop]
+README.md:381:  --listen 127.0.0.1:8080 --target 127.0.0.1:80
+README.md:385:  --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
+README.md:389:  --listen 127.0.0.1:8081 --target 127.0.0.1:80 \
+README.md:390:  --lifecycle detached --name demo-web
+README.md:398:- `port guest forward --lifecycle detached` starts the same forwarding model in
+README.md:399:  a detached Port-managed daemon process. Use the same `port guest forward`
+README.md:400:  command with `--list` to inspect detached sessions and `--stop --name <name>`
+README.md:402:- `--listen` and `--target` accept TCP addresses such as `127.0.0.1:8080` and
+README.md:403:  Unix-socket addresses written as `unix:/path/to/socket`.
+

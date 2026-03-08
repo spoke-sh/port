@@ -108,7 +108,8 @@ The in-guest `port-guest-agent` remains the executor of guest operations.
 - `copy` transfers file content across the host/guest boundary
 - `pty` owns terminal-backed sessions inside the guest
 - `logs` reads guest-visible log paths
-- `forward` opens guest-side connections for host or hosted proxying
+- `forward` opens guest-side TCP or Unix-socket connections for host or hosted
+  proxying
 
 Hosted Port keeps this guest agent and its protocol semantics intact.
 
@@ -300,11 +301,15 @@ That means hosted Port still uses the same guest-operation model for `exec`,
 `copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
 stream.
 
+Hosted `guest forward` also keeps the same command family while extending the
+surface with detached lifecycle management and Unix-socket listeners. The
+control-plane and node-agent runtime path stays the same; only the host-side
+forward listener and lifecycle ownership broaden.
+
 What still remains after this runtime slice:
 
 - follow-on order after this foundation is:
-  detached and Unix-socket forwarding -> monitoring and `top` ->
-  secrets/services/sandboxes -> SDK/API clients
+  monitoring and `top` -> secrets/services/sandboxes -> SDK/API clients
 - those follow-on capabilities are downstream of the authenticated API,
   inventory, lifecycle, and guest-attach foundation; they are not already
   shipped

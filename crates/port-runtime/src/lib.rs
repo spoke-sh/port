@@ -3,7 +3,7 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -11,7 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
+    ForwardEndpoint, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
+    parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
@@ -2071,18 +2072,60 @@ pub fn copy_guest_file(
 }
 
 pub struct GuestForwardSession {
-    listener: TcpListener,
+    listener: ForwardListener,
     endpoint: GuestEndpoint,
     target: String,
+}
+
+#[derive(Debug)]
+enum ForwardListener {
+    Tcp(TcpListener),
+    Unix {
+        listener: UnixListener,
+        socket_path: PathBuf,
+    },
+}
+
+trait ProxyStream: Read + Write + Send + 'static {
+    fn try_clone_stream(&self) -> std::io::Result<Self>
+    where
+        Self: Sized;
+
+    fn shutdown_write(&self) -> std::io::Result<()>;
+}
+
+impl ProxyStream for TcpStream {
+    fn try_clone_stream(&self) -> std::io::Result<Self> {
+        self.try_clone()
+    }
+
+    fn shutdown_write(&self) -> std::io::Result<()> {
+        self.shutdown(Shutdown::Write)
+    }
+}
+
+impl ProxyStream for UnixStream {
+    fn try_clone_stream(&self) -> std::io::Result<Self> {
+        self.try_clone()
+    }
+
+    fn shutdown_write(&self) -> std::io::Result<()> {
+        self.shutdown(Shutdown::Write)
+    }
 }
 
 impl GuestForwardSession {
     #[must_use]
     pub fn listen_addr(&self) -> String {
-        self.listener
-            .local_addr()
-            .map(|addr| addr.to_string())
-            .unwrap_or_else(|_| String::from("<unknown>"))
+        match &self.listener {
+            ForwardListener::Tcp(listener) => listener
+                .local_addr()
+                .map(|addr| addr.to_string())
+                .unwrap_or_else(|_| String::from("<unknown>")),
+            ForwardListener::Unix { socket_path, .. } => {
+                render_forward_endpoint(&ForwardEndpoint::Unix(socket_path.clone()))
+            }
+        }
     }
 
     #[must_use]
@@ -2091,15 +2134,41 @@ impl GuestForwardSession {
     }
 
     pub fn serve(self) -> Result<()> {
-        for inbound in self.listener.incoming() {
-            let inbound = inbound.context("failed to accept forwarded host connection")?;
-            let endpoint = self.endpoint.clone();
-            let target = self.target.clone();
-            thread::spawn(move || {
-                if let Err(error) = proxy_guest_forward_connection(endpoint, target, inbound) {
-                    eprintln!("port guest forward connection failed: {error}");
+        match self.listener {
+            ForwardListener::Tcp(listener) => {
+                for inbound in listener.incoming() {
+                    let inbound = inbound.context("failed to accept forwarded host connection")?;
+                    let endpoint = self.endpoint.clone();
+                    let target = self.target.clone();
+                    thread::spawn(move || {
+                        if let Err(error) =
+                            proxy_guest_forward_connection(endpoint, target, inbound)
+                        {
+                            eprintln!("port guest forward connection failed: {error}");
+                        }
+                    });
                 }
-            });
+            }
+            ForwardListener::Unix {
+                listener,
+                socket_path,
+            } => {
+                for inbound in listener.incoming() {
+                    let inbound =
+                        inbound.context("failed to accept forwarded Unix-socket connection")?;
+                    let endpoint = self.endpoint.clone();
+                    let target = self.target.clone();
+                    thread::spawn(move || {
+                        if let Err(error) =
+                            proxy_guest_forward_connection(endpoint, target, inbound)
+                        {
+                            eprintln!("port guest forward connection failed: {error}");
+                        }
+                    });
+                }
+
+                let _ = fs::remove_file(socket_path);
+            }
         }
 
         Ok(())
@@ -2123,8 +2192,7 @@ pub fn prepare_guest_forward(
             }),
         },
     )?;
-    let listener = TcpListener::bind(request.listen)
-        .with_context(|| format!("failed to bind '{}'", request.listen))?;
+    let listener = bind_forward_listener(request.listen)?;
     Ok(GuestForwardSession {
         listener,
         endpoint,
@@ -2132,10 +2200,86 @@ pub fn prepare_guest_forward(
     })
 }
 
-fn proxy_guest_forward_connection(
+pub fn guest_forward_state_dir(
+    config: &PortConfig,
+    machine_name: &str,
+    runtime_root: &Path,
+) -> Result<PathBuf> {
+    Ok(RuntimePaths::for_machine(
+        &resolve_guest_runtime_root(config, machine_name, runtime_root)?,
+        machine_name,
+    )
+    .runtime_dir
+    .join("forwards"))
+}
+
+fn resolve_guest_runtime_root(
+    config: &PortConfig,
+    machine_name: &str,
+    runtime_root: &Path,
+) -> Result<PathBuf> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{machine_name}'"))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+
+    match &host.connection {
+        HostConnection::Local => Ok(runtime_root.to_path_buf()),
+        HostConnection::HostedControlPlane { .. } => {
+            let resolution = hosted_machine_resolution(config, machine_name)?;
+            let Some(node_name) = resolution.node_name else {
+                bail!(
+                    "control plane '{}' could not resolve a detached forward state root for machine '{}': {}",
+                    resolution.control_plane,
+                    machine_name,
+                    resolution.status.detail
+                );
+            };
+            let _ = node_name;
+            Ok(resolution.runtime_root)
+        }
+    }
+}
+
+fn bind_forward_listener(listen: &str) -> Result<ForwardListener> {
+    match parse_forward_endpoint(listen).map_err(|error| anyhow!(error.to_string()))? {
+        ForwardEndpoint::Tcp(address) => {
+            let listener = TcpListener::bind(&address)
+                .with_context(|| format!("failed to bind '{address}'"))?;
+            Ok(ForwardListener::Tcp(listener))
+        }
+        ForwardEndpoint::Unix(socket_path) => {
+            if socket_path.exists() {
+                fs::remove_file(&socket_path).with_context(|| {
+                    format!(
+                        "failed to remove stale Unix forward socket '{}'",
+                        socket_path.display()
+                    )
+                })?;
+            }
+            if let Some(parent) = socket_path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create '{}'", parent.display()))?;
+            }
+            let listener = UnixListener::bind(&socket_path).with_context(|| {
+                format!("failed to bind Unix listener '{}'", socket_path.display())
+            })?;
+            Ok(ForwardListener::Unix {
+                listener,
+                socket_path,
+            })
+        }
+    }
+}
+
+fn proxy_guest_forward_connection<S: ProxyStream>(
     endpoint: GuestEndpoint,
     target: String,
-    inbound: TcpStream,
+    inbound: S,
 ) -> Result<()> {
     let stream = connect_guest_endpoint(&endpoint)?;
     let writer_stream = stream
@@ -2174,7 +2318,7 @@ fn proxy_guest_forward_connection(
         .context("failed to clone guest forward stream")?;
     let mut guest_read = PrefixedReader::new(buffered, guest_stream);
     let mut inbound_read = inbound
-        .try_clone()
+        .try_clone_stream()
         .context("failed to clone inbound forward socket")?;
     let mut inbound_write = inbound;
 
@@ -2185,7 +2329,7 @@ fn proxy_guest_forward_connection(
     });
     let second = thread::spawn(move || {
         let result = std::io::copy(&mut guest_read, &mut inbound_write);
-        let _ = inbound_write.shutdown(Shutdown::Write);
+        let _ = inbound_write.shutdown_write();
         result
     });
 
