@@ -6,19 +6,7 @@ created_at: 2026-03-08T09:35:39
 
 ## Knowledge
 
-### 1w03vv000: Add Probe Seams Before Expanding Host Diagnostics
-| Field | Value |
-|-------|-------|
-| **Category** | testing |
-| **Context** | Host diagnostics depend on live OS facts like platform, architecture, `/proc/cmdline`, or binary lookup, but the story needs deterministic tests for several incompatible states. |
-| **Insight** | A small probe struct is enough to turn environment-dependent diagnostics into a testable seam. That is lower-cost and more maintainable than trying to mock shell commands or `/proc` access ad hoc in each test. |
-| **Suggested Action** | When extending `doctor` with more host or platform checks, first introduce or reuse a single fact-gathering struct and keep the decision logic pure over that struct. |
-| **Applies To** | `crates/port-runtime/src/lib.rs`, future doctor and platform readiness checks |
-| **Linked Knowledge IDs** | 1w03v0000 |
-| **Observed At** | 2026-03-08T09:36:00Z |
-| **Score** | 0.82 |
-| **Confidence** | 0.94 |
-| **Applied** | yes |
+- [1w03vv000](../../knowledge/1w03vv000.md) Add Probe Seams Before Expanding Host Diagnostics
 
 ## Observations
 

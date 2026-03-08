@@ -2,11 +2,13 @@
 id: 1vzGrd000
 title: Add PVM Doctor Host Kit Checks
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T09:20:21
-updated_at: 2026-03-08T09:30:43
+updated_at: 2026-03-08T09:36:35
 scope: 1vz3ck000/1vzGo0000
 started_at: 2026-03-08T09:30:43
+submitted_at: 2026-03-08T09:36:27
+completed_at: 2026-03-08T09:36:35
 ---
 
 # Add PVM Doctor Host Kit Checks
