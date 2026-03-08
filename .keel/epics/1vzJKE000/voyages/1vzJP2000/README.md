@@ -25,12 +25,12 @@ started_at: 2026-03-08T12:09:02
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Publish Prepared Pvm Operator Workflow](../../../../stories/1vzJQJ000/README.md) | feat | backlog |
 | [Define Prepared Pvm Host Kit Contract](../../../../stories/1vzJQg000/README.md) | feat | done |
 | [Route Hosted Launch Through Prepared Pvm Nodes](../../../../stories/1vzJQh000/README.md) | feat | backlog |
-| [Implement Node Agent Pvm Launch Path](../../../../stories/1vzJSi000/README.md) | feat | backlog |
+| [Implement Node Agent Pvm Launch Path](../../../../stories/1vzJSi000/README.md) | feat | done |
 <!-- END GENERATED -->

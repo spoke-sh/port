@@ -2,11 +2,12 @@
 id: 1vzJSi000
 title: Implement Node Agent Pvm Launch Path
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T12:06:48
-updated_at: 2026-03-08T12:23:08
+updated_at: 2026-03-08T12:34:45
 scope: 1vzJKE000/1vzJP2000
 started_at: 2026-03-08T12:23:08
+completed_at: 2026-03-08T12:34:45
 ---
 
 # Implement Node Agent Pvm Launch Path
