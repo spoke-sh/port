@@ -58,6 +58,18 @@ impl PortConfig {
                             ExecutionSubstrate::Firecracker,
                             ProtectionMode::Standard,
                         ),
+                        sample_artifact_variant(
+                            "artifacts/kernel/demo/x86_64/avf/standard/vmlinux",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::Avf,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/kernel/demo/aarch64/avf/standard/vmlinux",
+                            MachineArchitecture::Aarch64,
+                            ExecutionSubstrate::Avf,
+                            ProtectionMode::Standard,
+                        ),
                     ],
                 },
             )]),
@@ -97,6 +109,18 @@ impl PortConfig {
                             "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4",
                             MachineArchitecture::Aarch64,
                             ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::Avf,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/aarch64/avf/standard/rootfs.ext4",
+                            MachineArchitecture::Aarch64,
+                            ExecutionSubstrate::Avf,
                             ProtectionMode::Standard,
                         ),
                     ],
@@ -172,6 +196,21 @@ impl PortConfig {
                         "Azure is modeled explicitly through the demo hosted control plane so diagnostics can report it as unsupported.",
                     )],
                 ),
+            ),
+            (
+                String::from("mac-local"),
+                HostSpec {
+                    platform: HostPlatform::Macos,
+                    provider: HostProvider::Local,
+                    connection: HostConnection::Local,
+                    firecracker: FirecrackerSupport {
+                        local_launch: false,
+                        pvm_lanes: Vec::new(),
+                        notes: vec![String::from(
+                            "AVF local execution is modeled separately from Firecracker.",
+                        )],
+                    },
+                },
             ),
         ]);
 
@@ -282,6 +321,10 @@ impl PortConfig {
 
         let machines = BTreeMap::from([
             (String::from("demo"), sample_machine("local", "demo", 52)),
+            (
+                String::from("demo-avf"),
+                sample_avf_machine("mac-local", "demo-avf", 53),
+            ),
             (
                 String::from("cloud-generic"),
                 sample_machine("generic-linux", "cloud-generic", 60),
@@ -896,6 +939,14 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
             control_port: 7000,
             console_log: PathBuf::from(format!("runtime/{name}/console.log")),
         },
+    }
+}
+
+fn sample_avf_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
+    MachineSpec {
+        host: host.to_string(),
+        substrate: ExecutionSubstrate::Avf,
+        ..sample_machine(host, name, vsock_cid)
     }
 }
 
@@ -2283,33 +2334,17 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ArtifactSelector, ArtifactStore, ArtifactVariant, AvfConsoleTransport,
-        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ExecutionSubstrate,
-        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
-        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
-        HostedGuestProtocolContract, HostedPlacementPolicy, MachineArchitecture,
-        MachineCommandRoute, MachineControlContract, MachineGuestBroker, MachineInventoryOwner,
-        MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource, PortConfig,
-        ProtectionMode, PvmCapabilityState, PvmLaneDecision,
+        ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
+        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
+        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource,
+        HostedGuestAttachActor, HostedGuestAttachHop, HostedGuestProtocolContract,
+        HostedPlacementPolicy, MachineArchitecture, MachineCommandRoute, MachineControlContract,
+        MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner,
+        MachineStatusSource, PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
     };
 
     fn sample_avf_config() -> PortConfig {
         let mut config = PortConfig::sample();
-        config.hosts.insert(
-            String::from("mac-local"),
-            super::HostSpec {
-                platform: HostPlatform::Macos,
-                provider: HostProvider::Local,
-                connection: HostConnection::Local,
-                firecracker: super::FirecrackerSupport {
-                    local_launch: false,
-                    pvm_lanes: Vec::new(),
-                    notes: vec![String::from(
-                        "AVF local execution is modeled separately from Firecracker.",
-                    )],
-                },
-            },
-        );
         let machine = config
             .machines
             .get_mut("demo")
@@ -2318,35 +2353,6 @@ mod tests {
         machine.substrate = ExecutionSubstrate::Avf;
         machine.architecture = MachineArchitecture::X86_64;
         machine.protection_mode = ProtectionMode::Standard;
-
-        config
-            .artifacts
-            .kernels
-            .get_mut("demo-kernel")
-            .expect("demo-kernel should exist")
-            .variants
-            .push(ArtifactVariant {
-                path: PathBuf::from("artifacts/kernel/demo/x86_64/avf/standard/vmlinux"),
-                selector: ArtifactSelector {
-                    architecture: MachineArchitecture::X86_64,
-                    substrate: ExecutionSubstrate::Avf,
-                    protection_mode: ProtectionMode::Standard,
-                },
-            });
-        config
-            .artifacts
-            .guest_images
-            .get_mut("demo-guest")
-            .expect("demo-guest should exist")
-            .variants
-            .push(ArtifactVariant {
-                path: PathBuf::from("artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4"),
-                selector: ArtifactSelector {
-                    architecture: MachineArchitecture::X86_64,
-                    substrate: ExecutionSubstrate::Avf,
-                    protection_mode: ProtectionMode::Standard,
-                },
-            });
 
         config
     }
@@ -2415,6 +2421,7 @@ mod tests {
         let config = PortConfig::sample();
 
         assert_eq!(config.hosts["local"].provider, HostProvider::Local);
+        assert_eq!(config.hosts["mac-local"].platform, HostPlatform::Macos);
         assert_eq!(
             config.hosts["generic-linux"].provider,
             HostProvider::GenericLinux
@@ -2423,9 +2430,18 @@ mod tests {
         assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
         assert_eq!(config.machines["cloud-aws"].host, "aws-linux");
+        assert_eq!(config.machines["demo-avf"].host, "mac-local");
         assert_eq!(
             config.machines["demo"].substrate,
             ExecutionSubstrate::Firecracker
+        );
+        assert_eq!(
+            config.machines["demo-avf"].substrate,
+            ExecutionSubstrate::Avf
+        );
+        assert_eq!(
+            config.machines["demo-avf"].architecture,
+            MachineArchitecture::Native
         );
         assert_eq!(
             config.machines["demo"].protection_mode,
@@ -3107,7 +3123,9 @@ mod tests {
         assert_eq!(config.hosts["aws-linux"].provider, HostProvider::Aws);
         assert_eq!(config.hosts["gcp-linux"].provider, HostProvider::Gcp);
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
+        assert_eq!(config.hosts["mac-local"].platform, HostPlatform::Macos);
         assert_eq!(config.machines["cloud-azure"].host, "azure-linux");
+        assert_eq!(config.machines["demo-avf"].host, "mac-local");
         assert!(config.control_planes.contains_key("demo"));
         assert!(config.nodes.contains_key("aws-linux-node"));
         assert_eq!(
@@ -3142,6 +3160,10 @@ mod tests {
             ExecutionSubstrate::Firecracker
         );
         assert_eq!(
+            config.machines["demo-avf"].substrate,
+            ExecutionSubstrate::Avf
+        );
+        assert_eq!(
             config.machines["demo"].protection_mode,
             ProtectionMode::Standard
         );
@@ -3173,6 +3195,11 @@ mod tests {
             ExecutionSubstrate::Firecracker,
             ProtectionMode::Pvm
         ));
+        assert!(config.artifacts.kernels["demo-kernel"].supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::Avf,
+            ProtectionMode::Standard
+        ));
         assert_eq!(
             config.artifacts.guest_images["demo-guest"].variants[0]
                 .selector
@@ -3183,6 +3210,11 @@ mod tests {
             MachineArchitecture::X86_64,
             ExecutionSubstrate::Firecracker,
             ProtectionMode::Pvm
+        ));
+        assert!(config.artifacts.guest_images["demo-guest"].supports(
+            MachineArchitecture::Aarch64,
+            ExecutionSubstrate::Avf,
+            ProtectionMode::Standard
         ));
     }
 

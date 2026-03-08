@@ -1,0 +1,67 @@
+---
+recorded_at: 2026-03-08T15:17:30.440840698-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzLZY000/verify-ac-2.sh
+---
+83:  `PORT_AVF_LAUNCHER` points at a launcher helper that exposes the runtime guest socket and console
+87:Native macOS AVF workflow:
+89:  PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch
+90:  --machine demo-avf
+91:  port --config examples/port.toml machine status --machine demo-avf
+92:  port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+93:  port --config examples/port.toml machine monitor --machine demo-avf
+94:  port --config examples/port.toml machine stop --machine demo-avf
+30:check[fail]: avf:demo-avf:host-platform (required=false) - AVF machine requires a macOS local host. Detected host OS 'linux'; Firecracker and Firecracker/PVM remain separate Linux lanes.
+31:check[ok]: avf:demo-avf:host-architecture (required=false) - Detected host architecture 'x86_64' is supported by the AVF lane (supported: aarch64, x86_64).
+32:check[fail]: avf:demo-avf:runtime-availability (required=false) - AVF runtime availability is bounded to local macOS hosts with Apple's Virtualization framework. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. Distributed macOS app targets need Apple's virtualization entitlement; sandboxed distributions also need the relevant network and file-access entitlements.
+examples/port.toml:382:console_log = "runtime/demo/console.log"
+examples/port.toml:384:[machines.demo-avf]
+examples/port.toml:386:#   on macOS, set PORT_AVF_LAUNCHER to an AVF launcher helper that bridges the
+examples/port.toml:387:#   guest transport onto runtime/demo-avf/guest-agent.sock and writes console
+examples/port.toml:388:#   output to runtime/demo-avf/console.log.
+examples/port.toml:400:[machines.demo-avf.guest]
+examples/port.toml:403:console_log = "runtime/demo-avf/console.log"
+examples/port.toml:423:console_log = "runtime/cloud-generic/console.log"
+examples/port.toml:444:console_log = "runtime/cloud-aws/console.log"
+examples/port.toml:461:console_log = "runtime/cloud-gcp/console.log"
+examples/port.toml:478:console_log = "runtime/cloud-azure/console.log"
+docs/operators.md:11:| macOS workstation | Run the native AVF workflow through `machines.demo-avf` and the canonical `port machine` and `port guest` verbs when `PORT_AVF_LAUNCHER` is configured | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; AVF is the macOS-native substrate and remains `standard` protection only |
+docs/operators.md:35:Runtime manifests and console logs land under the chosen runtime root, which
+docs/operators.md:58:  config paths, and console/log paths without talking to Firecracker directly.
+docs/operators.md:85:  path, manifest, pid file, console/log references, and the control-contract
+docs/operators.md:185:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-avf
+docs/operators.md:186:cargo run -p port-cli -- --config examples/port.toml machine status --machine demo-avf
+docs/operators.md:187:cargo run -p port-cli -- --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+docs/operators.md:188:cargo run -p port-cli -- --config examples/port.toml machine monitor --machine demo-avf
+docs/operators.md:189:cargo run -p port-cli -- --config examples/port.toml machine stop --machine demo-avf
+docs/operators.md:194:- the sample config now declares `hosts.mac-local` and `machines.demo-avf`
+docs/operators.md:195:- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+docs/operators.md:196:  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
+docs/operators.md:197:  to `runtime/demo-avf/console.log`
+README.md:43:  helper exposes the expected AVF transport socket and console log. `nix develop`
+README.md:166:- map console/log capture onto AVF serial ports
+README.md:174:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+README.md:175:port --config examples/port.toml machine status --machine demo-avf
+README.md:176:port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+README.md:177:port --config examples/port.toml machine monitor --machine demo-avf
+README.md:178:port --config examples/port.toml machine stop --machine demo-avf
+README.md:181:The checked-in sample config now includes `machines.demo-avf` on `hosts.mac-local`.
+README.md:257:  and console/log files under the chosen runtime root before invoking
+README.md:563:The runtime Unix socket at `<runtime-root>/<machine>/guest-agent.sock` remains
+docs/avf.md:35:  socket path, and console-log path
+docs/avf.md:37:  runtime `guest-agent.sock` once the launcher helper exposes the transport
+docs/avf.md:39:- AVF boot output now lands in the canonical runtime console log so `machine`
+docs/avf.md:54:  canonical runtime `guest-agent.sock`
+docs/avf.md:55:- console capture uses AVF serial ports and lands in the runtime console-log
+docs/avf.md:56:  path, not the guest-agent socket
+docs/avf.md:76:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+docs/avf.md:77:port --config examples/port.toml machine status --machine demo-avf
+docs/avf.md:78:port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+docs/avf.md:79:port --config examples/port.toml guest copy --machine demo-avf --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+docs/avf.md:80:port --config examples/port.toml guest logs --machine demo-avf --path /var/log/port-agent.log --tail-lines 50
+docs/avf.md:81:port --config examples/port.toml machine monitor --machine demo-avf
+docs/avf.md:82:port --config examples/port.toml machine stop --machine demo-avf
+docs/avf.md:88:  `machines.demo-avf`
+docs/avf.md:89:- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+docs/avf.md:90:  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
+docs/avf.md:91:  to `runtime/demo-avf/console.log`
+docs/avf.md:94:- on non-macOS hosts, `port machine launch --machine demo-avf` fails fast with

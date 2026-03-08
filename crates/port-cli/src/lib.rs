@@ -55,8 +55,16 @@ Service workflow examples:
 
 Platform Support:
   Linux: local Firecracker launch is supported when port doctor passes.
-  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned macOS lane.
+  macOS: the native AVF lane now uses the same `port machine` and `port guest` verbs when `PORT_AVF_LAUNCHER` points at a launcher helper that exposes the runtime guest socket and console log.
   Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
+Native macOS AVF workflow:
+  port --config examples/port.toml doctor
+  PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+  port --config examples/port.toml machine status --machine demo-avf
+  port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+  port --config examples/port.toml machine monitor --machine demo-avf
+  port --config examples/port.toml machine stop --machine demo-avf
+  Firecracker launch stays Linux-only; on non-macOS hosts the AVF lane fails fast with an explicit macOS boundary.
 Execution Lanes:
   Firecracker + standard on Linux is the current shipped lane.
   Firecracker + pvm on x86_64 now launches through the hosted control-plane and node-agent path on prepared Linux nodes and still depends on a dedicated host kit plus pvm artifact variants.
@@ -127,7 +135,7 @@ Service Control:
     name = "port",
     version,
     about = "CLI-first Firecracker orchestration for local and cloud Linux hosts",
-    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly as planned or research-backed lanes; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics; macOS and Windows operators use Linux, WSL, or future substrate-specific workflows.",
+    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly and surfaced through shared machine and guest verbs; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics; macOS and Windows operators use the same CLI while substrate-specific prerequisites stay explicit.",
     after_help = AFTER_HELP
 )]
 pub struct Cli {

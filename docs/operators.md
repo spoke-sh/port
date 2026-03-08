@@ -8,7 +8,7 @@ Windows operators.
 | Operator environment | Supported MVP workflow | Unsupported MVP workflow | Why |
 |----------------------|------------------------|--------------------------|-----|
 | Linux host with `/dev/kvm` and Firecracker | Run the full local Port workflow directly through the `port` CLI | n/a | Firecracker local launch requires Linux and KVM |
-| macOS workstation | Edit or inspect the repo locally, use `port doctor` to validate AVF-targeted machine contracts, and use the AVF local-driver foundation when a launcher helper is configured | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; the AVF runtime still needs guest transport, console capture, and published workflow proof |
+| macOS workstation | Run the native AVF workflow through `machines.demo-avf` and the canonical `port machine` and `port guest` verbs when `PORT_AVF_LAUNCHER` is configured | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; AVF is the macOS-native substrate and remains `standard` protection only |
 | Windows workstation | Use WSL or a remote Linux host for the Linux-side `port` workflow | Native Windows Firecracker launch | Firecracker local launch requires a Linux environment with `/dev/kvm`; not every WSL setup exposes that capability |
 
 ## Linux Workflow
@@ -115,9 +115,9 @@ Current artifact-command behavior:
   variant at a time.
 - The variant vocabulary is explicit on the CLI:
   `--architecture`, `--substrate`, and `--protection-mode`.
-- The sample config currently ships only Firecracker/standard variants, but the
-  model and help text already reserve the same command surface for PVM, Cloud
-  Hypervisor, and AVF lanes.
+- The sample config now ships Firecracker/standard plus AVF/standard variants,
+  while the same command surface remains reserved for PVM and Cloud Hypervisor
+  follow-on lanes.
 - `port artifacts push` writes the selected local variant into the configured
   backend and warms the local cache.
 - `port artifacts pull` restores the selected variant from the configured
@@ -176,41 +176,41 @@ same CLI lives in [`docs/hosted.md`](hosted.md).
 
 ## macOS Workflow
 
-The current shipped macOS workflow is still to run the actual Firecracker
-commands on a Linux host, but Port now has an explicit first-class AVF
-contract in [`avf.md`](avf.md).
+Port now ships a native macOS AVF workflow through the same canonical CLI.
 
-Recommended path:
+Use the checked-in sample config path:
 
-1. Keep the repository on the Linux host directly, or SSH into that host from macOS.
-2. On the Linux host, run the same canonical commands shown in the Linux workflow.
-3. Use `port doctor` on that Linux host before attempting local Firecracker launch.
+```bash
+cargo run -p port-cli -- --config examples/port.toml doctor
+PORT_AVF_LAUNCHER=/path/to/port-avf-launcher cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-avf
+cargo run -p port-cli -- --config examples/port.toml machine status --machine demo-avf
+cargo run -p port-cli -- --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+cargo run -p port-cli -- --config examples/port.toml machine monitor --machine demo-avf
+cargo run -p port-cli -- --config examples/port.toml machine stop --machine demo-avf
+```
 
-Current boundary:
+Current operator contract:
 
-- Running local Firecracker launch directly on macOS is unsupported because the
-  MVP launch path requires Linux and `/dev/kvm`.
-- `nix develop` now evaluates on macOS for repo tooling, but the shell
-  intentionally omits Linux-only runtime packages such as `firecracker`,
-  `iproute2`, and `iptables`.
-- Apple Virtualization Framework now has a local machine-driver plus guest
-  transport foundation. `machine launch|status|stop` and the canonical
-  `guest exec|copy|pty|logs|forward` verbs work when a configured launcher
-  helper exposes the expected runtime guest socket and console log.
-- The AVF lane keeps the same `machine` and `guest` verbs, maps guest transport
-  onto AVF virtio sockets, and maps console/log capture onto AVF serial ports
-  through that launcher-helper contract.
-- `port doctor` now emits AVF-specific host-platform, host-architecture, and
-  entitlement-boundary checks when a machine targets `substrate = "avf"`.
-- `port machine launch|status|stop` plus `machine monitor|top` now route
-  AVF-targeted machines through the local AVF driver and reference canonical
-  runtime metadata and console-log paths.
-- Distributed macOS app targets will need Apple's virtualization entitlement;
-  Rosetta-in-Linux-VM workflows are optional and depend on AVF directory
-  sharing rather than replacing Port's guest-agent contract.
-- Remote cloud hosts should still be treated as Linux execution environments:
-  run `port doctor` and any future launch commands on the Linux side, not on
-  macOS itself.
+- the sample config now declares `hosts.mac-local` and `machines.demo-avf`
+- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
+  to `runtime/demo-avf/console.log`
+- `port doctor` emits the AVF-specific host-platform, host-architecture, and
+  entitlement-boundary checks before launch
+- `port machine launch|status|stop|monitor|top` and `port guest
+  exec|copy|pty|logs|forward` stay on the canonical command family; no
+  macOS-only command tree exists
+
+Explicit unsupported boundaries:
+
+- local Firecracker launch on macOS remains unsupported because that lane still
+  requires Linux and `/dev/kvm`
+- `nix develop` evaluates on macOS for repo tooling, but intentionally omits
+  Linux-only runtime packages such as `firecracker`, `iproute2`, and `iptables`
+- Port does not define an AVF/PVM lane
+- distributed macOS binaries still need Apple's virtualization entitlement
+- remote cloud execution remains a Linux-hosted workflow, not a macOS-hosted
+  one
 
 ## Windows Workflow
 

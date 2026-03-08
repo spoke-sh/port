@@ -69,6 +69,31 @@ Required operator expectations:
 - expect optional directory sharing for operator convenience and Rosetta
   workflows, not as the primary guest-control surface
 
+Concrete sample workflow:
+
+```bash
+port --config examples/port.toml doctor
+PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+port --config examples/port.toml machine status --machine demo-avf
+port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+port --config examples/port.toml guest copy --machine demo-avf --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+port --config examples/port.toml guest logs --machine demo-avf --path /var/log/port-agent.log --tail-lines 50
+port --config examples/port.toml machine monitor --machine demo-avf
+port --config examples/port.toml machine stop --machine demo-avf
+```
+
+Workflow notes:
+
+- the checked-in sample config now ships `hosts.mac-local` plus
+  `machines.demo-avf`
+- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
+  to `runtime/demo-avf/console.log`
+- `port doctor` is the gate for whether the configured macOS binary and host
+  boundary are compatible with the AVF lane
+- on non-macOS hosts, `port machine launch --machine demo-avf` fails fast with
+  explicit macOS-only guidance instead of a generic launch error
+
 macOS distribution boundary:
 
 - local development binaries can use AVF directly
@@ -99,14 +124,19 @@ The executable runtime path now has proof for the next contract slice:
    over AVF virtio sockets.
 5. Console/log capture works through AVF serial ports.
 
+## Explicit Boundaries
+
+- local Firecracker launch remains Linux-only and still depends on `/dev/kvm`
+- Port does not define an AVF/PVM lane
+- hosted macOS node-agent ownership remains future work
+- Rosetta and directory sharing are documented convenience lanes, not required
+  parts of the canonical Port guest-agent workflow
+
 ## Follow-On Work
 
-The ordered implementation sequence after this contract is:
-
-1. Publish the native macOS AVF workflow across CLI help and operator docs with
-   reproducible proof commands.
-2. Decide how much of directory sharing and Rosetta support belongs in the
-   first executable macOS lane versus later operator-ergonomics slices.
+The remaining AVF follow-on work after this first executable workflow is to
+decide how much of directory sharing and Rosetta support belongs in the first
+macOS operator lane versus later ergonomics slices.
 
 ## Research Basis
 

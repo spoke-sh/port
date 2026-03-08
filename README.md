@@ -167,6 +167,21 @@ Port's macOS lane follows the same rule as the Linux and hosted lanes:
 - keep directory sharing and Rosetta as optional operator workflows, not as a
   replacement for the guest-agent protocol
 
+Native macOS quick reference:
+
+```bash
+port --config examples/port.toml doctor
+PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+port --config examples/port.toml machine status --machine demo-avf
+port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+port --config examples/port.toml machine monitor --machine demo-avf
+port --config examples/port.toml machine stop --machine demo-avf
+```
+
+The checked-in sample config now includes `machines.demo-avf` on `hosts.mac-local`.
+On non-macOS hosts that launch path fails fast with explicit macOS-only
+guidance, while Firecracker launch remains a Linux-only workflow.
+
 The full AVF runtime, operator, and follow-on implementation contract lives in
 [`docs/avf.md`](docs/avf.md).
 
@@ -602,7 +617,9 @@ initial sample model lives at [`examples/port.toml`](examples/port.toml).
 
 The host model now carries explicit provider identity:
 
-- `provider = "local"` for the supported local Linux launch lane
+- `provider = "local"` for the supported local Linux launch lane and the native
+  AVF sample lane, distinguished by `platform = "linux"` versus
+  `platform = "macos"`
 - `provider = "generic-linux"` for future remote Linux control
 - `provider = "aws"` and `provider = "gcp"` for the justified future cloud lanes
 - `provider = "azure"` for the explicitly unsupported MVP lane

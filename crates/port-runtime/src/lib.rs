@@ -5014,9 +5014,7 @@ mod tests {
         read_frame, write_frame,
     };
     use port_model::{
-        ArtifactKind, ArtifactSelector, ArtifactVariant, ExecutionSubstrate, FirecrackerSupport,
-        HostConnection, HostPlatform, HostProvider, HostSpec, MachineArchitecture, PortConfig,
-        ProtectionMode,
+        ArtifactKind, ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode,
     };
 
     fn sample_config_with_hosted_runtime_roots(root: &Path) -> PortConfig {
@@ -5041,21 +5039,6 @@ mod tests {
 
     fn sample_avf_config() -> PortConfig {
         let mut config = PortConfig::sample();
-        config.hosts.insert(
-            String::from("mac-local"),
-            HostSpec {
-                platform: HostPlatform::Macos,
-                provider: HostProvider::Local,
-                connection: HostConnection::Local,
-                firecracker: FirecrackerSupport {
-                    local_launch: false,
-                    pvm_lanes: Vec::new(),
-                    notes: vec![String::from(
-                        "AVF local execution is modeled separately from Firecracker.",
-                    )],
-                },
-            },
-        );
         let machine = config
             .machines
             .get_mut("demo")
@@ -5064,35 +5047,6 @@ mod tests {
         machine.substrate = ExecutionSubstrate::Avf;
         machine.architecture = MachineArchitecture::X86_64;
         machine.protection_mode = ProtectionMode::Standard;
-
-        config
-            .artifacts
-            .kernels
-            .get_mut("demo-kernel")
-            .expect("demo-kernel should exist")
-            .variants
-            .push(ArtifactVariant {
-                path: PathBuf::from("artifacts/kernel/demo/x86_64/avf/standard/vmlinux"),
-                selector: ArtifactSelector {
-                    architecture: MachineArchitecture::X86_64,
-                    substrate: ExecutionSubstrate::Avf,
-                    protection_mode: ProtectionMode::Standard,
-                },
-            });
-        config
-            .artifacts
-            .guest_images
-            .get_mut("demo-guest")
-            .expect("demo-guest should exist")
-            .variants
-            .push(ArtifactVariant {
-                path: PathBuf::from("artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4"),
-                selector: ArtifactSelector {
-                    architecture: MachineArchitecture::X86_64,
-                    substrate: ExecutionSubstrate::Avf,
-                    protection_mode: ProtectionMode::Standard,
-                },
-            });
 
         config
     }

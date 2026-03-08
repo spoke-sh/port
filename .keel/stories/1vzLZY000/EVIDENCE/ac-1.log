@@ -1,0 +1,80 @@
+---
+recorded_at: 2026-03-08T15:17:22.639847693-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzLZY000/verify-ac-1.sh
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+docs/operators.md:11:| macOS workstation | Run the native AVF workflow through `machines.demo-avf` and the canonical `port machine` and `port guest` verbs when `PORT_AVF_LAUNCHER` is configured | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; AVF is the macOS-native substrate and remains `standard` protection only |
+docs/operators.md:185:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-avf
+docs/operators.md:186:cargo run -p port-cli -- --config examples/port.toml machine status --machine demo-avf
+docs/operators.md:187:cargo run -p port-cli -- --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+docs/operators.md:188:cargo run -p port-cli -- --config examples/port.toml machine monitor --machine demo-avf
+docs/operators.md:189:cargo run -p port-cli -- --config examples/port.toml machine stop --machine demo-avf
+docs/operators.md:194:- the sample config now declares `hosts.mac-local` and `machines.demo-avf`
+docs/operators.md:195:- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+docs/operators.md:196:  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
+docs/operators.md:197:  to `runtime/demo-avf/console.log`
+docs/operators.md:210:- Port does not define an AVF/PVM lane
+README.md:174:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+README.md:175:port --config examples/port.toml machine status --machine demo-avf
+README.md:176:port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+README.md:177:port --config examples/port.toml machine monitor --machine demo-avf
+README.md:178:port --config examples/port.toml machine stop --machine demo-avf
+README.md:181:The checked-in sample config now includes `machines.demo-avf` on `hosts.mac-local`.
+docs/avf.md:68:- treat AVF as `standard` protection only; Port does not define an AVF/PVM lane
+docs/avf.md:76:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+docs/avf.md:77:port --config examples/port.toml machine status --machine demo-avf
+docs/avf.md:78:port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
+docs/avf.md:79:port --config examples/port.toml guest copy --machine demo-avf --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+docs/avf.md:80:port --config examples/port.toml guest logs --machine demo-avf --path /var/log/port-agent.log --tail-lines 50
+docs/avf.md:81:port --config examples/port.toml machine monitor --machine demo-avf
+docs/avf.md:82:port --config examples/port.toml machine stop --machine demo-avf
+docs/avf.md:88:  `machines.demo-avf`
+docs/avf.md:89:- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+docs/avf.md:90:  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
+docs/avf.md:91:  to `runtime/demo-avf/console.log`
+docs/avf.md:94:- on non-macOS hosts, `port machine launch --machine demo-avf` fails fast with
+docs/avf.md:130:- Port does not define an AVF/PVM lane

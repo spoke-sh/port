@@ -42,6 +42,22 @@ architecture = "aarch64"
 substrate = "firecracker"
 protection_mode = "standard"
 
+[[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/x86_64/avf/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "avf"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/aarch64/avf/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "aarch64"
+substrate = "avf"
+protection_mode = "standard"
+
 [artifacts.guest_images.demo-guest]
 build = "port artifacts build --artifact demo-guest"
 validate = "port artifacts validate --artifact demo-guest"
@@ -86,6 +102,22 @@ architecture = "aarch64"
 substrate = "firecracker"
 protection_mode = "standard"
 
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "avf"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/aarch64/avf/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "aarch64"
+substrate = "avf"
+protection_mode = "standard"
+
 [control_planes.demo]
 endpoint = "https://port.example.internal"
 audience = "port-hosted-demo"
@@ -108,6 +140,17 @@ mode = "local"
 [hosts.local.firecracker]
 local_launch = true
 notes = ["Requires /dev/kvm and the firecracker binary"]
+
+[hosts.mac-local]
+platform = "macos"
+provider = "local"
+
+[hosts.mac-local.connection]
+mode = "local"
+
+[hosts.mac-local.firecracker]
+local_launch = false
+notes = ["AVF local execution is modeled separately from Firecracker."]
 
 [[hosts.local.firecracker.pvm_lanes]]
 architecture = "x86_64"
@@ -337,6 +380,27 @@ rootfs_read_only = false
 vsock_cid = 52
 control_port = 7000
 console_log = "runtime/demo/console.log"
+
+[machines.demo-avf]
+# macOS AVF lane:
+#   on macOS, set PORT_AVF_LAUNCHER to an AVF launcher helper that bridges the
+#   guest transport onto runtime/demo-avf/guest-agent.sock and writes console
+#   output to runtime/demo-avf/console.log.
+host = "mac-local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "avf"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=hvc0 reboot=k panic=1 root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.demo-avf.guest]
+vsock_cid = 53
+control_port = 7000
+console_log = "runtime/demo-avf/console.log"
 
 [machines.cloud-generic]
 # Hosted denial example:

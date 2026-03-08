@@ -140,6 +140,59 @@ fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
 }
 
 #[test]
+fn cli_help_mentions_native_avf_workflow_and_boundaries() {
+    let output = Command::new(port_bin())
+        .arg("--help")
+        .output()
+        .expect("help command should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("demo-avf"));
+    assert!(stdout.contains("PORT_AVF_LAUNCHER"));
+    assert!(stdout.contains("machine launch"));
+    assert!(stdout.contains("--machine demo-avf"));
+    assert!(stdout.contains("Firecracker launch stays Linux-only"));
+}
+
+#[test]
+fn cli_doctor_and_launch_surface_sample_avf_workflow_boundary() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("runtime");
+    write_config(&config_path, &PortConfig::sample());
+
+    let doctor = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("doctor")
+        .output()
+        .expect("doctor command should run");
+    assert!(doctor.status.success());
+    let doctor_stdout = String::from_utf8_lossy(&doctor.stdout);
+    assert!(doctor_stdout.contains("avf:demo-avf:host-platform"));
+    assert!(doctor_stdout.contains("avf:demo-avf:runtime-availability"));
+
+    let launch = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("demo-avf")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(
+        !launch.status.success(),
+        "non-macOS CI host should reject demo-avf launch"
+    );
+    let stderr = String::from_utf8_lossy(&launch.stderr);
+    assert!(stderr.contains("AVF local launch requires running Port on macOS"));
+}
+
+#[test]
 fn cli_machine_monitor_reports_hosted_runtime_context() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");

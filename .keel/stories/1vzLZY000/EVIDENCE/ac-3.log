@@ -1,0 +1,22 @@
+---
+recorded_at: 2026-03-08T15:19:54.804343787-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzLZY000/verify-ac-3.sh
+---
+95:  Firecracker launch stays Linux-only; on non-macOS hosts the AVF lane fails fast with an explicit
+30:check[fail]: avf:demo-avf:host-platform (required=false) - AVF machine requires a macOS local host. Detected host OS 'linux'; Firecracker and Firecracker/PVM remain separate Linux lanes.
+1:Error: AVF local launch requires running Port on macOS; detected host OS 'linux'
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable
