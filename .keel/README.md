@@ -8,7 +8,6 @@
 | Bearing | Status | Survey | Assessment |
 |---------|--------|--------|------------|
 | [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
-| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | exploring | - | - |
 
 <details>
 <summary>Completed Bearings</summary>
@@ -18,6 +17,7 @@
 | [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid |
 | [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid |
 | [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid |
+| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid |
 
 </details>
 
@@ -45,14 +45,14 @@
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 
-### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (active)
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | done |
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
 | [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | done |
-| [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | in-progress |
+| [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | done |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 
@@ -60,4 +60,10 @@
 |--------|--------|
 | [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | done |
 | [Hosted Runtime And Service Expansion](epics/1vz4Yn000/voyages/1vz5mg000/) | done |
+
+### [Executable Pvm And Avf Lanes](epics/1vzJKE000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | planned |
 
