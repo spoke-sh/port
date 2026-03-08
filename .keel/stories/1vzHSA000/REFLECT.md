@@ -6,19 +6,7 @@ created_at: 2026-03-08T10:14:10
 
 ## Knowledge
 
-### 1w04f0000: Split Lane-Specific Binary Selection Into A Pure Helper
-| Field | Value |
-|-------|-------|
-| **Category** | code |
-| **Context** | A launch path needs to choose different VMM binaries for different protection modes, but spawning the VMM is too expensive and environment-sensitive for most unit tests. |
-| **Insight** | Pulling lane-specific binary selection into a pure helper makes the protection-mode contract testable without depending on a live Firecracker process or host PATH mutations. |
-| **Suggested Action** | When adding more substrate or protection-mode launch inputs, isolate the selection logic in a pure helper before wiring it into the process-spawn path. |
-| **Applies To** | `crates/port-runtime/src/lib.rs`, launch-path selection helpers |
-| **Linked Knowledge IDs** | 1w04a0000 |
-| **Observed At** | 2026-03-08T17:15:30Z |
-| **Score** | 0.75 |
-| **Confidence** | 0.93 |
-| **Applied** | yes |
+- [1w04f0000](../../knowledge/1w04f0000.md) Split Lane-Specific Binary Selection Into A Pure Helper
 
 ## Observations
 

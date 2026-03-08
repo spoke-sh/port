@@ -2,11 +2,13 @@
 id: 1vzHSA000
 title: Select Local Pvm Runtime Inputs
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T09:58:06
-updated_at: 2026-03-08T10:09:23
+updated_at: 2026-03-08T10:15:33
 scope: 1vz3ck000/1vzHPo000
 started_at: 2026-03-08T10:09:23
+submitted_at: 2026-03-08T10:15:26
+completed_at: 2026-03-08T10:15:33
 ---
 
 # Select Local Pvm Runtime Inputs
