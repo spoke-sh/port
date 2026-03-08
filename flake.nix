@@ -30,6 +30,21 @@
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
         keelPkg = keel.packages.${system}.keel;
+        sharedInputs = [
+          rust
+          pkgs.just
+          pkgs.cargo-nextest
+          keelPkg
+          pkgs.curl
+        ];
+        linuxRuntimeInputs = [
+          pkgs.firecracker
+          pkgs.iproute2
+          pkgs.iptables
+          pkgs.busybox
+          pkgs.e2fsprogs
+          pkgs.mold
+        ];
       in {
         packages = {
           keel = keelPkg;
@@ -37,25 +52,13 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = [
-            rust
-            pkgs.just
-            pkgs.cargo-nextest
-            keelPkg
-            pkgs.firecracker
-            pkgs.iproute2
-            pkgs.iptables
-            pkgs.busybox
-            pkgs.curl
-            pkgs.e2fsprogs
-          ] ++ pkgs.lib.optionals isLinux [
-            pkgs.mold
-          ];
+          buildInputs = sharedInputs ++ pkgs.lib.optionals isLinux linuxRuntimeInputs;
 
           shellHook = ''
             export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/port"
           '' + pkgs.lib.optionalString isDarwin ''
             export TMPDIR=/var/tmp
+            echo "Port's macOS dev shell provides repo tooling only; Linux-only runtime tools such as firecracker, iproute2, and iptables remain available only on Linux hosts."
           '' + pkgs.lib.optionalString isLinux ''
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"

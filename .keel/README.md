@@ -38,11 +38,12 @@
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 
-### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (done)
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (active)
 
 | Voyage | Status |
 |--------|--------|
 | [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | done |
+| [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | in-progress |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (active)
 

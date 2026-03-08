@@ -38,6 +38,9 @@ operator lanes around it:
   and `port machine launch`, on a host where `port doctor` passes.
 - macOS: work locally if you want, but run the canonical `port` commands on a
   Linux host because Firecracker local launch requires Linux and `/dev/kvm`.
+  `nix develop` now evaluates on macOS for repo tooling, but it intentionally
+  omits Linux-only runtime packages such as `firecracker`, `iproute2`, and
+  `iptables`.
 - Windows: use WSL for the repository and CLI if helpful, but treat `port doctor`
   as the gate for whether local Firecracker launch is actually available in that
   Linux environment. Otherwise run the same `port` commands on a remote Linux

@@ -190,6 +190,9 @@ Current boundary:
 
 - Running local Firecracker launch directly on macOS is unsupported because the
   MVP launch path requires Linux and `/dev/kvm`.
+- `nix develop` now evaluates on macOS for repo tooling, but the shell
+  intentionally omits Linux-only runtime packages such as `firecracker`,
+  `iproute2`, and `iptables`.
 - Apple Virtualization Framework is now a first-class planned Port lane, but it
   is not executable in the current runtime yet.
 - The planned AVF lane keeps the same `machine` and `guest` verbs, maps guest
