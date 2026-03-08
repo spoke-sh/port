@@ -11,12 +11,14 @@ What is shipped today:
   `stop`
 - guest `exec`, `copy`, `pty`, `logs`, and `forward` through the canonical
   guest protocol
+- `port control-plane serve` as the first live hosted HTTP server for canonical
+  machine and guest routes, forwarding to explicitly bound node-agent endpoints
 
 What is planned:
 
 - a long-lived node agent that owns hypervisor processes on each execution host
-- a central control plane that owns inventory, desired state, placement, and
-  policy
+- broader hosted rollout beyond the single-node demo lane, including durable
+  inventory, placement, and policy
 - a client/API path so the same `port` verbs can target local or hosted
   environments without changing their core meaning
 
@@ -61,6 +63,19 @@ The central control plane is the system of record for hosted Port.
 
 The control plane does not execute guest commands inside the VM directly. It
 coordinates and authorizes them.
+
+For the first live demo lane, the control plane binds node-agent endpoints
+explicitly at startup:
+
+```bash
+port --config examples/port.toml control-plane serve \
+  --control-plane demo \
+  --bind 127.0.0.1:7040 \
+  --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+```
+
+That keeps the control-plane transport real without pretending Port already has
+durable node registration or scheduler policy.
 
 ## Hosted API Identity Contract
 

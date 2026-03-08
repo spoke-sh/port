@@ -10,8 +10,8 @@ use port_agent_protocol::{
 };
 use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode};
 use port_runtime::{
-    ArtifactRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-    LaunchRequest,
+    ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest,
+    GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -71,9 +71,12 @@ Artifact Mobility:
   `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
 Hosted Control:
   Local Port still owns launch and guest-runtime lifecycle directly today.
+  `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
+  Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
   Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
+  Demo control-plane servers bind explicit node-agent endpoints with `--node-binding <node>=<endpoint>,<token>`.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
   `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
@@ -128,6 +131,8 @@ pub enum Command {
         about = "Manage machine-bound secrets, services, and sandboxes"
     )]
     Service(ServiceCommand),
+    #[command(subcommand, about = "Serve hosted control-plane endpoints")]
+    ControlPlane(ControlPlaneCommand),
     #[command(subcommand, hide = true)]
     Internal(InternalCommand),
 }
@@ -154,6 +159,32 @@ pub enum ForwardLifecycleArg {
 pub enum ServiceKindArg {
     Service,
     Sandbox,
+}
+
+#[derive(Debug, Clone)]
+pub struct HostedNodeBindingArg(pub HostedNodeBinding);
+
+impl std::str::FromStr for HostedNodeBindingArg {
+    type Err = String;
+
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        let (node_name, endpoint_and_token) = input
+            .split_once('=')
+            .ok_or_else(|| String::from("expected <node>=<endpoint>,<token>"))?;
+        let (endpoint, token) = endpoint_and_token
+            .rsplit_once(',')
+            .ok_or_else(|| String::from("expected <node>=<endpoint>,<token>"))?;
+        if node_name.trim().is_empty() || endpoint.trim().is_empty() || token.trim().is_empty() {
+            return Err(String::from(
+                "node name, endpoint, and token must all be non-empty",
+            ));
+        }
+        Ok(Self(HostedNodeBinding {
+            node_name: node_name.trim().to_string(),
+            endpoint: endpoint.trim().to_string(),
+            token: token.trim().to_string(),
+        }))
+    }
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -460,6 +491,19 @@ pub enum GuestCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum ControlPlaneCommand {
+    #[command(about = "Serve hosted machine and guest routes over authenticated HTTP")]
+    Serve {
+        #[arg(long)]
+        control_plane: String,
+        #[arg(long, default_value = "127.0.0.1:7040")]
+        bind: String,
+        #[arg(long = "node-binding")]
+        node_bindings: Vec<HostedNodeBindingArg>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum InternalCommand {
     #[command(hide = true)]
     ForwardDaemon {
@@ -522,6 +566,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let config = load_config(cli.config)?;
             run_service(command, &config)
         }
+        Command::ControlPlane(command) => {
+            let config = load_config(cli.config)?;
+            run_control_plane(command, config)
+        }
         Command::Internal(command) => match command {
             InternalCommand::ForwardDaemon {
                 machine,
@@ -543,6 +591,23 @@ pub fn run(cli: Cli) -> Result<()> {
                 )
             }
         },
+    }
+}
+
+fn run_control_plane(command: ControlPlaneCommand, config: PortConfig) -> Result<()> {
+    match command {
+        ControlPlaneCommand::Serve {
+            control_plane,
+            bind,
+            node_bindings,
+        } => port_runtime::serve_control_plane(
+            config,
+            ControlPlaneServeRequest {
+                control_plane,
+                bind,
+                node_bindings: node_bindings.into_iter().map(|binding| binding.0).collect(),
+            },
+        ),
     }
 }
 
@@ -1634,9 +1699,10 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        ArchitectureArg, ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand,
-        MachineCommand, ProtectionModeArg, ServiceCommand, ServiceKindArg, ServiceSecretCommand,
-        SubstrateArg, render_help, render_nested_subcommand_help, render_subcommand_help,
+        ArchitectureArg, ArtifactCommand, Cli, Command, ControlPlaneCommand, CopyDirectionArg,
+        GuestCommand, HostedNodeBindingArg, MachineCommand, ProtectionModeArg, ServiceCommand,
+        ServiceKindArg, ServiceSecretCommand, SubstrateArg, render_help,
+        render_nested_subcommand_help, render_subcommand_help,
     };
 
     #[test]
@@ -1664,8 +1730,10 @@ mod tests {
             "push",
             "pull",
             "service",
+            "control-plane",
             "Artifact Mobility",
             "detached lifecycle modes",
+            "node-binding",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }
@@ -1999,6 +2067,57 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_control_plane_serve_arguments() {
+        let cli = Cli::parse_from([
+            "port",
+            "--config",
+            "examples/port.toml",
+            "control-plane",
+            "serve",
+            "--control-plane",
+            "demo",
+            "--bind",
+            "127.0.0.1:7040",
+            "--node-binding",
+            "aws-linux-node=http://127.0.0.1:9234,node-secret",
+        ]);
+
+        match cli.command {
+            Command::ControlPlane(ControlPlaneCommand::Serve {
+                control_plane,
+                bind,
+                node_bindings,
+            }) => {
+                assert_eq!(control_plane, "demo");
+                assert_eq!(bind, "127.0.0.1:7040");
+                assert_eq!(node_bindings.len(), 1);
+                let HostedNodeBindingArg(binding) = &node_bindings[0];
+                assert_eq!(binding.node_name, "aws-linux-node");
+                assert_eq!(binding.endpoint, "http://127.0.0.1:9234");
+                assert_eq!(binding.token, "node-secret");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_control_plane_node_binding() {
+        let error = Cli::try_parse_from([
+            "port",
+            "control-plane",
+            "serve",
+            "--control-plane",
+            "demo",
+            "--node-binding",
+            "aws-linux-node=http://127.0.0.1:9234",
+        ])
+        .expect_err("missing token should fail");
+
+        let rendered = error.to_string();
+        assert!(rendered.contains("<node>=<endpoint>,<token>"));
     }
 }
 

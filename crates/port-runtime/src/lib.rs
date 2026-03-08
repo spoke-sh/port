@@ -21,6 +21,10 @@ use port_model::{
 };
 use serde::{Deserialize, Serialize};
 
+mod hosted_control_plane;
+
+pub use hosted_control_plane::{ControlPlaneServeRequest, HostedNodeBinding, serve_control_plane};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorReport {
     pub host_os: String,
@@ -68,7 +72,7 @@ pub struct LaunchMetadata {
     pub manifest_path: PathBuf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MachineRuntimeState {
     Running,
@@ -89,7 +93,7 @@ impl std::fmt::Display for MachineRuntimeState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineStatus {
     pub machine_name: String,
     pub state: MachineRuntimeState,
@@ -105,7 +109,7 @@ pub struct MachineStatus {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopResult {
     pub machine_name: String,
     pub previous_state: MachineRuntimeState,
@@ -116,7 +120,7 @@ pub struct StopResult {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DetachedForwardStatus {
     pub name: String,
     pub state: MachineRuntimeState,
@@ -129,7 +133,7 @@ pub struct DetachedForwardStatus {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineMonitorReport {
     pub machine_name: String,
     pub state: MachineRuntimeState,
@@ -149,7 +153,7 @@ pub struct MachineMonitorReport {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MachineTopEntryKind {
     Hypervisor,
@@ -165,7 +169,7 @@ impl std::fmt::Display for MachineTopEntryKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineTopEntry {
     pub kind: MachineTopEntryKind,
     pub name: String,
@@ -176,7 +180,7 @@ pub struct MachineTopEntry {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineTopReport {
     pub machine_name: String,
     pub state: MachineRuntimeState,

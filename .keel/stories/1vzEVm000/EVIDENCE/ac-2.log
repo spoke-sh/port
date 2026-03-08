@@ -1,0 +1,56 @@
+---
+recorded_at: 2026-03-08T07:06:15.537960067-07:00
+mode: manual
+files: [".keel/stories/1vzEVm000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-runtime control_plane_rejects_invalid_client_token ==
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+
+== cargo test -q -p port-runtime control_plane_reports_missing_node_binding_with_route_context ==
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+
+== control-plane docs and help excerpt ==
+Serve hosted machine and guest routes over authenticated HTTP
+
+Usage: port control-plane serve [OPTIONS] --control-plane <CONTROL_PLANE>
+
+Options:
+      --config <PATH>                  Load a Port model from a TOML file instead of using the
+                                       built-in sample
+      --control-plane <CONTROL_PLANE>  
+      --bind <BIND>                    [default: 127.0.0.1:7040]
+      --node-binding <NODE_BINDINGS>   
+  -h, --help                           Print help
+
+crates/port-runtime/src/hosted_control_plane.rs:66:            .context("control-plane server exited unexpectedly")
+crates/port-runtime/src/hosted_control_plane.rs:76:                "unknown control plane '{}' for control-plane serve",
+crates/port-runtime/src/hosted_control_plane.rs:647:            .header("authorization", "Bearer wrong")
+crates/port-runtime/src/hosted_control_plane.rs:654:        assert!(error.message.contains("authorization"));
+crates/port-runtime/src/hosted_control_plane.rs:685:            .header("authorization", "Bearer demo-token")
+crates/port-runtime/src/hosted_control_plane.rs:698:            .header("authorization", "Bearer demo-token")
+crates/port-runtime/src/hosted_control_plane.rs:740:            .header("authorization", "Bearer demo-token")
+README.md:138:port control-plane serve --control-plane <name> [--bind <addr>] [--node-binding <node>=<endpoint>,<token>]...
+README.md:189:- `port control-plane serve` now ships the first live hosted HTTP server for
+crates/port-cli/src/lib.rs:74:  `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
+crates/port-cli/src/lib.rs:75:  Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+crates/port-cli/src/lib.rs:78:  Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
+crates/port-cli/src/lib.rs:79:  Demo control-plane servers bind explicit node-agent endpoints with `--node-binding <node>=<endpoint>,<token>`.
+crates/port-cli/src/lib.rs:501:        #[arg(long = "node-binding")]
+crates/port-cli/src/lib.rs:1736:            "node-binding",
+crates/port-cli/src/lib.rs:2084:            "--node-binding",
+crates/port-cli/src/lib.rs:2114:            "--node-binding",
+docs/hosted.md:14:- `port control-plane serve` as the first live hosted HTTP server for canonical
+docs/hosted.md:71:port --config examples/port.toml control-plane serve \
+docs/hosted.md:74:  --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+docs/hosted.md:93:header = "authorization"
+

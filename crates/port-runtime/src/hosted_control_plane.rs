@@ -1,0 +1,887 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use axum::Router;
+use axum::body::{Body, Bytes};
+use axum::extract::{Path, State};
+use axum::http::header::CONTENT_TYPE;
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::response::Response;
+use axum::routing::{get, post};
+use port_hosted_protocol::{
+    HostedError, HostedGuestRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
+    HostedNodeRoute, HostedRouteContext, HostedSuccess,
+};
+use port_model::{HostedAuthTokenSource, HostedMachineSummaryContract, PortConfig};
+use reqwest::Client;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use tokio::net::TcpListener;
+
+use crate::{MachineRuntimeState, MachineStatus, RuntimePaths, hosted_placeholder_runtime_root};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedNodeBinding {
+    pub node_name: String,
+    pub endpoint: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ControlPlaneServeRequest {
+    pub control_plane: String,
+    pub bind: String,
+    pub node_bindings: Vec<HostedNodeBinding>,
+}
+
+#[derive(Clone)]
+struct ControlPlaneState {
+    inner: Arc<ControlPlaneStateInner>,
+}
+
+struct ControlPlaneStateInner {
+    config: PortConfig,
+    control_plane: String,
+    auth_header: String,
+    auth_value: String,
+    node_bindings: BTreeMap<String, HostedNodeBinding>,
+    client: Client,
+}
+
+pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to build control-plane runtime")?;
+
+    runtime.block_on(async move {
+        let bind = request.bind.clone();
+        let listener = TcpListener::bind(&bind)
+            .await
+            .with_context(|| format!("failed to bind control plane on '{bind}'"))?;
+        let state = build_state(config, request)?;
+        axum::serve(listener, control_plane_router(state))
+            .await
+            .context("control-plane server exited unexpectedly")
+    })
+}
+
+fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<ControlPlaneState> {
+    let control_plane = config
+        .control_planes
+        .get(&request.control_plane)
+        .with_context(|| {
+            format!(
+                "unknown control plane '{}' for control-plane serve",
+                request.control_plane
+            )
+        })?;
+
+    let token = match &control_plane.auth.source {
+        HostedAuthTokenSource::Env { variable } => std::env::var(variable).with_context(|| {
+            format!(
+                "control plane '{}' expects token in environment variable '{}'",
+                request.control_plane, variable
+            )
+        })?,
+    };
+
+    let auth_value = format!("Bearer {token}");
+    let node_bindings = request
+        .node_bindings
+        .into_iter()
+        .map(|binding| (binding.node_name.clone(), binding))
+        .collect();
+
+    let auth_header = control_plane.auth.header.clone();
+
+    Ok(ControlPlaneState {
+        inner: Arc::new(ControlPlaneStateInner {
+            config,
+            control_plane: request.control_plane,
+            auth_header,
+            auth_value,
+            node_bindings,
+            client: Client::new(),
+        }),
+    })
+}
+
+fn control_plane_router(state: ControlPlaneState) -> Router {
+    Router::new()
+        .route("/v1/machines", get(list_machines))
+        .route(
+            "/v1/machines/{machine}",
+            get(machine_status).post(machine_stop),
+        )
+        .route("/v1/machines/{machine}/monitor", get(machine_monitor))
+        .route("/v1/machines/{machine}/top", get(machine_top))
+        .route("/v1/machines/{machine}/guest:exec", post(guest_exec))
+        .route("/v1/machines/{machine}/guest:copy", post(guest_copy))
+        .route("/v1/machines/{machine}/guest:pty", post(guest_pty))
+        .route("/v1/machines/{machine}/guest:logs", post(guest_logs))
+        .route("/v1/machines/{machine}/guest:forward", post(guest_forward))
+        .with_state(state)
+}
+
+async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMap) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let mut machines = Vec::new();
+    for machine_name in state.inner.config.machines.keys() {
+        let Ok(Some(summary)) = state
+            .inner
+            .config
+            .hosted_machine_summary_contract(machine_name)
+        else {
+            continue;
+        };
+        if summary.control_plane != state.inner.control_plane {
+            continue;
+        }
+        match resolve_node_binding(&state, &summary) {
+            Ok((binding, route)) => {
+                let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
+                    machine_name: machine_name.clone(),
+                });
+                match proxy_json::<HostedSuccess<MachineStatus>>(
+                    &state,
+                    &binding,
+                    status_route,
+                    Method::GET,
+                    None,
+                    route.clone(),
+                )
+                .await
+                {
+                    Ok(status) => machines.push(status.result),
+                    Err(message) => {
+                        machines.push(malformed_machine_status(&summary, route, message))
+                    }
+                }
+            }
+            Err((route, message)) => {
+                machines.push(malformed_machine_status(&summary, route, message))
+            }
+        }
+    }
+
+    json_response(
+        StatusCode::OK,
+        &HostedSuccess {
+            route: HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                ..HostedRouteContext::default()
+            },
+            result: machines,
+        },
+    )
+}
+
+async fn machine_status(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Machine(HostedMachineRoute::Status {
+            machine_name: machine.clone(),
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn machine_monitor(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Machine(HostedMachineRoute::Monitor {
+            machine_name: machine.clone(),
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn machine_top(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Machine(HostedMachineRoute::Top {
+            machine_name: machine.clone(),
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn machine_stop(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(machine_name) = machine.strip_suffix(":stop") else {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "control plane '{}' only serves stop through '/v1/machines/{{machine}}:stop'",
+                state.inner.control_plane
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                machine_name: Some(machine),
+                ..HostedRouteContext::default()
+            }),
+        );
+    };
+    proxy_machine_route(
+        &state,
+        &headers,
+        machine_name,
+        HostedNodeRoute::Machine(HostedMachineRoute::Stop {
+            machine_name: machine_name.to_string(),
+        }),
+        Method::POST,
+        None,
+    )
+    .await
+}
+
+async fn guest_exec(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Exec, body).await
+}
+
+async fn guest_copy(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Copy, body).await
+}
+
+async fn guest_pty(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Pty, body).await
+}
+
+async fn guest_logs(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Logs, body).await
+}
+
+async fn guest_forward(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Forward, body).await
+}
+
+async fn proxy_guest_route(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    machine: &str,
+    verb: HostedGuestVerb,
+    body: Bytes,
+) -> Response {
+    proxy_machine_route(
+        state,
+        headers,
+        machine,
+        HostedNodeRoute::Guest(HostedGuestRoute {
+            machine_name: machine.to_string(),
+            verb,
+        }),
+        Method::POST,
+        Some(body),
+    )
+    .await
+}
+
+async fn proxy_machine_route(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    machine: &str,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+) -> Response {
+    if let Some(response) = authorize(state, headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(state, machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let (binding, route_context) = match resolve_node_binding(state, &summary) {
+        Ok(result) => result,
+        Err((route_context, message)) => {
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
+        }
+    };
+
+    proxy_raw(state, &binding, route, method, body, route_context).await
+}
+
+fn authorize(state: &ControlPlaneState, headers: &HeaderMap) -> Option<Response> {
+    match headers
+        .get(&state.inner.auth_header)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if value == state.inner.auth_value => None,
+        _ => Some(error_response(
+            StatusCode::UNAUTHORIZED,
+            format!(
+                "control plane '{}' expects a bearer token in the '{}' header",
+                state.inner.control_plane, state.inner.auth_header
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )),
+    }
+}
+
+fn resolve_summary(
+    state: &ControlPlaneState,
+    machine: &str,
+) -> Result<HostedMachineSummaryContract, Response> {
+    let summary = state
+        .inner
+        .config
+        .hosted_machine_summary_contract(machine)
+        .map_err(|error| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' could not resolve hosted machine '{}': {error}",
+                    state.inner.control_plane, machine
+                ),
+                Some(HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    machine_name: Some(machine.to_string()),
+                    ..HostedRouteContext::default()
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::NOT_FOUND,
+                format!(
+                    "machine '{}' does not resolve to hosted control plane '{}'",
+                    machine, state.inner.control_plane
+                ),
+                Some(HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    machine_name: Some(machine.to_string()),
+                    ..HostedRouteContext::default()
+                }),
+            )
+        })?;
+
+    if summary.control_plane != state.inner.control_plane {
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "machine '{}' belongs to control plane '{}', not '{}'",
+                machine, summary.control_plane, state.inner.control_plane
+            ),
+            Some(HostedRouteContext::from_machine_summary(&summary)),
+        ));
+    }
+
+    Ok(summary)
+}
+
+fn resolve_node_binding(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+) -> Result<(HostedNodeBinding, HostedRouteContext), (HostedRouteContext, String)> {
+    let route_context = HostedRouteContext::from_machine_summary(summary);
+
+    for node_name in &summary.candidate_nodes {
+        if let Some(binding) = state.inner.node_bindings.get(node_name) {
+            let runtime_root = state
+                .inner
+                .config
+                .nodes
+                .get(node_name)
+                .map(|node| node.runtime_root.clone())
+                .unwrap_or_else(|| hosted_placeholder_runtime_root(&summary.control_plane));
+            return Ok((
+                binding.clone(),
+                route_context
+                    .clone()
+                    .with_selected_node(node_name.clone(), runtime_root),
+            ));
+        }
+    }
+
+    Err((
+        route_context,
+        format!(
+            "control plane '{}' could not route machine '{}' because none of the candidate nodes {:?} have a bound node-agent endpoint",
+            state.inner.control_plane, summary.machine_name, summary.candidate_nodes
+        ),
+    ))
+}
+
+async fn proxy_raw(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+    route_context: HostedRouteContext,
+) -> Response {
+    match proxy_bytes(state, binding, route, method, body, route_context.clone()).await {
+        Ok((status, bytes)) => bytes_response(status, bytes),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route_context)),
+    }
+}
+
+async fn proxy_json<T: DeserializeOwned>(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+    route_context: HostedRouteContext,
+) -> Result<T, String> {
+    let (status, bytes) = proxy_bytes(state, binding, route, method, body, route_context).await?;
+    if !status.is_success() {
+        if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
+            return Err(error.message);
+        }
+        return Err(format!(
+            "node agent '{}' returned status {}",
+            binding.node_name, status
+        ));
+    }
+
+    serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "node agent '{}' returned invalid JSON payload: {error}",
+            binding.node_name
+        )
+    })
+}
+
+async fn proxy_bytes(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+    route_context: HostedRouteContext,
+) -> Result<(StatusCode, Bytes), String> {
+    let url = format!("{}{}", binding.endpoint.trim_end_matches('/'), route.path());
+    let method = reqwest::Method::from_bytes(method.as_str().as_bytes()).map_err(|error| {
+        format!(
+            "control plane '{}' could not convert request method for node '{}': {error}",
+            state.inner.control_plane, binding.node_name
+        )
+    })?;
+    let mut request = state.inner.client.request(method, url);
+    for (name, value) in HostedNodeAgentHeaders::new(binding.token.clone()).to_header_map() {
+        request = request.header(name, value);
+    }
+    if let Some(body) = body {
+        request = request.header(CONTENT_TYPE.as_str(), "application/json");
+        request = request.body(body.to_vec());
+    }
+    let response = request.send().await.map_err(|error| {
+        format!(
+            "control plane '{}' could not reach node '{}' for machine '{}': {error}",
+            state.inner.control_plane,
+            binding.node_name,
+            route_context.machine_name.as_deref().unwrap_or("<unknown>")
+        )
+    })?;
+    let status =
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let bytes = response.bytes().await.map_err(|error| {
+        format!(
+            "control plane '{}' received an unreadable response from node '{}': {error}",
+            state.inner.control_plane, binding.node_name
+        )
+    })?;
+    Ok((status, bytes))
+}
+
+fn malformed_machine_status(
+    summary: &HostedMachineSummaryContract,
+    route_context: HostedRouteContext,
+    detail: String,
+) -> MachineStatus {
+    let runtime_root = route_context
+        .runtime_root
+        .clone()
+        .unwrap_or_else(|| hosted_placeholder_runtime_root(&summary.control_plane));
+    let paths = RuntimePaths::for_machine(runtime_root, &summary.machine_name);
+    MachineStatus {
+        machine_name: summary.machine_name.clone(),
+        state: MachineRuntimeState::Malformed,
+        pid: None,
+        control: summary.control.clone(),
+        runtime_dir: paths.runtime_dir,
+        config_path: paths.config_path,
+        manifest_path: paths.manifest_path,
+        pid_path: paths.pid_path,
+        firecracker_log: paths.firecracker_log,
+        stdout_log: paths.stdout_log,
+        stderr_log: paths.stderr_log,
+        detail,
+    }
+}
+
+fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
+    match serde_json::to_vec(value) {
+        Ok(bytes) => bytes_response(status, bytes),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to encode JSON response: {error}"),
+            None,
+        ),
+    }
+}
+
+fn bytes_response(status: StatusCode, bytes: impl Into<Bytes>) -> Response {
+    let mut response = Response::new(Body::from(bytes.into()));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("application/json"),
+    );
+    response
+}
+
+fn error_response(
+    status: StatusCode,
+    message: String,
+    route: Option<HostedRouteContext>,
+) -> Response {
+    json_response(status, &HostedError { route, message })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{Json, Router};
+    use port_agent_protocol::{ExecRequest, ExecResult, GuestOperation, OperationResult};
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
+
+    #[derive(Clone)]
+    struct MockNodeState {
+        headers: Arc<Mutex<Vec<String>>>,
+        bodies: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[tokio::test]
+    async fn control_plane_rejects_invalid_client_token() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: addr.to_string(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("state should build");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, control_plane_router(state)).await;
+        });
+
+        let response = Client::new()
+            .get(format!("http://{addr}/v1/machines/cloud-aws"))
+            .header("authorization", "Bearer wrong")
+            .send()
+            .await
+            .expect("request should complete");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let error: HostedError = response.json().await.expect("error body should decode");
+        assert!(error.message.contains("control plane 'demo'"));
+        assert!(error.message.contains("authorization"));
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn control_plane_proxies_machine_and_guest_routes_to_node_agent() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let mock_state = MockNodeState {
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let node_addr = serve_mock_node_agent(mock_state.clone()).await;
+        let control_addr = serve_test_control_plane(
+            config,
+            vec![HostedNodeBinding {
+                node_name: String::from("aws-linux-node"),
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+            }],
+        )
+        .await;
+
+        let client = Client::new();
+        let status = client
+            .get(format!("http://{control_addr}/v1/machines/cloud-aws"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("status request should complete");
+        assert_eq!(status.status(), StatusCode::OK);
+        let status_body: HostedSuccess<MachineStatus> =
+            status.json().await.expect("status body should decode");
+        assert_eq!(status_body.result.machine_name, "cloud-aws");
+
+        let guest = client
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws/guest:exec"
+            ))
+            .header("authorization", "Bearer demo-token")
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(&GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("hello")],
+                    cwd: None,
+                    env: BTreeMap::new(),
+                }))
+                .expect("guest request should encode"),
+            )
+            .send()
+            .await
+            .expect("guest request should complete");
+        assert_eq!(guest.status(), StatusCode::OK);
+        let guest_body: HostedSuccess<OperationResult> =
+            guest.json().await.expect("guest body should decode");
+        match guest_body.result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "node-ok\n"),
+            other => panic!("unexpected guest result: {other:?}"),
+        }
+
+        let recorded_headers = mock_state.headers.lock().expect("headers lock");
+        assert!(recorded_headers.iter().all(|value| value == "node-secret"));
+        let recorded_bodies = mock_state.bodies.lock().expect("bodies lock");
+        assert!(
+            recorded_bodies
+                .iter()
+                .any(|body| body.contains("\"type\":\"exec\""))
+        );
+    }
+
+    #[tokio::test]
+    async fn control_plane_reports_missing_node_binding_with_route_context() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let control_addr = serve_test_control_plane(config, Vec::new()).await;
+        let response = Client::new()
+            .get(format!("http://{control_addr}/v1/machines/cloud-aws"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("request should complete");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let error: HostedError = response.json().await.expect("error body should decode");
+        assert!(error.message.contains("aws-linux-node"));
+        assert_eq!(
+            error.route.and_then(|route| route.control_plane),
+            Some(String::from("demo"))
+        );
+    }
+
+    async fn serve_test_control_plane(
+        config: PortConfig,
+        node_bindings: Vec<HostedNodeBinding>,
+    ) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: addr.to_string(),
+                node_bindings,
+            },
+        )
+        .expect("state should build");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, control_plane_router(state)).await;
+        });
+        addr
+    }
+
+    async fn serve_mock_node_agent(state: MockNodeState) -> SocketAddr {
+        async fn status_handler(
+            State(state): State<MockNodeState>,
+            headers: HeaderMap,
+            Path(machine): Path<String>,
+        ) -> Json<HostedSuccess<MachineStatus>> {
+            state.headers.lock().expect("headers lock").push(
+                headers
+                    .get("x-port-node-agent-token")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(machine.clone()),
+                    node_name: Some(String::from("aws-linux-node")),
+                    ..HostedRouteContext::default()
+                },
+                result: MachineStatus {
+                    machine_name: machine,
+                    state: MachineRuntimeState::Running,
+                    pid: Some(4321),
+                    control: port_model::MachineControlContract::hosted_control_plane(),
+                    runtime_dir: PathBuf::from("runtime/hosted/aws-linux-node/cloud-aws"),
+                    config_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker-config.json",
+                    ),
+                    manifest_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/manifest.json",
+                    ),
+                    pid_path: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker.pid",
+                    ),
+                    firecracker_log: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker.log",
+                    ),
+                    stdout_log: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/console.stdout.log",
+                    ),
+                    stderr_log: PathBuf::from(
+                        "runtime/hosted/aws-linux-node/cloud-aws/console.stderr.log",
+                    ),
+                    detail: String::from("mock status"),
+                },
+            })
+        }
+
+        async fn guest_handler(
+            State(state): State<MockNodeState>,
+            headers: HeaderMap,
+            body: Bytes,
+        ) -> Json<HostedSuccess<OperationResult>> {
+            state.headers.lock().expect("headers lock").push(
+                headers
+                    .get("x-port-node-agent-token")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string(),
+            );
+            state
+                .bodies
+                .lock()
+                .expect("bodies lock")
+                .push(String::from_utf8(body.to_vec()).expect("body should be utf8"));
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(String::from("cloud-aws")),
+                    node_name: Some(String::from("aws-linux-node")),
+                    ..HostedRouteContext::default()
+                },
+                result: OperationResult::Exec(ExecResult {
+                    stdout: String::from("node-ok\n"),
+                    stderr: String::new(),
+                }),
+            })
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let router = Router::new()
+            .route("/v1/node/machines/{machine}", get(status_handler))
+            .route(
+                "/v1/node/machines/{machine}/guest:exec",
+                post(guest_handler),
+            )
+            .with_state(state);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        addr
+    }
+
+    fn sample_control_plane_config(root: &std::path::Path) -> PortConfig {
+        let mut config = PortConfig::sample();
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane")
+            .endpoint = String::from("http://127.0.0.1:0");
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws node should exist")
+            .runtime_root = root.join("hosted/aws-linux-node");
+        config
+    }
+}

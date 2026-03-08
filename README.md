@@ -135,6 +135,7 @@ port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--
 port service list --machine <name>
 port service status --machine <name> --name <name>
 port service stop --machine <name> --name <name>
+port control-plane serve --control-plane <name> [--bind <addr>] [--node-binding <node>=<endpoint>,<token>]...
 ```
 
 Use `port --help` or any nested `--help` command to inspect the current command
@@ -185,6 +186,10 @@ Current behavior:
   published contract moves long-lived runtime ownership from the short-lived
   CLI process to a node agent plus control plane rather than inventing a second
   operator model.
+- `port control-plane serve` now ships the first live hosted HTTP server for
+  canonical machine and guest routes. It authenticates client requests from the
+  configured control-plane contract and forwards them to explicitly bound
+  node-agent endpoints for the demo lane.
 - `port doctor` also reports provider-aware support boundaries for
   `generic-linux`, `aws`, `gcp`, and `azure` hosts when they are present in the
   config.
