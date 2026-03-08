@@ -6,18 +6,7 @@ created_at: 2026-03-07T17:49:41
 
 ## Knowledge
 
-### 1vz3Mb000: Runtime Lifecycle Should Key Off Runtime State, Not Config
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | When Port adds lifecycle or inspection commands that must keep working after launch, across config drift, or under a future hosted control plane |
-| **Insight** | `launch` is model-backed, but `list`, `status`, and `stop` should key off runtime manifests and PID inspection instead of reloading the machine model. That keeps lifecycle commands usable after a VM already exists and matches the control-plane direction for hosted Port. |
-| **Suggested Action** | Treat runtime-root inspection data as the source of truth for post-launch lifecycle commands, and only require the model for launch-time validation or artifact resolution. |
-| **Applies To** | crates/port-runtime/**, crates/port-cli/**, docs/operators.md, README.md |
-| **Observed At** | 2026-03-08T01:55:00Z |
-| **Score** | 0.91 |
-| **Confidence** | 0.95 |
-| **Applied** | yes |
+- [1vz3Mb000](../../knowledge/1vz3Mb000.md) Runtime Lifecycle Should Key Off Runtime State, Not Config
 
 ## Observations
 
