@@ -686,13 +686,15 @@ fn firecracker_local_launch_machine(
     }
     let resolved_architecture = resolve_machine_architecture(machine.architecture)?;
 
+    let facts = DoctorHostFacts::collect();
+
     if machine.protection_mode == ProtectionMode::Pvm {
         let lane_prefix = format!(
             "pvm:{}:{}:",
             machine.host,
             architecture_dir(resolved_architecture)
         );
-        let pvm_failures = local_pvm_lane_checks(&machine.host, host, &DoctorHostFacts::collect())
+        let pvm_failures = local_pvm_lane_checks(&machine.host, host, &facts)
             .into_iter()
             .filter(|check| check.name.starts_with(&lane_prefix) && !check.ok)
             .map(|check| format!("{}: {}", check.name, check.detail))
@@ -713,8 +715,11 @@ fn firecracker_local_launch_machine(
         bail!("host preflight failed: {details}");
     }
 
-    let firecracker_binary = find_binary("firecracker")
-        .context("firecracker binary was not found on PATH after preflight")?;
+    let firecracker_binary = select_firecracker_binary(
+        machine.protection_mode,
+        find_binary("firecracker"),
+        facts.pvm_firecracker_binary.clone(),
+    )?;
 
     let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
     fs::create_dir_all(&paths.runtime_dir).with_context(|| {
@@ -2819,6 +2824,20 @@ fn find_binary(binary: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+fn select_firecracker_binary(
+    protection_mode: ProtectionMode,
+    standard_binary: Option<PathBuf>,
+    pvm_binary: Option<PathBuf>,
+) -> Result<PathBuf> {
+    match protection_mode {
+        ProtectionMode::Standard => standard_binary
+            .context("firecracker binary was not found on PATH after preflight"),
+        ProtectionMode::Pvm => pvm_binary.context(
+            "pvm host-kit preflight passed but the patched 'firecracker-pvm' binary is still missing; the standard firecracker binary is not a compatible fallback",
+        ),
+    }
+}
+
 fn find_pvm_firecracker_binary() -> Option<PathBuf> {
     if let Some(configured) = env::var_os("PORT_PVM_FIRECRACKER_BINARY") {
         let path = PathBuf::from(configured);
@@ -3931,12 +3950,12 @@ mod tests {
     use super::{
         ArtifactAction, ArtifactRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts,
         GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata,
-        LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest,
-        RuntimePaths, StopResult, artifact_script, build_firecracker_config,
-        collect_doctor_report, collect_doctor_report_with_facts, copy_guest_file,
-        driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
-        machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, read_pid_file, repo_root, resolve_artifact_metadata,
+        LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
+        StopResult, artifact_script, build_firecracker_config, collect_doctor_report,
+        collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
+        execute_guest_operation, launch_local_machine, list_machines, machine_monitor,
+        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
+        read_pid_file, repo_root, resolve_artifact_metadata, select_firecracker_binary,
         serve_control_plane, serve_node_agent, stop_machine,
     };
     use port_agent_protocol::{
@@ -4256,9 +4275,7 @@ mod tests {
         );
         assert_eq!(
             pvm.cache_path,
-            PathBuf::from(
-                ".port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/pvm/vmlinux"
-            )
+            PathBuf::from(".port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/pvm/vmlinux")
         );
     }
 
@@ -5064,6 +5081,37 @@ mod tests {
         assert!(message.contains("pvm host-kit preflight failed"));
         assert!(message.contains("pti=off"));
         assert!(message.contains("firecracker-pvm"));
+    }
+
+    #[test]
+    fn firecracker_binary_selection_uses_the_pvm_lane_without_standard_fallback() {
+        let standard = PathBuf::from("/usr/bin/firecracker");
+        let pvm = PathBuf::from("/usr/bin/firecracker-pvm");
+
+        assert_eq!(
+            select_firecracker_binary(
+                port_model::ProtectionMode::Standard,
+                Some(standard.clone()),
+                Some(pvm.clone())
+            )
+            .expect("standard lane should use the standard binary"),
+            standard
+        );
+        assert_eq!(
+            select_firecracker_binary(
+                port_model::ProtectionMode::Pvm,
+                Some(standard),
+                Some(pvm.clone())
+            )
+            .expect("pvm lane should use the patched binary"),
+            pvm
+        );
+
+        let error = select_firecracker_binary(port_model::ProtectionMode::Pvm, None, None)
+            .expect_err("pvm lane should require the patched binary");
+        let message = error.to_string();
+        assert!(message.contains("firecracker-pvm"));
+        assert!(message.contains("not a compatible fallback"));
     }
 
     #[test]
