@@ -2,11 +2,12 @@
 id: 1vzLZY000
 title: Publish Macos Avf Operator Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T14:22:00
-updated_at: 2026-03-08T15:09:32
+updated_at: 2026-03-08T15:20:34
 scope: 1vzJKE000/1vzLYD000
 started_at: 2026-03-08T15:09:32
+completed_at: 2026-03-08T15:20:34
 ---
 
 # Publish Macos Avf Operator Workflow

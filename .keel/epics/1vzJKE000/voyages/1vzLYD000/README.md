@@ -25,12 +25,12 @@ started_at: 2026-03-08T14:23:53
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Avf Machine Contract And Doctor Checks](../../../../stories/1vzLZS000/README.md) | feat | done |
-| [Publish Macos Avf Operator Workflow](../../../../stories/1vzLZY000/README.md) | feat | backlog |
+| [Publish Macos Avf Operator Workflow](../../../../stories/1vzLZY000/README.md) | feat | done |
 | [Implement Avf Local Machine Driver](../../../../stories/1vzLZj000/README.md) | feat | done |
 | [Wire Avf Guest Transport And Console Capture](../../../../stories/1vzLZm000/README.md) | feat | done |
 <!-- END GENERATED -->
