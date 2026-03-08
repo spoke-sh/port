@@ -48,6 +48,9 @@ Execution Lanes:
 Cloud Linux:
   generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
   port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
+Hosted Control:
+  Local Port still owns runtime lifecycle directly today.
+  Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the current guest protocol semantics.
   Azure remains an explicitly unsupported Firecracker provider lane.";
 
 #[derive(Debug, Parser)]
@@ -612,6 +615,7 @@ mod tests {
             "PVM",
             "Cloud Hypervisor",
             "Apple Virtualization Framework",
+            "Hosted Control",
             "foreground host-side proxy",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");

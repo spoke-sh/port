@@ -6,6 +6,9 @@ protection on Linux hosts; the shared model also represents planned or
 research-backed substrate lanes such as Firecracker/PVM, Cloud Hypervisor, and
 Apple Virtualization Framework.
 
+The hosted control-plane split that will eventually carry these remote lanes is
+defined in [`docs/hosted.md`](hosted.md).
+
 `port doctor` reports both provider-aware and lane-aware support boundaries, and
 `port machine launch` still fails fast when you target a lane that Port does not
 yet execute.
@@ -47,6 +50,21 @@ perform remote launch yet.
 - Linux operators can use `port doctor` to inspect both local prerequisites and remote-provider intent from the same config.
 - macOS operators should treat a Linux host as the execution environment and use the same canonical `port doctor` and `port machine launch` commands there.
 - Windows operators should use WSL or a remote Linux host for the same workflow, then rely on `port doctor` to distinguish a usable Linux launch environment from a documentation-only remote lane.
+
+## Hosted Mapping
+
+The planned hosted product uses the same command model, but with different
+runtime ownership:
+
+- `port machine list`, `status`, and `stop` are the local lifecycle surfaces
+  that a future hosted control plane will remote behind one canonical CLI
+  vocabulary.
+- node agents will own host-local hypervisor processes, runtime roots, and
+  guest-transport attachment on execution hosts.
+- the central control plane will own inventory, desired state, placement, and
+  policy instead of the CLI process owning those concerns directly.
+
+The detailed hosted control contract lives in [`docs/hosted.md`](hosted.md).
 
 ## PVM Lane
 

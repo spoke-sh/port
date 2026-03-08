@@ -58,7 +58,10 @@ still fails fast with provider-aware guidance instead of attempting a hidden
 runtime path. Substrate-aware expansion is now in flight: the current executable
 lane remains Firecracker with standard KVM on Linux, while Firecracker/PVM,
 Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly as
-planned or research-backed lanes rather than hidden future scope.
+planned or research-backed lanes rather than hidden future scope. The hosted
+Port control split is now documented explicitly: local CLI ownership is the
+current shipped lane, while the hosted direction is a CLI client talking to a
+control plane plus node-local runtime owner.
 
 ## Execution Lanes
 
@@ -111,6 +114,10 @@ Current behavior:
   Port-managed manifests plus live PID inspection instead of relying on the
   Firecracker REST API. Once a machine is launched, these commands operate on
   the runtime root and do not require the model file again.
+- The hosted direction keeps those same lifecycle and guest verbs; the
+  published contract moves long-lived runtime ownership from the short-lived
+  CLI process to a node agent plus control plane rather than inventing a second
+  operator model.
 - `port doctor` also reports provider-aware support boundaries for
   `generic-linux`, `aws`, `gcp`, and `azure` hosts when they are present in the
   config.
@@ -148,6 +155,20 @@ MVP does not yet implement remote launch orchestration.
 
 The explicit cloud design, remote workflow, and substrate guidance live in
 [`docs/cloud.md`](docs/cloud.md).
+
+## Hosted Control
+
+Port's current executable path is still local, but the canonical hosted split
+is now documented in [`docs/hosted.md`](docs/hosted.md).
+
+- The `port` CLI remains the canonical operator surface in both local and
+  hosted modes.
+- A future node agent owns host-local lifecycle, manifests, transport bridges,
+  and artifact materialization on one execution node.
+- A future control plane owns fleet inventory, routing, and durable API
+  identity.
+- Guest `exec`, `copy`, `pty`, `logs`, and `forward` keep the current guest
+  protocol semantics; the hosted layer brokers them instead of replacing them.
 
 ## Linux Local Workflow
 

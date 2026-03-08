@@ -52,6 +52,9 @@ Current lifecycle behavior:
   path, manifest, pid file, and console/log references needed for debugging.
 - `port machine stop --machine demo` signals a live Firecracker process and
   cleans stale pid/vsock/socket files so the next launch is deterministic.
+- Those commands are the local ownership implementation of Port's longer-term
+  hosted contract. In hosted Port, the CLI keeps the same verbs while a
+  node-local agent plus control plane take over runtime ownership.
 
 Current guest-command behavior:
 
@@ -93,8 +96,12 @@ What to expect:
   proof for the MVP.
 - `port machine list`, `status`, and `stop` currently inspect only local
   runtime roots; they do not yet enumerate or control remote/cloud hosts.
+- The future hosted split for lifecycle ownership and guest-operation brokering
+  is documented in [`hosted.md`](hosted.md).
 
 The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
+The hosted node-agent/control-plane split that will eventually sit behind the
+same CLI lives in [`docs/hosted.md`](hosted.md).
 
 ## macOS Workflow
 

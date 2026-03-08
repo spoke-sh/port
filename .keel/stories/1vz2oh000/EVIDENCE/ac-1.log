@@ -1,0 +1,146 @@
+---
+recorded_at: 2026-03-07T17:54:57.273898992-08:00
+mode: manual
+files: ["/tmp/1vz2oh000-ac1.log"]
+---
+
+--- File: 1vz2oh000-ac1.log ---
+docs/hosted.md:23:## Role Split
+docs/hosted.md:36:### Node Agent
+docs/hosted.md:51:### Control Plane
+docs/hosted.md:76:## Lifecycle Ownership
+docs/hosted.md:80:| Local Port today | local runtime root plus CLI output | local `port-runtime` invocation | local CLI plus runtime transport | runtime manifests and host process state |
+docs/hosted.md:81:| Hosted Port planned | central control plane | node agent on the selected host | control plane plus node agent tunnel | control-plane inventory plus node-agent reported runtime state |
+
+== full doc ==
+# Hosted Control Contract
+
+Port's hosted product is intentionally defined as an extension of the existing
+local command model, not as a separate product with different lifecycle or
+guest-operation semantics.
+
+What is shipped today:
+
+- local Linux launch through `port machine launch`
+- local runtime-root inspection through `port machine list`, `status`, and
+  `stop`
+- guest `exec`, `copy`, `pty`, `logs`, and `forward` through the canonical
+  guest protocol
+
+What is planned:
+
+- a long-lived node agent that owns hypervisor processes on each execution host
+- a central control plane that owns inventory, desired state, placement, and
+  policy
+- a client/API path so the same `port` verbs can target local or hosted
+  environments without changing their core meaning
+
+## Role Split
+
+### CLI / Client
+
+The `port` CLI remains the canonical operator surface.
+
+- In local mode, it can still launch or inspect directly against the local
+  runtime root.
+- In hosted mode, it becomes a client of the control plane instead of owning
+  VM processes itself.
+- The command verbs stay stable: `machine launch`, `list`, `status`, `stop`,
+  and guest `exec`, `copy`, `pty`, `logs`, and `forward`.
+
+### Node Agent
+
+The node agent is the host-local runtime owner on each execution host.
+
+- launches and stops VMs on the local substrate
+- owns host-local runtime state, manifests, pid/process inspection, and socket
+  paths
+- realizes artifacts onto the host before launch
+- brokers guest-operation tunnels from the control plane down to the guest
+  agent
+- reports node and machine health back to the control plane
+
+The node agent is the hosted analog of today's local `port-runtime` ownership.
+If a hypervisor process exists on a host, the node agent owns it.
+
+### Control Plane
+
+The central control plane is the system of record for hosted Port.
+
+- authenticates clients and enforces policy
+- stores machine inventory and desired lifecycle state
+- selects nodes or host groups for placement
+- asks node agents to launch, inspect, stop, or connect to machines
+- surfaces hosted inventory and status back through the CLI and future SDK/API
+
+The control plane does not execute guest commands inside the VM directly. It
+coordinates and authorizes them.
+
+### Guest Agent
+
+The in-guest `port-guest-agent` remains the executor of guest operations.
+
+- `exec` runs commands inside the guest
+- `copy` transfers file content across the host/guest boundary
+- `pty` owns terminal-backed sessions inside the guest
+- `logs` reads guest-visible log paths
+- `forward` opens guest-side connections for host or hosted proxying
+
+Hosted Port keeps this guest agent and its protocol semantics intact.
+
+## Lifecycle Ownership
+
+| Environment | Inventory owner | Hypervisor/process owner | Guest-operation broker | Source of truth |
+|-------------|-----------------|--------------------------|------------------------|-----------------|
+| Local Port today | local runtime root plus CLI output | local `port-runtime` invocation | local CLI plus runtime transport | runtime manifests and host process state |
+| Hosted Port planned | central control plane | node agent on the selected host | control plane plus node agent tunnel | control-plane inventory plus node-agent reported runtime state |
+
+The intended rule is simple:
+
+- local mode: the runtime root is the durable lifecycle record
+- hosted mode: the control plane owns desired state, while the node agent owns
+  the actual host-local process state
+
+## Guest Operation Brokerage
+
+Hosted Port preserves the existing guest protocol by tunneling it, not by
+redefining it.
+
+1. The operator runs a canonical CLI command such as `port guest exec`.
+2. The client resolves whether the target is local or hosted.
+3. For hosted targets, the control plane authorizes the request and resolves
+   the owning node.
+4. The control plane asks the node agent to open or attach to the machine's
+   guest transport.
+5. The node agent bridges the existing guest protocol stream to the in-guest
+   `port-guest-agent`.
+6. Responses stream back through the same path to the CLI.
+
+That means hosted Port still uses the same guest-operation model for `exec`,
+`copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
+stream.
+
+## Hosted API Shape
+
+The exact wire API is not fully implemented yet, but the contract is expected
+to expose lifecycle and guest-transport verbs that mirror the CLI:
+
+- `machines.create`
+- `machines.list`
+- `machines.get`
+- `machines.stop`
+- `machines.connect_guest`
+
+Those verbs are the hosted counterpart of today's local runtime calls and
+should remain substrate-aware without becoming Firecracker-specific API names.
+
+## Current Boundary
+
+- Port does not ship a hosted daemon or control plane yet.
+- `port machine list`, `status`, and `stop` currently inspect local runtime
+  roots only.
+- Remote Linux providers are modeled and diagnosed, but remote launch remains a
+  designed boundary rather than a shipped orchestration path.
+- The hosted contract is canonical design work for the next implementation
+  slices, not a claim that hosted Port is already available.
+

@@ -1,0 +1,100 @@
+---
+recorded_at: 2026-03-07T17:55:06.878988686-08:00
+mode: manual
+files: ["/tmp/1vz2oh000-ac3.log"]
+---
+
+--- File: 1vz2oh000-ac3.log ---
+== help keywords ==
+crates/port-cli/src/lib.rs:51:Hosted Control:
+docs/operators.md:104:same CLI lives in [`docs/hosted.md`](hosted.md).
+README.md:159:## Hosted Control
+README.md:173:The full hosted contract lives in [`docs/hosted.md`](docs/hosted.md).
+README.md:175:## Hosted Control
+README.md:188:The canonical hosted contract lives in [`docs/hosted.md`](docs/hosted.md).
+README.md:190:## Hosted Control Preview
+README.md:193:is now documented in [`docs/hosted.md`](docs/hosted.md).
+docs/cloud.md:10:defined in [`docs/hosted.md`](hosted.md).
+docs/cloud.md:54:## Hosted Mapping
+docs/cloud.md:67:The detailed hosted control contract lives in [`docs/hosted.md`](hosted.md).
+
+== help excerpt ==
+Port manages microVM-backed workloads through one canonical CLI and shared machine model.
+Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud
+Hypervisor, and Apple Virtualization Framework are modeled explicitly as planned or research-backed
+lanes; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics;
+macOS and Windows operators use Linux, WSL, or future substrate-specific workflows.
+
+Usage: port [OPTIONS] <COMMAND>
+
+Commands:
+  doctor     Inspect platform support and host requirements
+  artifacts  Build and validate kernel or guest artifacts
+  machine    Launch and inspect Port-managed machines
+  guest      Reach guest agent capabilities
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>
+          Load a Port model from a TOML file instead of using the built-in sample
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Example assumptions:
+  Run these sample-config commands from the repository root.
+  Local artifact and launch workflows require the needed host tools to be available in the execution
+  environment.
+  Treat `port doctor` as the gate for whether local `port machine launch` can succeed.
+
+Runnable local workflow:
+  port doctor
+  port --config examples/port.toml doctor
+  port --config examples/port.toml artifacts build --artifact demo-kernel
+  port --config examples/port.toml artifacts build --artifact demo-guest
+  port --config examples/port.toml machine launch --machine demo
+  port --config examples/port.toml machine list
+  port --config examples/port.toml machine status --machine demo
+  port --config examples/port.toml machine stop --machine demo
+
+Guest workflow examples:
+  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
+  port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source
+  ./host.txt --destination /workspace/host.txt
+  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log
+  --tail-lines 50
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target
+  127.0.0.1:80
+  `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs
+  through the live guest transport.
+  `port guest forward` is a foreground host-side proxy session; stop it with Ctrl-C when you are
+  done.
+  Guest-side `forward --target` addresses still depend on the guest network state. In the sample
+  guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec
+  --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
+
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned
+  macOS lane.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch
+  is supported.
+Execution Lanes:
+  Firecracker + standard on Linux is the current shipped lane.
+  Firecracker + pvm on x86_64 is planned for cloud cost control; Firecracker + pvm on aarch64
+  remains research only.
+  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
+Cloud Linux:
+  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port
+  doctor.
+  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for
+  remote hosts.
+Hosted Control:
+  Local Port still owns runtime lifecycle directly today.
+  Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the
+  current guest protocol semantics.
+  Azure remains an explicitly unsupported Firecracker provider lane.
+

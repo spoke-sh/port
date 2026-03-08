@@ -1,0 +1,29 @@
+---
+recorded_at: 2026-03-07T17:55:03.430554011-08:00
+mode: manual
+files: ["/tmp/1vz2oh000-ac2.log"]
+---
+
+--- File: 1vz2oh000-ac2.log ---
+12:- guest `exec`, `copy`, `pty`, `logs`, and `forward` through the canonical
+13:  guest protocol
+17:- a long-lived node agent that owns hypervisor processes on each execution host
+34:  and guest `exec`, `copy`, `pty`, `logs`, and `forward`.
+38:The node agent is the host-local runtime owner on each execution host.
+44:- brokers guest-operation tunnels from the control plane down to the guest
+61:The control plane does not execute guest commands inside the VM directly. It
+66:The in-guest `port-guest-agent` remains the executor of guest operations.
+68:- `exec` runs commands inside the guest
+69:- `copy` transfers file content across the host/guest boundary
+70:- `pty` owns terminal-backed sessions inside the guest
+71:- `logs` reads guest-visible log paths
+72:- `forward` opens guest-side connections for host or hosted proxying
+78:| Environment | Inventory owner | Hypervisor/process owner | Guest-operation broker | Source of truth |
+89:## Guest Operation Brokerage
+91:Hosted Port preserves the existing guest protocol by tunneling it, not by
+94:1. The operator runs a canonical CLI command such as `port guest exec`.
+100:5. The node agent bridges the existing guest protocol stream to the in-guest
+104:That means hosted Port still uses the same guest-operation model for `exec`,
+105:`copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
+117:- `machines.connect_guest`
+
