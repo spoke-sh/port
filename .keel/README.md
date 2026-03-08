@@ -9,6 +9,15 @@
 |---------|--------|--------|------------|
 | [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
 
+<details>
+<summary>Completed Bearings</summary>
+
+| Bearing | Status |
+|---------|--------|
+| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid |
+
+</details>
+
 ## Epics
 
 ### [Port MVP](epics/1vydg7000/) (done)
@@ -22,4 +31,9 @@
 | [Wire Live Guest Transport](epics/1vydg7000/voyages/1vyfve000/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | draft |
+| [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2lN000/) | draft |
 
