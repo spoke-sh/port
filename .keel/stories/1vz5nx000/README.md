@@ -2,11 +2,13 @@
 id: 1vz5nx000
 title: Add Hosted Monitoring And Top
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T20:31:49
-updated_at: 2026-03-07T21:23:23
+updated_at: 2026-03-08T06:29:11
 scope: 1vz4Yn000/1vz5mg000
 started_at: 2026-03-07T21:23:23
+submitted_at: 2026-03-08T06:29:06
+completed_at: 2026-03-08T06:29:11
 ---
 
 # Add Hosted Monitoring And Top
