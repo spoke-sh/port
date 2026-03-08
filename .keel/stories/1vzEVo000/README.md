@@ -20,6 +20,7 @@ instead of the current in-process hosted runtime-root shortcut.
 
 ## Acceptance Criteria
 
-<!-- verify: manual, SRS-03:start:end, proof: ac-1.log, ac-2.log -->
+<!-- verify: manual, SRS-03:start:end, proof: ac-1.log -->
 - [x] [SRS-03/AC-01] Hosted `port machine ...` and `port guest ...` commands execute through the live hosted HTTP path whenever a machine resolves to `hosted-control-plane` mode. <!-- [SRS-03/AC-01] verify: cargo test -q -p port-cli, proof: ac-1.log -->
+<!-- verify: manual, SRS-04:start:end, proof: ac-2.log -->
 - [x] [SRS-04/AC-02] `port-sdk`, CLI help, and operator output align with the live hosted routes and distinguish shipped transport from still-planned follow-on behavior. <!-- [SRS-04/AC-02] verify: cargo test -q -p port-sdk && cargo test -q -p port-cli, proof: ac-2.log -->

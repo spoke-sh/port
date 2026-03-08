@@ -32,11 +32,11 @@
 | [Remove Nix Bias From Help Surface](epics/1vydg7000/voyages/1vyfXX000/) | done |
 | [Wire Live Guest Transport](epics/1vydg7000/voyages/1vyfve000/) | done |
 
-### [Hosted Runtime Transport](epics/1vzETR000/) (active)
+### [Hosted Runtime Transport](epics/1vzETR000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Implement Hosted Control Plane Demo Lane](epics/1vzETR000/voyages/1vzETX000/) | in-progress |
+| [Implement Hosted Control Plane Demo Lane](epics/1vzETR000/voyages/1vzETX000/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
@@ -44,12 +44,13 @@
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 
-### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (done)
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (active)
 
 | Voyage | Status |
 |--------|--------|
 | [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | done |
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
+| [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | draft |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 

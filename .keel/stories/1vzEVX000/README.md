@@ -2,11 +2,13 @@
 id: 1vzEVX000
 title: Publish Hosted Demo Workflow And Evidence
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T06:49:23
-updated_at: 2026-03-08T09:10:04
+updated_at: 2026-03-08T09:15:36
 scope: 1vzETR000/1vzETX000
 started_at: 2026-03-08T09:10:04
+submitted_at: 2026-03-08T09:14:24
+completed_at: 2026-03-08T09:15:36
 ---
 
 # Publish Hosted Demo Workflow And Evidence
