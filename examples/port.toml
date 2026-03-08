@@ -260,8 +260,8 @@ notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the 
 [nodes.aws-linux-node]
 # Hosted PVM admission-ready example:
 #   switching [machines.cloud-aws] to protection_mode = "pvm" should pass the
-#   hosted placement gate because this node advertises a ready PVM lane, even
-#   though hosted launch remains a follow-on runtime slice.
+#   hosted placement gate because this node advertises a ready PVM lane and can
+#   launch once the host kit and PVM artifact paths are prepared.
 host = "aws-linux"
 runtime_root = "runtime/hosted/aws-linux-node"
 notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
@@ -361,7 +361,8 @@ console_log = "runtime/cloud-generic/console.log"
 [machines.cloud-aws]
 # Hosted admission-ready example:
 #   change protection_mode to "pvm" to model a hosted machine whose node
-#   inventory advertises state = "ready" for x86_64 Firecracker/PVM.
+#   inventory advertises state = "ready" for x86_64 Firecracker/PVM and can
+#   boot through the live control-plane and node-agent path once prepared.
 host = "aws-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"

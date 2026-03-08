@@ -11,6 +11,9 @@ What is shipped today:
   `stop`
 - guest `exec`, `copy`, `pty`, `logs`, and `forward` through the canonical
   guest protocol
+- prepared-node x86_64 Firecracker/PVM launch through `port machine launch`
+  when a hosted machine resolves to a ready node with a real PVM host kit and
+  PVM artifact variants
 - `port control-plane serve` as the first live hosted HTTP server for canonical
   machine and guest routes, forwarding to explicitly bound node-agent endpoints
 - `port node-agent serve` as the first live hosted node-runtime server for one
@@ -96,6 +99,12 @@ That script prepares temporary hosted server and client configs, starts
 then runs canonical hosted `port machine status`, `port guest exec`,
 `port guest copy`, and `port guest logs` commands through the live hosted HTTP
 path.
+
+The prepared-node PVM workflow reuses that same hosted split. The only extra
+requirements are a copied config that switches `cloud-aws` to `pvm`, PVM
+artifact paths that exist on the prepared node, and `PORT_PVM_FIRECRACKER_BINARY`
+pointing at the patched `firecracker-pvm` binary before `port machine launch
+--machine cloud-aws` runs through the control plane.
 
 ## Hosted API Identity Contract
 

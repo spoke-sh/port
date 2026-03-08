@@ -59,7 +59,7 @@ Platform Support:
   Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
 Execution Lanes:
   Firecracker + standard on Linux is the current shipped lane.
-  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit plus pvm artifact variants.
+  Firecracker + pvm on x86_64 now launches through the hosted control-plane and node-agent path on prepared Linux nodes and still depends on a dedicated host kit plus pvm artifact variants.
   Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker runtime path.
 PVM foundation workflow:
   port --config examples/port.toml doctor
@@ -67,14 +67,18 @@ PVM foundation workflow:
   port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-  Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for the future runtime lane.
-  Firecracker/PVM launch remains blocked on a prepared host kit and a patched `firecracker-pvm` binary even after the artifact commands pass.
-Hosted PVM admission workflow:
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-generic
+  Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for a prepared Linux node.
+  Local PVM launch still requires a prepared x86_64 Linux host with the patched `firecracker-pvm` binary and the required host boot state.
+Hosted prepared-node PVM workflow:
+  Copy `examples/port.toml` to a temp config, switch `machines.cloud-aws` to `protection_mode = \"pvm\"`, and point the `x86_64/firecracker/pvm` kernel and guest variants at prepared artifact paths.
+  PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
   Switch `cloud-generic` to `protection_mode = \"pvm\"` to see an explicit hosted placement denial against `generic-linux-node state = planned`.
-  Switch `cloud-aws` to `protection_mode = \"pvm\"` to see the hosted admission-ready inventory path against `aws-linux-node state = ready`.
-  Hosted launch is still partial, so admission-ready placement does not yet imply a shipped hosted runtime path.
+  Missing `firecracker-pvm`, missing host boot prerequisites, or missing PVM artifact paths fail explicitly; Port does not fall back to the standard Firecracker lane.
+  Other hosted launch paths still return provider-aware guidance until their runtime lanes ship.
 Standard lane preservation:
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode standard
   port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode standard
@@ -84,12 +88,12 @@ Standard lane preservation:
   The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
 Cloud Linux:
   generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
-  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
+  hosted `port machine launch` now supports admission-ready x86_64 PVM machines through the live control-plane and node-agent path; other remote launch paths still return provider-aware guidance.
 Artifact Mobility:
   `port artifacts build` and `validate` materialize one canonical local variant selected by architecture, substrate, and protection mode.
   `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
 Hosted Control:
-  Local Port still owns launch and guest-runtime lifecycle directly today.
+  Local Port still owns the shipped standard-lane launch path directly, and hosted prepared-node PVM launch now routes through the control plane and node agent.
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
   Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
   `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root.

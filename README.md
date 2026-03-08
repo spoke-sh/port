@@ -77,7 +77,7 @@ canonical substrate matrix is:
 | Substrate | Protection mode | Architecture | Status | Current Port position |
 |-----------|-----------------|--------------|--------|------------------------|
 | Firecracker | `standard` | `x86_64`, `aarch64`, or `native` | Supported today | This is the real Linux execution lane behind today's `port machine launch` workflow |
-| Firecracker | `pvm` | `x86_64` | Planned / partial design | Strategic lane for cloud cost control; requires dedicated host-kernel, VMM, and artifact work |
+| Firecracker | `pvm` | `x86_64` | Prepared-node / partial rollout | Launches through the hosted control-plane and node-agent path on prepared Linux nodes; broader packaging and rollout still require dedicated host-kit and artifact work |
 | Firecracker | `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path here |
 | Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
 | Apple Virtualization Framework | `standard` | `arm64` or `x86_64` on macOS | Planned | First-class macOS lane in the model and docs, not yet implemented |
@@ -97,12 +97,12 @@ contract lives in [`docs/pvm.md`](docs/pvm.md).
 Repository-local PVM foundation workflow:
 
 ```bash
-cargo run -p port-cli -- --config examples/port.toml doctor
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+port --config examples/port.toml doctor
+port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config examples/port.toml machine launch --machine demo
 ```
 
 Interpretation:
@@ -115,18 +115,29 @@ Interpretation:
   kit failure, not a signal to fall back to the standard Firecracker lane
 - `aarch64/firecracker/pvm` remains research-only in the model, docs, and
   scripts
-- `port machine launch` still blocks on the unprepared PVM host kit even when
-  the PVM artifact build/validate workflow passes
+- a local PVM launch still requires a prepared x86_64 Linux host with the
+  patched `firecracker-pvm` binary and required host boot state even after the
+  PVM artifact build/validate workflow passes
 - `port machine launch --machine demo` remains the preserved standard
   Firecracker proof and should keep working independently of the PVM artifact
   workflow
 
-Hosted PVM admission workflow:
+Hosted prepared-node PVM workflow:
+
+Start from a copy of `examples/port.toml` and make these temporary changes:
+
+- switch `machines.cloud-aws.protection_mode` to `pvm`
+- point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
+  prepared artifact paths for the node
+- export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm` binary
+  on the prepared node host
 
 ```bash
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-aws
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
 ```
 
 Interpretation:
@@ -134,11 +145,15 @@ Interpretation:
 - `cloud-generic` is the sample hosted denial case: if you switch it to
   `protection_mode = "pvm"`, Port marks it `malformed` with an explicit
   placement reason because `generic-linux-node` advertises `state = "planned"`
-- `cloud-aws` is the sample hosted admission-ready case: if you switch it to
-  `protection_mode = "pvm"`, the hosted inventory contract accepts placement
-  because `aws-linux-node` advertises `state = "ready"`
-- hosted `machine launch` is still partial, so admission-ready hosted PVM
-  placement does not yet imply a shipped remote launch path
+- `cloud-aws` is the sample hosted prepared-node case: once you switch it to
+  `protection_mode = "pvm"` and provide the PVM artifact paths plus
+  `firecracker-pvm`, `port machine launch` routes through the live control
+  plane and prepared node agent to boot the VM
+- missing `firecracker-pvm`, missing host boot prerequisites, or missing PVM
+  artifact paths fail explicitly; Port does not fall back to the standard
+  Firecracker lane
+- other hosted launch paths still return provider-aware guidance until their
+  runtime lanes ship
 
 ## AVF Contract
 
@@ -244,11 +259,13 @@ Current behavior:
 - `port doctor` also reports provider-aware support boundaries for
   `generic-linux`, `aws`, `gcp`, and `azure` hosts when they are present in the
   config.
-- `port machine launch` still supports only local Linux launch in the MVP and
-  returns provider-specific guidance for remote Linux or cloud hosts.
-- hosted PVM placement is now gated explicitly before that provider guidance:
-  unplaceable hosted PVM machines fail with node readiness detail instead of
-  looking like generic transport failures.
+- `port machine launch` still supports the shipped local Linux standard lane
+  directly, and now also supports hosted x86_64 PVM launch when a machine
+  resolves to a ready prepared node with the required PVM host kit and PVM
+  artifact paths.
+- hosted PVM placement and host-kit failures stay explicit before launch:
+  unplaceable nodes, missing `firecracker-pvm`, or missing PVM artifact paths
+  fail with concrete detail instead of looking like generic transport failures.
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
   guest-agent protocol through the canonical CLI and return structured results
   rendered as human-readable CLI output.
@@ -269,20 +286,22 @@ hosts. The current provider matrix for that lane is:
 |----------|-----------------|------------|--------------------------|
 | `local` | `demo` | Supported | `port doctor` performs local preflight; `port machine launch --machine demo` can launch Firecracker on Linux |
 | `generic-linux` | `cloud-generic` | Partial | `port doctor` reports the future remote Linux lane; `port machine launch` tells you to run Port on that Linux host directly |
-| `aws` | `cloud-aws` | Partial | `port doctor` reports AWS as a justified future lane; `port machine launch --machine cloud-aws` fails with AWS-specific guidance |
+| `aws` | `cloud-aws` | Prepared-node / partial | `port doctor` reports AWS readiness details; `port machine launch --machine cloud-aws` launches through the hosted control plane when the machine is switched to `pvm` and the prepared node host kit plus PVM artifact paths exist |
 | `gcp` | `cloud-gcp` | Partial | `port doctor` reports GCP as a justified future lane; `port machine launch` fails with GCP-specific guidance |
 | `azure` | `cloud-azure` | Unsupported | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
 
-The remote Linux workflow is intentionally limited today:
+The remote Linux workflow is intentionally limited today outside the prepared
+hosted PVM lane:
 
 ```bash
-cargo run -p port-cli -- --config examples/port.toml doctor
-cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
+port --config examples/port.toml doctor
+port --config examples/port.toml machine launch --machine cloud-aws
 ```
 
 The first command surfaces the provider-aware support matrix through the CLI.
-The second command is expected to fail with an AWS-specific message because the
-MVP does not yet implement remote launch orchestration.
+The second command is still expected to fail with an AWS-specific message until
+you switch `cloud-aws` to `protection_mode = "pvm"` and provide the prepared
+node host kit plus PVM artifact paths described in [`docs/pvm.md`](docs/pvm.md).
 
 The explicit cloud design, remote workflow, and substrate guidance live in
 [`docs/cloud.md`](docs/cloud.md).
@@ -312,6 +331,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   a hosted fleet. Those verbs now execute through the live hosted HTTP path to
   `port control-plane serve`, which routes to `port node-agent serve` for the
   demo lane without introducing hosted-only verbs.
+- Hosted `machine launch` now uses that same control-plane plus node-agent path
+  for prepared x86_64 PVM machines. Other hosted launch paths still return
+  provider-aware guidance instead of pretending they are live.
 - Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
   a control-plane-authorized attach followed by node-agent guest brokerage to
   the in-guest `port-guest-agent`. The canonical `guest` verbs and guest

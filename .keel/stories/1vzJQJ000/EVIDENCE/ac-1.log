@@ -1,0 +1,15 @@
+---
+recorded_at: 2026-03-08T14:17:32.702028332-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJQJ000/verify-ac-1.sh
+---
+Hosted prepared-node PVM workflow:
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+  Other hosted launch paths still return provider-aware guidance until their runtime lanes ship.
+Hosted prepared-node PVM workflow:
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+| `aws` | `cloud-aws` | Prepared-node / partial | `port doctor` reports AWS readiness details; `port machine launch --machine cloud-aws` launches through the hosted control plane when the machine is switched to `pvm` and the prepared node host kit plus PVM artifact paths exist |
+port --config examples/port.toml machine launch --machine cloud-aws
+- other hosted launch paths still return provider-aware guidance until their
+## Hosted Prepared-Node Workflow
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+  on that prepared node

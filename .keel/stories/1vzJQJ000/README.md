@@ -2,10 +2,11 @@
 id: 1vzJQJ000
 title: Publish Prepared Pvm Operator Workflow
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T12:04:19
-updated_at: 2026-03-08T12:07:52
+updated_at: 2026-03-08T14:11:38
 scope: 1vzJKE000/1vzJP2000
+started_at: 2026-03-08T14:11:38
 ---
 
 # Publish Prepared Pvm Operator Workflow
@@ -18,9 +19,7 @@ boundaries.
 
 ## Acceptance Criteria
 
-- [ ] [SRS-04/AC-01] CLI help, README, and `docs/pvm.md` describe the
-  prepared-node PVM workflow, prerequisites, and failure boundaries through the
-  canonical `port` command model.
-- [ ] [SRS-04/AC-02] Recorded CLI evidence demonstrates prepared-node PVM
-  launch while also proving the preserved standard Firecracker lane for a new
-  operator.
+<!-- verify: command, SRS-04:start:end, proof: ac-1.log -->
+- [x] [SRS-04/AC-01] CLI help, README, and `docs/pvm.md` describe the prepared-node PVM workflow, prerequisites, and failure boundaries through the canonical `port` command model. <!-- [SRS-04/AC-01] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJQJ000/verify-ac-1.sh, proof: ac-1.log -->
+<!-- verify: command, SRS-04:start:end, proof: ac-2.log -->
+- [x] [SRS-04/AC-02] Recorded CLI evidence demonstrates prepared-node PVM launch while also proving the preserved standard Firecracker lane for a new operator. <!-- [SRS-04/AC-02] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJQJ000/verify-ac-2.sh, proof: ac-2.log -->

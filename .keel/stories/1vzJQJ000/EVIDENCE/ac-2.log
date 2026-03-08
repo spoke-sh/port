@@ -1,0 +1,91 @@
+---
+recorded_at: 2026-03-08T14:17:43.377386204-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJQJ000/verify-ac-2.sh
+---
+launched machine: cloud-aws
+pid: 2933683
+runtime dir: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws
+firecracker binary: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/firecracker-pvm
+config path: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/firecracker-config.json
+firecracker log: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/firecracker.log
+console stdout: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/console.stdout.log
+console stderr: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/console.stderr.log
+manifest: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/manifest.json
+machine: cloud-aws
+state: running
+pid: 2933683
+inventory scope: hosted-fleet
+inventory owner: hosted-control-plane
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+status source: control-plane-inventory-and-node-agent-runtime
+launch route: hosted-control-plane
+inventory route: hosted-control-plane
+status route: hosted-control-plane
+stop route: hosted-control-plane
+guest route: hosted-control-plane
+runtime dir: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws
+config path: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/firecracker-config.json
+manifest: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/manifest.json
+pid file: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/firecracker.pid
+firecracker log: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/firecracker.log
+console stdout: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/console.stdout.log
+console stderr: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws/console.stderr.log
+detail: live Firecracker process matches runtime manifest Routed through control plane 'demo' and node 'aws-linux-node'.
+machine: cloud-aws
+previous state: running
+current state: stopped
+pid: 2933683
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+status source: control-plane-inventory-and-node-agent-runtime
+stop route: hosted-control-plane
+runtime dir: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/hosted/aws-linux-node/cloud-aws
+detail: sent SIGTERM to pid and cleaned stale runtime sockets Routed through control plane 'demo' and node 'aws-linux-node'.
+launched machine: demo
+pid: 2933783
+runtime dir: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo
+firecracker binary: /nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker
+config path: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/firecracker-config.json
+firecracker log: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/firecracker.log
+console stdout: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/console.stdout.log
+console stderr: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/console.stderr.log
+manifest: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/manifest.json
+machine: demo
+state: running
+pid: 2933783
+inventory scope: local-runtime-root
+inventory owner: local-runtime-root
+lifecycle owner: local-port-runtime
+guest broker: local-runtime-transport
+status source: runtime-manifest-and-host-process
+launch route: direct-local-runtime
+inventory route: direct-local-runtime
+status route: direct-local-runtime
+stop route: direct-local-runtime
+guest route: direct-local-runtime
+runtime dir: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo
+config path: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/firecracker-config.json
+manifest: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/manifest.json
+pid file: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/firecracker.pid
+firecracker log: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/firecracker.log
+console stdout: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/console.stdout.log
+console stderr: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo/console.stderr.log
+detail: live Firecracker process matches runtime manifest
+machine: demo
+previous state: running
+current state: stopped
+pid: 2933783
+inventory scope: local-runtime-root
+lifecycle owner: local-port-runtime
+status source: runtime-manifest-and-host-process
+stop route: direct-local-runtime
+runtime dir: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/runtime/demo
+detail: sent SIGTERM to pid and cleaned stale runtime sockets
+launched machine: cloud-aws
+firecracker binary: /var/tmp/nix-shell.YDi08R/tmp.yWpnDYfmoF/firecracker-pvm
+state: running
+current state: stopped
+launched machine: demo
+state: running
+current state: stopped

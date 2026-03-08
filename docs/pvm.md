@@ -15,7 +15,7 @@ The implementation contract is narrower and more concrete:
 
 | Architecture | Port decision | Why |
 |--------------|---------------|-----|
-| `x86_64` | Keep / planned | Current public Firecracker/PVM operator docs still describe an x86_64-only lane with a custom host kernel, a patched Firecracker build, `pti=off`, and dedicated guest images |
+| `x86_64` | Keep / prepared-node launch | Port now launches this lane through prepared Linux nodes, but it still depends on a custom host kernel, a patched Firecracker build, `pti=off`, and dedicated guest images |
 | `aarch64` | Research-only | Upstream arm64 protected-virtualization work is real, but Port does not yet have a vendor-grade Firecracker/PVM runtime contract to ship or validate |
 
 Actuated's public product materials also matter to this decision:
@@ -100,21 +100,32 @@ What those commands prove today:
 - `port doctor` reports the `pvm:local:x86_64:*` host-kit checks for Linux
   platform, `x86_64` architecture, `pti=off`, and the patched
   `firecracker-pvm` binary contract
-- the current launch path still blocks on those host-kit checks because the
-  real Firecracker/PVM runtime lane is not shipped yet
+- a local PVM launch still blocks until the prepared x86_64 Linux host really
+  satisfies that host-kit contract
 
 The same operator workflow should also leave the standard Firecracker lane
 usable. Building or validating `x86_64/firecracker/pvm` artifacts does not
 replace the standard `x86_64/firecracker/standard` artifacts or their paths.
 
-## Hosted Admission Workflow
+## Hosted Prepared-Node Workflow
 
-Hosted PVM work is now explicit about placement versus launch:
+Hosted PVM work is now explicit about placement, host-kit readiness, and live
+launch through the hosted control plane.
+
+Start from a copy of `examples/port.toml` and make these temporary changes:
+
+- switch `machines.cloud-aws.protection_mode` to `pvm`
+- point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
+  prepared artifact paths available on the node host
+- export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm` binary
+  on that prepared node
 
 ```bash
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
 ```
 
 Interpret those sample hosts this way:
@@ -123,12 +134,16 @@ Interpret those sample hosts this way:
   `protection_mode = "pvm"`, Port reports the machine as `malformed` with
   placement detail because `generic-linux-node` advertises a PVM lane in
   `planned` state rather than `ready`.
-- `cloud-aws` is the sample admission-ready path. If you change it to
-  `protection_mode = "pvm"`, Port accepts hosted placement because
-  `aws-linux-node` advertises a `ready` x86_64 PVM lane.
-- hosted `machine launch` is still a follow-on runtime slice. Admission-ready
-  placement means the hosted inventory and control-plane contracts are
-  coherent; it does not yet mean Port can boot the remote PVM VM.
+- `cloud-aws` is the sample prepared-node path. Once you change it to
+  `protection_mode = "pvm"` and provide the prepared artifact paths plus
+  `firecracker-pvm`, Port accepts placement because `aws-linux-node`
+  advertises a `ready` x86_64 PVM lane and then launches through the live
+  control-plane and node-agent path.
+- missing `firecracker-pvm`, missing host boot prerequisites, or missing PVM
+  artifact paths fail explicitly; Port does not silently fall back to the
+  standard Firecracker lane.
+- other hosted launch paths still return provider-aware guidance until their
+  runtime lanes ship.
 
 ## Preserved Standard Lane
 
@@ -168,11 +183,10 @@ The implementation order after this contract is:
 1. Build and package the x86_64 PVM host kit.
 2. Extend `port doctor` with explicit PVM host-kit checks.
 3. Add x86_64/firecracker/pvm kernel and guest-image pipelines plus validation.
-4. Add a Firecracker/PVM driver path that selects the host kit and PVM
-   artifacts explicitly.
-5. Teach the hosted/node-agent lane how to place workloads only on hosts that
-   advertise the PVM host kit.
-6. Turn hosted placement readiness into a real hosted launch path.
+4. Expand prepared-node automation so operators do not need a manual config
+   overlay for the hosted demo workflow.
+5. Extend hosted launch beyond the prepared PVM lane to broader scheduler and
+   provider-backed runtime rollout.
 
 ## Research Basis
 
