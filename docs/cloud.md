@@ -8,6 +8,7 @@ Apple Virtualization Framework.
 
 The hosted control-plane split that will eventually carry these remote lanes is
 defined in [`docs/hosted.md`](hosted.md).
+The dedicated Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
 
 `port doctor` reports both provider-aware and lane-aware support boundaries, and
 `port machine launch` still fails fast when you target a lane that Port does not
@@ -76,12 +77,17 @@ The PVM / protected VM / confidential VM lane is back in scope, but under an
 explicitly narrower contract than Port's overall architecture story:
 
 - Firecracker/PVM on `x86_64` is the near-term implementation lane.
+- That x86_64 lane depends on a prepared host kit: custom host kernel,
+  patched Firecracker build, `pti=off`, and dedicated PVM artifact variants.
 - Firecracker/PVM on `aarch64` remains a research lane until Port has a
   supportable runtime path rather than only upstream protected-virtualization
   evidence.
 - Port will fail fast when machine or artifact compatibility claims a substrate,
   protection-mode, or architecture combination that the current lane does not
   support yet.
+
+See [`pvm.md`](pvm.md) for the explicit host-kit, artifact-kit, validation, and
+follow-on implementation contract.
 
 That is the intended product posture: no hidden promises, no silent fallback,
 and no conflation of "arm64 protected virtualization exists upstream" with

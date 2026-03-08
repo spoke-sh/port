@@ -1,0 +1,22 @@
+---
+recorded_at: 2026-03-07T19:05:23-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3lA000/verify-ac-2.sh
+---
+
+/tmp/1vz3lA000-help.verify:68:  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit
+/tmp/1vz3lA000-help.verify:70:  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker
+/tmp/1vz3lA000-help.verify:89:  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus
+crates/port-cli/src/lib.rs:49:  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit plus pvm artifact variants.
+crates/port-cli/src/lib.rs:50:  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker runtime path.
+crates/port-cli/src/lib.rs:62:  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
+README.md:49:[`docs/pvm.md`](docs/pvm.md).
+README.md:85:- treat it as a dedicated host kit plus artifact kit, not just a model flag
+README.md:90:contract lives in [`docs/pvm.md`](docs/pvm.md).
+docs/cloud.md:80:- That x86_64 lane depends on a prepared host kit: custom host kernel,
+docs/pvm.md:36:The x86_64 Firecracker/PVM lane needs a dedicated host kit.
+docs/pvm.md:44:- explicit operator separation between the standard Firecracker host kit and
+docs/pvm.md:45:  the PVM host kit
+docs/pvm.md:89:  artifacts, or docs until the host kit, VMM path, artifact kit, and runtime
+docs/pvm.md:98:1. Build and package the x86_64 PVM host kit.
+docs/pvm.md:101:4. Add a Firecracker/PVM driver path that selects the host kit and PVM
+docs/pvm.md:104:   advertise the PVM host kit.

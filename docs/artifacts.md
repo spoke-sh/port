@@ -56,6 +56,8 @@ Current runtime boundary:
 - the demo build and validate pipelines only run for the native host
   architecture
 - the sample config only ships Firecracker/standard variants
+- the future Firecracker/PVM lane requires a separate artifact kit rather than
+  reusing those `standard` variants
 - push/pull are already variant-aware even when the selected variant is
   published or fetched on another host
 
@@ -115,6 +117,21 @@ For `demo-kernel` on `x86_64/firecracker/standard`, that becomes:
   `e2fsck -fn` for filesystem integrity plus `debugfs` checks that `/init`,
   `/bin/busybox`, and `/usr/bin/port-guest-agent` exist and that `/init`
   launches `port-guest-agent`
+
+## Future PVM Artifact Kit
+
+Port's future Firecracker/PVM lane is not a metadata-only variation of the
+standard artifacts.
+
+Required contract:
+
+- kernel variant path under `.../x86_64/firecracker/pvm/`
+- guest-image variant path under `.../x86_64/firecracker/pvm/`
+- dedicated validation for those PVM variants
+- no silent fallback to `standard` artifacts
+
+The full host-kit and artifact-kit contract for that lane lives in
+[`pvm.md`](pvm.md).
 
 ## Operator Notes
 

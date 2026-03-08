@@ -1,0 +1,36 @@
+---
+recorded_at: 2026-03-07T19:05:23-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz3lA000/verify-ac-1.sh
+---
+
+
+running 11 tests
+...........
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+668:pub struct FirecrackerPvmLaneContract {
+671:    pub host_kit: Option<PvmHostKit>,
+672:    pub artifact_kit: Option<PvmArtifactKit>,
+678:impl FirecrackerPvmLaneContract {
+685:                host_kit: Some(PvmHostKit {
+690:                    host_boot_args: vec![String::from("pti=off")],
+700:                artifact_kit: Some(PvmArtifactKit {
+733:                            "Confirm the host is booted into the custom PVM-capable kernel and that the host boot line includes pti=off.",
+744:                        name: String::from("artifact-variants"),
+812:pub struct PvmHostKit {
+822:pub struct PvmArtifactKit {
+1013:        ArtifactStore, ExecutionSubstrate, FirecrackerPvmLaneContract, HostProvider,
+1170:        let contract = FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::X86_64);
+1180:            .contains(&String::from("pti=off")));
+1193:        let contract = FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::Aarch64);
+docs/pvm.md:18:| `x86_64` | Keep / planned | Current public Firecracker/PVM operator docs still describe an x86_64-only lane with a custom host kernel, a patched Firecracker build, `pti=off`, and dedicated guest images |
+docs/pvm.md:34:## x86_64 Host Kit Contract
+docs/pvm.md:42:- host boot line includes `pti=off`
+docs/pvm.md:50:## x86_64 Artifact Kit Contract
+docs/pvm.md:66:Future Port validation for the x86_64 PVM lane should check all of the
+docs/pvm.md:71:   `pti=off`.

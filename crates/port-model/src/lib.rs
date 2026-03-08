@@ -664,6 +664,175 @@ impl MachineControlContract {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FirecrackerPvmLaneContract {
+    pub architecture: MachineArchitecture,
+    pub decision: PvmLaneDecision,
+    pub host_kit: Option<PvmHostKit>,
+    pub artifact_kit: Option<PvmArtifactKit>,
+    pub validation: Vec<PvmValidationExpectation>,
+    pub operator_prerequisites: Vec<String>,
+    pub follow_on_work: Vec<String>,
+}
+
+impl FirecrackerPvmLaneContract {
+    #[must_use]
+    pub fn for_architecture(architecture: MachineArchitecture) -> Self {
+        match architecture {
+            MachineArchitecture::X86_64 => Self {
+                architecture,
+                decision: PvmLaneDecision::Planned,
+                host_kit: Some(PvmHostKit {
+                    host_platform: HostPlatform::Linux,
+                    host_architecture: MachineArchitecture::X86_64,
+                    requires_custom_host_kernel: true,
+                    requires_patched_firecracker: true,
+                    host_boot_args: vec![String::from("pti=off")],
+                    notes: vec![
+                        String::from(
+                            "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
+                        ),
+                        String::from(
+                            "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
+                        ),
+                    ],
+                }),
+                artifact_kit: Some(PvmArtifactKit {
+                    kernel_selector: ArtifactSelector {
+                        architecture: MachineArchitecture::X86_64,
+                        substrate: ExecutionSubstrate::Firecracker,
+                        protection_mode: ProtectionMode::Pvm,
+                    },
+                    guest_image_selector: ArtifactSelector {
+                        architecture: MachineArchitecture::X86_64,
+                        substrate: ExecutionSubstrate::Firecracker,
+                        protection_mode: ProtectionMode::Pvm,
+                    },
+                    requires_dedicated_variants: true,
+                    notes: vec![
+                        String::from(
+                            "PVM guests require dedicated kernel and guest-image variants; standard Firecracker artifacts are insufficient.",
+                        ),
+                        String::from(
+                            "The guest image must boot with the guest-side PVM expectations rather than the current standard guest contract.",
+                        ),
+                    ],
+                }),
+                validation: vec![
+                    PvmValidationExpectation {
+                        name: String::from("host-architecture"),
+                        blocking: true,
+                        detail: String::from(
+                            "Confirm the execution host is Linux/x86_64 before attempting the Firecracker/PVM lane.",
+                        ),
+                    },
+                    PvmValidationExpectation {
+                        name: String::from("host-kernel"),
+                        blocking: true,
+                        detail: String::from(
+                            "Confirm the host is booted into the custom PVM-capable kernel and that the host boot line includes pti=off.",
+                        ),
+                    },
+                    PvmValidationExpectation {
+                        name: String::from("firecracker-binary"),
+                        blocking: true,
+                        detail: String::from(
+                            "Confirm the selected Firecracker binary is the patched PVM-capable build rather than the standard local-launch binary.",
+                        ),
+                    },
+                    PvmValidationExpectation {
+                        name: String::from("artifact-variants"),
+                        blocking: true,
+                        detail: String::from(
+                            "Confirm both kernel and guest-image artifacts exist for x86_64/firecracker/pvm and pass their variant-specific validation steps.",
+                        ),
+                    },
+                ],
+                operator_prerequisites: vec![
+                    String::from("Prepare a dedicated Linux/x86_64 host kit before enabling Firecracker/PVM in Port."),
+                    String::from("Do not reuse the standard Firecracker host or standard guest artifacts for the PVM lane."),
+                ],
+                follow_on_work: vec![
+                    String::from("Teach port doctor to validate the x86_64 PVM host kit and host boot-line requirements."),
+                    String::from("Add build, pull, and validate pipelines for x86_64/firecracker/pvm kernel and guest-image variants."),
+                    String::from("Add a Firecracker/PVM driver path that selects the PVM host kit and fails fast when the host kit is absent."),
+                ],
+            },
+            MachineArchitecture::Aarch64 => Self {
+                architecture,
+                decision: PvmLaneDecision::ResearchOnly,
+                host_kit: None,
+                artifact_kit: None,
+                validation: vec![PvmValidationExpectation {
+                    name: String::from("runtime-path"),
+                    blocking: true,
+                    detail: String::from(
+                        "Upstream arm64 protected virtualization work exists, but Port does not yet have a supportable Firecracker/PVM runtime path to validate.",
+                    ),
+                }],
+                operator_prerequisites: vec![String::from(
+                    "Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path.",
+                )],
+                follow_on_work: vec![
+                    String::from("Track upstream arm64 protected-virtualization and guest-memory work relevant to Firecracker."),
+                    String::from("Reassess arm64 only after a supportable Firecracker runtime path exists, not only because upstream kernel capability exists."),
+                ],
+            },
+            MachineArchitecture::Native => Self::for_architecture(resolve_native_pvm_architecture()),
+        }
+    }
+}
+
+fn resolve_native_pvm_architecture() -> MachineArchitecture {
+    match std::env::consts::ARCH {
+        "x86_64" => MachineArchitecture::X86_64,
+        "aarch64" => MachineArchitecture::Aarch64,
+        _ => MachineArchitecture::Native,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PvmLaneDecision {
+    Planned,
+    ResearchOnly,
+}
+
+impl std::fmt::Display for PvmLaneDecision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Planned => "planned",
+            Self::ResearchOnly => "research-only",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PvmHostKit {
+    pub host_platform: HostPlatform,
+    pub host_architecture: MachineArchitecture,
+    pub requires_custom_host_kernel: bool,
+    pub requires_patched_firecracker: bool,
+    pub host_boot_args: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PvmArtifactKit {
+    pub kernel_selector: ArtifactSelector,
+    pub guest_image_selector: ArtifactSelector,
+    pub requires_dedicated_variants: bool,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PvmValidationExpectation {
+    pub name: String,
+    pub blocking: bool,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MachineInventoryScope {
@@ -841,9 +1010,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ArtifactStore, ExecutionSubstrate, HostProvider, MachineArchitecture, MachineCommandRoute,
-        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
-        MachineLifecycleOwner, MachineStatusSource, PortConfig, ProtectionMode,
+        ArtifactStore, ExecutionSubstrate, FirecrackerPvmLaneContract, HostProvider,
+        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
+        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
+        PortConfig, ProtectionMode, PvmLaneDecision,
     };
 
     #[test]
@@ -993,6 +1163,41 @@ mod tests {
             contract.status_route,
             MachineCommandRoute::HostedControlPlane
         );
+    }
+
+    #[test]
+    fn x86_firecracker_pvm_contract_requires_host_and_artifact_kits() {
+        let contract = FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::X86_64);
+
+        assert_eq!(contract.decision, PvmLaneDecision::Planned);
+        assert!(contract.host_kit.is_some());
+        assert!(contract.artifact_kit.is_some());
+        assert!(contract
+            .host_kit
+            .as_ref()
+            .expect("x86 host kit should exist")
+            .host_boot_args
+            .contains(&String::from("pti=off")));
+        assert!(contract
+            .validation
+            .iter()
+            .any(|check| check.name == "host-kernel"));
+        assert!(contract
+            .follow_on_work
+            .iter()
+            .any(|item| item.contains("port doctor")));
+    }
+
+    #[test]
+    fn arm64_firecracker_pvm_contract_is_research_only() {
+        let contract = FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::Aarch64);
+
+        assert_eq!(contract.decision, PvmLaneDecision::ResearchOnly);
+        assert!(contract.host_kit.is_none());
+        assert!(contract.artifact_kit.is_none());
+        assert!(contract.validation[0]
+            .detail
+            .contains("supportable Firecracker/PVM runtime path"));
     }
 
     #[test]

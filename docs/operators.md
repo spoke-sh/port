@@ -122,6 +122,8 @@ Current artifact-command behavior:
   backend and warms the local cache.
 - `port artifacts pull` restores the selected variant from the configured
   backend into both the cache and the canonical local path used by `launch`.
+- Firecracker/PVM is a separate future artifact kit on `x86_64`; do not assume
+  the current `standard` kernel or guest image can be reused there.
 
 ## Remote Linux And Cloud Workflow
 
@@ -160,6 +162,7 @@ What to expect:
   `hosted-control-plane` / `hosted-node-agent` through the same fields.
 - The future hosted split for lifecycle ownership and guest-operation brokering
   is documented in [`hosted.md`](hosted.md).
+- The explicit Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
 
 The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
 The hosted node-agent/control-plane split that will eventually sit behind the

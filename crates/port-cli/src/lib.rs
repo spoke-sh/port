@@ -46,7 +46,8 @@ Platform Support:
   Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
 Execution Lanes:
   Firecracker + standard on Linux is the current shipped lane.
-  Firecracker + pvm on x86_64 is planned for cloud cost control; Firecracker + pvm on aarch64 remains research only.
+  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit plus pvm artifact variants.
+  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker runtime path.
   Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
 Cloud Linux:
   generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
@@ -58,6 +59,7 @@ Hosted Control:
   Local Port still owns runtime lifecycle directly today.
   Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the current guest protocol semantics.
   `port machine list`, `status`, and `stop` now report the current inventory scope, lifecycle owner, status source, and routing contract.
+  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   Azure remains an explicitly unsupported Firecracker provider lane.";
 
 #[derive(Debug, Parser)]

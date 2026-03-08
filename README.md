@@ -45,7 +45,8 @@ operator lanes around it:
 
 Detailed operator workflows live in [`docs/operators.md`](docs/operators.md).
 Cloud-provider boundaries and the current remote Linux support matrix live in
-[`docs/cloud.md`](docs/cloud.md).
+[`docs/cloud.md`](docs/cloud.md). The Firecracker/PVM host-kit contract lives in
+[`docs/pvm.md`](docs/pvm.md).
 
 ## Project Status
 
@@ -75,6 +76,18 @@ canonical substrate matrix is:
 | Firecracker | `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path here |
 | Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
 | Apple Virtualization Framework | `standard` | `arm64` or `x86_64` on macOS | Planned | First-class macOS lane in the model and docs, not yet implemented |
+
+## PVM Contract
+
+Port's PVM position is intentionally concrete:
+
+- keep Firecracker/PVM on `x86_64` as the first implementation lane
+- treat it as a dedicated host kit plus artifact kit, not just a model flag
+- keep Firecracker/PVM on `aarch64` research-only until there is a supportable
+  Firecracker runtime path
+
+The full host-kit, artifact-kit, validation, and follow-on implementation
+contract lives in [`docs/pvm.md`](docs/pvm.md).
 
 ## CLI Surface
 
