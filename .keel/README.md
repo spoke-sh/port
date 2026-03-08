@@ -8,7 +8,6 @@
 | Bearing | Status | Survey | Assessment |
 |---------|--------|--------|------------|
 | [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
-| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | exploring | - | - |
 
 <details>
 <summary>Completed Bearings</summary>
@@ -17,6 +16,7 @@
 |---------|--------|
 | [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid |
 | [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid |
+| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid |
 
 </details>
 
@@ -43,4 +43,10 @@
 | Voyage | Status |
 |--------|--------|
 | [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | done |
+
+### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | planned |
 
