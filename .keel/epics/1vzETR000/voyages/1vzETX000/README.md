@@ -29,7 +29,7 @@ started_at: 2026-03-08T06:51:29
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Publish Hosted Demo Workflow And Evidence](../../../../stories/1vzEVX000/README.md) | feat | backlog |
+| [Publish Hosted Demo Workflow And Evidence](../../../../stories/1vzEVX000/README.md) | feat | in-progress |
 | [Define Hosted HTTP Control Contracts](../../../../stories/1vzEVi000/README.md) | feat | done |
 | [Implement Node Agent Serve Path](../../../../stories/1vzEVk000/README.md) | feat | done |
 | [Implement Control Plane Serve Path](../../../../stories/1vzEVm000/README.md) | feat | done |

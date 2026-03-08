@@ -84,6 +84,19 @@ port --config examples/port.toml control-plane serve \
 That keeps the control-plane transport real without pretending Port already has
 durable node registration or scheduler policy.
 
+The repository-local end-to-end demo workflow is:
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+bash scripts/hosted-demo.sh
+```
+
+That script prepares temporary hosted server and client configs, starts
+`port-guest-agent`, `port node-agent serve`, and `port control-plane serve`,
+then runs canonical hosted `port machine status`, `port guest exec`,
+`port guest copy`, and `port guest logs` commands through the live hosted HTTP
+path.
+
 ## Hosted API Identity Contract
 
 The first hosted auth slice is now explicit in the shared Port model.

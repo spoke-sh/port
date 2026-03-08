@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-08T09:13:18.761884772-07:00
+mode: manual
+---
+README, hosted docs, and CLI help now point to the same repository-local hosted demo flow, including the start commands and the current copy/forward limits.

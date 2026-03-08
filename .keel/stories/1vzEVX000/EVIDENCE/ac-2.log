@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-08T09:13:18.800897119-07:00
+mode: manual
+---
+The hosted demo script starts port-guest-agent, node-agent, and control-plane processes, then proves hosted machine status, guest exec, guest copy, and guest logs through the live HTTP path with a deliberately wrong client runtime root.

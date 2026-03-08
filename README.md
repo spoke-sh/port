@@ -297,6 +297,21 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   control-contract fields that future hosted routing will reuse: inventory
   scope, inventory owner, lifecycle owner, status source, and per-verb route.
 
+Repository-local hosted demo proof:
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+bash scripts/hosted-demo.sh
+```
+
+That demo script prepares temporary hosted server and client configs, starts
+`port-guest-agent`, `port node-agent serve`, and `port control-plane serve`,
+then runs canonical hosted `port machine status`, `port guest exec`,
+`port guest copy`, and `port guest logs` commands end-to-end. It also prints
+the current single-node demo limits: hosted `copy` still assumes node-visible
+host paths, and hosted `forward` still keeps its listener lifecycle on the
+repo-local guest transport path.
+
 ## Linux Local Workflow
 
 The supported end-to-end Linux MVP workflow is:
