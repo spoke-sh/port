@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-03-08T06:56:05.769173213-07:00
+mode: manual
+files: [".keel/stories/1vzEVi000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo run -q -p port-sdk --example hosted-sdk ==
+machine monitor url: https://port.example.internal/v1/machines/cloud-aws/monitor
+guest exec url: https://port.example.internal/v1/machines/cloud-aws/guest:exec
+service apply url: https://port.example.internal/v1/machines/cloud-aws/services
+
+== hosted contract docs excerpt ==
+docs/sdk.md:16:  header shape from the shared Port model plus `port-hosted-protocol`
+docs/sdk.md:22:- `port-hosted-protocol` publishes the shared hosted HTTP route, auth-header,
+docs/sdk.md:23:  and route-context contract that the SDK now uses directly
+docs/sdk.md:96:header definitions themselves live in `crates/port-hosted-protocol`.
+crates/port-hosted-protocol/src/lib.rs:10:pub const PORT_AUDIENCE_HEADER: &str = "x-port-audience";
+crates/port-hosted-protocol/src/lib.rs:11:pub const PORT_NODE_AGENT_TOKEN_HEADER: &str = "x-port-node-agent-token";
+docs/hosted.md:101:`crates/port-hosted-protocol`. It carries:
+docs/hosted.md:104:- the internal node-agent request paths
+docs/hosted.md:105:- the explicit auth-header rules for client and node-agent calls
+docs/hosted.md:106:- the route-context envelope that keeps control-plane, node, host-group, and
+README.md:278:- `port-hosted-protocol` now publishes the shared hosted HTTP route, auth, and
+README.md:279:  route-context contract that later control-plane and node-agent servers will
+README.md:362:[`crates/port-hosted-protocol/src/lib.rs`](crates/port-hosted-protocol/src/lib.rs).
+README.md:365:  header shape from the shared Port model and `port-hosted-protocol`.
+

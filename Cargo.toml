@@ -3,6 +3,7 @@ members = [
   "crates/port-agent-protocol",
   "crates/port-cli",
   "crates/port-guest-agent",
+  "crates/port-hosted-protocol",
   "crates/port-model",
   "crates/port-runtime",
   "crates/port-sdk",

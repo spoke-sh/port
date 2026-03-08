@@ -97,6 +97,15 @@ That means Port now has a canonical way to say:
 - which header carries the token,
 - and where the operator provides that token.
 
+The shared hosted HTTP route and auth contract now lives in
+`crates/port-hosted-protocol`. It carries:
+
+- the public control-plane request paths
+- the internal node-agent request paths
+- the explicit auth-header rules for client and node-agent calls
+- the route-context envelope that keeps control-plane, node, host-group, and
+  runtime-owner context attached to hosted responses and failures
+
 This is still a contract, not a claim that the hosted API already runs. The
 current implementation uses it for validation, docs, help text, and provider-
 aware guidance rather than for real remote execution.

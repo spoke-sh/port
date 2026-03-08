@@ -275,6 +275,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - `port-sdk` now publishes typed hosted request builders for canonical
   machine, guest, and service operations so SDK/API consumers can follow the
   same surface as the CLI without waiting for a separate client model.
+- `port-hosted-protocol` now publishes the shared hosted HTTP route, auth, and
+  route-context contract that later control-plane and node-agent servers will
+  reuse instead of inventing a second hosted path model.
 - Local `machine list`, `status`, `monitor`, `top`, and `stop` now publish the
   control-contract fields that future hosted routing will reuse: inventory
   scope, inventory owner, lifecycle owner, status source, and per-verb route.
@@ -355,8 +358,11 @@ the supported hosted client surface. It is intentionally a typed
 request-builder API today, not a claim that the remote control plane transport
 already exists.
 
+The shared hosted HTTP route and auth contract now lives in
+[`crates/port-hosted-protocol/src/lib.rs`](crates/port-hosted-protocol/src/lib.rs).
+
 - `HostedClient::from_machine` derives the hosted endpoint, audience, and auth
-  header shape from the shared Port model.
+  header shape from the shared Port model and `port-hosted-protocol`.
 - `machines()` mirrors `port machine list|status|monitor|top|stop`.
 - `guest()` mirrors `port guest exec|copy|pty|logs|forward` and reuses the
   existing `port-agent-protocol` payloads.

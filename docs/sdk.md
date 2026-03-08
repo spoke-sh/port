@@ -13,12 +13,14 @@ mirror the existing CLI and model.
 Shipped today:
 
 - `HostedClient::from_machine` derives hosted endpoint, audience, and auth
-  header shape from the shared Port model
+  header shape from the shared Port model plus `port-hosted-protocol`
 - `machines()` mirrors `port machine list|status|monitor|top|stop`
 - `guest()` mirrors `port guest exec|copy|pty|logs|forward` using the existing
   `port-agent-protocol` request payloads
 - `services()` mirrors `port service secret put|list|remove` plus
   `port service apply|list|status|stop`
+- `port-hosted-protocol` publishes the shared hosted HTTP route, auth-header,
+  and route-context contract that the SDK now uses directly
 
 Still planned:
 
@@ -90,4 +92,5 @@ Canonical hosted request paths now documented by Port:
 - `POST /v1/machines/{machine}/services/{name}:stop`
 
 The SDK mirrors those paths exactly so later transport work can build on a
-stable typed surface instead of inventing a second client model.
+stable typed surface instead of inventing a second client model. The route and
+header definitions themselves live in `crates/port-hosted-protocol`.

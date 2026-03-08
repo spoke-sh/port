@@ -404,6 +404,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "port-hosted-protocol"
+version = "0.1.0"
+dependencies = [
+ "port-agent-protocol",
+ "port-model",
+ "serde",
+]
+
+[[package]]
 name = "port-model"
 version = "0.1.0"
 dependencies = [
@@ -430,6 +439,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "port-agent-protocol",
+ "port-hosted-protocol",
  "port-model",
  "serde",
  "serde_json",

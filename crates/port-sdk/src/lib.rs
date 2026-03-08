@@ -4,7 +4,11 @@ use anyhow::{Context, Result};
 use port_agent_protocol::{
     CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, PtyRequest,
 };
-use port_model::{HostedApiIdentityContract, HostedAuthScheme, PortConfig};
+use port_hosted_protocol::{
+    HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestVerb,
+    HostedMachineRoute, HostedServiceRoute,
+};
+use port_model::{HostedApiIdentityContract, PortConfig};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -39,9 +43,7 @@ pub struct HostedApiRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedClient {
     base_url: String,
-    audience: String,
-    auth_header: String,
-    auth_value: String,
+    auth_headers: HostedClientHeaders,
 }
 
 impl HostedClient {
@@ -54,9 +56,7 @@ impl HostedClient {
     ) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
-            audience: audience.into(),
-            auth_header: auth_header.into(),
-            auth_value: auth_value.into(),
+            auth_headers: HostedClientHeaders::new(auth_header, auth_value, audience),
         }
     }
 
@@ -92,26 +92,22 @@ impl HostedClient {
     }
 
     fn from_identity(contract: HostedApiIdentityContract, token: String) -> Self {
-        let auth_value = match contract.auth.scheme {
-            HostedAuthScheme::Bearer => format!("Bearer {token}"),
-        };
+        let headers = HostedClientHeaders::from_identity(&contract, token);
         Self::new(
             contract.endpoint,
             contract.audience,
             contract.auth.header,
-            auth_value,
+            headers.auth_value,
         )
     }
 
     fn request(
         &self,
         method: HttpMethod,
-        path: impl AsRef<str>,
+        route: HostedControlPlaneRoute,
         body: Option<Value>,
     ) -> HostedApiRequest {
-        let mut headers = BTreeMap::new();
-        headers.insert(self.auth_header.clone(), self.auth_value.clone());
-        headers.insert(String::from("x-port-audience"), self.audience.clone());
+        let mut headers = self.auth_headers.to_header_map();
         if body.is_some() {
             headers.insert(
                 String::from("content-type"),
@@ -120,11 +116,7 @@ impl HostedClient {
         }
         HostedApiRequest {
             method,
-            url: format!(
-                "{}/{}",
-                self.base_url,
-                path.as_ref().trim_start_matches('/')
-            ),
+            url: format!("{}/{}", self.base_url, route.path().trim_start_matches('/')),
             headers,
             body,
         }
@@ -165,14 +157,20 @@ pub struct MachineClient<'a> {
 impl<'a> MachineClient<'a> {
     #[must_use]
     pub fn list(&self) -> HostedApiRequest {
-        self.client.request(HttpMethod::Get, "/v1/machines", None)
+        self.client.request(
+            HttpMethod::Get,
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::List),
+            None,
+        )
     }
 
     #[must_use]
     pub fn status(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
-            format!("/v1/machines/{machine_name}"),
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Status {
+                machine_name: machine_name.to_string(),
+            }),
             None,
         )
     }
@@ -181,7 +179,9 @@ impl<'a> MachineClient<'a> {
     pub fn monitor(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
-            format!("/v1/machines/{machine_name}/monitor"),
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Monitor {
+                machine_name: machine_name.to_string(),
+            }),
             None,
         )
     }
@@ -190,7 +190,9 @@ impl<'a> MachineClient<'a> {
     pub fn top(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
-            format!("/v1/machines/{machine_name}/top"),
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Top {
+                machine_name: machine_name.to_string(),
+            }),
             None,
         )
     }
@@ -199,7 +201,9 @@ impl<'a> MachineClient<'a> {
     pub fn stop(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Post,
-            format!("/v1/machines/{machine_name}:stop"),
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Stop {
+                machine_name: machine_name.to_string(),
+            }),
             None,
         )
     }
@@ -239,7 +243,17 @@ impl<'a> GuestClient<'a> {
         let body = serde_json::to_value(operation).context("failed to encode guest operation")?;
         Ok(self.client.request(
             HttpMethod::Post,
-            format!("/v1/machines/{machine_name}/guest:{verb}"),
+            HostedControlPlaneRoute::Guest(HostedGuestRoute {
+                machine_name: machine_name.to_string(),
+                verb: match verb {
+                    "exec" => HostedGuestVerb::Exec,
+                    "copy" => HostedGuestVerb::Copy,
+                    "pty" => HostedGuestVerb::Pty,
+                    "logs" => HostedGuestVerb::Logs,
+                    "forward" => HostedGuestVerb::Forward,
+                    _ => unreachable!("unsupported guest route verb"),
+                },
+            }),
             Some(body),
         ))
     }
@@ -258,7 +272,10 @@ impl<'a> ServiceClient<'a> {
         let body = serde_json::to_value(&request).context("failed to encode secret request")?;
         Ok(self.client.request(
             HttpMethod::Put,
-            format!("/v1/machines/{machine_name}/secrets/{}", request.name),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::SecretPut {
+                machine_name: machine_name.to_string(),
+                secret_name: request.name.clone(),
+            }),
             Some(body),
         ))
     }
@@ -267,7 +284,9 @@ impl<'a> ServiceClient<'a> {
     pub fn secret_list(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
-            format!("/v1/machines/{machine_name}/secrets"),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::SecretList {
+                machine_name: machine_name.to_string(),
+            }),
             None,
         )
     }
@@ -276,7 +295,10 @@ impl<'a> ServiceClient<'a> {
     pub fn secret_remove(&self, machine_name: &str, secret_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Delete,
-            format!("/v1/machines/{machine_name}/secrets/{secret_name}"),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::SecretRemove {
+                machine_name: machine_name.to_string(),
+                secret_name: secret_name.to_string(),
+            }),
             None,
         )
     }
@@ -289,7 +311,9 @@ impl<'a> ServiceClient<'a> {
         let body = serde_json::to_value(request).context("failed to encode service request")?;
         Ok(self.client.request(
             HttpMethod::Post,
-            format!("/v1/machines/{machine_name}/services"),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::Apply {
+                machine_name: machine_name.to_string(),
+            }),
             Some(body),
         ))
     }
@@ -298,7 +322,9 @@ impl<'a> ServiceClient<'a> {
     pub fn list(&self, machine_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
-            format!("/v1/machines/{machine_name}/services"),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::List {
+                machine_name: machine_name.to_string(),
+            }),
             None,
         )
     }
@@ -307,7 +333,10 @@ impl<'a> ServiceClient<'a> {
     pub fn status(&self, machine_name: &str, service_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Get,
-            format!("/v1/machines/{machine_name}/services/{service_name}"),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::Status {
+                machine_name: machine_name.to_string(),
+                service_name: service_name.to_string(),
+            }),
             None,
         )
     }
@@ -316,7 +345,10 @@ impl<'a> ServiceClient<'a> {
     pub fn stop(&self, machine_name: &str, service_name: &str) -> HostedApiRequest {
         self.client.request(
             HttpMethod::Post,
-            format!("/v1/machines/{machine_name}/services/{service_name}:stop"),
+            HostedControlPlaneRoute::Service(HostedServiceRoute::Stop {
+                machine_name: machine_name.to_string(),
+                service_name: service_name.to_string(),
+            }),
             None,
         )
     }
@@ -327,6 +359,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest};
+    use port_hosted_protocol::PORT_AUDIENCE_HEADER;
 
     use super::{
         HostedClient, HttpMethod, SecretPutRequest, ServiceApplyRequest, ServiceClient,
@@ -346,7 +379,7 @@ mod tests {
         assert_eq!(request.method, HttpMethod::Get);
         assert_eq!(request.url, "https://port.example.internal/v1/machines");
         assert_eq!(request.headers["authorization"], "Bearer demo-token");
-        assert_eq!(request.headers["x-port-audience"], "port-hosted-demo");
+        assert_eq!(request.headers[PORT_AUDIENCE_HEADER], "port-hosted-demo");
     }
 
     #[test]
