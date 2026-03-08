@@ -32,6 +32,12 @@
 | [Remove Nix Bias From Help Surface](epics/1vydg7000/voyages/1vyfXX000/) | done |
 | [Wire Live Guest Transport](epics/1vydg7000/voyages/1vyfve000/) | done |
 
+### [Hosted Runtime Transport](epics/1vzETR000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Implement Hosted Control Plane Demo Lane](epics/1vzETR000/voyages/1vzETX000/) | in-progress |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
