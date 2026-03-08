@@ -18,7 +18,7 @@ use port_hosted_protocol::HostedSuccess;
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, HostedApiIdentityContract,
-    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode,
+    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmHostKit,
 };
 use port_sdk::HostedClient;
 use serde::{Deserialize, Serialize};
@@ -529,6 +529,7 @@ fn collect_doctor_report_with_facts(
             }
             checks.extend(local_pvm_lane_checks(name, host, facts));
         }
+        checks.extend(hosted_pvm_lane_checks(config));
         for (name, control_plane) in &config.control_planes {
             checks.push(control_plane_check(name, control_plane));
         }
@@ -635,6 +636,10 @@ fn firecracker_local_launch_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
 ) -> Result<LaunchMetadata> {
+    config
+        .validate()
+        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+
     let machine = config
         .machines
         .get(request.machine_name)
@@ -715,10 +720,19 @@ fn firecracker_local_launch_machine(
         bail!("host preflight failed: {details}");
     }
 
+    let pvm_host_kit = if machine.protection_mode == ProtectionMode::Pvm {
+        host.firecracker
+            .pvm_lane_for(resolved_architecture)
+            .and_then(|lane| lane.host_kit.as_ref())
+    } else {
+        None
+    };
+    let pvm_firecracker_binary = pvm_host_kit.and_then(find_pvm_firecracker_binary_for_host_kit);
     let firecracker_binary = select_firecracker_binary(
         machine.protection_mode,
         find_binary("firecracker"),
-        facts.pvm_firecracker_binary.clone(),
+        pvm_firecracker_binary.or_else(|| facts.pvm_firecracker_binary.clone()),
+        pvm_host_kit,
     )?;
 
     let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
@@ -2602,7 +2616,7 @@ fn local_pvm_lane_checks(
             port_model::PvmLaneDecision::Planned => {
                 let Some(host_kit) = lane.host_kit.as_ref() else {
                     checks.push(DoctorCheck {
-                        name: format!("pvm:{host_name}:{architecture}"),
+                        name: format!("pvm:{host_name}:{architecture}:host-kit-contract"),
                         ok: false,
                         required: false,
                         detail: String::from(
@@ -2611,6 +2625,21 @@ fn local_pvm_lane_checks(
                     });
                     continue;
                 };
+                if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
+                    checks.push(DoctorCheck {
+                        name: format!("pvm:{host_name}:{architecture}:host-kit-contract"),
+                        ok: false,
+                        required: false,
+                        detail,
+                    });
+                    continue;
+                }
+                checks.push(DoctorCheck {
+                    name: format!("pvm:{host_name}:{architecture}:host-kit-contract"),
+                    ok: true,
+                    required: false,
+                    detail: pvm_host_kit_contract_detail(host_kit),
+                });
 
                 let platform_ok =
                     host.platform == host_kit.host_platform && facts.host_os == "linux";
@@ -2695,9 +2724,7 @@ fn local_pvm_lane_checks(
                             "Found the patched PVM Firecracker binary at '{}'.",
                             path.display()
                         ),
-                        None => String::from(
-                            "Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible.",
-                        ),
+                        None => pvm_firecracker_missing_detail(host_kit),
                     },
                 });
             }
@@ -2720,6 +2747,137 @@ fn local_pvm_lane_checks(
     }
 
     checks
+}
+
+fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+
+    for (node_name, node) in &config.nodes {
+        for lane in &node.capabilities.pvm_lanes {
+            if lane.state == port_model::PvmCapabilityState::ResearchOnly {
+                continue;
+            }
+
+            let name = format!(
+                "pvm:{node_name}:{}:host-kit-contract",
+                architecture_dir(lane.architecture)
+            );
+            match lane.host_kit.as_ref() {
+                Some(host_kit) => {
+                    if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
+                        checks.push(DoctorCheck {
+                            name,
+                            ok: false,
+                            required: false,
+                            detail,
+                        });
+                    } else {
+                        checks.push(DoctorCheck {
+                            name,
+                            ok: true,
+                            required: false,
+                            detail: format!(
+                                "Hosted node '{}' advertises {}",
+                                node_name,
+                                pvm_host_kit_contract_detail(host_kit)
+                            ),
+                        });
+                    }
+                }
+                None => checks.push(DoctorCheck {
+                    name,
+                    ok: false,
+                    required: false,
+                    detail: format!(
+                        "Hosted node '{}' advertises a {:?} PVM lane without a host-kit contract.",
+                        node_name, lane.state
+                    ),
+                }),
+            }
+        }
+    }
+
+    checks
+}
+
+fn pvm_host_kit_contract_issue(
+    expected_architecture: MachineArchitecture,
+    host_kit: &PvmHostKit,
+) -> Option<String> {
+    if host_kit.host_platform != HostPlatform::Linux {
+        return Some(String::from(
+            "host-kit contract must target host platform 'linux' for Firecracker/PVM.",
+        ));
+    }
+    if host_kit.host_architecture != expected_architecture {
+        return Some(format!(
+            "host-kit contract must target host architecture '{}', not '{}'.",
+            architecture_dir(expected_architecture),
+            architecture_dir(host_kit.host_architecture)
+        ));
+    }
+    if host_kit.firecracker_binary_name.trim().is_empty() {
+        return Some(String::from(
+            "host-kit contract must declare a non-empty firecracker binary name.",
+        ));
+    }
+    if host_kit
+        .firecracker_binary_env
+        .as_deref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
+        return Some(String::from(
+            "host-kit contract must declare a non-empty firecracker binary environment variable when firecracker_binary_env is set.",
+        ));
+    }
+    if host_kit
+        .host_boot_args
+        .iter()
+        .any(|argument| argument.trim().is_empty())
+    {
+        return Some(String::from(
+            "host-kit contract must not contain empty host boot arguments.",
+        ));
+    }
+    if host_kit.requires_custom_host_kernel && host_kit.host_boot_args.is_empty() {
+        return Some(String::from(
+            "host-kit contract must declare at least one host boot argument for the custom host kernel.",
+        ));
+    }
+
+    None
+}
+
+fn pvm_host_kit_contract_detail(host_kit: &PvmHostKit) -> String {
+    format!(
+        "host-kit contract requires Linux/{}, boot args [{}], and the patched Firecracker binary {}.",
+        architecture_dir(host_kit.host_architecture),
+        host_kit.host_boot_args.join(", "),
+        pvm_firecracker_lookup_detail(host_kit)
+    )
+}
+
+fn pvm_firecracker_lookup_detail(host_kit: &PvmHostKit) -> String {
+    match host_kit.firecracker_binary_env.as_deref() {
+        Some(variable) => format!(
+            "'{}' via ${variable} or PATH",
+            host_kit.firecracker_binary_name
+        ),
+        None => format!("'{}' on PATH", host_kit.firecracker_binary_name),
+    }
+}
+
+fn pvm_firecracker_missing_detail(host_kit: &PvmHostKit) -> String {
+    match host_kit.firecracker_binary_env.as_deref() {
+        Some(variable) => format!(
+            "Missing the patched PVM Firecracker binary. Set {variable} or put '{}' on PATH; the standard firecracker binary is not compatible.",
+            host_kit.firecracker_binary_name
+        ),
+        None => format!(
+            "Missing the patched PVM Firecracker binary '{}'; the standard firecracker binary is not compatible.",
+            host_kit.firecracker_binary_name
+        ),
+    }
 }
 
 fn resolve_machine_architecture(architecture: MachineArchitecture) -> Result<MachineArchitecture> {
@@ -2857,13 +3015,20 @@ fn select_firecracker_binary(
     protection_mode: ProtectionMode,
     standard_binary: Option<PathBuf>,
     pvm_binary: Option<PathBuf>,
+    pvm_host_kit: Option<&PvmHostKit>,
 ) -> Result<PathBuf> {
     match protection_mode {
         ProtectionMode::Standard => standard_binary
             .context("firecracker binary was not found on PATH after preflight"),
-        ProtectionMode::Pvm => pvm_binary.context(
-            "pvm host-kit preflight passed but the patched 'firecracker-pvm' binary is still missing; the standard firecracker binary is not a compatible fallback",
-        ),
+        ProtectionMode::Pvm => pvm_binary.context(match pvm_host_kit {
+            Some(host_kit) => format!(
+                "pvm host-kit preflight passed but {}; the standard firecracker binary is not a compatible fallback",
+                pvm_firecracker_missing_detail(host_kit)
+            ),
+            None => String::from(
+                "pvm host-kit preflight passed but the patched PVM Firecracker binary is still missing; the standard firecracker binary is not a compatible fallback",
+            ),
+        }),
     }
 }
 
@@ -2876,6 +3041,19 @@ fn find_pvm_firecracker_binary() -> Option<PathBuf> {
     }
 
     find_binary("firecracker-pvm")
+}
+
+fn find_pvm_firecracker_binary_for_host_kit(host_kit: &PvmHostKit) -> Option<PathBuf> {
+    if let Some(variable) = host_kit.firecracker_binary_env.as_deref() {
+        if let Some(configured) = env::var_os(variable) {
+            let path = PathBuf::from(configured);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+
+    find_binary(&host_kit.firecracker_binary_name)
 }
 
 fn run_artifact_pipeline(
@@ -4545,6 +4723,36 @@ mod tests {
     }
 
     #[test]
+    fn doctor_report_includes_hosted_pvm_host_kit_contract_checks() {
+        let report = collect_doctor_report_with_facts(
+            Some(&PortConfig::sample()),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: String::from("x86_64"),
+                proc_cmdline: Some(String::from("console=ttyS0 pti=off")),
+                pvm_firecracker_binary: Some(PathBuf::from("/usr/bin/firecracker-pvm")),
+            },
+        );
+
+        let aws = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:aws-linux-node:x86_64:host-kit-contract")
+            .expect("aws hosted host-kit contract check should exist");
+        let generic = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:generic-linux-node:x86_64:host-kit-contract")
+            .expect("generic hosted host-kit contract check should exist");
+
+        assert!(aws.ok);
+        assert!(aws.detail.contains("firecracker-pvm"));
+        assert!(aws.detail.contains("PORT_PVM_FIRECRACKER_BINARY"));
+        assert!(!generic.ok);
+        assert!(generic.detail.contains("host-kit contract"));
+    }
+
+    #[test]
     fn list_machines_reports_running_stale_and_malformed_runtime_entries() {
         let tempdir = tempdir().expect("tempdir should exist");
         let running_paths = RuntimePaths::for_machine(tempdir.path(), "running");
@@ -5199,15 +5407,56 @@ mod tests {
     }
 
     #[test]
+    fn launch_rejects_malformed_pvm_host_kit_contract_with_explicit_detail() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("demo")
+            .expect("demo should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+        config
+            .hosts
+            .get_mut("local")
+            .expect("local host should exist")
+            .firecracker
+            .pvm_lanes[0]
+            .host_kit
+            .as_mut()
+            .expect("x86 host kit should exist")
+            .firecracker_binary_name
+            .clear();
+        let tempdir = tempdir().expect("tempdir should exist");
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("launch should reject a malformed PVM host-kit contract");
+
+        let message = error.to_string();
+        assert!(message.contains("host-kit contract"));
+        assert!(message.contains("firecracker binary"));
+    }
+
+    #[test]
     fn firecracker_binary_selection_uses_the_pvm_lane_without_standard_fallback() {
         let standard = PathBuf::from("/usr/bin/firecracker");
         let pvm = PathBuf::from("/usr/bin/firecracker-pvm");
+        let sample = PortConfig::sample();
+        let host_kit = sample.hosts["local"].firecracker.pvm_lanes[0]
+            .host_kit
+            .as_ref();
 
         assert_eq!(
             select_firecracker_binary(
                 port_model::ProtectionMode::Standard,
                 Some(standard.clone()),
-                Some(pvm.clone())
+                Some(pvm.clone()),
+                None,
             )
             .expect("standard lane should use the standard binary"),
             standard
@@ -5216,14 +5465,16 @@ mod tests {
             select_firecracker_binary(
                 port_model::ProtectionMode::Pvm,
                 Some(standard),
-                Some(pvm.clone())
+                Some(pvm.clone()),
+                host_kit,
             )
             .expect("pvm lane should use the patched binary"),
             pvm
         );
 
-        let error = select_firecracker_binary(port_model::ProtectionMode::Pvm, None, None)
-            .expect_err("pvm lane should require the patched binary");
+        let error =
+            select_firecracker_binary(port_model::ProtectionMode::Pvm, None, None, host_kit)
+                .expect_err("pvm lane should require the patched binary");
         let message = error.to_string();
         assert!(message.contains("firecracker-pvm"));
         assert!(message.contains("not a compatible fallback"));

@@ -1,0 +1,19 @@
+---
+recorded_at: 2026-03-08T12:20:45.832765206-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJQg000/verify-ac-2.sh
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 43 filtered out; finished in 0.00s
+
+Error: invalid Port config
+
+Caused by:
+    host 'local' PVM lane 'X86_64' must declare a non-empty firecracker binary name in the host-kit contract
+Error: invalid Port config
+    host 'local' PVM lane 'X86_64' must declare a non-empty firecracker binary name in the host-kit contract
+    host 'local' PVM lane 'X86_64' must declare a non-empty firecracker binary name in the host-kit contract
+
+--- stderr ---
+error (ignored): error: SQLite database '/home/alex/.cache/nix/eval-cache-v5/2b317c30776a7c6a807ba91a3d48e322d974652e087a471c87edc02a121db09b.sqlite' is busy

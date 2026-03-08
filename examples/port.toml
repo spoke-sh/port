@@ -127,6 +127,8 @@ host_platform = "linux"
 host_architecture = "x86_64"
 requires_custom_host_kernel = true
 requires_patched_firecracker = true
+firecracker_binary_name = "firecracker-pvm"
+firecracker_binary_env = "PORT_PVM_FIRECRACKER_BINARY"
 host_boot_args = ["pti=off"]
 notes = [
   "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
@@ -275,6 +277,19 @@ protection_modes = ["standard", "pvm"]
 architecture = "x86_64"
 state = "ready"
 notes = ["AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit."]
+
+[nodes.aws-linux-node.capabilities.pvm_lanes.host_kit]
+host_platform = "linux"
+host_architecture = "x86_64"
+requires_custom_host_kernel = true
+requires_patched_firecracker = true
+firecracker_binary_name = "firecracker-pvm"
+firecracker_binary_env = "PORT_PVM_FIRECRACKER_BINARY"
+host_boot_args = ["pti=off"]
+notes = [
+  "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
+  "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
+]
 
 [nodes.gcp-linux-node]
 host = "gcp-linux"

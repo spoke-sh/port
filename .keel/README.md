@@ -65,5 +65,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | planned |
+| [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | in-progress |
 

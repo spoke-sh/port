@@ -1,0 +1,193 @@
+---
+recorded_at: 2026-03-08T12:20:49.849602660-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzJQg000/verify-ac-1.sh
+---
+
+running 24 tests
+........................
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 44 tests
+............................................
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+{
+  "host_os": "linux",
+  "local_firecracker_supported": true,
+  "notes": [
+    "port doctor reports the host state without mutating runtime directories.",
+    "macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.",
+    "Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.",
+    "Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.",
+    "Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback."
+  ],
+  "checks": [
+    {
+      "name": "host-platform",
+      "ok": true,
+      "required": true,
+      "detail": "Local Firecracker launch is available on Linux hosts."
+    },
+    {
+      "name": "kvm-device",
+      "ok": true,
+      "required": true,
+      "detail": "Found /dev/kvm for KVM acceleration."
+    },
+    {
+      "name": "firecracker-binary",
+      "ok": true,
+      "required": true,
+      "detail": "Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'."
+    },
+    {
+      "name": "iproute2",
+      "ok": true,
+      "required": true,
+      "detail": "Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity."
+    },
+    {
+      "name": "iptables",
+      "ok": true,
+      "required": true,
+      "detail": "Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity."
+    },
+    {
+      "name": "artifact:demo-kernel",
+      "ok": true,
+      "required": true,
+      "detail": "Artifact variant 'artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux' exists."
+    },
+    {
+      "name": "artifact:demo-guest",
+      "ok": true,
+      "required": true,
+      "detail": "Artifact variant 'artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' exists."
+    },
+    {
+      "name": "host:aws-linux",
+      "ok": true,
+      "required": false,
+      "detail": "provider 'aws' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'."
+    },
+    {
+      "name": "host:azure-linux",
+      "ok": false,
+      "required": false,
+      "detail": "provider 'azure' is explicitly unsupported for the Firecracker MVP; do not expect a working launch path. Hosted routing is modeled through control plane 'demo'."
+    },
+    {
+      "name": "host:gcp-linux",
+      "ok": true,
+      "required": false,
+      "detail": "provider 'gcp' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'."
+    },
+    {
+      "name": "host:generic-linux",
+      "ok": true,
+      "required": false,
+      "detail": "provider 'generic-linux' is modeled for a future remote Linux control lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'."
+    },
+    {
+      "name": "pvm:local:x86_64:host-kit-contract",
+      "ok": true,
+      "required": false,
+      "detail": "host-kit contract requires Linux/x86_64, boot args [pti=off], and the patched Firecracker binary 'firecracker-pvm' via $PORT_PVM_FIRECRACKER_BINARY or PATH."
+    },
+    {
+      "name": "pvm:local:x86_64:host-platform",
+      "ok": true,
+      "required": false,
+      "detail": "Host 'local' matches the Linux platform required for the Firecracker/PVM host kit."
+    },
+    {
+      "name": "pvm:local:x86_64:host-architecture",
+      "ok": true,
+      "required": false,
+      "detail": "Host architecture 'x86_64' matches the PVM host-kit requirement."
+    },
+    {
+      "name": "pvm:local:x86_64:boot-line",
+      "ok": false,
+      "required": false,
+      "detail": "Host boot line is missing required PVM argument(s): pti=off. Reboot into the prepared host kit; the standard Firecracker lane is not a PVM fallback."
+    },
+    {
+      "name": "pvm:local:x86_64:firecracker-binary",
+      "ok": false,
+      "required": false,
+      "detail": "Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible."
+    },
+    {
+      "name": "pvm:local:aarch64",
+      "ok": false,
+      "required": false,
+      "detail": "Firecracker/PVM on 'aarch64' remains research-only. Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path."
+    },
+    {
+      "name": "pvm:aws-linux-node:x86_64:host-kit-contract",
+      "ok": true,
+      "required": false,
+      "detail": "Hosted node 'aws-linux-node' advertises host-kit contract requires Linux/x86_64, boot args [pti=off], and the patched Firecracker binary 'firecracker-pvm' via $PORT_PVM_FIRECRACKER_BINARY or PATH."
+    },
+    {
+      "name": "pvm:gcp-linux-node:x86_64:host-kit-contract",
+      "ok": false,
+      "required": false,
+      "detail": "Hosted node 'gcp-linux-node' advertises a Planned PVM lane without a host-kit contract."
+    },
+    {
+      "name": "pvm:generic-linux-node:x86_64:host-kit-contract",
+      "ok": false,
+      "required": false,
+      "detail": "Hosted node 'generic-linux-node' advertises a Planned PVM lane without a host-kit contract."
+    },
+    {
+      "name": "control-plane:demo",
+      "ok": true,
+      "required": false,
+      "detail": "Hosted control plane 'demo' targets 'https://port.example.internal' with audience 'port-hosted-demo' and expects a bearer token from env:PORT_DEMO_TOKEN via the 'authorization' header."
+    },
+    {
+      "name": "machine:cloud-aws",
+      "ok": true,
+      "required": false,
+      "detail": "Machine models Firecracker/Standard/X86_64 with compatible artifacts."
+    },
+    {
+      "name": "machine:cloud-azure",
+      "ok": true,
+      "required": false,
+      "detail": "Machine models Firecracker/Standard/X86_64 with compatible artifacts."
+    },
+    {
+      "name": "machine:cloud-gcp",
+      "ok": true,
+      "required": false,
+      "detail": "Machine models Firecracker/Standard/X86_64 with compatible artifacts."
+    },
+    {
+      "name": "machine:cloud-generic",
+      "ok": true,
+      "required": false,
+      "detail": "Machine models Firecracker/Standard/X86_64 with compatible artifacts."
+    },
+    {
+      "name": "machine:demo",
+      "ok": true,
+      "required": false,
+      "detail": "Machine models Firecracker/Standard/X86_64 with compatible artifacts."
+    }
+  ]
+}

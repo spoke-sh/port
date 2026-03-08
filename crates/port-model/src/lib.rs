@@ -190,6 +190,7 @@ impl PortConfig {
                         pvm_lanes: vec![HostedPvmCapability {
                             architecture: MachineArchitecture::X86_64,
                             state: PvmCapabilityState::Planned,
+                            host_kit: None,
                             notes: vec![String::from(
                                 "Generic Linux is modeled as PVM-planned but not host-kit-ready in the sample inventory.",
                             )],
@@ -214,6 +215,7 @@ impl PortConfig {
                         pvm_lanes: vec![HostedPvmCapability {
                             architecture: MachineArchitecture::X86_64,
                             state: PvmCapabilityState::Ready,
+                            host_kit: Some(x86_64_firecracker_pvm_host_kit()),
                             notes: vec![String::from(
                                 "AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit.",
                             )],
@@ -238,6 +240,7 @@ impl PortConfig {
                         pvm_lanes: vec![HostedPvmCapability {
                             architecture: MachineArchitecture::X86_64,
                             state: PvmCapabilityState::Planned,
+                            host_kit: None,
                             notes: vec![String::from(
                                 "GCP remains modeled as a planned PVM node until a prepared host kit is explicitly advertised.",
                             )],
@@ -655,6 +658,9 @@ impl PortConfig {
         for (control_plane_name, control_plane) in &self.control_planes {
             validate_hosted_control_plane(control_plane_name, control_plane)?;
         }
+        for (host_name, host) in &self.hosts {
+            validate_host(host_name, host)?;
+        }
         for (node_name, node) in &self.nodes {
             validate_hosted_node(self, node_name, node)?;
         }
@@ -822,6 +828,50 @@ fn firecracker_pvm_lanes() -> Vec<FirecrackerPvmLaneContract> {
         FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::X86_64),
         FirecrackerPvmLaneContract::for_architecture(MachineArchitecture::Aarch64),
     ]
+}
+
+fn x86_64_firecracker_pvm_host_kit() -> PvmHostKit {
+    PvmHostKit {
+        host_platform: HostPlatform::Linux,
+        host_architecture: MachineArchitecture::X86_64,
+        requires_custom_host_kernel: true,
+        requires_patched_firecracker: true,
+        firecracker_binary_name: String::from("firecracker-pvm"),
+        firecracker_binary_env: Some(String::from("PORT_PVM_FIRECRACKER_BINARY")),
+        host_boot_args: vec![String::from("pti=off")],
+        notes: vec![
+            String::from(
+                "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
+            ),
+            String::from(
+                "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
+            ),
+        ],
+    }
+}
+
+fn x86_64_firecracker_pvm_artifact_kit() -> PvmArtifactKit {
+    PvmArtifactKit {
+        kernel_selector: ArtifactSelector {
+            architecture: MachineArchitecture::X86_64,
+            substrate: ExecutionSubstrate::Firecracker,
+            protection_mode: ProtectionMode::Pvm,
+        },
+        guest_image_selector: ArtifactSelector {
+            architecture: MachineArchitecture::X86_64,
+            substrate: ExecutionSubstrate::Firecracker,
+            protection_mode: ProtectionMode::Pvm,
+        },
+        requires_dedicated_variants: true,
+        notes: vec![
+            String::from(
+                "PVM guests require dedicated kernel and guest-image variants; standard Firecracker artifacts are insufficient.",
+            ),
+            String::from(
+                "The guest image must boot with the guest-side PVM expectations rather than the current standard guest contract.",
+            ),
+        ],
+    }
 }
 
 fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
@@ -1070,6 +1120,8 @@ impl HostedNodeCapabilities {
 pub struct HostedPvmCapability {
     pub architecture: MachineArchitecture,
     pub state: PvmCapabilityState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_kit: Option<PvmHostKit>,
     pub notes: Vec<String>,
 }
 
@@ -1388,42 +1440,8 @@ impl FirecrackerPvmLaneContract {
             MachineArchitecture::X86_64 => Self {
                 architecture,
                 decision: PvmLaneDecision::Planned,
-                host_kit: Some(PvmHostKit {
-                    host_platform: HostPlatform::Linux,
-                    host_architecture: MachineArchitecture::X86_64,
-                    requires_custom_host_kernel: true,
-                    requires_patched_firecracker: true,
-                    host_boot_args: vec![String::from("pti=off")],
-                    notes: vec![
-                        String::from(
-                            "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
-                        ),
-                        String::from(
-                            "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
-                        ),
-                    ],
-                }),
-                artifact_kit: Some(PvmArtifactKit {
-                    kernel_selector: ArtifactSelector {
-                        architecture: MachineArchitecture::X86_64,
-                        substrate: ExecutionSubstrate::Firecracker,
-                        protection_mode: ProtectionMode::Pvm,
-                    },
-                    guest_image_selector: ArtifactSelector {
-                        architecture: MachineArchitecture::X86_64,
-                        substrate: ExecutionSubstrate::Firecracker,
-                        protection_mode: ProtectionMode::Pvm,
-                    },
-                    requires_dedicated_variants: true,
-                    notes: vec![
-                        String::from(
-                            "PVM guests require dedicated kernel and guest-image variants; standard Firecracker artifacts are insufficient.",
-                        ),
-                        String::from(
-                            "The guest image must boot with the guest-side PVM expectations rather than the current standard guest contract.",
-                        ),
-                    ],
-                }),
+                host_kit: Some(x86_64_firecracker_pvm_host_kit()),
+                artifact_kit: Some(x86_64_firecracker_pvm_artifact_kit()),
                 validation: vec![
                     PvmValidationExpectation {
                         name: String::from("host-architecture"),
@@ -1536,6 +1554,9 @@ pub struct PvmHostKit {
     pub host_architecture: MachineArchitecture,
     pub requires_custom_host_kernel: bool,
     pub requires_patched_firecracker: bool,
+    pub firecracker_binary_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firecracker_binary_env: Option<String>,
     pub host_boot_args: Vec<String>,
     pub notes: Vec<String>,
 }
@@ -1850,6 +1871,14 @@ fn validate_hosted_control_plane(
     Ok(())
 }
 
+fn validate_host(host_name: &str, host: &HostSpec) -> Result<(), ValidationError> {
+    for lane in &host.firecracker.pvm_lanes {
+        validate_firecracker_pvm_lane(host_name, lane)?;
+    }
+
+    Ok(())
+}
+
 fn validate_hosted_node(
     config: &PortConfig,
     node_name: &str,
@@ -1899,6 +1928,7 @@ fn validate_hosted_node(
                 node_name, lane.architecture
             )));
         }
+        validate_hosted_pvm_capability(node_name, lane)?;
     }
     if node
         .capabilities
@@ -1913,6 +1943,131 @@ fn validate_hosted_node(
         return Err(ValidationError::new(format!(
             "node '{}' declares a PVM-ready or planned lane but does not advertise protection mode 'pvm'",
             node_name
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_firecracker_pvm_lane(
+    host_name: &str,
+    lane: &FirecrackerPvmLaneContract,
+) -> Result<(), ValidationError> {
+    match lane.decision {
+        PvmLaneDecision::Planned => {
+            let host_kit = lane.host_kit.as_ref().ok_or_else(|| {
+                ValidationError::new(format!(
+                    "host '{}' planned PVM lane '{:?}' must declare a host-kit contract",
+                    host_name, lane.architecture
+                ))
+            })?;
+            validate_pvm_host_kit(
+                &format!("host '{}' PVM lane '{:?}'", host_name, lane.architecture),
+                lane.architecture,
+                host_kit,
+            )?;
+        }
+        PvmLaneDecision::ResearchOnly => {
+            if lane.host_kit.is_some() {
+                return Err(ValidationError::new(format!(
+                    "host '{}' research-only PVM lane '{:?}' must not declare a host-kit contract",
+                    host_name, lane.architecture
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_hosted_pvm_capability(
+    node_name: &str,
+    lane: &HostedPvmCapability,
+) -> Result<(), ValidationError> {
+    match lane.state {
+        PvmCapabilityState::Ready => {
+            let host_kit = lane.host_kit.as_ref().ok_or_else(|| {
+                ValidationError::new(format!(
+                    "node '{}' ready PVM lane '{:?}' must declare a host-kit contract",
+                    node_name, lane.architecture
+                ))
+            })?;
+            validate_pvm_host_kit(
+                &format!(
+                    "node '{}' ready PVM lane '{:?}'",
+                    node_name, lane.architecture
+                ),
+                lane.architecture,
+                host_kit,
+            )?;
+        }
+        PvmCapabilityState::Planned => {
+            if let Some(host_kit) = lane.host_kit.as_ref() {
+                validate_pvm_host_kit(
+                    &format!(
+                        "node '{}' planned PVM lane '{:?}'",
+                        node_name, lane.architecture
+                    ),
+                    lane.architecture,
+                    host_kit,
+                )?;
+            }
+        }
+        PvmCapabilityState::ResearchOnly => {
+            if lane.host_kit.is_some() {
+                return Err(ValidationError::new(format!(
+                    "node '{}' research-only PVM lane '{:?}' must not declare a host-kit contract",
+                    node_name, lane.architecture
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_pvm_host_kit(
+    context: &str,
+    expected_architecture: MachineArchitecture,
+    host_kit: &PvmHostKit,
+) -> Result<(), ValidationError> {
+    if host_kit.host_platform != HostPlatform::Linux {
+        return Err(ValidationError::new(format!(
+            "{context} must target host platform 'linux' for Firecracker/PVM"
+        )));
+    }
+    if host_kit.host_architecture != expected_architecture {
+        return Err(ValidationError::new(format!(
+            "{context} must target host architecture '{:?}', not '{:?}'",
+            expected_architecture, host_kit.host_architecture
+        )));
+    }
+    if host_kit.firecracker_binary_name.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "{context} must declare a non-empty firecracker binary name in the host-kit contract"
+        )));
+    }
+    if host_kit
+        .firecracker_binary_env
+        .as_deref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
+        return Err(ValidationError::new(format!(
+            "{context} must declare a non-empty firecracker binary environment variable in the host-kit contract when firecracker_binary_env is set"
+        )));
+    }
+    if host_kit
+        .host_boot_args
+        .iter()
+        .any(|argument| argument.trim().is_empty())
+    {
+        return Err(ValidationError::new(format!(
+            "{context} host-kit contract must not contain empty host boot arguments"
+        )));
+    }
+    if host_kit.requires_custom_host_kernel && host_kit.host_boot_args.is_empty() {
+        return Err(ValidationError::new(format!(
+            "{context} host-kit contract must declare at least one host boot argument for the custom host kernel"
         )));
     }
 
@@ -2125,7 +2280,7 @@ mod tests {
     use super::{
         ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
         AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
-        HostConnection, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
+        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
         HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
         MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
         MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
@@ -2165,6 +2320,8 @@ mod tests {
         assert!(encoded.contains("decision = \"planned\""));
         assert!(encoded.contains("decision = \"research-only\""));
         assert!(encoded.contains("requires_patched_firecracker = true"));
+        assert!(encoded.contains("firecracker_binary_name = \"firecracker-pvm\""));
+        assert!(encoded.contains("firecracker_binary_env = \"PORT_PVM_FIRECRACKER_BINARY\""));
         assert!(encoded.contains("[machines.demo.guest]"));
         assert!(encoded.contains("[machines.cloud-aws]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
@@ -2624,6 +2781,23 @@ mod tests {
                 .host_kit
                 .as_ref()
                 .expect("x86 host kit should exist")
+                .firecracker_binary_name
+                == "firecracker-pvm"
+        );
+        assert_eq!(
+            contract
+                .host_kit
+                .as_ref()
+                .expect("x86 host kit should exist")
+                .firecracker_binary_env
+                .as_deref(),
+            Some("PORT_PVM_FIRECRACKER_BINARY")
+        );
+        assert!(
+            contract
+                .host_kit
+                .as_ref()
+                .expect("x86 host kit should exist")
                 .host_boot_args
                 .contains(&String::from("pti=off"))
         );
@@ -2706,6 +2880,61 @@ mod tests {
     }
 
     #[test]
+    fn sample_config_derives_hosted_node_pvm_host_kit_contracts() {
+        let config = PortConfig::sample();
+
+        let inventory = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory contract should resolve");
+
+        let aws_lane = &inventory.nodes["aws-linux-node"].capabilities.pvm_lanes[0];
+        let aws_host_kit = aws_lane
+            .host_kit
+            .as_ref()
+            .expect("ready hosted PVM lane should declare a host-kit contract");
+        assert_eq!(aws_host_kit.host_platform, HostPlatform::Linux);
+        assert_eq!(aws_host_kit.host_architecture, MachineArchitecture::X86_64);
+        assert_eq!(
+            aws_host_kit.firecracker_binary_name,
+            String::from("firecracker-pvm")
+        );
+        assert_eq!(
+            aws_host_kit.firecracker_binary_env.as_deref(),
+            Some("PORT_PVM_FIRECRACKER_BINARY")
+        );
+        assert!(
+            aws_host_kit
+                .host_boot_args
+                .contains(&String::from("pti=off"))
+        );
+
+        let generic_lane = &inventory.nodes["generic-linux-node"].capabilities.pvm_lanes[0];
+        assert!(generic_lane.host_kit.is_none());
+    }
+
+    #[test]
+    fn ready_hosted_pvm_lane_requires_an_explicit_host_kit_contract() {
+        let mut config = PortConfig::sample();
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .host_kit = None;
+
+        let error = config
+            .validate()
+            .expect_err("ready hosted PVM lane without host-kit should fail validation");
+
+        assert!(
+            error
+                .to_string()
+                .contains("must declare a host-kit contract")
+        );
+    }
+
+    #[test]
     fn avf_contract_maps_guest_transport_and_console() {
         let contract = AvfExecutionContract::linux_guest();
 
@@ -2753,6 +2982,14 @@ mod tests {
         assert_eq!(
             config.nodes["aws-linux-node"].capabilities.pvm_lanes[0].state,
             PvmCapabilityState::Ready
+        );
+        assert_eq!(
+            config.nodes["aws-linux-node"].capabilities.pvm_lanes[0]
+                .host_kit
+                .as_ref()
+                .expect("aws node should declare a host-kit contract")
+                .firecracker_binary_name,
+            String::from("firecracker-pvm")
         );
         assert_eq!(
             config.nodes["generic-linux-node"].capabilities.pvm_lanes[0].state,

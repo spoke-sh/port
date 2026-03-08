@@ -23,5 +23,5 @@ created_at: 2026-03-08T12:02:25
 **Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Prepared Linux Pvm Runtime](voyages/1vzJP2000/) | planned | 0/4 |
+| [Prepared Linux Pvm Runtime](voyages/1vzJP2000/) | in-progress | 0/4 |
 <!-- END GENERATED -->
