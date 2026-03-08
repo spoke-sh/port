@@ -1,0 +1,66 @@
+---
+recorded_at: 2026-03-07T19:28:15,672649044-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz4gb000/verify-ac-2.sh
+---
+
+  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker
+  runtime path.
+  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
+  The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial
+  ports for console capture.
+Cloud Linux:
+  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port
+  doctor.
+  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for
+  remote hosts.
+Artifact Mobility:
+  `port artifacts build` and `validate` materialize one canonical local variant selected by
+  architecture, substrate, and protection mode.
+  `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config
+  ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
+Hosted Control:
+  Local Port still owns runtime lifecycle directly today.
+  Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the
+  current guest protocol semantics.
+  The sample config now declares `[control_planes.demo]` with endpoint
+  `https://port.example.internal`.
+  Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the
+  `authorization` header.
+  Remote/cloud sample hosts now use `mode = "hosted-control-plane"` and `control_plane = "demo"`
+  instead of SSH placeholders.
+  `port machine list`, `status`, and `stop` now report the current inventory scope, lifecycle owner,
+  status source, and routing contract.
+  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus
+  aarch64 research-only decision.
+  See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta
+  workflow contract.
+  Azure remains an explicitly unsupported Firecracker provider lane.
+  The sample config now declares `[control_planes.demo]` with endpoint
+  Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the
+README.md:219:  `[control_planes.demo]`, with endpoint `https://port.example.internal`,
+README.md:221:  `PORT_DEMO_TOKEN`.
+docs/hosted.md:71:[control_planes.demo]
+docs/hosted.md:72:endpoint = "https://port.example.internal"
+docs/hosted.md:75:[control_planes.demo.auth]
+docs/hosted.md:79:[control_planes.demo.auth.source]
+docs/hosted.md:81:variable = "PORT_DEMO_TOKEN"
+docs/hosted.md:88:mode = "hosted-control-plane"
+docs/hosted.md:150:- `inventory_owner = "hosted-control-plane"`
+docs/hosted.md:154:- `launch_route = "hosted-control-plane"`
+docs/hosted.md:155:- `inventory_route = "hosted-control-plane"`
+docs/hosted.md:156:- `status_route = "hosted-control-plane"`
+docs/hosted.md:157:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:158:- `guest_route = "hosted-control-plane"`
+docs/operators.md:149:  audience, and token source from `[control_planes.demo]`.
+docs/operators.md:165:  `hosted-control-plane` / `hosted-node-agent` through the same fields.
+docs/operators.md:170:  they declare `mode = "hosted-control-plane"` and `control_plane = "demo"`
+docs/cloud.md:45:   example `mode = "hosted-control-plane"` plus `control_plane = "demo"`.
+examples/port.toml:73:[control_planes.demo]
+examples/port.toml:74:endpoint = "https://port.example.internal"
+examples/port.toml:77:[control_planes.demo.auth]
+examples/port.toml:81:[control_planes.demo.auth.source]
+examples/port.toml:83:variable = "PORT_DEMO_TOKEN"
+examples/port.toml:101:mode = "hosted-control-plane"
+examples/port.toml:113:mode = "hosted-control-plane"
+examples/port.toml:125:mode = "hosted-control-plane"
+examples/port.toml:137:mode = "hosted-control-plane"

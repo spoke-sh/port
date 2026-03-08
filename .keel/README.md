@@ -48,5 +48,5 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | planned |
+| [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | in-progress |
 

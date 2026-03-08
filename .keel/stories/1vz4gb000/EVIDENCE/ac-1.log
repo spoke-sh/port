@@ -1,0 +1,93 @@
+---
+recorded_at: 2026-03-07T19:28:14,791882936-08:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vz4gb000/verify-ac-1.sh
+---
+
+
+running 14 tests
+..............
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 20 tests
+....................
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[fail]: firecracker-binary (required=true) - Missing 'firecracker' on PATH.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/usr/sbin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/usr/sbin/iptables' with expected identity.
+check[fail]: artifact:demo-kernel (required=true) - Artifact variant 'artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux' is missing. Build or pull the native variant first.
+check[fail]: artifact:demo-guest (required=true) - Artifact variant 'artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' is missing. Build or pull the native variant first.
+check[ok]: host:aws-linux (required=false) - provider 'aws' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[fail]: host:azure-linux (required=false) - provider 'azure' is explicitly unsupported for the Firecracker MVP; do not expect a working launch path. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:gcp-linux (required=false) - provider 'gcp' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:generic-linux (required=false) - provider 'generic-linux' is modeled for a future remote Linux control lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: control-plane:demo (required=false) - Hosted control plane 'demo' targets 'https://port.example.internal' with audience 'port-hosted-demo' and expects a bearer token from env:PORT_DEMO_TOKEN via the 'authorization' header.
+check[ok]: machine:cloud-aws (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-azure (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-gcp (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-generic (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:demo (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.
+Error: machine 'cloud-aws' targets AWS host 'aws-linux'; AWS remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the AWS Linux host itself. Hosted routing is modeled through control plane 'demo' at 'https://port.example.internal' with audience 'port-hosted-demo' and token source 'env:PORT_DEMO_TOKEN'.
+Error: machine 'cloud-aws' targets AWS host 'aws-linux'; AWS remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the AWS Linux host itself. Hosted routing is modeled through control plane 'demo' at 'https://port.example.internal' with audience 'port-hosted-demo' and token source 'env:PORT_DEMO_TOKEN'.
+crates/port-model/src/lib.rs:10:    pub control_planes: BTreeMap<String, HostedControlPlaneSpec>,
+crates/port-model/src/lib.rs:93:            HostedControlPlaneSpec {
+crates/port-model/src/lib.rs:96:                auth: HostedAuthTokenContract {
+crates/port-model/src/lib.rs:232:    pub fn hosted_api_identity_contract(
+crates/port-model/src/lib.rs:235:    ) -> Result<Option<HostedApiIdentityContract>, ValidationError> {
+crates/port-model/src/lib.rs:256:                Ok(Some(HostedApiIdentityContract {
+crates/port-model/src/lib.rs:593:pub struct HostedControlPlaneSpec {
+crates/port-model/src/lib.rs:596:    pub auth: HostedAuthTokenContract,
+crates/port-model/src/lib.rs:600:pub struct HostedAuthTokenContract {
+crates/port-model/src/lib.rs:628:pub struct HostedApiIdentityContract {
+crates/port-model/src/lib.rs:632:    pub auth: HostedAuthTokenContract,
+crates/port-model/src/lib.rs:1188:    control_plane: &HostedControlPlaneSpec,
+crates/port-model/src/lib.rs:1385:    fn sample_config_derives_hosted_api_identity_contract() {
+crates/port-model/src/lib.rs:1389:            .hosted_api_identity_contract("cloud-aws")
+crates/port-runtime/src/lib.rs:17:    ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, HostedApiIdentityContract,
+crates/port-runtime/src/lib.rs:434:            .hosted_api_identity_contract(request.machine_name)
+crates/port-runtime/src/lib.rs:1093:    control_plane: &port_model::HostedControlPlaneSpec,
+crates/port-runtime/src/lib.rs:1230:    hosted_identity: Option<&HostedApiIdentityContract>,
