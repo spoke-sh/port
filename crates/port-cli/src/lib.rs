@@ -12,6 +12,7 @@ use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, Protection
 use port_runtime::{
     ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest,
     GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchRequest,
+    NodeAgentServeRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +74,7 @@ Hosted Control:
   Local Port still owns launch and guest-runtime lifecycle directly today.
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
   Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root.
   Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
@@ -133,6 +135,8 @@ pub enum Command {
     Service(ServiceCommand),
     #[command(subcommand, about = "Serve hosted control-plane endpoints")]
     ControlPlane(ControlPlaneCommand),
+    #[command(subcommand, about = "Serve hosted node-agent endpoints")]
+    NodeAgent(NodeAgentCommand),
     #[command(subcommand, hide = true)]
     Internal(InternalCommand),
 }
@@ -504,6 +508,19 @@ pub enum ControlPlaneCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum NodeAgentCommand {
+    #[command(about = "Serve one hosted node's runtime-root-backed machine and guest routes")]
+    Serve {
+        #[arg(long)]
+        node: String,
+        #[arg(long, default_value = "127.0.0.1:9234")]
+        bind: String,
+        #[arg(long)]
+        token: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum InternalCommand {
     #[command(hide = true)]
     ForwardDaemon {
@@ -570,6 +587,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let config = load_config(cli.config)?;
             run_control_plane(command, config)
         }
+        Command::NodeAgent(command) => {
+            let config = load_config(cli.config)?;
+            run_node_agent(command, config)
+        }
         Command::Internal(command) => match command {
             InternalCommand::ForwardDaemon {
                 machine,
@@ -606,6 +627,19 @@ fn run_control_plane(command: ControlPlaneCommand, config: PortConfig) -> Result
                 control_plane,
                 bind,
                 node_bindings: node_bindings.into_iter().map(|binding| binding.0).collect(),
+            },
+        ),
+    }
+}
+
+fn run_node_agent(command: NodeAgentCommand, config: PortConfig) -> Result<()> {
+    match command {
+        NodeAgentCommand::Serve { node, bind, token } => port_runtime::serve_node_agent(
+            config,
+            NodeAgentServeRequest {
+                node_name: node,
+                bind,
+                token,
             },
         ),
     }
@@ -1700,8 +1734,8 @@ mod tests {
 
     use super::{
         ArchitectureArg, ArtifactCommand, Cli, Command, ControlPlaneCommand, CopyDirectionArg,
-        GuestCommand, HostedNodeBindingArg, MachineCommand, ProtectionModeArg, ServiceCommand,
-        ServiceKindArg, ServiceSecretCommand, SubstrateArg, render_help,
+        GuestCommand, HostedNodeBindingArg, MachineCommand, NodeAgentCommand, ProtectionModeArg,
+        ServiceCommand, ServiceKindArg, ServiceSecretCommand, SubstrateArg, render_help,
         render_nested_subcommand_help, render_subcommand_help,
     };
 
@@ -1731,6 +1765,7 @@ mod tests {
             "pull",
             "service",
             "control-plane",
+            "node-agent",
             "Artifact Mobility",
             "detached lifecycle modes",
             "node-binding",
@@ -2118,6 +2153,30 @@ mod tests {
 
         let rendered = error.to_string();
         assert!(rendered.contains("<node>=<endpoint>,<token>"));
+    }
+
+    #[test]
+    fn parses_node_agent_serve_arguments() {
+        let cli = Cli::parse_from([
+            "port",
+            "node-agent",
+            "serve",
+            "--node",
+            "aws-linux-node",
+            "--bind",
+            "127.0.0.1:9234",
+            "--token",
+            "node-secret",
+        ]);
+
+        match cli.command {
+            Command::NodeAgent(NodeAgentCommand::Serve { node, bind, token }) => {
+                assert_eq!(node, "aws-linux-node");
+                assert_eq!(bind, "127.0.0.1:9234");
+                assert_eq!(token, "node-secret");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Router;
@@ -13,13 +15,19 @@ use port_hosted_protocol::{
     HostedError, HostedGuestRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
     HostedNodeRoute, HostedRouteContext, HostedSuccess,
 };
-use port_model::{HostedAuthTokenSource, HostedMachineSummaryContract, PortConfig};
+use port_model::{HostConnection, HostedAuthTokenSource, HostedMachineSummaryContract, PortConfig};
 use reqwest::Client;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 
-use crate::{MachineRuntimeState, MachineStatus, RuntimePaths, hosted_placeholder_runtime_root};
+use crate::{
+    GuestCopyRequest, GuestForwardRequest, GuestRequest, MachineRuntimeState, MachineStatus,
+    RuntimePaths, copy_guest_file, execute_guest_operation, hosted_placeholder_runtime_root,
+    machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
+    machine_top as runtime_machine_top, prepare_guest_forward, stop_machine as runtime_stop_machine,
+};
+use port_agent_protocol::{ForwardResult, GuestOperation, OperationResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedNodeBinding {
@@ -47,6 +55,25 @@ struct ControlPlaneStateInner {
     auth_value: String,
     node_bindings: BTreeMap<String, HostedNodeBinding>,
     client: Client,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeAgentServeRequest {
+    pub node_name: String,
+    pub bind: String,
+    pub token: String,
+}
+
+#[derive(Clone)]
+struct NodeAgentState {
+    inner: Arc<NodeAgentStateInner>,
+}
+
+struct NodeAgentStateInner {
+    config: PortConfig,
+    node_name: String,
+    runtime_root: std::path::PathBuf,
+    token: String,
 }
 
 pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest) -> Result<()> {
@@ -601,11 +628,387 @@ fn error_response(
     json_response(status, &HostedError { route, message })
 }
 
+pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to build node-agent runtime")?;
+
+    runtime.block_on(async move {
+        let bind = request.bind.clone();
+        let listener = TcpListener::bind(&bind)
+            .await
+            .with_context(|| format!("failed to bind node agent on '{bind}'"))?;
+        let state = build_node_agent_state(config, request)?;
+        axum::serve(listener, node_agent_router(state))
+            .await
+            .context("node-agent server exited unexpectedly")
+    })
+}
+
+fn build_node_agent_state(config: PortConfig, request: NodeAgentServeRequest) -> Result<NodeAgentState> {
+    let runtime_root = config
+        .nodes
+        .get(&request.node_name)
+        .with_context(|| format!("unknown hosted node '{}' for node-agent serve", request.node_name))?
+        .runtime_root
+        .clone();
+
+    Ok(NodeAgentState {
+        inner: Arc::new(NodeAgentStateInner {
+            config,
+            node_name: request.node_name,
+            runtime_root,
+            token: request.token,
+        }),
+    })
+}
+
+fn node_agent_router(state: NodeAgentState) -> Router {
+    Router::new()
+        .route(
+            "/v1/node/machines/{machine}",
+            get(node_machine_status).post(node_machine_stop),
+        )
+        .route("/v1/node/machines/{machine}/monitor", get(node_machine_monitor))
+        .route("/v1/node/machines/{machine}/top", get(node_machine_top))
+        .route("/v1/node/machines/{machine}/guest:exec", post(node_guest_exec))
+        .route("/v1/node/machines/{machine}/guest:copy", post(node_guest_copy))
+        .route("/v1/node/machines/{machine}/guest:pty", post(node_guest_pty))
+        .route("/v1/node/machines/{machine}/guest:logs", post(node_guest_logs))
+        .route("/v1/node/machines/{machine}/guest:forward", post(node_guest_forward))
+        .with_state(state)
+}
+
+async fn node_machine_status(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    node_machine_response(&state, &headers, &machine, |config, runtime_root, machine_name| {
+        runtime_machine_status(config, runtime_root, machine_name)
+    })
+}
+
+async fn node_machine_monitor(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    node_machine_response(&state, &headers, &machine, |config, runtime_root, machine_name| {
+        runtime_machine_monitor(config, runtime_root, machine_name)
+    })
+}
+
+async fn node_machine_top(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    node_machine_response(&state, &headers, &machine, |config, runtime_root, machine_name| {
+        runtime_machine_top(config, runtime_root, machine_name)
+    })
+}
+
+async fn node_machine_stop(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(machine_name) = machine.strip_suffix(":stop") else {
+        return node_agent_error(
+            &state,
+            Some(machine),
+            format!(
+                "node '{}' only serves stop through '/v1/node/machines/{{machine}}:stop'",
+                state.inner.node_name
+            ),
+        );
+    };
+
+    node_machine_response(&state, &headers, machine_name, |config, runtime_root, machine_name| {
+        runtime_stop_machine(config, runtime_root, machine_name, Duration::from_secs(3))
+    })
+}
+
+async fn node_guest_exec(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Exec)
+}
+
+async fn node_guest_copy(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Copy)
+}
+
+async fn node_guest_pty(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Pty)
+}
+
+async fn node_guest_logs(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Logs)
+}
+
+async fn node_guest_forward(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Forward)
+}
+
+fn node_authorize(state: &NodeAgentState, headers: &HeaderMap) -> Option<Response> {
+    match headers
+        .get("x-port-node-agent-token")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if value == state.inner.token => None,
+        _ => Some(node_agent_error(
+            state,
+            None,
+            format!(
+                "node '{}' expects an auth token in the '{}' header",
+                state.inner.node_name, "x-port-node-agent-token"
+            ),
+        )),
+    }
+}
+
+fn node_route_context(state: &NodeAgentState, machine_name: Option<String>) -> HostedRouteContext {
+    HostedRouteContext {
+        control_plane: None,
+        machine_name,
+        node_name: Some(state.inner.node_name.clone()),
+        runtime_root: Some(state.inner.runtime_root.clone()),
+        ..HostedRouteContext::default()
+    }
+}
+
+fn node_agent_error(state: &NodeAgentState, machine_name: Option<String>, message: String) -> Response {
+    error_response(StatusCode::BAD_GATEWAY, message, Some(node_route_context(state, machine_name)))
+}
+
+fn localize_machine_for_node(
+    state: &NodeAgentState,
+    machine_name: &str,
+) -> Result<(PortConfig, HostedRouteContext), Response> {
+    let summary = state
+        .inner
+        .config
+        .hosted_machine_summary_contract(machine_name)
+        .map_err(|error| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' could not resolve hosted machine '{}': {error}",
+                    state.inner.node_name, machine_name
+                ),
+                Some(node_route_context(state, Some(machine_name.to_string()))),
+            )
+        })?
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::NOT_FOUND,
+                format!(
+                    "machine '{}' does not resolve to a hosted machine owned by node '{}'",
+                    machine_name, state.inner.node_name
+                ),
+                Some(node_route_context(state, Some(machine_name.to_string()))),
+            )
+        })?;
+
+    if !summary
+        .candidate_nodes
+        .iter()
+        .any(|node| node == &state.inner.node_name)
+    {
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "machine '{}' is not routed to node '{}' (candidate nodes: {:?})",
+                machine_name, state.inner.node_name, summary.candidate_nodes
+            ),
+            Some(
+                HostedRouteContext::from_machine_summary(&summary)
+                    .with_selected_node(&state.inner.node_name, state.inner.runtime_root.clone()),
+            ),
+        ));
+    }
+
+    let mut localized = state.inner.config.clone();
+    let host_name = localized
+        .machines
+        .get(machine_name)
+        .map(|machine| machine.host.clone())
+        .ok_or_else(|| {
+            error_response(
+                StatusCode::NOT_FOUND,
+                format!("unknown machine '{}'", machine_name),
+                Some(node_route_context(state, Some(machine_name.to_string()))),
+            )
+        })?;
+    localized
+        .hosts
+        .get_mut(&host_name)
+        .expect("machine host should exist after summary resolution")
+        .connection = HostConnection::Local;
+
+    let route = HostedRouteContext::from_machine_summary(&summary)
+        .with_selected_node(&state.inner.node_name, state.inner.runtime_root.clone());
+    Ok((localized, route))
+}
+
+fn node_machine_response<T, F>(
+    state: &NodeAgentState,
+    headers: &HeaderMap,
+    machine_name: &str,
+    operation: F,
+) -> Response
+where
+    T: Serialize,
+    F: FnOnce(&PortConfig, &std::path::Path, &str) -> Result<T>,
+{
+    if let Some(response) = node_authorize(state, headers) {
+        return response;
+    }
+
+    let (localized, route) = match localize_machine_for_node(state, machine_name) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    match operation(&localized, &state.inner.runtime_root, machine_name) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to serve machine '{}': {error}",
+                state.inner.node_name, machine_name
+            ),
+            Some(route),
+        ),
+    }
+}
+
+fn node_guest_operation_response(
+    state: &NodeAgentState,
+    headers: &HeaderMap,
+    machine_name: &str,
+    body: Bytes,
+    expected_verb: HostedGuestVerb,
+) -> Response {
+    if let Some(response) = node_authorize(state, headers) {
+        return response;
+    }
+
+    let operation: GuestOperation = match serde_json::from_slice(&body) {
+        Ok(operation) => operation,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("node '{}' received invalid guest JSON: {error}", state.inner.node_name),
+                Some(node_route_context(state, Some(machine_name.to_string()))),
+            );
+        }
+    };
+
+    let (localized, route) = match localize_machine_for_node(state, machine_name) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    let result = match (expected_verb, operation) {
+        (HostedGuestVerb::Exec, operation @ GuestOperation::Exec(_))
+        | (HostedGuestVerb::Pty, operation @ GuestOperation::Pty(_))
+        | (HostedGuestVerb::Logs, operation @ GuestOperation::Logs(_)) => execute_guest_operation(
+            &localized,
+            GuestRequest {
+                machine_name,
+                runtime_root: &state.inner.runtime_root,
+                operation,
+            },
+        ),
+        (HostedGuestVerb::Copy, GuestOperation::Copy(request)) => copy_guest_file(
+            &localized,
+            GuestCopyRequest {
+                machine_name,
+                runtime_root: &state.inner.runtime_root,
+                source: std::path::Path::new(&request.source),
+                destination: std::path::Path::new(&request.destination),
+                direction: request.direction,
+            },
+        )
+        .map(OperationResult::Copy),
+        (HostedGuestVerb::Forward, GuestOperation::Forward(request)) => {
+            match prepare_guest_forward(
+                &localized,
+                GuestForwardRequest {
+                    machine_name,
+                    runtime_root: &state.inner.runtime_root,
+                    listen: &request.listen,
+                    target: &request.target,
+                },
+            ) {
+                Ok(session) => {
+                    let listen = session.listen_addr();
+                    let target = session.target().to_string();
+                    thread::spawn(move || {
+                        let _ = session.serve();
+                    });
+                    Ok(OperationResult::Forward(ForwardResult { listen, target }))
+                }
+                Err(error) => Err(error),
+            }
+        }
+        (verb, _) => Err(anyhow::anyhow!(
+            "node '{}' received a guest payload that does not match the '{}' route",
+            state.inner.node_name,
+            verb.as_str()
+        )),
+    };
+
+    match result {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to serve guest operation for machine '{}': {error}",
+                state.inner.node_name, machine_name
+            ),
+            Some(route),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::{Json, Router};
-    use port_agent_protocol::{ExecRequest, ExecResult, GuestOperation, OperationResult};
+    use port_agent_protocol::{
+        ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
+        ResponseEnvelope, read_frame, write_frame,
+    };
+    use std::io::BufReader;
+    use std::os::unix::net::UnixListener;
     use std::net::SocketAddr;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -750,6 +1153,137 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn node_agent_rejects_invalid_token() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+
+        let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
+        let response = Client::new()
+            .get(format!("http://{node_addr}/v1/node/machines/cloud-aws"))
+            .header("x-port-node-agent-token", "wrong")
+            .send()
+            .await
+            .expect("request should complete");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let error: HostedError = response.json().await.expect("error body should decode");
+        assert!(error.message.contains("aws-linux-node"));
+        assert!(error.message.contains("x-port-node-agent-token"));
+    }
+
+    #[tokio::test]
+    async fn node_agent_serves_status_and_guest_exec_from_runtime_root() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        write_manifest(&paths, "cloud-aws", 424242);
+        std::fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest socket should bind");
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("guest socket should accept");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => {
+                    assert_eq!(
+                        request.command,
+                        vec![String::from("/bin/echo"), String::from("node-ok")]
+                    );
+                }
+                other => panic!("unexpected operation: {other:?}"),
+            }
+
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("node-ok\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        });
+
+        let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
+        let client = Client::new();
+
+        let status = client
+            .get(format!("http://{node_addr}/v1/node/machines/cloud-aws"))
+            .header("x-port-node-agent-token", "node-secret")
+            .send()
+            .await
+            .expect("status request should complete");
+        assert_eq!(status.status(), StatusCode::OK);
+        let status_body: HostedSuccess<MachineStatus> =
+            status.json().await.expect("status body should decode");
+        assert_eq!(status_body.result.machine_name, "cloud-aws");
+        assert_eq!(status_body.route.node_name.as_deref(), Some("aws-linux-node"));
+
+        let guest = client
+            .post(format!("http://{node_addr}/v1/node/machines/cloud-aws/guest:exec"))
+            .header("x-port-node-agent-token", "node-secret")
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(&GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("node-ok")],
+                    cwd: None,
+                    env: BTreeMap::new(),
+                }))
+                .expect("guest request should encode"),
+            )
+            .send()
+            .await
+            .expect("guest request should complete");
+        assert_eq!(guest.status(), StatusCode::OK);
+        let guest_body: HostedSuccess<OperationResult> =
+            guest.json().await.expect("guest body should decode");
+        match guest_body.result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "node-ok\n"),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        server.join().expect("guest server thread should complete");
+    }
+
+    #[tokio::test]
+    async fn node_agent_reports_missing_guest_socket_with_runtime_context() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
+
+        let response = Client::new()
+            .post(format!("http://{node_addr}/v1/node/machines/cloud-aws/guest:exec"))
+            .header("x-port-node-agent-token", "node-secret")
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(&GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/true")],
+                    cwd: None,
+                    env: BTreeMap::new(),
+                }))
+                .expect("guest request should encode"),
+            )
+            .send()
+            .await
+            .expect("guest request should complete");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let error: HostedError = response.json().await.expect("error body should decode");
+        assert!(error.message.contains("guest agent socket"));
+        let route = error.route.expect("route context should exist");
+        assert_eq!(route.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            route.runtime_root,
+            Some(tempdir.path().join("hosted/aws-linux-node"))
+        );
+    }
+
     async fn serve_test_control_plane(
         config: PortConfig,
         node_bindings: Vec<HostedNodeBinding>,
@@ -868,6 +1402,47 @@ mod tests {
             let _ = axum::serve(listener, router).await;
         });
         addr
+    }
+
+    async fn serve_test_node_agent(config: PortConfig, node_name: &str, token: &str) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let state = build_node_agent_state(
+            config,
+            NodeAgentServeRequest {
+                node_name: node_name.to_string(),
+                bind: addr.to_string(),
+                token: token.to_string(),
+            },
+        )
+        .expect("node-agent state should build");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, node_agent_router(state)).await;
+        });
+        addr
+    }
+
+    fn write_manifest(paths: &RuntimePaths, machine_name: &str, pid: u32) {
+        std::fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let manifest = crate::LaunchMetadata {
+            machine_name: String::from(machine_name),
+            pid,
+            launched_at_unix_s: 1,
+            runtime_dir: paths.runtime_dir.clone(),
+            firecracker_binary: PathBuf::from("/usr/bin/firecracker"),
+            config_path: paths.config_path.clone(),
+            log_path: paths.firecracker_log.clone(),
+            stdout_path: paths.stdout_log.clone(),
+            stderr_path: paths.stderr_log.clone(),
+            manifest_path: paths.manifest_path.clone(),
+        };
+        std::fs::write(
+            &paths.manifest_path,
+            serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("manifest should write");
     }
 
     fn sample_control_plane_config(root: &std::path::Path) -> PortConfig {

@@ -136,6 +136,7 @@ port service list --machine <name>
 port service status --machine <name> --name <name>
 port service stop --machine <name> --name <name>
 port control-plane serve --control-plane <name> [--bind <addr>] [--node-binding <node>=<endpoint>,<token>]...
+port node-agent serve --node <name> [--bind <addr>] --token <token>
 ```
 
 Use `port --help` or any nested `--help` command to inspect the current command
@@ -190,6 +191,10 @@ Current behavior:
   canonical machine and guest routes. It authenticates client requests from the
   configured control-plane contract and forwards them to explicitly bound
   node-agent endpoints for the demo lane.
+- `port node-agent serve` now ships the matching hosted node-runtime server for
+  the demo lane. It authenticates control-plane calls and reuses Port's
+  existing runtime-root and guest transport logic behind the internal node
+  routes.
 - `port doctor` also reports provider-aware support boundaries for
   `generic-linux`, `aws`, `gcp`, and `azure` hosts when they are present in the
   config.

@@ -23,7 +23,10 @@ use serde::{Deserialize, Serialize};
 
 mod hosted_control_plane;
 
-pub use hosted_control_plane::{ControlPlaneServeRequest, HostedNodeBinding, serve_control_plane};
+pub use hosted_control_plane::{
+    ControlPlaneServeRequest, HostedNodeBinding, NodeAgentServeRequest, serve_control_plane,
+    serve_node_agent,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorReport {

@@ -1,0 +1,64 @@
+---
+recorded_at: 2026-03-08T07:12:27.243240448-07:00
+mode: manual
+files: [".keel/stories/1vzEVk000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-runtime node_agent_reports_missing_guest_socket_with_runtime_context ==
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 33 filtered out; finished in 0.00s
+
+
+== cargo run -q -p port-cli -- node-agent serve --help ==
+Serve one hosted node's runtime-root-backed machine and guest routes
+
+Usage: port node-agent serve [OPTIONS] --node <NODE> --token <TOKEN>
+
+Options:
+      --config <PATH>  Load a Port model from a TOML file instead of using the built-in sample
+      --node <NODE>    
+      --bind <BIND>    [default: 127.0.0.1:9234]
+      --token <TOKEN>  
+  -h, --help           Print help
+
+== node-agent docs and help excerpt ==
+crates/port-cli/src/lib.rs:77:  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root.
+crates/port-cli/src/lib.rs:78:  Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
+crates/port-cli/src/lib.rs:84:  Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
+crates/port-cli/src/lib.rs:85:  This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
+crates/port-cli/src/lib.rs:90:  Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
+crates/port-cli/src/lib.rs:314:    #[command(about = "List Port-managed machines under a runtime root")]
+crates/port-cli/src/lib.rs:342:    #[command(about = "Stop a Port-managed machine under a runtime root")]
+crates/port-cli/src/lib.rs:844:                    "no Port-managed machines found under runtime root '{}'",
+crates/port-runtime/src/hosted_control_plane.rs:645:            .context("node-agent server exited unexpectedly")
+crates/port-runtime/src/hosted_control_plane.rs:653:        .with_context(|| format!("unknown hosted node '{}' for node-agent serve", request.node_name))?
+crates/port-runtime/src/hosted_control_plane.rs:781:        .get("x-port-node-agent-token")
+crates/port-runtime/src/hosted_control_plane.rs:790:                state.inner.node_name, "x-port-node-agent-token"
+crates/port-runtime/src/hosted_control_plane.rs:1164:            .header("x-port-node-agent-token", "wrong")
+crates/port-runtime/src/hosted_control_plane.rs:1171:        assert!(error.message.contains("x-port-node-agent-token"));
+crates/port-runtime/src/hosted_control_plane.rs:1219:            .header("x-port-node-agent-token", "node-secret")
+crates/port-runtime/src/hosted_control_plane.rs:1231:            .header("x-port-node-agent-token", "node-secret")
+crates/port-runtime/src/hosted_control_plane.rs:1263:            .header("x-port-node-agent-token", "node-secret")
+crates/port-runtime/src/hosted_control_plane.rs:1318:                    .get("x-port-node-agent-token")
+crates/port-runtime/src/hosted_control_plane.rs:1366:                    .get("x-port-node-agent-token")
+docs/hosted.md:16:- `port node-agent serve` as the first live hosted node-runtime server for one
+docs/hosted.md:17:  configured hosted node and runtime root
+docs/hosted.md:34:  runtime root.
+docs/hosted.md:73:port --config examples/port.toml node-agent serve \
+docs/hosted.md:152:| Local Port today | local runtime root plus CLI output | local `port-runtime` invocation | local CLI plus runtime transport | runtime manifests and host process state |
+docs/hosted.md:157:- local mode: the runtime root is the durable lifecycle record
+docs/hosted.md:269:  node-agent runtime root
+docs/hosted.md:277:  detached forward processes Port recorded under that node runtime root
+docs/hosted.md:282:  model, then attaches to the node-agent runtime root's host-local guest
+README.md:139:port node-agent serve --node <name> [--bind <addr>] --token <token>
+README.md:150:  for one local machine under the selected runtime root and starts Firecracker.
+README.md:179:  and console/log files under the chosen runtime root before invoking
+README.md:185:  on the runtime root and do not require the model file again.
+README.md:194:- `port node-agent serve` now ships the matching hosted node-runtime server for
+README.md:283:  resolved machine runtime root. Treat that as a bootstrap operator workflow,
+README.md:289:  route-context contract that later control-plane and node-agent servers will
+README.md:318:- Firecracker runtime state, logs, and manifest files under the chosen runtime root
+

@@ -13,6 +13,8 @@ What is shipped today:
   guest protocol
 - `port control-plane serve` as the first live hosted HTTP server for canonical
   machine and guest routes, forwarding to explicitly bound node-agent endpoints
+- `port node-agent serve` as the first live hosted node-runtime server for one
+  configured hosted node and runtime root
 
 What is planned:
 
@@ -68,6 +70,11 @@ For the first live demo lane, the control plane binds node-agent endpoints
 explicitly at startup:
 
 ```bash
+port --config examples/port.toml node-agent serve \
+  --node aws-linux-node \
+  --bind 127.0.0.1:9234 \
+  --token node-secret
+
 port --config examples/port.toml control-plane serve \
   --control-plane demo \
   --bind 127.0.0.1:7040 \
