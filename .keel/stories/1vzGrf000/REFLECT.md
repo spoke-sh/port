@@ -6,19 +6,7 @@ created_at: 2026-03-08T09:43:44
 
 ## Knowledge
 
-### 1w03w0000: Infer Artifact Variants From Canonical Output Paths
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | Artifact scripts are invoked with a single output path, but the build and validation logic still needs to know architecture and protection mode without growing a second command contract. |
-| **Insight** | Deriving selector intent from the canonical artifact path keeps model selection, cache/store layout, and script behavior aligned. That lets new variants like `x86_64/firecracker/pvm` land without widening the script API. |
-| **Suggested Action** | When adding future artifact selectors, keep the path layout canonical and let the scripts derive selector intent from it before introducing new script arguments or hidden environment variables. |
-| **Applies To** | `scripts/artifacts/*.sh`, `crates/port-runtime/src/lib.rs`, artifact selector evolution |
-| **Linked Knowledge IDs** | 1w03v0000 |
-| **Observed At** | 2026-03-08T09:45:00Z |
-| **Score** | 0.8 |
-| **Confidence** | 0.92 |
-| **Applied** | yes |
+- [1w03w0000](../../knowledge/1w03w0000.md) Infer Artifact Variants From Canonical Output Paths
 
 ## Observations
 

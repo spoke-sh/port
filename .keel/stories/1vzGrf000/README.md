@@ -2,11 +2,13 @@
 id: 1vzGrf000
 title: Materialize PVM Artifact Variants
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T09:20:23
-updated_at: 2026-03-08T09:37:01
+updated_at: 2026-03-08T09:46:39
 scope: 1vz3ck000/1vzGo0000
 started_at: 2026-03-08T09:37:01
+submitted_at: 2026-03-08T09:46:32
+completed_at: 2026-03-08T09:46:39
 ---
 
 # Materialize PVM Artifact Variants

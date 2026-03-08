@@ -25,12 +25,12 @@ started_at: 2026-03-08T09:22:45
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Model X86 64 PVM Host Kit Contract](../../../../stories/1vzGrP000/README.md) | feat | done |
 | [Publish PVM Operator Proof Workflow](../../../../stories/1vzGrQ000/README.md) | feat | backlog |
 | [Add PVM Doctor Host Kit Checks](../../../../stories/1vzGrd000/README.md) | feat | done |
-| [Materialize PVM Artifact Variants](../../../../stories/1vzGrf000/README.md) | feat | backlog |
+| [Materialize PVM Artifact Variants](../../../../stories/1vzGrf000/README.md) | feat | done |
 <!-- END GENERATED -->
