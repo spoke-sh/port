@@ -2,11 +2,13 @@
 id: 1vzEVk000
 title: Implement Node Agent Serve Path
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T06:49:36
-updated_at: 2026-03-08T07:07:03
+updated_at: 2026-03-08T07:12:54
 scope: 1vzETR000/1vzETX000
 started_at: 2026-03-08T07:07:03
+submitted_at: 2026-03-08T07:12:51
+completed_at: 2026-03-08T07:12:54
 ---
 
 # Implement Node Agent Serve Path
