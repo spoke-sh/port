@@ -2,11 +2,12 @@
 id: 1vz2ky000
 index: 1
 title: Hosted Control And Substrate Foundations
-status: in-progress
+status: done
 epic: 1vz2eV000
 created_at: 2026-03-07T17:16:32
 updated_at: 2026-03-07T17:24:27
 started_at: 2026-03-07T17:24:47
+completed_at: 2026-03-07T18:11:30
 ---
 
 # Hosted Control And Substrate Foundations
@@ -22,17 +23,19 @@ started_at: 2026-03-07T17:24:47
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Model Substrates And Protection Modes](../../../../stories/1vz2oQ000/README.md) | feat | done |
 | [Add Machine Inventory Status And Stop](../../../../stories/1vz2oY000/README.md) | feat | done |
 | [Publish Hosted Node Agent Contract](../../../../stories/1vz2oh000/README.md) | feat | done |
-| [Define Artifact Mobility Commands And Contracts](../../../../stories/1vz2on000/README.md) | feat | backlog |
+| [Define Artifact Mobility Commands And Contracts](../../../../stories/1vz2on000/README.md) | feat | done |
 <!-- END GENERATED -->

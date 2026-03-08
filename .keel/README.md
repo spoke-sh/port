@@ -30,9 +30,9 @@
 | [Remove Nix Bias From Help Surface](epics/1vydg7000/voyages/1vyfXX000/) | done |
 | [Wire Live Guest Transport](epics/1vydg7000/voyages/1vyfve000/) | done |
 
-### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (active)
+### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | in-progress |
+| [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 

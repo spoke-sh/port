@@ -6,19 +6,7 @@ created_at: 2026-03-07T18:10:45
 
 ## Knowledge
 
-### 1vz3rU000: Noninteractive Story Record Needs Editor Override
-| Field | Value |
-|-------|-------|
-| **Category** | process |
-| **Context** | Recording `keel story record --cmd ...` proofs from the harness without an attached editor session |
-| **Insight** | `keel story record` still opens a manual-evidence editor even for command proofs unless the editor exits immediately; setting `EDITOR=true` keeps the command proof path noninteractive. |
-| **Suggested Action** | Use `EDITOR=true nix develop -c keel story record ... --cmd "<command>"` for automated proof capture and only fall back to a PTY editor when a manual note is genuinely needed. |
-| **Applies To** | `.keel/stories/*`, proof recording workflow |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-08T02:10:00Z |
-| **Score** | 0.80 |
-| **Confidence** | 0.92 |
-| **Applied** | yes |
+- [1vz3rU000](../../knowledge/1vz3rU000.md) Noninteractive Story Record Needs Editor Override
 
 ## Observations
 

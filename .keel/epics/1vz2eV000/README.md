@@ -20,8 +20,8 @@ the operator/API surfaces needed to approach SlicerVM-level capability.
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted Control And Substrate Foundations](voyages/1vz2ky000/) | in-progress | 3/4 |
+| [Hosted Control And Substrate Foundations](voyages/1vz2ky000/) | done | 4/4 |
 <!-- END GENERATED -->

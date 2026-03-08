@@ -2,11 +2,13 @@
 id: 1vz2on000
 title: Define Artifact Mobility Commands And Contracts
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T17:20:29
-updated_at: 2026-03-07T17:56:43
+updated_at: 2026-03-07T18:11:30
 scope: 1vz2eV000/1vz2ky000
 started_at: 2026-03-07T17:56:43
+submitted_at: 2026-03-07T18:11:24
+completed_at: 2026-03-07T18:11:30
 ---
 
 # Define Artifact Mobility Commands And Contracts
