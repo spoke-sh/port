@@ -8,7 +8,6 @@
 | Bearing | Status | Survey | Assessment |
 |---------|--------|--------|------------|
 | [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
-| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | exploring | ✓ | ✓ |
 
 <details>
 <summary>Completed Bearings</summary>
@@ -16,6 +15,7 @@
 | Bearing | Status |
 |---------|--------|
 | [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid |
+| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid |
 
 </details>
 
@@ -36,4 +36,10 @@
 | Voyage | Status |
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
+
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Substrate Drivers And Host Kits](epics/1vz3ck000/voyages/1vz3j0000/) | draft |
 
