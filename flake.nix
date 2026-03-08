@@ -37,7 +37,7 @@
           keelPkg
           pkgs.curl
         ];
-        linuxRuntimeInputs = [
+        linuxRuntimeInputs = pkgs.lib.optionals isLinux [
           pkgs.firecracker
           pkgs.iproute2
           pkgs.iptables
@@ -52,7 +52,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = sharedInputs ++ pkgs.lib.optionals isLinux linuxRuntimeInputs;
+          buildInputs = sharedInputs ++ linuxRuntimeInputs;
 
           shellHook = ''
             export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/port"
