@@ -416,6 +416,7 @@ name = "port-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "port-agent-protocol",
  "port-model",
  "serde",

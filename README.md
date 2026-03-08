@@ -82,6 +82,9 @@ port doctor
 port artifacts build --artifact <name>
 port artifacts validate --artifact <name>
 port machine launch --machine <name>
+port machine list [--runtime-root <path>]
+port machine status --machine <name> [--runtime-root <path>]
+port machine stop --machine <name> [--runtime-root <path>]
 port guest exec --machine <name> -- <command...>
 port guest copy --machine <name> --direction <host-to-guest|guest-to-host> --source <path> --destination <path>
 port guest pty --machine <name> -- <command...>
@@ -104,6 +107,10 @@ Current behavior:
 - `port machine launch` now writes a Firecracker config plus runtime metadata
   and console/log files under the chosen runtime root before invoking
   Firecracker with `--config-file`.
+- `port machine list`, `port machine status`, and `port machine stop` now use
+  Port-managed manifests plus live PID inspection instead of relying on the
+  Firecracker REST API. Once a machine is launched, these commands operate on
+  the runtime root and do not require the model file again.
 - `port doctor` also reports provider-aware support boundaries for
   `generic-linux`, `aws`, `gcp`, and `azure` hosts when they are present in the
   config.
@@ -152,6 +159,9 @@ cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact 
 cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
 cargo run -p port-cli -- --config examples/port.toml doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+cargo run -p port-cli -- machine list
+cargo run -p port-cli -- machine status --machine demo
+cargo run -p port-cli -- machine stop --machine demo
 ```
 
 What that produces:
@@ -159,6 +169,8 @@ What that produces:
 - deterministic artifacts under `artifacts/`
 - host validation through `port doctor`
 - Firecracker runtime state, logs, and manifest files under the chosen runtime root
+- lifecycle inspection and stop surfaces through `port machine list`, `status`,
+  and `stop`
 
 If the required tools are not available, `port doctor` may report missing
 prerequisites such as `firecracker` on `PATH`, and `port machine launch` is

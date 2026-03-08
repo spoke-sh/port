@@ -40,6 +40,7 @@ perform remote launch yet.
 3. Read the provider-aware checks to confirm whether the target lane is `local`, a future remote lane (`generic-linux`, `aws`, `gcp`), or explicitly unsupported (`azure`).
 4. For the current MVP, run `port machine launch --machine demo` only on a Linux host that passes `port doctor`.
 5. If you try `port machine launch --machine cloud-aws` or another remote machine, Port intentionally fails fast with guidance about the current boundary.
+6. `port machine list`, `port machine status`, and `port machine stop` currently inspect local runtime roots only; they are not yet a remote-cloud inventory surface.
 
 ## Operator Mapping
 

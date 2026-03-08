@@ -1,0 +1,19 @@
+---
+recorded_at: 2026-03-07T17:51:22.543922846-08:00
+mode: manual
+files: ["/tmp/1vz2oY000-ac2.log"]
+---
+
+--- File: 1vz2oY000-ac2.log ---
+machine: demo
+state: stopped
+pid: 99
+runtime dir: /tmp/port-machine-status-proof/demo
+config path: /tmp/port-machine-status-proof/demo/firecracker-config.json
+manifest: /tmp/port-machine-status-proof/demo/manifest.json
+pid file: /tmp/port-machine-status-proof/demo/firecracker.pid
+firecracker log: /tmp/port-machine-status-proof/demo/firecracker.log
+console stdout: /tmp/port-machine-status-proof/demo/console.stdout.log
+console stderr: /tmp/port-machine-status-proof/demo/console.stderr.log
+detail: launch manifest exists but no live Firecracker process is recorded
+

@@ -24,6 +24,9 @@ Runnable local workflow:
   port --config examples/port.toml artifacts build --artifact demo-kernel
   port --config examples/port.toml artifacts build --artifact demo-guest
   port --config examples/port.toml machine launch --machine demo
+  port --config examples/port.toml machine list
+  port --config examples/port.toml machine status --machine demo
+  port --config examples/port.toml machine stop --machine demo
 
 Guest workflow examples:
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
@@ -34,18 +37,18 @@ Guest workflow examples:
   `port guest forward` is a foreground host-side proxy session; stop it with Ctrl-C when you are done.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
 
-	Platform Support:
-	  Linux: local Firecracker launch is supported when port doctor passes.
-	  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned macOS lane.
-	  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
-	Execution Lanes:
-	  Firecracker + standard on Linux is the current shipped lane.
-	  Firecracker + pvm on x86_64 is planned for cloud cost control; Firecracker + pvm on aarch64 remains research only.
-	  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
-	Cloud Linux:
-	  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
-	  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
-	  Azure remains an explicitly unsupported Firecracker provider lane.";
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned macOS lane.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
+Execution Lanes:
+  Firecracker + standard on Linux is the current shipped lane.
+  Firecracker + pvm on x86_64 is planned for cloud cost control; Firecracker + pvm on aarch64 remains research only.
+  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
+Cloud Linux:
+  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
+  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
+  Azure remains an explicitly unsupported Firecracker provider lane.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -128,6 +131,27 @@ pub enum MachineCommand {
         runtime_root: PathBuf,
         #[arg(long, default_value_t = 3)]
         boot_wait_secs: u64,
+    },
+    #[command(about = "List Port-managed machines under a runtime root")]
+    List {
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+    },
+    #[command(about = "Inspect the runtime status of a named machine")]
+    Status {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+    },
+    #[command(about = "Stop a Port-managed machine under a runtime root")]
+    Stop {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        wait_secs: u64,
     },
 }
 
@@ -213,10 +237,7 @@ pub fn run(cli: Cli) -> Result<()> {
             let config = load_config(cli.config)?;
             run_artifacts(command, &config)
         }
-        Command::Machine(command) => {
-            let config = load_config(cli.config)?;
-            run_machine(command, &config)
-        }
+        Command::Machine(command) => run_machine(command, cli.config),
         Command::Guest(command) => {
             let config = load_config(cli.config)?;
             run_guest(command, &config)
@@ -291,15 +312,16 @@ fn render_artifact_kind(kind: port_model::ArtifactKind) -> &'static str {
     }
 }
 
-fn run_machine(command: MachineCommand, config: &PortConfig) -> Result<()> {
+fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<()> {
     match command {
         MachineCommand::Launch {
             machine,
             runtime_root,
             boot_wait_secs,
         } => {
+            let config = load_config(config_path)?;
             let metadata = port_runtime::launch_local_machine(
-                config,
+                &config,
                 &LaunchRequest {
                     machine_name: &machine,
                     runtime_root: &runtime_root,
@@ -319,6 +341,73 @@ fn run_machine(command: MachineCommand, config: &PortConfig) -> Result<()> {
             println!("console stderr: {}", metadata.stderr_path.display());
             println!("manifest: {}", metadata.manifest_path.display());
         }
+        MachineCommand::List { runtime_root } => {
+            let machines = port_runtime::list_machines(&runtime_root)?;
+            if machines.is_empty() {
+                println!(
+                    "no Port-managed machines found under runtime root '{}'",
+                    runtime_root.display()
+                );
+            } else {
+                for machine in machines {
+                    println!("machine: {}", machine.machine_name);
+                    println!("state: {}", machine.state);
+                    println!(
+                        "pid: {}",
+                        machine
+                            .pid
+                            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+                    );
+                    println!("runtime dir: {}", machine.runtime_dir.display());
+                    println!("detail: {}", machine.detail);
+                    println!();
+                }
+            }
+        }
+        MachineCommand::Status {
+            machine,
+            runtime_root,
+        } => {
+            let status = port_runtime::machine_status(&runtime_root, &machine)?;
+            println!("machine: {}", status.machine_name);
+            println!("state: {}", status.state);
+            println!(
+                "pid: {}",
+                status
+                    .pid
+                    .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+            );
+            println!("runtime dir: {}", status.runtime_dir.display());
+            println!("config path: {}", status.config_path.display());
+            println!("manifest: {}", status.manifest_path.display());
+            println!("pid file: {}", status.pid_path.display());
+            println!("firecracker log: {}", status.firecracker_log.display());
+            println!("console stdout: {}", status.stdout_log.display());
+            println!("console stderr: {}", status.stderr_log.display());
+            println!("detail: {}", status.detail);
+        }
+        MachineCommand::Stop {
+            machine,
+            runtime_root,
+            wait_secs,
+        } => {
+            let result = port_runtime::stop_machine(
+                &runtime_root,
+                &machine,
+                Duration::from_secs(wait_secs),
+            )?;
+            println!("machine: {}", result.machine_name);
+            println!("previous state: {}", result.previous_state);
+            println!("current state: {}", result.current_state);
+            println!(
+                "pid: {}",
+                result
+                    .pid
+                    .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+            );
+            println!("runtime dir: {}", result.runtime_dir.display());
+            println!("detail: {}", result.detail);
+        }
     }
 
     Ok(())
@@ -332,15 +421,18 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             command,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(config, GuestRequest {
-                machine_name: &machine,
-                runtime_root: &runtime_root,
-                operation: GuestOperation::Exec(ExecRequest {
-                    command,
-                    cwd: None,
-                    env: Default::default(),
-                }),
-            })? {
+            match port_runtime::execute_guest_operation(
+                config,
+                GuestRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    operation: GuestOperation::Exec(ExecRequest {
+                        command,
+                        cwd: None,
+                        env: Default::default(),
+                    }),
+                },
+            )? {
                 OperationResult::Exec(result) => {
                     print!("{}", result.stdout);
                     eprint!("{}", result.stderr);
@@ -377,15 +469,18 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             command,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(config, GuestRequest {
-                machine_name: &machine,
-                runtime_root: &runtime_root,
-                operation: GuestOperation::Pty(PtyRequest {
-                    command,
-                    cols: 80,
-                    rows: 24,
-                }),
-            })? {
+            match port_runtime::execute_guest_operation(
+                config,
+                GuestRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    operation: GuestOperation::Pty(PtyRequest {
+                        command,
+                        cols: 80,
+                        rows: 24,
+                    }),
+                },
+            )? {
                 OperationResult::Pty(result) => {
                     print!("{}", result.transcript);
                 }
@@ -400,15 +495,18 @@ fn run_guest(command: GuestCommand, config: &PortConfig) -> Result<()> {
             follow,
         } => {
             ensure_machine_exists(config, &machine)?;
-            match port_runtime::execute_guest_operation(config, GuestRequest {
-                machine_name: &machine,
-                runtime_root: &runtime_root,
-                operation: GuestOperation::Logs(LogsRequest {
-                    path,
-                    follow,
-                    tail_lines,
-                }),
-            })? {
+            match port_runtime::execute_guest_operation(
+                config,
+                GuestRequest {
+                    machine_name: &machine,
+                    runtime_root: &runtime_root,
+                    operation: GuestOperation::Logs(LogsRequest {
+                        path,
+                        follow,
+                        tail_lines,
+                    }),
+                },
+            )? {
                 OperationResult::Logs(result) => {
                     print!("{}", result.contents);
                 }
@@ -519,10 +617,19 @@ mod tests {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }
 
+        let machine_help = render_subcommand_help("machine").expect("machine help should exist");
+
         for keyword in ["exec", "copy", "pty", "logs", "forward"] {
             assert!(
                 guest_help.contains(keyword),
                 "missing guest help keyword: {keyword}"
+            );
+        }
+
+        for keyword in ["launch", "list", "status", "stop"] {
+            assert!(
+                machine_help.contains(keyword),
+                "missing machine help keyword: {keyword}"
             );
         }
     }
@@ -618,6 +725,63 @@ mod tests {
                 assert_eq!(direction, CopyDirectionArg::GuestToHost);
                 assert_eq!(source, "/tmp/in-guest.txt");
                 assert_eq!(destination, "./copied.txt");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_machine_lifecycle_arguments() {
+        let list = Cli::parse_from(["port", "machine", "list", "--runtime-root", "/tmp/runtime"]);
+        match list.command {
+            Command::Machine(MachineCommand::List { runtime_root }) => {
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let status = Cli::parse_from([
+            "port",
+            "machine",
+            "status",
+            "--machine",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+        ]);
+
+        match status.command {
+            Command::Machine(MachineCommand::Status {
+                machine,
+                runtime_root,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let stop = Cli::parse_from([
+            "port",
+            "machine",
+            "stop",
+            "--machine",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--wait-secs",
+            "9",
+        ]);
+
+        match stop.command {
+            Command::Machine(MachineCommand::Stop {
+                machine,
+                runtime_root,
+                wait_secs,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(wait_secs, 9);
             }
             other => panic!("unexpected command: {other:?}"),
         }

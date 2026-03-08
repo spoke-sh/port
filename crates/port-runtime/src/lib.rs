@@ -16,7 +16,7 @@ use port_model::{
     ArtifactKind, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
     MachineArchitecture, PortConfig, ProtectionMode,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorReport {
@@ -51,7 +51,7 @@ pub struct LaunchRequest<'a> {
     pub boot_wait: Duration,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LaunchMetadata {
     pub machine_name: String,
     pub pid: u32,
@@ -63,6 +63,52 @@ pub struct LaunchMetadata {
     pub stdout_path: PathBuf,
     pub stderr_path: PathBuf,
     pub manifest_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineRuntimeState {
+    Running,
+    Stopped,
+    Stale,
+    Malformed,
+}
+
+impl std::fmt::Display for MachineRuntimeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Running => "running",
+            Self::Stopped => "stopped",
+            Self::Stale => "stale",
+            Self::Malformed => "malformed",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineStatus {
+    pub machine_name: String,
+    pub state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub runtime_dir: PathBuf,
+    pub config_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub pid_path: PathBuf,
+    pub firecracker_log: PathBuf,
+    pub stdout_log: PathBuf,
+    pub stderr_log: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StopResult {
+    pub machine_name: String,
+    pub previous_state: MachineRuntimeState,
+    pub current_state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub runtime_dir: PathBuf,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +256,13 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
             let guest_image = config
                 .artifact(&machine.guest_image)
                 .expect("sampled machines should reference a known guest image");
-            checks.push(machine_contract_check(name, host, machine, kernel, guest_image));
+            checks.push(machine_contract_check(
+                name,
+                host,
+                machine,
+                kernel,
+                guest_image,
+            ));
         }
     }
 
@@ -392,6 +444,122 @@ pub fn launch_local_machine(
     Ok(metadata)
 }
 
+pub fn list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+    if !runtime_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut machines = Vec::new();
+    for entry in fs::read_dir(runtime_root)
+        .with_context(|| format!("failed to read runtime root '{}'", runtime_root.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read an entry from runtime root '{}'",
+                runtime_root.display()
+            )
+        })?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+            .is_dir()
+        {
+            continue;
+        }
+
+        let machine_name = entry.file_name().to_string_lossy().into_owned();
+        machines.push(inspect_machine(runtime_root, &machine_name)?);
+    }
+    machines.sort_by(|left, right| left.machine_name.cmp(&right.machine_name));
+
+    Ok(machines)
+}
+
+pub fn machine_status(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    if !paths.runtime_dir.exists() {
+        bail!(
+            "runtime state for machine '{}' does not exist under '{}'",
+            machine_name,
+            runtime_root.display()
+        );
+    }
+
+    inspect_machine(runtime_root, machine_name)
+}
+
+pub fn stop_machine(
+    runtime_root: &Path,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let status = machine_status(runtime_root, machine_name)?;
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+
+    match status.state {
+        MachineRuntimeState::Running => {
+            let pid = status
+                .pid
+                .context("running machine status did not include a pid")?;
+            signal_process(pid, libc::SIGTERM).with_context(|| {
+                format!("failed to stop machine '{}' with SIGTERM", machine_name)
+            })?;
+            if !wait_for_process_exit(pid, machine_name, timeout)? {
+                signal_process(pid, libc::SIGKILL).with_context(|| {
+                    format!(
+                        "failed to force-stop machine '{}' with SIGKILL",
+                        machine_name
+                    )
+                })?;
+                if !wait_for_process_exit(pid, machine_name, Duration::from_secs(1))? {
+                    bail!(
+                        "machine '{}' did not stop after SIGTERM/SIGKILL for pid {}",
+                        machine_name,
+                        pid
+                    );
+                }
+            }
+            cleanup_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Running,
+                current_state: MachineRuntimeState::Stopped,
+                pid: Some(pid),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
+            })
+        }
+        MachineRuntimeState::Stopped => {
+            cleanup_runtime_transient_paths(&paths)?;
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Stopped,
+                current_state: MachineRuntimeState::Stopped,
+                pid: status.pid,
+                runtime_dir: paths.runtime_dir,
+                detail: String::from("machine was already stopped"),
+            })
+        }
+        MachineRuntimeState::Stale => {
+            cleanup_runtime_transient_paths(&paths)?;
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Stale,
+                current_state: MachineRuntimeState::Stopped,
+                pid: status.pid,
+                runtime_dir: paths.runtime_dir,
+                detail: String::from("cleaned stale runtime sockets for already-stopped machine"),
+            })
+        }
+        MachineRuntimeState::Malformed => bail!(
+            "runtime state for machine '{}' is malformed: {}",
+            machine_name,
+            status.detail
+        ),
+    }
+}
+
 fn wait_for_boot(
     child: &mut std::process::Child,
     boot_wait: Duration,
@@ -432,20 +600,93 @@ fn prepare_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()>
     Ok(())
 }
 
+fn inspect_machine(runtime_root: &Path, machine_name: &str) -> Result<MachineStatus> {
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    let pid_from_file = match read_pid_file(&paths.pid_path) {
+        Ok(pid) => pid,
+        Err(error) => {
+            return Ok(malformed_machine_status(
+                machine_name,
+                &paths,
+                error.to_string(),
+            ));
+        }
+    };
+
+    if !paths.manifest_path.exists() {
+        return Ok(malformed_machine_status(
+            machine_name,
+            &paths,
+            format!(
+                "runtime manifest '{}' is missing",
+                paths.manifest_path.display()
+            ),
+        ));
+    }
+
+    let manifest = match read_launch_metadata(&paths.manifest_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Ok(malformed_machine_status(
+                machine_name,
+                &paths,
+                format!(
+                    "failed to parse manifest '{}': {error}",
+                    paths.manifest_path.display()
+                ),
+            ));
+        }
+    };
+
+    if manifest.machine_name != machine_name {
+        return Ok(malformed_machine_status(
+            machine_name,
+            &paths,
+            format!(
+                "manifest machine name '{}' does not match runtime directory '{}'",
+                manifest.machine_name, machine_name
+            ),
+        ));
+    }
+
+    let live_pid = resolve_live_machine_pid(machine_name, pid_from_file, Some(manifest.pid))?;
+    let pid = live_pid.or(pid_from_file).or(Some(manifest.pid));
+    let (state, detail) = match live_pid {
+        Some(_) => (
+            MachineRuntimeState::Running,
+            String::from("live Firecracker process matches runtime manifest"),
+        ),
+        None if pid_from_file.is_some() => (
+            MachineRuntimeState::Stale,
+            String::from("recorded Firecracker pid is no longer live"),
+        ),
+        None => (
+            MachineRuntimeState::Stopped,
+            String::from("launch manifest exists but no live Firecracker process is recorded"),
+        ),
+    };
+
+    Ok(MachineStatus {
+        machine_name: machine_name.to_string(),
+        state,
+        pid,
+        runtime_dir: paths.runtime_dir,
+        config_path: paths.config_path,
+        manifest_path: paths.manifest_path,
+        pid_path: paths.pid_path,
+        firecracker_log: paths.firecracker_log,
+        stdout_log: paths.stdout_log,
+        stderr_log: paths.stderr_log,
+        detail,
+    })
+}
+
 fn live_firecracker_pid(pid_path: &Path, machine_name: &str) -> Result<Option<u32>> {
     let Some(pid) = read_pid_file(pid_path)? else {
         return Ok(None);
     };
 
-    let Some(cmdline) = process_cmdline(pid)? else {
-        return Ok(None);
-    };
-
-    let is_firecracker = cmdline.contains("firecracker");
-    let matches_machine = cmdline.contains(&format!("--id {machine_name}"))
-        || cmdline.contains(&format!("--id\0{machine_name}"));
-
-    if is_firecracker && matches_machine {
+    if is_live_firecracker_pid(pid, machine_name)? {
         Ok(Some(pid))
     } else {
         Ok(None)
@@ -489,6 +730,103 @@ fn process_cmdline(pid: u32) -> Result<Option<String>> {
         .collect();
 
     Ok(Some(rendered))
+}
+
+fn read_launch_metadata(path: &Path) -> Result<LaunchMetadata> {
+    let file = File::open(path)
+        .with_context(|| format!("failed to open manifest '{}'", path.display()))?;
+    serde_json::from_reader(file)
+        .with_context(|| format!("failed to decode manifest '{}'", path.display()))
+}
+
+fn resolve_live_machine_pid(
+    machine_name: &str,
+    pid_from_file: Option<u32>,
+    manifest_pid: Option<u32>,
+) -> Result<Option<u32>> {
+    if let Some(pid) = pid_from_file {
+        if is_live_firecracker_pid(pid, machine_name)? {
+            return Ok(Some(pid));
+        }
+    }
+
+    if let Some(pid) = manifest_pid {
+        if Some(pid) != pid_from_file && is_live_firecracker_pid(pid, machine_name)? {
+            return Ok(Some(pid));
+        }
+    }
+
+    Ok(None)
+}
+
+fn is_live_firecracker_pid(pid: u32, machine_name: &str) -> Result<bool> {
+    let Some(cmdline) = process_cmdline(pid)? else {
+        return Ok(false);
+    };
+
+    Ok(matches_firecracker_process(&cmdline, machine_name))
+}
+
+fn matches_firecracker_process(cmdline: &str, machine_name: &str) -> bool {
+    let is_firecracker = cmdline.contains("firecracker");
+    let matches_machine = cmdline.contains(&format!("--id {machine_name}"))
+        || cmdline.contains(&format!("--id\0{machine_name}"));
+
+    is_firecracker && matches_machine
+}
+
+fn wait_for_process_exit(pid: u32, machine_name: &str, timeout: Duration) -> Result<bool> {
+    let step = Duration::from_millis(100);
+    let mut waited = Duration::ZERO;
+
+    while waited < timeout {
+        if !is_live_firecracker_pid(pid, machine_name)? {
+            return Ok(true);
+        }
+        thread::sleep(step);
+        waited += step;
+    }
+
+    Ok(!is_live_firecracker_pid(pid, machine_name)?)
+}
+
+fn signal_process(pid: u32, signal: i32) -> Result<()> {
+    // SAFETY: `libc::kill` is the POSIX process-signal interface. The call does not
+    // alias Rust references, and we only pass the target pid plus a fixed signal.
+    let status = unsafe { libc::kill(pid as i32, signal) };
+    if status == 0 {
+        Ok(())
+    } else {
+        let error = std::io::Error::last_os_error();
+        bail!("signal delivery failed for pid {}: {}", pid, error);
+    }
+}
+
+fn cleanup_runtime_transient_paths(paths: &RuntimePaths) -> Result<()> {
+    remove_stale_runtime_path(&paths.pid_path, "pid file")?;
+    remove_stale_runtime_path(&paths.vsock_path, "vsock socket")?;
+    remove_stale_runtime_path(&paths.guest_agent_socket, "guest-agent socket")?;
+    Ok(())
+}
+
+fn malformed_machine_status(
+    machine_name: &str,
+    paths: &RuntimePaths,
+    detail: String,
+) -> MachineStatus {
+    MachineStatus {
+        machine_name: machine_name.to_string(),
+        state: MachineRuntimeState::Malformed,
+        pid: None,
+        runtime_dir: paths.runtime_dir.clone(),
+        config_path: paths.config_path.clone(),
+        manifest_path: paths.manifest_path.clone(),
+        pid_path: paths.pid_path.clone(),
+        firecracker_log: paths.firecracker_log.clone(),
+        stdout_log: paths.stdout_log.clone(),
+        stderr_log: paths.stderr_log.clone(),
+        detail,
+    }
 }
 
 fn remove_stale_runtime_path(path: &Path, label: &str) -> Result<()> {
@@ -841,7 +1179,10 @@ fn repo_root() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("failed to derive repository root from CARGO_MANIFEST_DIR"))
 }
 
-pub fn execute_guest_operation(config: &PortConfig, request: GuestRequest<'_>) -> Result<OperationResult> {
+pub fn execute_guest_operation(
+    config: &PortConfig,
+    request: GuestRequest<'_>,
+) -> Result<OperationResult> {
     if matches!(
         &request.operation,
         GuestOperation::Copy(_) | GuestOperation::Forward(_)
@@ -979,9 +1320,7 @@ pub fn copy_guest_file(
             let bytes_copied = std::io::copy(&mut limited, &mut destination)
                 .with_context(|| format!("failed to write '{}'", request.destination.display()))?;
             if bytes_copied != size_bytes {
-                bail!(
-                    "expected {size_bytes} bytes from guest copy, received {bytes_copied}"
-                );
+                bail!("expected {size_bytes} bytes from guest copy, received {bytes_copied}");
             }
         }
     }
@@ -1164,7 +1503,10 @@ enum GuestEndpoint {
     },
 }
 
-fn resolve_guest_endpoint(config: &PortConfig, request: &GuestRequest<'_>) -> Result<GuestEndpoint> {
+fn resolve_guest_endpoint(
+    config: &PortConfig,
+    request: &GuestRequest<'_>,
+) -> Result<GuestEndpoint> {
     let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
     if paths.guest_agent_socket.exists() {
         return Ok(GuestEndpoint::RuntimeSocket(paths.guest_agent_socket));
@@ -1229,7 +1571,9 @@ fn connect_firecracker_vsock(host_socket_path: &Path, guest_port: u32) -> Result
                 host_socket_path.display()
             )
         })?;
-    stream.flush().context("failed to flush Firecracker handshake")?;
+    stream
+        .flush()
+        .context("failed to flush Firecracker handshake")?;
 
     let reader_stream = stream
         .try_clone()
@@ -1339,7 +1683,7 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{Shutdown, TcpStream};
     use std::os::unix::net::UnixListener;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::Duration;
@@ -1348,9 +1692,10 @@ mod tests {
 
     use super::{
         ArtifactAction, DoctorCheck, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-        LaunchRequest, RuntimePaths, artifact_script, build_firecracker_config,
-        collect_doctor_report, copy_guest_file, execute_guest_operation, launch_local_machine,
-        path_check, prepare_guest_forward, prepare_runtime_state, read_pid_file, repo_root,
+        LaunchMetadata, LaunchRequest, MachineRuntimeState, RuntimePaths, StopResult,
+        artifact_script, build_firecracker_config, collect_doctor_report, copy_guest_file,
+        execute_guest_operation, launch_local_machine, list_machines, machine_status, path_check,
+        prepare_guest_forward, prepare_runtime_state, read_pid_file, repo_root, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
@@ -1545,6 +1890,217 @@ mod tests {
     }
 
     #[test]
+    fn list_machines_reports_running_stale_and_malformed_runtime_entries() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let running_paths = RuntimePaths::for_machine(tempdir.path(), "running");
+        let stale_paths = RuntimePaths::for_machine(tempdir.path(), "stale");
+        let malformed_paths = RuntimePaths::for_machine(tempdir.path(), "broken");
+        fs::create_dir_all(&running_paths.runtime_dir).expect("running dir should exist");
+        fs::create_dir_all(&stale_paths.runtime_dir).expect("stale dir should exist");
+        fs::create_dir_all(&malformed_paths.runtime_dir).expect("broken dir should exist");
+
+        let mut command = Command::new("bash");
+        command
+            .args([
+                "-lc",
+                "exec -a firecracker /bin/sh -c 'sleep 30' --id running",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .expect("fake running firecracker process should start");
+        thread::sleep(Duration::from_millis(100));
+
+        let running_manifest = LaunchMetadata {
+            machine_name: String::from("running"),
+            pid: child.id(),
+            launched_at_unix_s: 1,
+            runtime_dir: running_paths.runtime_dir.clone(),
+            firecracker_binary: PathBuf::from("/usr/bin/firecracker"),
+            config_path: running_paths.config_path.clone(),
+            log_path: running_paths.firecracker_log.clone(),
+            stdout_path: running_paths.stdout_log.clone(),
+            stderr_path: running_paths.stderr_log.clone(),
+            manifest_path: running_paths.manifest_path.clone(),
+        };
+        fs::write(
+            &running_paths.manifest_path,
+            serde_json::to_vec_pretty(&running_manifest).expect("manifest should serialize"),
+        )
+        .expect("running manifest should write");
+        fs::write(&running_paths.pid_path, format!("{}\n", child.id()))
+            .expect("running pid should write");
+
+        let stale_manifest = LaunchMetadata {
+            machine_name: String::from("stale"),
+            pid: 424242,
+            launched_at_unix_s: 2,
+            runtime_dir: stale_paths.runtime_dir.clone(),
+            firecracker_binary: PathBuf::from("/usr/bin/firecracker"),
+            config_path: stale_paths.config_path.clone(),
+            log_path: stale_paths.firecracker_log.clone(),
+            stdout_path: stale_paths.stdout_log.clone(),
+            stderr_path: stale_paths.stderr_log.clone(),
+            manifest_path: stale_paths.manifest_path.clone(),
+        };
+        fs::write(
+            &stale_paths.manifest_path,
+            serde_json::to_vec_pretty(&stale_manifest).expect("manifest should serialize"),
+        )
+        .expect("stale manifest should write");
+        fs::write(&stale_paths.pid_path, "424242\n").expect("stale pid should write");
+        fs::write(&malformed_paths.manifest_path, "{not-json\n")
+            .expect("malformed manifest should write");
+
+        let machines = list_machines(tempdir.path()).expect("machine listing should succeed");
+        assert_eq!(machines.len(), 3);
+
+        let running = machines
+            .iter()
+            .find(|machine| machine.machine_name == "running")
+            .expect("running machine should exist");
+        assert_eq!(running.state, MachineRuntimeState::Running);
+        assert_eq!(running.pid, Some(child.id()));
+
+        let stale = machines
+            .iter()
+            .find(|machine| machine.machine_name == "stale")
+            .expect("stale machine should exist");
+        assert_eq!(stale.state, MachineRuntimeState::Stale);
+        assert_eq!(stale.pid, Some(424242));
+        assert!(stale.detail.contains("no longer live"));
+
+        let broken = machines
+            .iter()
+            .find(|machine| machine.machine_name == "broken")
+            .expect("broken machine should exist");
+        assert_eq!(broken.state, MachineRuntimeState::Malformed);
+        assert!(broken.detail.contains("failed to parse"));
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn machine_status_reports_runtime_paths_for_known_machine() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let manifest = LaunchMetadata {
+            machine_name: String::from("demo"),
+            pid: 99,
+            launched_at_unix_s: 1,
+            runtime_dir: paths.runtime_dir.clone(),
+            firecracker_binary: PathBuf::from("/usr/bin/firecracker"),
+            config_path: paths.config_path.clone(),
+            log_path: paths.firecracker_log.clone(),
+            stdout_path: paths.stdout_log.clone(),
+            stderr_path: paths.stderr_log.clone(),
+            manifest_path: paths.manifest_path.clone(),
+        };
+        fs::write(
+            &paths.manifest_path,
+            serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("manifest should write");
+
+        let status = machine_status(tempdir.path(), "demo").expect("status should load");
+        assert_eq!(status.machine_name, "demo");
+        assert_eq!(status.state, MachineRuntimeState::Stopped);
+        assert_eq!(status.runtime_dir, paths.runtime_dir);
+        assert_eq!(status.config_path, paths.config_path);
+        assert_eq!(status.manifest_path, paths.manifest_path);
+        assert_eq!(status.pid_path, paths.pid_path);
+        assert_eq!(status.firecracker_log, paths.firecracker_log);
+        assert_eq!(status.stdout_log, paths.stdout_log);
+        assert_eq!(status.stderr_log, paths.stderr_log);
+    }
+
+    #[test]
+    fn stop_machine_terminates_live_port_owned_process() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        fs::write(&paths.vsock_path, "").expect("vsock path should write");
+        fs::write(&paths.guest_agent_socket, "").expect("guest socket should write");
+
+        let mut command = Command::new("bash");
+        command
+            .args(["-lc", "exec -a firecracker /bin/sh -c 'sleep 30' --id demo"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .expect("fake firecracker process should start");
+        thread::sleep(Duration::from_millis(100));
+
+        let manifest = LaunchMetadata {
+            machine_name: String::from("demo"),
+            pid: child.id(),
+            launched_at_unix_s: 1,
+            runtime_dir: paths.runtime_dir.clone(),
+            firecracker_binary: PathBuf::from("/usr/bin/firecracker"),
+            config_path: paths.config_path.clone(),
+            log_path: paths.firecracker_log.clone(),
+            stdout_path: paths.stdout_log.clone(),
+            stderr_path: paths.stderr_log.clone(),
+            manifest_path: paths.manifest_path.clone(),
+        };
+        fs::write(
+            &paths.manifest_path,
+            serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
+        )
+        .expect("manifest should write");
+        fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
+
+        let result = stop_machine(tempdir.path(), "demo", Duration::from_secs(2))
+            .expect("stop should succeed");
+        assert_eq!(
+            result,
+            StopResult {
+                machine_name: String::from("demo"),
+                previous_state: MachineRuntimeState::Running,
+                current_state: MachineRuntimeState::Stopped,
+                pid: Some(child.id()),
+                runtime_dir: paths.runtime_dir.clone(),
+                detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
+            }
+        );
+        assert_eq!(
+            read_pid_file(&paths.pid_path).expect("pid file should be readable"),
+            None
+        );
+        assert!(!paths.vsock_path.exists());
+        assert!(!paths.guest_agent_socket.exists());
+
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn machine_status_reports_missing_and_malformed_runtime_state() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let error =
+            machine_status(tempdir.path(), "missing").expect_err("missing machine should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("runtime state for machine 'missing' does not exist")
+        );
+
+        let broken_paths = RuntimePaths::for_machine(tempdir.path(), "broken");
+        fs::create_dir_all(&broken_paths.runtime_dir).expect("broken runtime dir should exist");
+        fs::write(&broken_paths.manifest_path, "{not-json\n")
+            .expect("malformed manifest should write");
+
+        let broken = machine_status(tempdir.path(), "broken").expect("broken status should load");
+        assert_eq!(broken.state, MachineRuntimeState::Malformed);
+        assert!(broken.detail.contains("failed to parse"));
+    }
+
+    #[test]
     fn remote_launch_rejects_aws_hosts_with_provider_guidance() {
         let tempdir = tempdir().expect("tempdir should exist");
         let error = launch_local_machine(
@@ -1567,8 +2123,11 @@ mod tests {
     #[test]
     fn launch_rejects_unsupported_pvm_artifact_contract() {
         let mut config = PortConfig::sample();
-        config.machines.get_mut("demo").expect("demo should exist").protection_mode =
-            port_model::ProtectionMode::Pvm;
+        config
+            .machines
+            .get_mut("demo")
+            .expect("demo should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
         let tempdir = tempdir().expect("tempdir should exist");
 
         let error = launch_local_machine(
@@ -1593,19 +2152,22 @@ mod tests {
         fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
         fs::write(&paths.manifest_path, "{}\n").expect("manifest marker should write");
 
-        let error = execute_guest_operation(&PortConfig::sample(), GuestRequest {
-            machine_name: "demo",
-            runtime_root: tempdir.path(),
-            operation: GuestOperation::Exec(ExecRequest {
-                command: vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from("true"),
-                ],
-                cwd: None,
-                env: Default::default(),
-            }),
-        })
+        let error = execute_guest_operation(
+            &PortConfig::sample(),
+            GuestRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("true"),
+                    ],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
         .expect_err("missing guest socket should fail");
 
         let message = error.to_string();
@@ -1630,13 +2192,18 @@ mod tests {
                 .read_line(&mut handshake)
                 .expect("handshake line should read");
             assert_eq!(handshake, "CONNECT 7000\n");
-            stream.write_all(b"OK\n").expect("should acknowledge handshake");
+            stream
+                .write_all(b"OK\n")
+                .expect("should acknowledge handshake");
             stream.flush().expect("should flush handshake response");
 
             let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
             match request.operation {
                 GuestOperation::Exec(request) => {
-                    assert_eq!(request.command, vec![String::from("/bin/echo"), String::from("live-ok")]);
+                    assert_eq!(
+                        request.command,
+                        vec![String::from("/bin/echo"), String::from("live-ok")]
+                    );
                 }
                 other => panic!("unexpected operation over live guest transport: {other:?}"),
             }
@@ -1866,7 +2433,8 @@ mod tests {
         )
         .expect("forward session should prepare");
         let listen_addr = session.listen_addr();
-        let serve_thread = thread::spawn(move || session.serve().expect("forward serve should run"));
+        let serve_thread =
+            thread::spawn(move || session.serve().expect("forward serve should run"));
 
         let mut forwarded: Option<TcpStream> = None;
         for _ in 0..100 {
@@ -1885,7 +2453,9 @@ mod tests {
             .expect("forward eager bytes should read");
         assert_eq!(&eager, b"ready");
         forwarded.write_all(b"forward-ok").expect("forward write");
-        forwarded.shutdown(Shutdown::Write).expect("forward shutdown");
+        forwarded
+            .shutdown(Shutdown::Write)
+            .expect("forward shutdown");
         let mut echoed = Vec::new();
         forwarded
             .read_to_end(&mut echoed)
@@ -1893,6 +2463,8 @@ mod tests {
         assert_eq!(echoed, b"forward-ok");
 
         let _ = serve_thread.thread().id();
-        server.join().expect("forward server thread should complete");
+        server
+            .join()
+            .expect("forward server thread should complete");
     }
 }

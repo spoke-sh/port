@@ -25,6 +25,9 @@ cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact 
 cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
 cargo run -p port-cli -- --config examples/port.toml doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+cargo run -p port-cli -- machine list
+cargo run -p port-cli -- machine status --machine demo
+cargo run -p port-cli -- machine stop --machine demo
 ```
 
 Artifacts land under `artifacts/`. Runtime manifests and console logs land under
@@ -37,6 +40,18 @@ Important prerequisite note:
   checks are available in the execution environment.
 - If `port doctor` reports a missing dependency, treat that as the explanation
   for why a later `port machine launch` example will fail.
+
+Current lifecycle behavior:
+
+- `port machine list` enumerates Port-managed runtime directories and reports
+  `running`, `stopped`, `stale`, or `malformed` state from manifests plus live
+  PID inspection.
+- After a machine has been launched, `list`, `status`, and `stop` operate on
+  the runtime root directly and do not require the model file again.
+- `port machine status --machine demo` prints the runtime directory, config
+  path, manifest, pid file, and console/log references needed for debugging.
+- `port machine stop --machine demo` signals a live Firecracker process and
+  cleans stale pid/vsock/socket files so the next launch is deterministic.
 
 Current guest-command behavior:
 
@@ -76,6 +91,8 @@ What to expect:
   the MVP.
 - `port machine launch --machine demo` remains the supported local Linux launch
   proof for the MVP.
+- `port machine list`, `status`, and `stop` currently inspect only local
+  runtime roots; they do not yet enumerate or control remote/cloud hosts.
 
 The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
 
