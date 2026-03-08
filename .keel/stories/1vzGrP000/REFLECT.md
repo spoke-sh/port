@@ -6,19 +6,7 @@ created_at: 2026-03-08T09:29:05
 
 ## Knowledge
 
-### 1w03v0000: Prefer Serializable Contract Fields Over Orphan Helper Types
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | A lane or capability contract exists in code as a helper type, but downstream configuration, examples, and diagnostics still cannot see or round-trip it. |
-| **Insight** | A standalone contract type is not enough for operator-facing work. If the contract matters to CLI discovery or future runtime checks, it should live on the serializable model surface so examples, validation, and later stories all reuse the same source of truth. |
-| **Suggested Action** | When adding future substrate or host-kit contracts, first attach them to the config/model structs and round-trip them through the checked-in example before building doctor or runtime logic on top. |
-| **Applies To** | `crates/port-model/src/lib.rs`, `examples/*.toml`, future substrate contracts |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-08T09:30:00Z |
-| **Score** | 0.83 |
-| **Confidence** | 0.93 |
-| **Applied** | yes |
+- [1w03v0000](../../knowledge/1w03v0000.md) Prefer Serializable Contract Fields Over Orphan Helper Types
 
 ## Observations
 
