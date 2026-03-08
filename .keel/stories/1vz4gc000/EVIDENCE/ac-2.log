@@ -1,0 +1,39 @@
+---
+recorded_at: 2026-03-07T20:28:18-08:00
+---
+== cargo test -q -p port-cli ==
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port --help hosted guest attach excerpt ==
+102:  Hosted guest attach is now modeled explicitly: the control plane authorizes the attach, the node
+105:  In the MVP, those guest verbs still run only through the local runtime path; the hosted lane is a
+
+== hosted guest attach docs excerpt ==
+README.md:231:  lifecycle surfaces are modeled today, not runnable yet.
+README.md:232:- Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
+docs/hosted.md:263:Hosted guest attach contract for a hosted machine such as `cloud-aws`:
+docs/hosted.md:286:What still remains after this contract:

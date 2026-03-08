@@ -460,7 +460,12 @@ impl PortConfig {
         let host_groups = inventory
             .host_groups
             .iter()
-            .filter(|(_, group)| group.nodes.iter().any(|node| candidate_nodes.contains(node)))
+            .filter(|(_, group)| {
+                group
+                    .nodes
+                    .iter()
+                    .any(|node| candidate_nodes.contains(node))
+            })
             .map(|(group_name, _)| group_name.clone())
             .collect::<Vec<_>>();
 
@@ -505,6 +510,54 @@ impl PortConfig {
             stop_route: summary.control.stop_route,
             detail: String::from(
                 "Hosted machine stop remains routed through the control plane, with the node agent owning the host-local stop action once the runtime path exists.",
+            ),
+        }))
+    }
+
+    pub fn hosted_guest_attach_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedGuestAttachContract>, ValidationError> {
+        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+            Some(summary) => summary,
+            None => return Ok(None),
+        };
+        Ok(Some(HostedGuestAttachContract {
+            machine: summary.clone(),
+            guest_broker: summary.control.guest_broker,
+            guest_route: summary.control.guest_route,
+            command_surface: vec![
+                GuestCommandVerb::Exec,
+                GuestCommandVerb::Copy,
+                GuestCommandVerb::Pty,
+                GuestCommandVerb::Logs,
+                GuestCommandVerb::Forward,
+            ],
+            protocol: HostedGuestProtocolContract::PortAgentProtocol,
+            attach_path: vec![
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::Cli,
+                    role: String::from("initiates a canonical `port guest ...` request"),
+                },
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::HostedControlPlane,
+                    role: String::from("authorizes guest attachment and resolves the owning node"),
+                },
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::HostedNodeAgent,
+                    role: String::from(
+                        "opens the host-local guest transport and bridges the byte stream",
+                    ),
+                },
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::GuestAgent,
+                    role: String::from(
+                        "continues serving the existing guest request and response frames",
+                    ),
+                },
+            ],
+            detail: String::from(
+                "Hosted guest attach preserves the canonical `port guest exec|copy|pty|logs|forward` surface. The control plane authorizes the attach, the node agent bridges the host-local guest transport, and the existing Port guest protocol frames continue unchanged to the in-guest agent.",
             ),
         }))
     }
@@ -963,6 +1016,45 @@ pub struct HostedMachineStopContract {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedGuestAttachContract {
+    pub machine: HostedMachineSummaryContract,
+    pub guest_broker: MachineGuestBroker,
+    pub guest_route: MachineCommandRoute,
+    pub command_surface: Vec<GuestCommandVerb>,
+    pub protocol: HostedGuestProtocolContract,
+    pub attach_path: Vec<HostedGuestAttachHop>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestCommandVerb {
+    Exec,
+    Copy,
+    Pty,
+    Logs,
+    Forward,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostedGuestProtocolContract {
+    PortAgentProtocol,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedGuestAttachHop {
+    pub actor: HostedGuestAttachActor,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostedGuestAttachActor {
+    Cli,
+    HostedControlPlane,
+    HostedNodeAgent,
+    GuestAgent,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactVariant {
     pub selector: ArtifactSelector,
@@ -1006,9 +1098,7 @@ pub struct HostSpec {
 #[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum HostConnection {
     Local,
-    HostedControlPlane {
-        control_plane: String,
-    },
+    HostedControlPlane { control_plane: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1180,13 +1270,23 @@ impl FirecrackerPvmLaneContract {
                     },
                 ],
                 operator_prerequisites: vec![
-                    String::from("Prepare a dedicated Linux/x86_64 host kit before enabling Firecracker/PVM in Port."),
-                    String::from("Do not reuse the standard Firecracker host or standard guest artifacts for the PVM lane."),
+                    String::from(
+                        "Prepare a dedicated Linux/x86_64 host kit before enabling Firecracker/PVM in Port.",
+                    ),
+                    String::from(
+                        "Do not reuse the standard Firecracker host or standard guest artifacts for the PVM lane.",
+                    ),
                 ],
                 follow_on_work: vec![
-                    String::from("Teach port doctor to validate the x86_64 PVM host kit and host boot-line requirements."),
-                    String::from("Add build, pull, and validate pipelines for x86_64/firecracker/pvm kernel and guest-image variants."),
-                    String::from("Add a Firecracker/PVM driver path that selects the PVM host kit and fails fast when the host kit is absent."),
+                    String::from(
+                        "Teach port doctor to validate the x86_64 PVM host kit and host boot-line requirements.",
+                    ),
+                    String::from(
+                        "Add build, pull, and validate pipelines for x86_64/firecracker/pvm kernel and guest-image variants.",
+                    ),
+                    String::from(
+                        "Add a Firecracker/PVM driver path that selects the PVM host kit and fails fast when the host kit is absent.",
+                    ),
                 ],
             },
             MachineArchitecture::Aarch64 => Self {
@@ -1205,11 +1305,17 @@ impl FirecrackerPvmLaneContract {
                     "Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path.",
                 )],
                 follow_on_work: vec![
-                    String::from("Track upstream arm64 protected-virtualization and guest-memory work relevant to Firecracker."),
-                    String::from("Reassess arm64 only after a supportable Firecracker runtime path exists, not only because upstream kernel capability exists."),
+                    String::from(
+                        "Track upstream arm64 protected-virtualization and guest-memory work relevant to Firecracker.",
+                    ),
+                    String::from(
+                        "Reassess arm64 only after a supportable Firecracker runtime path exists, not only because upstream kernel capability exists.",
+                    ),
                 ],
             },
-            MachineArchitecture::Native => Self::for_architecture(resolve_native_pvm_architecture()),
+            MachineArchitecture::Native => {
+                Self::for_architecture(resolve_native_pvm_architecture())
+            }
         }
     }
 }
@@ -1285,7 +1391,10 @@ impl AvfExecutionContract {
                 MachineArchitecture::Aarch64,
                 MachineArchitecture::X86_64,
             ],
-            launch_owners: vec![AvfLaunchOwner::LocalPortRuntime, AvfLaunchOwner::HostedNodeAgent],
+            launch_owners: vec![
+                AvfLaunchOwner::LocalPortRuntime,
+                AvfLaunchOwner::HostedNodeAgent,
+            ],
             guest_transport: AvfGuestTransport::VirtioSocket,
             console_transport: AvfConsoleTransport::SerialPort,
             directory_share: AvfDirectoryShareContract {
@@ -1301,15 +1410,23 @@ impl AvfExecutionContract {
                 ],
             },
             operator_prerequisites: vec![
-                String::from("Run the AVF lane on macOS with the Virtualization framework available."),
+                String::from(
+                    "Run the AVF lane on macOS with the Virtualization framework available.",
+                ),
                 String::from(
                     "Distributed macOS app targets need Apple's virtualization entitlement; sandboxed distributions also need the relevant network and file-access entitlements.",
                 ),
             ],
             follow_on_work: vec![
-                String::from("Implement an AVF driver that maps machine launch onto VZVirtualMachineConfiguration plus a Linux boot loader."),
-                String::from("Bridge the guest agent through AVF virtio sockets and map console/log capture onto AVF serial ports."),
-                String::from("Add macOS-focused port doctor checks for AVF availability, entitlements, and optional Rosetta support."),
+                String::from(
+                    "Implement an AVF driver that maps machine launch onto VZVirtualMachineConfiguration plus a Linux boot loader.",
+                ),
+                String::from(
+                    "Bridge the guest agent through AVF virtio sockets and map console/log capture onto AVF serial ports.",
+                ),
+                String::from(
+                    "Add macOS-focused port doctor checks for AVF availability, entitlements, and optional Rosetta support.",
+                ),
             ],
         }
     }
@@ -1636,11 +1753,12 @@ mod tests {
 
     use super::{
         ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
-        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection,
-        HostProvider, HostedAuthTokenSource, HostedPlacementPolicy, MachineArchitecture,
-        MachineCommandRoute, MachineControlContract, MachineGuestBroker, MachineInventoryOwner,
-        MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource, PortConfig,
-        ProtectionMode, PvmLaneDecision,
+        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
+        HostConnection, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
+        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
+        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
+        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
+        PortConfig, ProtectionMode, PvmLaneDecision,
     };
 
     #[test]
@@ -1825,19 +1943,24 @@ mod tests {
     #[test]
     fn validate_rejects_unknown_control_plane_reference() {
         let mut config = PortConfig::sample();
-        config.hosts.get_mut("aws-linux").expect("aws host").connection =
-            HostConnection::HostedControlPlane {
-                control_plane: String::from("missing"),
-            };
+        config
+            .hosts
+            .get_mut("aws-linux")
+            .expect("aws host")
+            .connection = HostConnection::HostedControlPlane {
+            control_plane: String::from("missing"),
+        };
         config.host_groups.clear();
 
         let error = config
             .validate()
             .expect_err("missing control plane should fail validation");
 
-        assert!(error
-            .to_string()
-            .contains("references unknown control plane 'missing'"));
+        assert!(
+            error
+                .to_string()
+                .contains("references unknown control plane 'missing'")
+        );
     }
 
     #[test]
@@ -1851,17 +1974,31 @@ mod tests {
         let aws_node = &contract.nodes["aws-linux-node"];
         assert_eq!(aws_node.host, "aws-linux");
         assert_eq!(aws_node.control_plane, "demo");
-        assert_eq!(aws_node.inventory_owner, MachineInventoryOwner::HostedControlPlane);
-        assert_eq!(aws_node.lifecycle_owner, MachineLifecycleOwner::HostedNodeAgent);
+        assert_eq!(
+            aws_node.inventory_owner,
+            MachineInventoryOwner::HostedControlPlane
+        );
+        assert_eq!(
+            aws_node.lifecycle_owner,
+            MachineLifecycleOwner::HostedNodeAgent
+        );
         assert_eq!(aws_node.capabilities.providers, vec![HostProvider::Aws]);
 
         let remote_group = &contract.host_groups["remote-linux"];
         assert_eq!(remote_group.control_plane, "demo");
-        assert_eq!(remote_group.inventory_owner, MachineInventoryOwner::HostedControlPlane);
-        assert_eq!(remote_group.placement, HostedPlacementPolicy::ExplicitMembership);
-        assert!(remote_group
-            .nodes
-            .contains(&String::from("generic-linux-node")));
+        assert_eq!(
+            remote_group.inventory_owner,
+            MachineInventoryOwner::HostedControlPlane
+        );
+        assert_eq!(
+            remote_group.placement,
+            HostedPlacementPolicy::ExplicitMembership
+        );
+        assert!(
+            remote_group
+                .nodes
+                .contains(&String::from("generic-linux-node"))
+        );
     }
 
     #[test]
@@ -1873,10 +2010,16 @@ mod tests {
             .expect("hosted machine summary should resolve")
             .expect("cloud-aws should be hosted");
         assert_eq!(summary.control_plane, "demo");
-        assert_eq!(summary.candidate_nodes, vec![String::from("aws-linux-node")]);
+        assert_eq!(
+            summary.candidate_nodes,
+            vec![String::from("aws-linux-node")]
+        );
         assert!(summary.host_groups.contains(&String::from("remote-linux")));
         assert!(summary.host_groups.contains(&String::from("aws-builders")));
-        assert_eq!(summary.control.status_route, MachineCommandRoute::HostedControlPlane);
+        assert_eq!(
+            summary.control.status_route,
+            MachineCommandRoute::HostedControlPlane
+        );
 
         let status = config
             .hosted_machine_status_contract("cloud-aws")
@@ -1895,6 +2038,70 @@ mod tests {
         assert_eq!(stop.stop_route, MachineCommandRoute::HostedControlPlane);
         assert_eq!(stop.lifecycle_owner, MachineLifecycleOwner::HostedNodeAgent);
         assert!(stop.detail.contains("node agent"));
+    }
+
+    #[test]
+    fn sample_config_derives_hosted_guest_attach_contract() {
+        let config = PortConfig::sample();
+
+        let contract = config
+            .hosted_guest_attach_contract("cloud-aws")
+            .expect("hosted guest attach contract should resolve")
+            .expect("cloud-aws guest attach should be hosted");
+
+        assert_eq!(contract.machine.control_plane, "demo");
+        assert_eq!(
+            contract.guest_broker,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel
+        );
+        assert_eq!(
+            contract.guest_route,
+            MachineCommandRoute::HostedControlPlane
+        );
+        assert_eq!(
+            contract.command_surface,
+            vec![
+                GuestCommandVerb::Exec,
+                GuestCommandVerb::Copy,
+                GuestCommandVerb::Pty,
+                GuestCommandVerb::Logs,
+                GuestCommandVerb::Forward
+            ]
+        );
+        assert_eq!(
+            contract.protocol,
+            HostedGuestProtocolContract::PortAgentProtocol
+        );
+        assert_eq!(
+            contract.attach_path,
+            vec![
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::Cli,
+                    role: String::from("initiates a canonical `port guest ...` request"),
+                },
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::HostedControlPlane,
+                    role: String::from("authorizes guest attachment and resolves the owning node",),
+                },
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::HostedNodeAgent,
+                    role: String::from(
+                        "opens the host-local guest transport and bridges the byte stream",
+                    ),
+                },
+                HostedGuestAttachHop {
+                    actor: HostedGuestAttachActor::GuestAgent,
+                    role: String::from(
+                        "continues serving the existing guest request and response frames",
+                    ),
+                },
+            ]
+        );
+        assert!(
+            contract
+                .detail
+                .contains("port guest exec|copy|pty|logs|forward")
+        );
     }
 
     #[test]
@@ -1919,9 +2126,11 @@ mod tests {
             .validate()
             .expect_err("local hosted node should fail validation");
 
-        assert!(error
-            .to_string()
-            .contains("hosted nodes must resolve through a hosted control plane"));
+        assert!(
+            error
+                .to_string()
+                .contains("hosted nodes must resolve through a hosted control plane")
+        );
     }
 
     #[test]
@@ -1931,20 +2140,26 @@ mod tests {
         assert_eq!(contract.decision, PvmLaneDecision::Planned);
         assert!(contract.host_kit.is_some());
         assert!(contract.artifact_kit.is_some());
-        assert!(contract
-            .host_kit
-            .as_ref()
-            .expect("x86 host kit should exist")
-            .host_boot_args
-            .contains(&String::from("pti=off")));
-        assert!(contract
-            .validation
-            .iter()
-            .any(|check| check.name == "host-kernel"));
-        assert!(contract
-            .follow_on_work
-            .iter()
-            .any(|item| item.contains("port doctor")));
+        assert!(
+            contract
+                .host_kit
+                .as_ref()
+                .expect("x86 host kit should exist")
+                .host_boot_args
+                .contains(&String::from("pti=off"))
+        );
+        assert!(
+            contract
+                .validation
+                .iter()
+                .any(|check| check.name == "host-kernel")
+        );
+        assert!(
+            contract
+                .follow_on_work
+                .iter()
+                .any(|item| item.contains("port doctor"))
+        );
     }
 
     #[test]
@@ -1954,9 +2169,11 @@ mod tests {
         assert_eq!(contract.decision, PvmLaneDecision::ResearchOnly);
         assert!(contract.host_kit.is_none());
         assert!(contract.artifact_kit.is_none());
-        assert!(contract.validation[0]
-            .detail
-            .contains("supportable Firecracker/PVM runtime path"));
+        assert!(
+            contract.validation[0]
+                .detail
+                .contains("supportable Firecracker/PVM runtime path")
+        );
     }
 
     #[test]
@@ -1966,12 +2183,16 @@ mod tests {
         assert_eq!(contract.host_platform, super::HostPlatform::Macos);
         assert_eq!(contract.guest_transport, AvfGuestTransport::VirtioSocket);
         assert_eq!(contract.console_transport, AvfConsoleTransport::SerialPort);
-        assert!(contract
-            .supported_host_architectures
-            .contains(&MachineArchitecture::Aarch64));
-        assert!(contract
-            .launch_owners
-            .contains(&AvfLaunchOwner::LocalPortRuntime));
+        assert!(
+            contract
+                .supported_host_architectures
+                .contains(&MachineArchitecture::Aarch64)
+        );
+        assert!(
+            contract
+                .launch_owners
+                .contains(&AvfLaunchOwner::LocalPortRuntime)
+        );
         assert!(contract.directory_share.supported);
         assert!(contract.directory_share.required_for_rosetta);
         assert!(contract.follow_on_work[0].contains("VZVirtualMachineConfiguration"));
@@ -2051,19 +2272,23 @@ mod tests {
             kernel.distribution.push,
             ArtifactStore::FileSystem { .. }
         ));
-        assert!(kernel
-            .variant(
-                MachineArchitecture::Aarch64,
-                ExecutionSubstrate::Firecracker,
-                ProtectionMode::Standard
-            )
-            .is_some());
-        assert!(kernel
-            .variant(
-                MachineArchitecture::X86_64,
-                ExecutionSubstrate::Firecracker,
-                ProtectionMode::Pvm
-            )
-            .is_none());
+        assert!(
+            kernel
+                .variant(
+                    MachineArchitecture::Aarch64,
+                    ExecutionSubstrate::Firecracker,
+                    ProtectionMode::Standard
+                )
+                .is_some()
+        );
+        assert!(
+            kernel
+                .variant(
+                    MachineArchitecture::X86_64,
+                    ExecutionSubstrate::Firecracker,
+                    ProtectionMode::Pvm
+                )
+                .is_none()
+        );
     }
 }

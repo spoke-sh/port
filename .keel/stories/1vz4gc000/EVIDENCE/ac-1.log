@@ -1,0 +1,68 @@
+---
+recorded_at: 2026-03-07T20:28:18-08:00
+---
+== cargo test -q -p port-model ==
+
+running 18 tests
+..................
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== cargo test -q -p port-model sample_config_derives_hosted_guest_attach_contract ==
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.00s
+
+
+== hosted guest attach contracts in port-model ==
+517:    pub fn hosted_guest_attach_contract(
+520:    ) -> Result<Option<HostedGuestAttachContract>, ValidationError> {
+525:        Ok(Some(HostedGuestAttachContract {
+530:                GuestCommandVerb::Exec,
+531:                GuestCommandVerb::Copy,
+532:                GuestCommandVerb::Pty,
+533:                GuestCommandVerb::Logs,
+534:                GuestCommandVerb::Forward,
+536:            protocol: HostedGuestProtocolContract::PortAgentProtocol,
+538:                HostedGuestAttachHop {
+539:                    actor: HostedGuestAttachActor::Cli,
+542:                HostedGuestAttachHop {
+543:                    actor: HostedGuestAttachActor::HostedControlPlane,
+546:                HostedGuestAttachHop {
+547:                    actor: HostedGuestAttachActor::HostedNodeAgent,
+552:                HostedGuestAttachHop {
+553:                    actor: HostedGuestAttachActor::GuestAgent,
+1020:pub struct HostedGuestAttachContract {
+1024:    pub command_surface: Vec<GuestCommandVerb>,
+1025:    pub protocol: HostedGuestProtocolContract,
+1026:    pub attach_path: Vec<HostedGuestAttachHop>,
+1031:pub enum GuestCommandVerb {
+1040:pub enum HostedGuestProtocolContract {
+1045:pub struct HostedGuestAttachHop {
+1046:    pub actor: HostedGuestAttachActor,
+1051:pub enum HostedGuestAttachActor {
+1756:        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
+1757:        HostConnection, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
+1758:        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
+2044:    fn sample_config_derives_hosted_guest_attach_contract() {
+2048:            .hosted_guest_attach_contract("cloud-aws")
+2064:                GuestCommandVerb::Exec,
+2065:                GuestCommandVerb::Copy,
+2066:                GuestCommandVerb::Pty,
+2067:                GuestCommandVerb::Logs,
+2068:                GuestCommandVerb::Forward
+2073:            HostedGuestProtocolContract::PortAgentProtocol
+2078:                HostedGuestAttachHop {
+2079:                    actor: HostedGuestAttachActor::Cli,
+2082:                HostedGuestAttachHop {
+2083:                    actor: HostedGuestAttachActor::HostedControlPlane,
+2086:                HostedGuestAttachHop {
+2087:                    actor: HostedGuestAttachActor::HostedNodeAgent,
+2092:                HostedGuestAttachHop {
+2093:                    actor: HostedGuestAttachActor::GuestAgent,

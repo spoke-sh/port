@@ -260,6 +260,15 @@ the hosted form rather than inventing a second vocabulary.
 Hosted Port preserves the existing guest protocol by tunneling it, not by
 redefining it.
 
+Hosted guest attach contract for a hosted machine such as `cloud-aws`:
+
+- `guest_broker = "control-plane-node-agent-tunnel"`
+- `guest_route = "hosted-control-plane"`
+- `command_surface = ["exec", "copy", "pty", "logs", "forward"]`
+- `protocol = "port-agent-protocol"`
+- attach path:
+  CLI -> hosted control plane -> hosted node agent -> in-guest `port-guest-agent`
+
 1. The operator runs a canonical CLI command such as `port guest exec`.
 2. The client resolves whether the target is local or hosted.
 3. For hosted targets, the control plane authorizes the request and resolves
@@ -273,6 +282,12 @@ redefining it.
 That means hosted Port still uses the same guest-operation model for `exec`,
 `copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
 stream.
+
+What still remains after this contract:
+
+- no hosted `port guest ...` runtime path ships yet
+- detached forwarding and Unix-socket forwarding remain follow-on work
+- monitoring, secrets, services, sandboxes, and SDK work remain follow-on work
 
 ## Hosted API Shape
 

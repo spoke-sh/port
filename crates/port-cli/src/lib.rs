@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use port_agent_protocol::{
     CopyDirection, ExecRequest, GuestOperation, LogsRequest, OperationResult, PtyRequest,
@@ -65,6 +65,8 @@ Hosted Control:
   Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later scheduler, monitoring, and services work can reuse one placement vocabulary.
   Hosted `machine list`, `status`, and `stop` are now modeled explicitly as control-plane plus node-agent contracts so the canonical machine verbs stay stable as Port moves from local to hosted execution.
   In the MVP, those verbs still run only against the local runtime; the hosted lane is a published routing and ownership contract, not a runnable remote lifecycle yet.
+  Hosted guest attach is now modeled explicitly: the control plane authorizes the attach, the node agent opens the host-local guest transport, and `port guest exec|copy|pty|logs|forward` keep the same request and response frames.
+  In the MVP, those guest verbs still run only through the local runtime path; the hosted lane is a published bridge contract for the next control-plane, node-agent, and follow-on service slices.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";
@@ -809,9 +811,9 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        render_help, render_nested_subcommand_help, render_subcommand_help, ArchitectureArg,
-        ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand, MachineCommand,
-        ProtectionModeArg, SubstrateArg,
+        ArchitectureArg, ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand,
+        MachineCommand, ProtectionModeArg, SubstrateArg, render_help,
+        render_nested_subcommand_help, render_subcommand_help,
     };
 
     #[test]

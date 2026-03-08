@@ -229,8 +229,11 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   control-plane plus node-agent contracts so the canonical machine verbs stay
   stable as Port moves from the local runtime to a hosted fleet. Those hosted
   lifecycle surfaces are modeled today, not runnable yet.
-- Guest `exec`, `copy`, `pty`, `logs`, and `forward` keep the current guest
-  protocol semantics; the hosted layer brokers them instead of replacing them.
+- Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
+  a control-plane-authorized attach followed by node-agent guest brokerage to
+  the in-guest `port-guest-agent`. The canonical `guest` verbs and guest
+  protocol frames stay unchanged; the hosted guest bridge is modeled today, not
+  runnable yet.
 - Local `machine list`, `status`, and `stop` now publish the control-contract
   fields that future hosted routing will reuse: inventory scope, inventory
   owner, lifecycle owner, status source, and per-verb route.
