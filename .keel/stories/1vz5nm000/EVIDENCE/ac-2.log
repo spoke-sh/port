@@ -1,0 +1,51 @@
+---
+recorded_at: 2026-03-08T06:45:11.590439800-07:00
+mode: manual
+files: [".keel/stories/1vz5nm000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo run -q -p port-sdk --example hosted-sdk ==
+machine monitor url: https://port.example.internal/v1/machines/cloud-aws/monitor
+guest exec url: https://port.example.internal/v1/machines/cloud-aws/guest:exec
+service apply url: https://port.example.internal/v1/machines/cloud-aws/services
+
+== hosted SDK docs excerpt ==
+crates/port-sdk/src/lib.rs:338:        let client = HostedClient::from_machine(
+docs/sdk.md:3:Port now publishes a supported typed client surface in the `port-sdk` crate for
+docs/sdk.md:7:ships a live remote control plane transport. The crate gives operators and
+docs/sdk.md:15:- `HostedClient::from_machine` derives hosted endpoint, audience, and auth
+docs/sdk.md:23:Still planned:
+docs/sdk.md:25:- a real HTTP transport implementation
+docs/sdk.md:38:let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+docs/sdk.md:71:cargo run -p port-sdk --example hosted-sdk
+docs/sdk.md:92:The SDK mirrors those paths exactly so later transport work can build on a
+docs/hosted.md:15:What is planned:
+docs/hosted.md:121:| Local Port today | local runtime root plus CLI output | local `port-runtime` invocation | local CLI plus runtime transport | runtime manifests and host process state |
+docs/hosted.md:122:| Hosted Port planned | central control plane | node agent on the selected host | control plane plus node agent tunnel | control-plane inventory plus node-agent reported runtime state |
+docs/hosted.md:252:  transport instead of inventing hosted-only guest verbs
+docs/hosted.md:276:- `guest_broker = "local-runtime-transport"`
+docs/hosted.md:327:   guest transport.
+docs/hosted.md:343:- the `port-sdk` crate now ships the supported typed client surface for those
+docs/hosted.md:345:- what still remains after that publication is a real transport, response
+docs/hosted.md:352:publishes the request surface through `port-sdk`. The contract mirrors the CLI:
+docs/hosted.md:371:`port-sdk` builds typed request objects for these paths today, while the actual
+docs/hosted.md:372:remote transport remains a follow-on slice.
+docs/hosted.md:383:- `port-sdk` now ships the supported typed client entry points for machine,
+docs/hosted.md:385:  construction instead of performing network transport.
+docs/hosted.md:392:  by the request-builder SDK, even though the real hosted control plane still
+docs/hosted.md:393:  remains a planned runtime boundary.
+README.md:67:planned or research-backed lanes rather than hidden future scope. The hosted
+README.md:102:- map guest transport onto AVF virtio sockets
+README.md:238:- A future node agent owns host-local lifecycle, manifests, transport bridges,
+README.md:275:- `port-sdk` now publishes typed hosted request builders for canonical
+README.md:326:The launched-VM guest transport is now the canonical path for the guest CLI:
+README.md:335:  transport, and runs until you stop it.
+README.md:353:Port now ships the in-repo [`port-sdk`](crates/port-sdk/src/lib.rs) crate as
+README.md:355:request-builder API today, not a claim that the remote control plane transport
+README.md:358:- `HostedClient::from_machine` derives the hosted endpoint, audience, and auth
+README.md:367:[`crates/port-sdk/examples/hosted-sdk.rs`](crates/port-sdk/examples/hosted-sdk.rs)
+README.md:422:the live guest transport automatically:
+README.md:467:  guest transport connection per inbound client.
+README.md:525:- macOS now has a first-class planned lane through Apple Virtualization
+

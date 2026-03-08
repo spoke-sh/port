@@ -1,0 +1,13 @@
+[package]
+name = "port-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+port-agent-protocol = { path = "../port-agent-protocol" }
+port-model = { path = "../port-model" }

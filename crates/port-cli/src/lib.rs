@@ -79,11 +79,12 @@ Hosted Control:
   Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
   This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
-  `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution and SDK clients as follow-on slices.
+  `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
 Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
   Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
   `port service apply` persists desired state, guest command, secret bindings, and hosted routing context; real guest execution and teardown remain explicit follow-on work.
+  `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service request construction.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";

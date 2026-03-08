@@ -5,6 +5,7 @@ members = [
   "crates/port-guest-agent",
   "crates/port-model",
   "crates/port-runtime",
+  "crates/port-sdk",
 ]
 resolver = "2"
 

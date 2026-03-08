@@ -50,7 +50,8 @@ Detailed operator workflows live in [`docs/operators.md`](docs/operators.md).
 Cloud-provider boundaries and the current remote Linux support matrix live in
 [`docs/cloud.md`](docs/cloud.md). The Firecracker/PVM host-kit contract lives in
 [`docs/pvm.md`](docs/pvm.md). The Apple Virtualization Framework contract lives
-in [`docs/avf.md`](docs/avf.md).
+in [`docs/avf.md`](docs/avf.md). The hosted SDK and API client surface lives in
+[`docs/sdk.md`](docs/sdk.md).
 
 ## Project Status
 
@@ -271,6 +272,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Secret values are currently stored as runtime-owned JSON files under the
   resolved machine runtime root. Treat that as a bootstrap operator workflow,
   not as a hardened secret backend.
+- `port-sdk` now publishes typed hosted request builders for canonical
+  machine, guest, and service operations so SDK/API consumers can follow the
+  same surface as the CLI without waiting for a separate client model.
 - Local `machine list`, `status`, `monitor`, `top`, and `stop` now publish the
   control-contract fields that future hosted routing will reuse: inventory
   scope, inventory owner, lifecycle owner, status source, and per-verb route.
@@ -343,6 +347,25 @@ The first service/sandbox surface builds on that same runtime ownership model:
 - This slice is intentionally spec-backed. Service definitions are persisted and
   routed correctly today, but real hosted execution, teardown, and secure
   secret backends remain follow-on work.
+
+## SDK And API Clients
+
+Port now ships the in-repo [`port-sdk`](crates/port-sdk/src/lib.rs) crate as
+the supported hosted client surface. It is intentionally a typed
+request-builder API today, not a claim that the remote control plane transport
+already exists.
+
+- `HostedClient::from_machine` derives the hosted endpoint, audience, and auth
+  header shape from the shared Port model.
+- `machines()` mirrors `port machine list|status|monitor|top|stop`.
+- `guest()` mirrors `port guest exec|copy|pty|logs|forward` and reuses the
+  existing `port-agent-protocol` payloads.
+- `services()` mirrors `port service secret put|list|remove` and
+  `port service apply|list|status|stop`.
+
+See [`docs/sdk.md`](docs/sdk.md) for the request-path contract and
+[`crates/port-sdk/examples/hosted-sdk.rs`](crates/port-sdk/examples/hosted-sdk.rs)
+for a minimal example.
 
 ## Artifact Workflow
 

@@ -57,7 +57,7 @@ The central control plane is the system of record for hosted Port.
 - stores machine inventory and desired lifecycle state
 - selects nodes or host groups for placement
 - asks node agents to launch, inspect, monitor, stop, or connect to machines
-- surfaces hosted inventory and status back through the CLI and future SDK/API
+- surfaces hosted inventory and status back through the CLI and SDK/API surface
 
 The control plane does not execute guest commands inside the VM directly. It
 coordinates and authorizes them.
@@ -340,16 +340,16 @@ forward listener and lifecycle ownership broaden.
 
 What still remains after this runtime slice:
 
-- follow-on order after this foundation is:
-  SDK/API clients
-- those follow-on capabilities are downstream of the authenticated API,
-  inventory, lifecycle, and guest-attach foundation; they are not already
-  shipped
+- the `port-sdk` crate now ships the supported typed client surface for those
+  hosted verbs
+- what still remains after that publication is a real transport, response
+  decoding, retries, and advanced auth/tenancy work on top of the same API
+  paths
 
 ## Hosted API Shape
 
-The exact wire API is not fully implemented yet, but the contract is expected
-to expose lifecycle and guest-transport verbs that mirror the CLI:
+The exact wire API is not fully implemented yet, but Port now documents and
+publishes the request surface through `port-sdk`. The contract mirrors the CLI:
 
 - `machines.create`
 - `machines.list`
@@ -368,6 +368,8 @@ to expose lifecycle and guest-transport verbs that mirror the CLI:
 
 Those verbs are the hosted counterpart of today's local runtime calls and
 should remain substrate-aware without becoming Firecracker-specific API names.
+`port-sdk` builds typed request objects for these paths today, while the actual
+remote transport remains a follow-on slice.
 
 ## Current Boundary
 
@@ -378,11 +380,14 @@ should remain substrate-aware without becoming Firecracker-specific API names.
 - hosted `service secret` and `service apply|list|status|stop` are also
   config-backed and in-process; they persist spec state under the selected node
   `runtime_root` rather than materializing real hosted execution yet.
+- `port-sdk` now ships the supported typed client entry points for machine,
+  guest, and service operations, but it currently stops at request
+  construction instead of performing network transport.
 - Those commands already report the control-contract fields above so the
   operator-visible lifecycle vocabulary does not need to change when the real
   hosted routing lands.
 - Remote Linux providers are modeled and diagnosed, but remote launch remains a
   designed boundary rather than a shipped orchestration path.
-- The hosted contract is canonical design work for the next implementation
-  slices, but the first hosted runtime and monitoring surfaces are already
-  executable through the canonical CLI.
+- The hosted contract is now executable through the canonical CLI and mirrored
+  by the request-builder SDK, even though the real hosted control plane still
+  remains a planned runtime boundary.
