@@ -6,7 +6,9 @@ created_at: 2026-03-07T17:15:53
 
 # Cloud Substrate And PVM Strategy
 
-> {{problem}}
+> Expand Port from a local Firecracker MVP into a hosted, substrate-aware
+platform with credible cloud cost-control lanes, first-class macOS support, and
+the operator/API surfaces needed to approach SlicerVM-level capability.
 
 ## Documents
 
@@ -18,9 +20,8 @@ created_at: 2026-03-07T17:15:53
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 voyages complete, 0/0 stories done
+**Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted Control And Substrate Foundations](voyages/1vz2ky000/) | draft | 0/0 |
-| [Hosted Control And Substrate Foundations](voyages/1vz2lN000/) | draft | 0/0 |
+| [Hosted Control And Substrate Foundations](voyages/1vz2ky000/) | in-progress | 0/4 |
 <!-- END GENERATED -->

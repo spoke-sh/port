@@ -45,6 +45,23 @@ surface across local, hosted, and hybrid environments.
 
 ## Technical Research
 
+### Feasibility
+
+The expansion is feasible, but only if Port splits it into explicit lanes rather
+than promising one magic cloud substrate:
+
+- Firecracker with normal KVM remains the proven baseline and should continue on
+  both x86_64 and aarch64 where the host supports it.
+- A Firecracker PVM lane is supportable as a dedicated engineering track, but
+  current public evidence still points to a patch-heavy, specialized x86_64
+  implementation rather than a turnkey multi-architecture solution.
+- arm64 protected virtualization is technically real and increasingly upstream,
+  but it should be treated as a parallel research/prototype lane until Port has
+  a concrete Firecracker or alternate-hypervisor integration plan.
+- A hosted control plane, artifact mobility, and richer machine lifecycle
+  surfaces are feasible and should begin immediately because they are substrate-
+  independent foundations.
+
 ### Slicer's Published PVM Boundary
 
 Slicer's current public PVM docs state that the feature is:
