@@ -1,0 +1,39 @@
+---
+recorded_at: 2026-03-07T20:24:23-08:00
+---
+== cargo test -q -p port-cli ==
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port --help hosted lifecycle excerpt ==
+97:  Hosted `machine list`, `status`, and `stop` are now modeled explicitly as control-plane plus
+100:  In the MVP, those verbs still run only against the local runtime; the hosted lane is a published
+
+== hosted lifecycle docs excerpt ==
+crates/port-cli/src/lib.rs:66:  Hosted `machine list`, `status`, and `stop` are now modeled explicitly as control-plane plus node-agent contracts so the canonical machine verbs stay stable as Port moves from local to hosted execution.
+docs/hosted.md:177:## Hosted Machine Lifecycle Surface
+README.md:228:- Hosted `machine list`, `status`, and `stop` are also modeled explicitly as
+README.md:231:  lifecycle surfaces are modeled today, not runnable yet.

@@ -1,0 +1,43 @@
+---
+recorded_at: 2026-03-07T20:24:23-08:00
+---
+== cargo test -q -p port-model ==
+
+running 17 tests
+.................
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== cargo test -q -p port-model sample_config_derives_hosted_machine_lifecycle_contracts ==
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+
+== hosted lifecycle contracts in port-model ==
+425:    pub fn hosted_machine_summary_contract(
+428:    ) -> Result<Option<HostedMachineSummaryContract>, ValidationError> {
+467:        Ok(Some(HostedMachineSummaryContract {
+476:    pub fn hosted_machine_status_contract(
+479:    ) -> Result<Option<HostedMachineStatusContract>, ValidationError> {
+480:        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+484:        Ok(Some(HostedMachineStatusContract {
+494:    pub fn hosted_machine_stop_contract(
+497:    ) -> Result<Option<HostedMachineStopContract>, ValidationError> {
+498:        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+502:        Ok(Some(HostedMachineStopContract {
+942:pub struct HostedMachineSummaryContract {
+951:pub struct HostedMachineStatusContract {
+952:    pub machine: HostedMachineSummaryContract,
+959:pub struct HostedMachineStopContract {
+960:    pub machine: HostedMachineSummaryContract,
+1868:    fn sample_config_derives_hosted_machine_lifecycle_contracts() {
+1872:            .hosted_machine_summary_contract("cloud-aws")
+1882:            .hosted_machine_status_contract("cloud-aws")
+1892:            .hosted_machine_stop_contract("cloud-aws")

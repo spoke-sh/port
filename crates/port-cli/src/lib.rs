@@ -63,7 +63,8 @@ Hosted Control:
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders.
   Hosted inventory is now modeled through `[nodes.<name>]` and `[host_groups.<name>]` so later scheduler, monitoring, and services work can reuse one placement vocabulary.
-  `port machine list`, `status`, and `stop` now report the current inventory scope, lifecycle owner, status source, and routing contract.
+  Hosted `machine list`, `status`, and `stop` are now modeled explicitly as control-plane plus node-agent contracts so the canonical machine verbs stay stable as Port moves from local to hosted execution.
+  In the MVP, those verbs still run only against the local runtime; the hosted lane is a published routing and ownership contract, not a runnable remote lifecycle yet.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";

@@ -225,6 +225,10 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted inventory is now modeled explicitly through `[nodes.<name>]` and
   `[host_groups.<name>]`, with capability and explicit-membership placement
   fields that later scheduler, monitoring, and services work can reuse.
+- Hosted `machine list`, `status`, and `stop` are also modeled explicitly as
+  control-plane plus node-agent contracts so the canonical machine verbs stay
+  stable as Port moves from the local runtime to a hosted fleet. Those hosted
+  lifecycle surfaces are modeled today, not runnable yet.
 - Guest `exec`, `copy`, `pty`, `logs`, and `forward` keep the current guest
   protocol semantics; the hosted layer brokers them instead of replacing them.
 - Local `machine list`, `status`, and `stop` now publish the control-contract

@@ -422,6 +422,93 @@ impl PortConfig {
         Ok(HostedInventoryContract { nodes, host_groups })
     }
 
+    pub fn hosted_machine_summary_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedMachineSummaryContract>, ValidationError> {
+        let control = self.machine_control_contract(machine_name)?;
+        if control.inventory_scope != MachineInventoryScope::HostedFleet {
+            return Ok(None);
+        }
+
+        let machine = self
+            .machines
+            .get(machine_name)
+            .ok_or_else(|| ValidationError::new(format!("unknown machine '{}'", machine_name)))?;
+        let hosted_identity = self
+            .hosted_api_identity_contract(machine_name)?
+            .ok_or_else(|| {
+                ValidationError::new(format!(
+                    "machine '{}' does not resolve to a hosted control plane",
+                    machine_name
+                ))
+            })?;
+        let inventory = self.hosted_inventory_contract()?;
+        let candidate_nodes = inventory
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.host == machine.host)
+            .map(|(node_name, _)| node_name.clone())
+            .collect::<Vec<_>>();
+        if candidate_nodes.is_empty() {
+            return Err(ValidationError::new(format!(
+                "machine '{}' targets hosted host '{}' but no hosted node inventory record matches that host",
+                machine_name, machine.host
+            )));
+        }
+
+        let host_groups = inventory
+            .host_groups
+            .iter()
+            .filter(|(_, group)| group.nodes.iter().any(|node| candidate_nodes.contains(node)))
+            .map(|(group_name, _)| group_name.clone())
+            .collect::<Vec<_>>();
+
+        Ok(Some(HostedMachineSummaryContract {
+            machine_name: machine_name.to_string(),
+            control_plane: hosted_identity.control_plane,
+            candidate_nodes,
+            host_groups,
+            control,
+        }))
+    }
+
+    pub fn hosted_machine_status_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedMachineStatusContract>, ValidationError> {
+        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+            Some(summary) => summary,
+            None => return Ok(None),
+        };
+        Ok(Some(HostedMachineStatusContract {
+            machine: summary.clone(),
+            status_source: summary.control.status_source,
+            status_route: summary.control.status_route,
+            detail: String::from(
+                "Hosted machine status is modeled as control-plane inventory plus node-agent runtime state; the canonical `port machine status` verb remains the future surface.",
+            ),
+        }))
+    }
+
+    pub fn hosted_machine_stop_contract(
+        &self,
+        machine_name: &str,
+    ) -> Result<Option<HostedMachineStopContract>, ValidationError> {
+        let summary = match self.hosted_machine_summary_contract(machine_name)? {
+            Some(summary) => summary,
+            None => return Ok(None),
+        };
+        Ok(Some(HostedMachineStopContract {
+            machine: summary.clone(),
+            lifecycle_owner: summary.control.lifecycle_owner,
+            stop_route: summary.control.stop_route,
+            detail: String::from(
+                "Hosted machine stop remains routed through the control plane, with the node agent owning the host-local stop action once the runtime path exists.",
+            ),
+        }))
+    }
+
     pub fn validate(&self) -> Result<(), ValidationError> {
         for (control_plane_name, control_plane) in &self.control_planes {
             validate_hosted_control_plane(control_plane_name, control_plane)?;
@@ -849,6 +936,31 @@ pub struct HostedHostGroupContract {
     pub placement: HostedPlacementPolicy,
     pub nodes: Vec<String>,
     pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedMachineSummaryContract {
+    pub machine_name: String,
+    pub control_plane: String,
+    pub candidate_nodes: Vec<String>,
+    pub host_groups: Vec<String>,
+    pub control: MachineControlContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedMachineStatusContract {
+    pub machine: HostedMachineSummaryContract,
+    pub status_source: MachineStatusSource,
+    pub status_route: MachineCommandRoute,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedMachineStopContract {
+    pub machine: HostedMachineSummaryContract,
+    pub lifecycle_owner: MachineLifecycleOwner,
+    pub stop_route: MachineCommandRoute,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1750,6 +1862,39 @@ mod tests {
         assert!(remote_group
             .nodes
             .contains(&String::from("generic-linux-node")));
+    }
+
+    #[test]
+    fn sample_config_derives_hosted_machine_lifecycle_contracts() {
+        let config = PortConfig::sample();
+
+        let summary = config
+            .hosted_machine_summary_contract("cloud-aws")
+            .expect("hosted machine summary should resolve")
+            .expect("cloud-aws should be hosted");
+        assert_eq!(summary.control_plane, "demo");
+        assert_eq!(summary.candidate_nodes, vec![String::from("aws-linux-node")]);
+        assert!(summary.host_groups.contains(&String::from("remote-linux")));
+        assert!(summary.host_groups.contains(&String::from("aws-builders")));
+        assert_eq!(summary.control.status_route, MachineCommandRoute::HostedControlPlane);
+
+        let status = config
+            .hosted_machine_status_contract("cloud-aws")
+            .expect("hosted machine status should resolve")
+            .expect("cloud-aws status should be hosted");
+        assert_eq!(
+            status.status_source,
+            MachineStatusSource::ControlPlaneInventoryAndNodeAgentRuntime
+        );
+        assert!(status.detail.contains("control-plane inventory"));
+
+        let stop = config
+            .hosted_machine_stop_contract("cloud-aws")
+            .expect("hosted machine stop should resolve")
+            .expect("cloud-aws stop should be hosted");
+        assert_eq!(stop.stop_route, MachineCommandRoute::HostedControlPlane);
+        assert_eq!(stop.lifecycle_owner, MachineLifecycleOwner::HostedNodeAgent);
+        assert!(stop.detail.contains("node agent"));
     }
 
     #[test]

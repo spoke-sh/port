@@ -174,6 +174,50 @@ What this does not claim:
 Those later features are expected to reuse the same node and host-group
 vocabulary instead of inventing a second inventory model.
 
+## Hosted Machine Lifecycle Surface
+
+Port now models the hosted lifecycle surface without pretending the remote
+runtime already exists.
+
+The canonical operator verbs stay the same:
+
+- `port machine list`
+- `port machine status --machine <name>`
+- `port machine stop --machine <name>`
+
+For a hosted machine, the shared model now derives three explicit contracts:
+
+- summary: which control plane owns the machine, which hosted nodes can run it,
+  and which explicit host groups include those nodes
+- status: the status source and route for the future hosted
+  `port machine status` command
+- stop: the lifecycle owner and route for the future hosted
+  `port machine stop` command
+
+Current hosted lifecycle contract for a sample machine such as `cloud-aws`:
+
+- `control_plane = "demo"`
+- `candidate_nodes = ["aws-linux-node"]`
+- `host_groups = ["remote-linux", "aws-builders"]`
+- `status_source = "control-plane-inventory-and-node-agent-runtime"`
+- `status_route = "hosted-control-plane"`
+- `stop_route = "hosted-control-plane"`
+- `lifecycle_owner = "hosted-node-agent"`
+
+What this means operationally:
+
+- the control plane remains the routing entry point for list, status, and stop
+- the node agent remains the eventual owner of host-local lifecycle actions
+- the CLI verbs and guest protocol do not need a second hosted-only naming
+  scheme
+
+What is runnable today:
+
+- local `port machine list`, `status`, and `stop` inspect and manage
+  Port-managed runtime directories on Linux
+- hosted `machine list`, `status`, and `stop` are modeled and documented, but
+  not implemented as remote runtime actions yet
+
 ## Canonical Machine Control Contract
 
 Port now names the lifecycle and inventory contract explicitly so later hosted
