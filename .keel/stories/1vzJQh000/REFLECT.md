@@ -33,4 +33,13 @@ Format:
 
 ## Observations
 
-TODO: What went well? What was difficult? What surprised you?
+The missing launch path was concentrated in two places: the hosted control
+plane accepted status and guest routes but not `:launch`, and the top-level
+hosted driver still returned provider guidance even after node-agent launch was
+implemented. Adding failing checks at the control-plane proxy, runtime launch,
+and CLI surfaces made the gap obvious and kept the fix small.
+
+`keel story record` still rewrote the first acceptance criterion proof comment
+to `ac-2.log`, so the story README needed the same manual normalization as
+earlier slices before `keel verify run` and `keel story submit` would stay
+clean.

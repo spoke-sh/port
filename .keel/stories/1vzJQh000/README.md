@@ -2,11 +2,12 @@
 id: 1vzJQh000
 title: Route Hosted Launch Through Prepared Pvm Nodes
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T12:04:43
-updated_at: 2026-03-08T12:35:15
+updated_at: 2026-03-08T14:10:56
 scope: 1vzJKE000/1vzJP2000
 started_at: 2026-03-08T12:35:15
+completed_at: 2026-03-08T14:10:56
 ---
 
 # Route Hosted Launch Through Prepared Pvm Nodes
