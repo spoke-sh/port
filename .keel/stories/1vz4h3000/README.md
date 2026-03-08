@@ -2,11 +2,13 @@
 id: 1vz4h3000
 title: Define Hosted Machine Lifecycle Surface
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T19:20:37
-updated_at: 2026-03-07T19:39:40
+updated_at: 2026-03-07T20:25:01
 scope: 1vz4Yn000/1vz4cU000
 started_at: 2026-03-07T19:39:40
+submitted_at: 2026-03-07T20:24:53
+completed_at: 2026-03-07T20:25:01
 ---
 
 # Define Hosted Machine Lifecycle Surface
