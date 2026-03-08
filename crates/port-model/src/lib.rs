@@ -17,27 +17,71 @@ impl PortConfig {
             kernels: BTreeMap::from([(
                 String::from("demo-kernel"),
                 ArtifactSpec {
-                    path: PathBuf::from("artifacts/kernel/demo/vmlinux"),
+                    reference: ArtifactReference {
+                        registry: String::from("demo-fs"),
+                        repository: String::from("port/demo-kernel"),
+                        version: String::from("v1"),
+                    },
                     build: String::from("port artifacts build --artifact demo-kernel"),
                     validate: String::from("port artifacts validate --artifact demo-kernel"),
-                    compatibility: ArtifactCompatibility {
-                        architectures: vec![MachineArchitecture::X86_64, MachineArchitecture::Aarch64],
-                        substrates: vec![ExecutionSubstrate::Firecracker],
-                        protection_modes: vec![ProtectionMode::Standard],
+                    distribution: ArtifactDistribution {
+                        push: ArtifactStore::FileSystem {
+                            root: PathBuf::from("artifact-store/demo-fs"),
+                        },
+                        pull: ArtifactStore::FileSystem {
+                            root: PathBuf::from("artifact-store/demo-fs"),
+                        },
+                        cache_root: PathBuf::from(".port/cache"),
                     },
+                    variants: vec![
+                        sample_artifact_variant(
+                            "artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/kernel/demo/aarch64/firecracker/standard/vmlinux",
+                            MachineArchitecture::Aarch64,
+                            ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Standard,
+                        ),
+                    ],
                 },
             )]),
             guest_images: BTreeMap::from([(
                 String::from("demo-guest"),
                 ArtifactSpec {
-                    path: PathBuf::from("artifacts/guest/demo/rootfs.ext4"),
+                    reference: ArtifactReference {
+                        registry: String::from("demo-fs"),
+                        repository: String::from("port/demo-guest"),
+                        version: String::from("v1"),
+                    },
                     build: String::from("port artifacts build --artifact demo-guest"),
                     validate: String::from("port artifacts validate --artifact demo-guest"),
-                    compatibility: ArtifactCompatibility {
-                        architectures: vec![MachineArchitecture::X86_64, MachineArchitecture::Aarch64],
-                        substrates: vec![ExecutionSubstrate::Firecracker],
-                        protection_modes: vec![ProtectionMode::Standard],
+                    distribution: ArtifactDistribution {
+                        push: ArtifactStore::FileSystem {
+                            root: PathBuf::from("artifact-store/demo-fs"),
+                        },
+                        pull: ArtifactStore::FileSystem {
+                            root: PathBuf::from("artifact-store/demo-fs"),
+                        },
+                        cache_root: PathBuf::from(".port/cache"),
                     },
+                    variants: vec![
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4",
+                            MachineArchitecture::Aarch64,
+                            ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Standard,
+                        ),
+                    ],
                 },
             )]),
         };
@@ -173,9 +217,10 @@ impl PortConfig {
                     machine_name, machine.guest_image
                 ))
             })?;
-            let resolved_architecture = resolve_machine_architecture(machine.architecture).map_err(
-                |message| ValidationError::new(format!("machine '{}': {message}", machine_name)),
-            )?;
+            let resolved_architecture = resolve_machine_architecture(machine.architecture)
+                .map_err(|message| {
+                    ValidationError::new(format!("machine '{}': {message}", machine_name))
+                })?;
 
             let mut issues = Vec::new();
             match machine.substrate {
@@ -225,8 +270,11 @@ impl PortConfig {
                 machine.protection_mode,
             ) {
                 issues.push(format!(
-                    "Kernel artifact '{}' is not compatible with {:?}/{:?}/{:?}.",
-                    machine.kernel, machine.substrate, machine.protection_mode, resolved_architecture
+                    "Kernel artifact '{}' has no variant for {:?}/{:?}/{:?}.",
+                    machine.kernel,
+                    machine.substrate,
+                    machine.protection_mode,
+                    resolved_architecture
                 ));
             }
             if !guest_image.supports(
@@ -235,13 +283,23 @@ impl PortConfig {
                 machine.protection_mode,
             ) {
                 issues.push(format!(
-                    "Guest image artifact '{}' is not compatible with {:?}/{:?}/{:?}.",
+                    "Guest image artifact '{}' has no variant for {:?}/{:?}/{:?}.",
                     machine.guest_image,
                     machine.substrate,
                     machine.protection_mode,
                     resolved_architecture
                 ));
             }
+
+            validate_artifact_spec(machine_name, "kernel", &machine.kernel, kernel)
+                .map_err(|message| ValidationError::new(message))?;
+            validate_artifact_spec(
+                machine_name,
+                "guest image",
+                &machine.guest_image,
+                guest_image,
+            )
+            .map_err(|message| ValidationError::new(message))?;
 
             if !issues.is_empty() {
                 return Err(ValidationError::new(format!(
@@ -253,6 +311,22 @@ impl PortConfig {
         }
 
         Ok(())
+    }
+}
+
+fn sample_artifact_variant(
+    path: &str,
+    architecture: MachineArchitecture,
+    substrate: ExecutionSubstrate,
+    protection_mode: ProtectionMode,
+) -> ArtifactVariant {
+    ArtifactVariant {
+        selector: ArtifactSelector {
+            architecture,
+            substrate,
+            protection_mode,
+        },
+        path: PathBuf::from(path),
     }
 }
 
@@ -376,10 +450,11 @@ pub enum ArtifactKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactSpec {
-    pub path: PathBuf,
+    pub reference: ArtifactReference,
     pub build: String,
     pub validate: String,
-    pub compatibility: ArtifactCompatibility,
+    pub distribution: ArtifactDistribution,
+    pub variants: Vec<ArtifactVariant>,
 }
 
 impl ArtifactSpec {
@@ -390,20 +465,64 @@ impl ArtifactSpec {
         substrate: ExecutionSubstrate,
         protection_mode: ProtectionMode,
     ) -> bool {
-        self.compatibility.architectures.contains(&architecture)
-            && self.compatibility.substrates.contains(&substrate)
-            && self
-                .compatibility
-                .protection_modes
-                .contains(&protection_mode)
+        self.variant(architecture, substrate, protection_mode)
+            .is_some()
+    }
+
+    #[must_use]
+    pub fn variant(
+        &self,
+        architecture: MachineArchitecture,
+        substrate: ExecutionSubstrate,
+        protection_mode: ProtectionMode,
+    ) -> Option<&ArtifactVariant> {
+        self.variants.iter().find(|variant| {
+            variant.selector.architecture == architecture
+                && variant.selector.substrate == substrate
+                && variant.selector.protection_mode == protection_mode
+        })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ArtifactCompatibility {
-    pub architectures: Vec<MachineArchitecture>,
-    pub substrates: Vec<ExecutionSubstrate>,
-    pub protection_modes: Vec<ProtectionMode>,
+pub struct ArtifactReference {
+    pub registry: String,
+    pub repository: String,
+    pub version: String,
+}
+
+impl std::fmt::Display for ArtifactReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}:{}", self.registry, self.repository, self.version)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactDistribution {
+    pub push: ArtifactStore,
+    pub pull: ArtifactStore,
+    pub cache_root: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "backend", rename_all = "kebab-case")]
+pub enum ArtifactStore {
+    FileSystem { root: PathBuf },
+    OciRegistry { reference: String },
+    HostedApi { endpoint: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactVariant {
+    pub selector: ArtifactSelector,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactSelector {
+    pub architecture: MachineArchitecture,
+    pub substrate: ExecutionSubstrate,
+    pub protection_mode: ProtectionMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,12 +626,45 @@ fn resolve_machine_architecture(
     }
 }
 
+fn validate_artifact_spec(
+    machine_name: &str,
+    artifact_kind: &str,
+    artifact_name: &str,
+    artifact: &ArtifactSpec,
+) -> Result<(), String> {
+    if artifact.variants.is_empty() {
+        return Err(format!(
+            "machine '{}': {} artifact '{}' does not declare any variants",
+            machine_name, artifact_kind, artifact_name
+        ));
+    }
+
+    let mut seen = Vec::new();
+    for variant in &artifact.variants {
+        if seen.contains(&variant.selector) {
+            return Err(format!(
+                "machine '{}': {} artifact '{}' declares duplicate variant {:?}/{:?}/{:?}",
+                machine_name,
+                artifact_kind,
+                artifact_name,
+                variant.selector.architecture,
+                variant.selector.substrate,
+                variant.selector.protection_mode
+            ));
+        }
+        seen.push(variant.selector);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ExecutionSubstrate, HostProvider, MachineArchitecture, PortConfig, ProtectionMode,
+        ArtifactStore, ExecutionSubstrate, HostProvider, MachineArchitecture, PortConfig,
+        ProtectionMode,
     };
 
     #[test]
@@ -542,7 +694,9 @@ mod tests {
         assert!(encoded.contains("architecture = \"native\""));
         assert!(encoded.contains("[machines.demo.guest]"));
         assert!(encoded.contains("[machines.cloud-aws]"));
-        assert!(encoded.contains("[artifacts.kernels.demo-kernel.compatibility]"));
+        assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
+        assert!(encoded.contains("[artifacts.kernels.demo-kernel.distribution.push]"));
+        assert!(encoded.contains("[artifacts.kernels.demo-kernel.variants]"));
     }
 
     #[test]
@@ -587,6 +741,12 @@ mod tests {
             config.machines["demo"].architecture,
             MachineArchitecture::Native
         );
+        assert_eq!(
+            config.artifacts.kernels["demo-kernel"]
+                .reference
+                .to_string(),
+            "demo-fs/port/demo-kernel:v1"
+        );
     }
 
     #[test]
@@ -615,14 +775,16 @@ mod tests {
             ProtectionMode::Standard
         );
         assert_eq!(
-            config.artifacts.kernels["demo-kernel"].compatibility.architectures,
-            vec![MachineArchitecture::X86_64, MachineArchitecture::Aarch64]
+            config.artifacts.kernels["demo-kernel"].variants[0]
+                .selector
+                .architecture,
+            MachineArchitecture::X86_64
         );
         assert_eq!(
-            config.artifacts.guest_images["demo-guest"]
-                .compatibility
-                .substrates,
-            vec![ExecutionSubstrate::Firecracker]
+            config.artifacts.guest_images["demo-guest"].variants[0]
+                .selector
+                .substrate,
+            ExecutionSubstrate::Firecracker
         );
     }
 
@@ -643,4 +805,32 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn artifact_variants_cover_file_store_distribution_and_resolution() {
+        let config = PortConfig::sample();
+        let kernel = &config.artifacts.kernels["demo-kernel"];
+
+        assert!(matches!(
+            kernel.distribution.push,
+            ArtifactStore::FileSystem { .. }
+        ));
+        assert!(
+            kernel
+                .variant(
+                    MachineArchitecture::Aarch64,
+                    ExecutionSubstrate::Firecracker,
+                    ProtectionMode::Standard
+                )
+                .is_some()
+        );
+        assert!(
+            kernel
+                .variant(
+                    MachineArchitecture::X86_64,
+                    ExecutionSubstrate::Firecracker,
+                    ProtectionMode::Pvm
+                )
+                .is_none()
+        );
+    }
 }

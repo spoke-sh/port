@@ -1,15 +1,93 @@
 # Artifact Contracts
 
-Port ships one canonical artifact pipeline per artifact class for the MVP path.
-The sample config in [`examples/port.toml`](../examples/port.toml) binds those
-pipelines to `demo-kernel` and `demo-guest`.
+Port artifacts are now modeled as logical references plus concrete variants.
+The sample config in [`examples/port.toml`](../examples/port.toml) binds that
+contract to `demo-kernel` and `demo-guest`.
+
+## Canonical Vocabulary
+
+Each artifact now carries four related concepts:
+
+- Reference:
+  a logical identifier such as `demo-fs/port/demo-kernel:v1`
+- Variant:
+  one concrete selection of `architecture`, `substrate`, and
+  `protection_mode`
+- Distribution backend:
+  where `push` publishes and `pull` fetches that variant
+- Cache root:
+  where Port stores a pulled or published local copy outside the canonical
+  build output path
+
+In the sample model:
+
+- the shipped backend is `file-system`
+- the sample store root is `artifact-store/demo-fs/`
+- the sample cache root is `.port/cache/`
+- reserved but not yet executable backends are `oci-registry` and `hosted-api`
+
+## Canonical CLI
+
+Build and validate one native variant:
+
+```bash
+port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+port --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+port --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
+```
+
+Publish and fetch one selected variant:
+
+```bash
+port --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
+```
+
+The selector flags are the canonical compatibility surface:
+
+- `--architecture <native|x86-64|aarch64>`
+- `--substrate <firecracker|cloud-hypervisor|avf>`
+- `--protection-mode <standard|pvm>`
+
+Current runtime boundary:
+
+- the demo build and validate pipelines only run for the native host
+  architecture
+- the sample config only ships Firecracker/standard variants
+- push/pull are already variant-aware even when the selected variant is
+  published or fetched on another host
+
+## Sample Variant Layout
+
+The sample config points at deterministic local output paths:
+
+- kernel:
+  `artifacts/kernel/demo/<architecture>/firecracker/standard/vmlinux`
+- guest image:
+  `artifacts/guest/demo/<architecture>/firecracker/standard/rootfs.ext4`
+
+The file-backed store layout is similarly deterministic:
+
+- store path:
+  `artifact-store/demo-fs/<registry>/<repository>/<version>/<architecture>/<substrate>/<protection-mode>/<filename>`
+- cache path:
+  `.port/cache/<registry>/<repository>/<version>/<architecture>/<substrate>/<protection-mode>/<filename>`
+
+For `demo-kernel` on `x86_64/firecracker/standard`, that becomes:
+
+- local path:
+  `artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux`
+- store path:
+  `artifact-store/demo-fs/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux`
+- cache path:
+  `.port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux`
 
 ## Kernel Artifact
 
-- Canonical CLI:
-  `port --config examples/port.toml artifacts build --artifact demo-kernel`
-- Output path:
-  `artifacts/kernel/demo/vmlinux`
+- Logical reference:
+  `demo-fs/port/demo-kernel:v1`
 - Source:
   pinned Firecracker CI kernel assets from the official `spec.ccfc.min` bucket
   for `v1.14`
@@ -22,14 +100,12 @@ pipelines to `demo-kernel` and `demo-guest`.
 
 ## Guest Image Artifact
 
-- Canonical CLI:
-  `port --config examples/port.toml artifacts build --artifact demo-guest`
-- Output path:
-  `artifacts/guest/demo/rootfs.ext4`
+- Logical reference:
+  `demo-fs/port/demo-guest:v1`
 - Inputs:
-  release build of `port-guest-agent`, BusyBox userspace from the development
-  shell, runtime shared libraries discovered with `ldd`, and an `init` script
-  authored in-repo
+  release build of `port-guest-agent`, BusyBox userspace when available,
+  runtime shared libraries discovered with `ldd`, and an `init` script authored
+  in-repo
 - Files installed into the image:
   `/init`
   `/bin/busybox`
@@ -42,8 +118,13 @@ pipelines to `demo-kernel` and `demo-guest`.
 
 ## Operator Notes
 
-- Run the artifact workflows from `nix develop` so `curl`, `busybox`,
-  `mkfs.ext4`, `debugfs`, and related tooling are on `PATH`.
-- Artifact paths are intentionally deterministic and derived from the checked-in
-  model so later `port doctor` and `port machine launch` calls point at the
-  same locations.
+- Run the artifact workflows from the repository root so
+  `examples/port.toml` resolves correctly.
+- `nix develop` is one way to provide `curl`, `busybox`, `mkfs.ext4`,
+  `debugfs`, and related tooling, but it is optional. Port also works when
+  those tools are installed directly on the host.
+- `push` and `pull` are the canonical artifact-mobility verbs even though the
+  sample runtime currently implements only the file-backed backend.
+- The file-backed backend is not the long-term hosted product story by itself;
+  it is the shipped proof that Port's artifact vocabulary can span local build,
+  publish, fetch, cache, and compatibility selection without changing the CLI.

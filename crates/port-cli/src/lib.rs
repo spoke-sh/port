@@ -2,13 +2,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use port_agent_protocol::{
     CopyDirection, ExecRequest, GuestOperation, LogsRequest, OperationResult, PtyRequest,
 };
-use port_model::PortConfig;
+use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode};
 use port_runtime::{
-    DoctorReport, GuestCopyRequest, GuestForwardRequest, GuestRequest, LaunchRequest,
+    ArtifactRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest, GuestRequest,
+    LaunchRequest,
 };
 use serde::Serialize;
 
@@ -20,9 +21,11 @@ Example assumptions:
 
 Runnable local workflow:
   port doctor
+  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+  port --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+  port --config examples/port.toml artifacts push --artifact demo-kernel --architecture native
+  port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture native
   port --config examples/port.toml doctor
-  port --config examples/port.toml artifacts build --artifact demo-kernel
-  port --config examples/port.toml artifacts build --artifact demo-guest
   port --config examples/port.toml machine launch --machine demo
   port --config examples/port.toml machine list
   port --config examples/port.toml machine status --machine demo
@@ -48,6 +51,9 @@ Execution Lanes:
 Cloud Linux:
   generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
   port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for remote hosts.
+Artifact Mobility:
+  `port artifacts build` and `validate` materialize one canonical local variant selected by architecture, substrate, and protection mode.
+  `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
 Hosted Control:
   Local Port still owns runtime lifecycle directly today.
   Hosted Port will move lifecycle ownership to a node agent plus control plane while preserving the current guest protocol semantics.
@@ -116,12 +122,89 @@ pub enum ArtifactCommand {
     Build {
         #[arg(long)]
         artifact: String,
+        #[command(flatten)]
+        selection: ArtifactSelectionArgs,
     },
     #[command(about = "Validate a named artifact from the model")]
     Validate {
         #[arg(long)]
         artifact: String,
+        #[command(flatten)]
+        selection: ArtifactSelectionArgs,
     },
+    #[command(about = "Publish a selected artifact variant to its configured backend")]
+    Push {
+        #[arg(long)]
+        artifact: String,
+        #[command(flatten)]
+        selection: ArtifactSelectionArgs,
+    },
+    #[command(about = "Fetch a selected artifact variant from its configured backend")]
+    Pull {
+        #[arg(long)]
+        artifact: String,
+        #[command(flatten)]
+        selection: ArtifactSelectionArgs,
+    },
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ArtifactSelectionArgs {
+    #[arg(long, value_enum, default_value_t = ArchitectureArg::Native)]
+    architecture: ArchitectureArg,
+    #[arg(long, value_enum, default_value_t = SubstrateArg::Firecracker)]
+    substrate: SubstrateArg,
+    #[arg(long = "protection-mode", value_enum, default_value_t = ProtectionModeArg::Standard)]
+    protection_mode: ProtectionModeArg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ArchitectureArg {
+    Native,
+    X86_64,
+    Aarch64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SubstrateArg {
+    Firecracker,
+    CloudHypervisor,
+    Avf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ProtectionModeArg {
+    Standard,
+    Pvm,
+}
+
+impl From<ArchitectureArg> for MachineArchitecture {
+    fn from(value: ArchitectureArg) -> Self {
+        match value {
+            ArchitectureArg::Native => Self::Native,
+            ArchitectureArg::X86_64 => Self::X86_64,
+            ArchitectureArg::Aarch64 => Self::Aarch64,
+        }
+    }
+}
+
+impl From<SubstrateArg> for ExecutionSubstrate {
+    fn from(value: SubstrateArg) -> Self {
+        match value {
+            SubstrateArg::Firecracker => Self::Firecracker,
+            SubstrateArg::CloudHypervisor => Self::CloudHypervisor,
+            SubstrateArg::Avf => Self::Avf,
+        }
+    }
+}
+
+impl From<ProtectionModeArg> for ProtectionMode {
+    fn from(value: ProtectionModeArg) -> Self {
+        match value {
+            ProtectionModeArg::Standard => Self::Standard,
+            ProtectionModeArg::Pvm => Self::Pvm,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -285,23 +368,99 @@ fn doctor(format: OutputFormat, config_path: Option<&std::path::Path>) -> Result
 
 fn run_artifacts(command: ArtifactCommand, config: &PortConfig) -> Result<()> {
     match command {
-        ArtifactCommand::Build { artifact } => {
-            let metadata = port_runtime::build_artifact(config, &artifact)?;
+        ArtifactCommand::Build {
+            artifact,
+            selection,
+        } => {
+            let metadata = port_runtime::build_artifact(
+                config,
+                ArtifactRequest {
+                    name: &artifact,
+                    architecture: selection.architecture.into(),
+                    substrate: selection.substrate.into(),
+                    protection_mode: selection.protection_mode.into(),
+                },
+            )?;
             println!(
-                "built {} artifact '{}' at {}",
+                "built {} artifact '{}' as {} for {} at {}",
                 render_artifact_kind(metadata.kind),
                 metadata.name,
+                metadata.reference,
+                render_selector(metadata.selector),
                 metadata.path.display()
             );
         }
-        ArtifactCommand::Validate { artifact } => {
-            let metadata = port_runtime::validate_artifact(config, &artifact)?;
+        ArtifactCommand::Validate {
+            artifact,
+            selection,
+        } => {
+            let metadata = port_runtime::validate_artifact(
+                config,
+                ArtifactRequest {
+                    name: &artifact,
+                    architecture: selection.architecture.into(),
+                    substrate: selection.substrate.into(),
+                    protection_mode: selection.protection_mode.into(),
+                },
+            )?;
             println!(
-                "validated {} artifact '{}' at {}",
+                "validated {} artifact '{}' as {} for {} at {}",
                 render_artifact_kind(metadata.kind),
                 metadata.name,
+                metadata.reference,
+                render_selector(metadata.selector),
                 metadata.path.display()
             );
+        }
+        ArtifactCommand::Push {
+            artifact,
+            selection,
+        } => {
+            let transfer = port_runtime::push_artifact(
+                config,
+                ArtifactRequest {
+                    name: &artifact,
+                    architecture: selection.architecture.into(),
+                    substrate: selection.substrate.into(),
+                    protection_mode: selection.protection_mode.into(),
+                },
+            )?;
+            println!(
+                "pushed {} artifact '{}' as {} for {}",
+                render_artifact_kind(transfer.artifact.kind),
+                transfer.artifact.name,
+                transfer.artifact.reference,
+                render_selector(transfer.artifact.selector)
+            );
+            println!("local path: {}", transfer.artifact.path.display());
+            println!("store path: {}", transfer.store_path.display());
+            println!("cache path: {}", transfer.artifact.cache_path.display());
+            println!("bytes: {}", transfer.bytes_copied);
+        }
+        ArtifactCommand::Pull {
+            artifact,
+            selection,
+        } => {
+            let transfer = port_runtime::pull_artifact(
+                config,
+                ArtifactRequest {
+                    name: &artifact,
+                    architecture: selection.architecture.into(),
+                    substrate: selection.substrate.into(),
+                    protection_mode: selection.protection_mode.into(),
+                },
+            )?;
+            println!(
+                "pulled {} artifact '{}' as {} for {}",
+                render_artifact_kind(transfer.artifact.kind),
+                transfer.artifact.name,
+                transfer.artifact.reference,
+                render_selector(transfer.artifact.selector)
+            );
+            println!("store path: {}", transfer.store_path.display());
+            println!("cache path: {}", transfer.artifact.cache_path.display());
+            println!("local path: {}", transfer.artifact.path.display());
+            println!("bytes: {}", transfer.bytes_copied);
         }
     }
 
@@ -313,6 +472,26 @@ fn render_artifact_kind(kind: port_model::ArtifactKind) -> &'static str {
         port_model::ArtifactKind::Kernel => "kernel",
         port_model::ArtifactKind::GuestImage => "guest-image",
     }
+}
+
+fn render_selector(selector: port_model::ArtifactSelector) -> String {
+    format!(
+        "{}/{}/{}",
+        match selector.architecture {
+            MachineArchitecture::Native => "native",
+            MachineArchitecture::X86_64 => "x86_64",
+            MachineArchitecture::Aarch64 => "aarch64",
+        },
+        match selector.substrate {
+            ExecutionSubstrate::Firecracker => "firecracker",
+            ExecutionSubstrate::CloudHypervisor => "cloud-hypervisor",
+            ExecutionSubstrate::Avf => "avf",
+        },
+        match selector.protection_mode {
+            ProtectionMode::Standard => "standard",
+            ProtectionMode::Pvm => "pvm",
+        }
+    )
 }
 
 fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<()> {
@@ -585,13 +764,25 @@ pub fn render_subcommand_help(name: &str) -> Option<String> {
     Some(subcommand.render_long_help().to_string())
 }
 
+pub fn render_nested_subcommand_help(path: &[&str]) -> Option<String> {
+    let mut command = Cli::command();
+    let (last, parents) = path.split_last()?;
+    let mut current = &mut command;
+    for segment in parents {
+        current = current.find_subcommand_mut(segment)?;
+    }
+    let nested = current.find_subcommand_mut(last)?;
+    Some(nested.render_long_help().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
 
     use super::{
-        Cli, Command, CopyDirectionArg, GuestCommand, MachineCommand, render_help,
-        render_subcommand_help,
+        ArchitectureArg, ArtifactCommand, Cli, Command, CopyDirectionArg, GuestCommand,
+        MachineCommand, ProtectionModeArg, SubstrateArg, render_help,
+        render_nested_subcommand_help, render_subcommand_help,
     };
 
     #[test]
@@ -616,6 +807,9 @@ mod tests {
             "Cloud Hypervisor",
             "Apple Virtualization Framework",
             "Hosted Control",
+            "push",
+            "pull",
+            "Artifact Mobility",
             "foreground host-side proxy",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
@@ -630,10 +824,25 @@ mod tests {
             );
         }
 
+        let artifact_help = render_nested_subcommand_help(&["artifacts", "push"])
+            .expect("artifact help should exist");
+
         for keyword in ["launch", "list", "status", "stop"] {
             assert!(
                 machine_help.contains(keyword),
                 "missing machine help keyword: {keyword}"
+            );
+        }
+
+        for keyword in [
+            "architecture",
+            "substrate",
+            "protection-mode",
+            "Publish a selected artifact variant",
+        ] {
+            assert!(
+                artifact_help.contains(keyword),
+                "missing artifact help keyword: {keyword}"
             );
         }
     }
@@ -729,6 +938,36 @@ mod tests {
                 assert_eq!(direction, CopyDirectionArg::GuestToHost);
                 assert_eq!(source, "/tmp/in-guest.txt");
                 assert_eq!(destination, "./copied.txt");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_artifact_push_with_variant_selection() {
+        let cli = Cli::parse_from([
+            "port",
+            "artifacts",
+            "push",
+            "--artifact",
+            "demo-kernel",
+            "--architecture",
+            "x86-64",
+            "--substrate",
+            "firecracker",
+            "--protection-mode",
+            "standard",
+        ]);
+
+        match cli.command {
+            Command::Artifacts(ArtifactCommand::Push {
+                artifact,
+                selection,
+            }) => {
+                assert_eq!(artifact, "demo-kernel");
+                assert_eq!(selection.architecture, ArchitectureArg::X86_64);
+                assert_eq!(selection.substrate, SubstrateArg::Firecracker);
+                assert_eq!(selection.protection_mode, ProtectionModeArg::Standard);
             }
             other => panic!("unexpected command: {other:?}"),
         }

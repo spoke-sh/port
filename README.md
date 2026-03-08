@@ -82,8 +82,10 @@ The canonical binary is `port`. The current command tree is:
 
 ```text
 port doctor
-port artifacts build --artifact <name>
-port artifacts validate --artifact <name>
+port artifacts build --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+port artifacts validate --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+port artifacts push --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
 port machine launch --machine <name>
 port machine list [--runtime-root <path>]
 port machine status --machine <name> [--runtime-root <path>]
@@ -100,13 +102,32 @@ model and examples. The sample `port --help` commands assume you are running
 from the repository root. Local artifact and launch examples also assume the
 needed runtime tools are available in the execution environment and on `PATH`.
 
+Local lifecycle quick reference:
+
+- `port machine launch --machine <name>` creates the Port-managed runtime state
+  for one local machine under the selected runtime root and starts Firecracker.
+- `port machine list` discovers local machines by enumerating Port-managed
+  runtime state; it is the canonical local inventory view rather than a direct
+  Firecracker API query.
+- `port machine status --machine <name>` reads that runtime state back and
+  prints the paths and process metadata Port recorded for one machine.
+- `port machine stop --machine <name>` stops a local Port-managed machine and
+  cleans up runtime ownership details so the next launch is deterministic.
+- Those same lifecycle verbs are also the groundwork for the hosted product:
+  the operator model stays the same while runtime ownership moves from local
+  files plus processes to a hosted control plane and node-local agent.
+
 Current behavior:
 
 - `port artifacts build` and `port artifacts validate` now run real in-repo
-  kernel and guest-image pipelines for the MVP sample config.
+  kernel and guest-image pipelines for the selected artifact variant.
+- `port artifacts push` and `port artifacts pull` now use the artifact's
+  configured mobility backend. The sample config ships a file-backed
+  registry/cache contract, while OCI and hosted backends are modeled but still
+  reserved.
 - `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
-  `ip`, and `iptables`. When you pass `--config`, it also validates referenced
-  artifact paths.
+  `ip`, and `iptables`. When you pass `--config`, it also validates the native
+  Firecracker/standard artifact variant paths required on the current host.
 - `port machine launch` now writes a Firecracker config plus runtime metadata
   and console/log files under the chosen runtime root before invoking
   Firecracker with `--config-file`.
@@ -176,8 +197,10 @@ The supported end-to-end Linux MVP workflow is:
 
 ```bash
 cargo run -p port-cli -- doctor
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
 cargo run -p port-cli -- --config examples/port.toml doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 cargo run -p port-cli -- machine list
@@ -187,11 +210,20 @@ cargo run -p port-cli -- machine stop --machine demo
 
 What that produces:
 
-- deterministic artifacts under `artifacts/`
+- deterministic artifact variants under `artifacts/<kind>/<name>/<architecture>/<substrate>/<protection-mode>/`
 - host validation through `port doctor`
 - Firecracker runtime state, logs, and manifest files under the chosen runtime root
 - lifecycle inspection and stop surfaces through `port machine list`, `status`,
   and `stop`
+
+The lifecycle commands above intentionally switch from model-driven launch to
+runtime-state-driven management. After `port machine launch` creates
+`runtime/<machine>/`, use `port machine list`, `port machine status --machine
+<name>`, and `port machine stop --machine <name>` to inspect and control that
+local Port-managed runtime state without going through Firecracker directly.
+That local ownership model is also the basis for the hosted control design: the
+same verbs remain canonical even when a future node agent and control plane own
+the runtime on behalf of the CLI.
 
 If the required tools are not available, `port doctor` may report missing
 prerequisites such as `firecracker` on `PATH`, and `port machine launch` is
@@ -210,24 +242,49 @@ The launched-VM guest transport is now the canonical path for the guest CLI:
 
 ## Artifact Workflow
 
-Build the sample artifacts through the canonical CLI:
+Port artifacts now have one canonical identity model:
+
+- a logical reference, for example `demo-fs/port/demo-kernel:v1`
+- one or more variants selected by `architecture`, `substrate`, and
+  `protection-mode`
+- a `push` backend, a `pull` backend, and a local cache root
+
+Build and validate the native sample variants through the canonical CLI:
 
 ```bash
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
+```
+
+Publish and fetch one selected variant:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
 ```
 
 Artifact contracts:
 
 - `demo-kernel` fetches a pinned Firecracker-compatible kernel from the official
   Firecracker CI bucket and validates its architecture-specific sha256 digest.
+  In the sample model, the native build lands at
+  `artifacts/kernel/demo/<architecture>/firecracker/standard/vmlinux`.
 - `demo-guest` builds a deterministic ext4 rootfs containing BusyBox userspace,
   `/init`, and the `port-guest-agent` binary. The guest init path reads
   `port.guest_control_port` from the kernel cmdline and launches the guest
   agent on that vsock port, then validates the filesystem layout with `e2fsck`
-  and `debugfs`.
+  and `debugfs`. Its native output lands at
+  `artifacts/guest/demo/<architecture>/firecracker/standard/rootfs.ext4`.
+- The sample config uses a file-backed store at `artifact-store/demo-fs/` and a
+  cache root at `.port/cache/`. `push` writes the selected variant into that
+  store and warms the cache; `pull` restores the selected variant from the
+  store into both the cache and the canonical local path used by launch.
+- OCI and hosted artifact backends are modeled explicitly in the shared config
+  and CLI story, but the current runtime only implements the file-backed
+  backend.
 
 Detailed contracts, inputs, outputs, and validation expectations live in
 [`docs/artifacts.md`](docs/artifacts.md).
@@ -294,7 +351,8 @@ The machine and artifact model now also carries explicit compatibility terms:
 - `substrate = "firecracker" | "cloud-hypervisor" | "avf"`
 - `protection_mode = "standard" | "pvm"`
 - `architecture = "native" | "x86_64" | "aarch64"`
-- artifact compatibility metadata for architecture, substrate, and protection-mode support
+- artifact references, variant selectors, and mobility backends for local build
+  outputs plus future remote distribution
 
 The workspace crates are:
 
@@ -308,14 +366,16 @@ You can inspect the current surface with:
 
 ```bash
 cargo run -p port-cli -- --help
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
 cargo run -p port-cli -- doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 ```
 
-The checked-in example config points at deterministic artifact output paths.
-Build the sample kernel and guest image first, then use the same config to run
-`port doctor` and `port machine launch`.
+The checked-in example config points at deterministic artifact variant paths,
+store roots, and cache roots. Build or pull the sample kernel and guest image
+variants first, then use the same config to run `port doctor` and
+`port machine launch`.
 
 ## Current Platform Boundary
 

@@ -1,0 +1,50 @@
+---
+recorded_at: 2026-03-07T18:09:37.401906884-08:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo run -q -p port-cli -- artifacts --help && cargo run -q -p port-cli -- artifacts push --help'
+---
+Build and validate kernel or guest artifacts
+
+Usage: port artifacts [OPTIONS] <COMMAND>
+
+Commands:
+  build     Build a named artifact from the model
+  validate  Validate a named artifact from the model
+  push      Publish a selected artifact variant to its configured backend
+  pull      Fetch a selected artifact variant from its configured backend
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>  Load a Port model from a TOML file instead of using the built-in sample
+  -h, --help           Print help
+Publish a selected artifact variant to its configured backend
+
+Usage: port artifacts push [OPTIONS] --artifact <ARTIFACT>
+
+Options:
+      --artifact <ARTIFACT>
+          
+      --config <PATH>
+          Load a Port model from a TOML file instead of using the built-in sample
+      --architecture <ARCHITECTURE>
+          [default: native] [possible values: native, x86-64, aarch64]
+      --substrate <SUBSTRATE>
+          [default: firecracker] [possible values: firecracker, cloud-hypervisor, avf]
+      --protection-mode <PROTECTION_MODE>
+          [default: standard] [possible values: standard, pvm]
+  -h, --help
+          Print help
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

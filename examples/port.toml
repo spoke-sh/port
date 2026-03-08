@@ -1,22 +1,74 @@
 [artifacts.kernels.demo-kernel]
-path = "artifacts/kernel/demo/vmlinux"
 build = "port artifacts build --artifact demo-kernel"
 validate = "port artifacts validate --artifact demo-kernel"
 
-[artifacts.kernels.demo-kernel.compatibility]
-architectures = ["x86_64", "aarch64"]
-substrates = ["firecracker"]
-protection_modes = ["standard"]
+[artifacts.kernels.demo-kernel.reference]
+registry = "demo-fs"
+repository = "port/demo-kernel"
+version = "v1"
+
+[artifacts.kernels.demo-kernel.distribution]
+cache_root = ".port/cache"
+
+[artifacts.kernels.demo-kernel.distribution.push]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[artifacts.kernels.demo-kernel.distribution.pull]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/aarch64/firecracker/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "aarch64"
+substrate = "firecracker"
+protection_mode = "standard"
 
 [artifacts.guest_images.demo-guest]
-path = "artifacts/guest/demo/rootfs.ext4"
 build = "port artifacts build --artifact demo-guest"
 validate = "port artifacts validate --artifact demo-guest"
 
-[artifacts.guest_images.demo-guest.compatibility]
-architectures = ["x86_64", "aarch64"]
-substrates = ["firecracker"]
-protection_modes = ["standard"]
+[artifacts.guest_images.demo-guest.reference]
+registry = "demo-fs"
+repository = "port/demo-guest"
+version = "v1"
+
+[artifacts.guest_images.demo-guest.distribution]
+cache_root = ".port/cache"
+
+[artifacts.guest_images.demo-guest.distribution.push]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[artifacts.guest_images.demo-guest.distribution.pull]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "aarch64"
+substrate = "firecracker"
+protection_mode = "standard"
 
 [hosts.local]
 platform = "linux"

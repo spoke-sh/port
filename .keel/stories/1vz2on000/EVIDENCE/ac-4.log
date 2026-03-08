@@ -1,0 +1,13 @@
+pushed kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/standard
+local path: artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+store path: artifact-store/demo-fs/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux
+cache path: .port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux
+bytes: 17
+pulled kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/standard
+store path: artifact-store/demo-fs/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux
+cache path: .port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux
+local path: artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+bytes: 17
+
+local:demo-kernel-proof
+cache:demo-kernel-proof

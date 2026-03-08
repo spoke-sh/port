@@ -1,0 +1,69 @@
+docs/cloud.md:47:7. Artifact mobility already uses the future-hosted vocabulary: build or publish a selected variant with `port artifacts push ...`, then pull that same logical reference onto the Linux host that will eventually own execution.
+docs/artifacts.md:1:# Artifact Contracts
+docs/artifacts.md:3:Port artifacts are now modeled as logical references plus concrete variants.
+docs/artifacts.md:26:- the sample cache root is `.port/cache/`
+docs/artifacts.md:34:port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+docs/artifacts.md:35:port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+docs/artifacts.md:36:port --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+docs/artifacts.md:37:port --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
+docs/artifacts.md:43:port --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+docs/artifacts.md:45:port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
+docs/artifacts.md:50:- `--architecture <native|x86-64|aarch64>`
+docs/artifacts.md:58:- the sample config only ships Firecracker/standard variants
+docs/artifacts.md:71:The file-backed store layout is similarly deterministic:
+docs/artifacts.md:75:- cache path:
+docs/artifacts.md:76:  `.port/cache/<registry>/<repository>/<version>/<architecture>/<substrate>/<protection-mode>/<filename>`
+docs/artifacts.md:84:- cache path:
+docs/artifacts.md:85:  `.port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux`
+docs/artifacts.md:89:- Logical reference:
+docs/artifacts.md:103:- Logical reference:
+docs/artifacts.md:130:  publish, fetch, cache, and compatibility selection without changing the CLI.
+README.md:85:port artifacts build --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:86:port artifacts validate --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:87:port artifacts push --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:88:port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:105:Local lifecycle quick reference:
+README.md:124:- `port artifacts push` and `port artifacts pull` now use the artifact's
+README.md:126:  registry/cache contract, while OCI and hosted backends are modeled but still
+README.md:200:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+README.md:201:cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+README.md:202:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+README.md:203:cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
+README.md:213:- deterministic artifact variants under `artifacts/<kind>/<name>/<architecture>/<substrate>/<protection-mode>/`
+README.md:247:- a logical reference, for example `demo-fs/port/demo-kernel:v1`
+README.md:248:- one or more variants selected by `architecture`, `substrate`, and
+README.md:250:- a `push` backend, a `pull` backend, and a local cache root
+README.md:252:Build and validate the native sample variants through the canonical CLI:
+README.md:255:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+README.md:256:cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+README.md:257:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+README.md:258:cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
+README.md:264:cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+README.md:266:cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
+README.md:281:- The sample config uses a file-backed store at `artifact-store/demo-fs/` and a
+README.md:282:  cache root at `.port/cache/`. `push` writes the selected variant into that
+README.md:283:  store and warms the cache; `pull` restores the selected variant from the
+README.md:284:  store into both the cache and the canonical local path used by launch.
+README.md:354:- artifact references, variant selectors, and mobility backends for local build
+README.md:369:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+README.md:370:cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+README.md:376:store roots, and cache roots. Build or pull the sample kernel and guest image
+README.md:377:variants first, then use the same config to run `port doctor` and
+docs/operators.md:22:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+docs/operators.md:23:cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+docs/operators.md:24:cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+docs/operators.md:25:cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
+docs/operators.md:33:Artifact variants land under
+docs/operators.md:38:Artifact mobility quick reference:
+docs/operators.md:41:cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+docs/operators.md:43:cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
+docs/operators.md:47:config, that means a file-backed store at `artifact-store/demo-fs/` plus a
+docs/operators.md:48:local cache at `.port/cache/`.
+docs/operators.md:82:  path, manifest, pid file, and console/log references needed for debugging.
+docs/operators.md:112:  `--architecture`, `--substrate`, and `--protection-mode`.
+docs/operators.md:113:- The sample config currently ships only Firecracker/standard variants, but the
+docs/operators.md:116:- `port artifacts push` writes the selected local variant into the configured
+docs/operators.md:117:  backend and warms the local cache.
+docs/operators.md:118:- `port artifacts pull` restores the selected variant from the configured
+docs/operators.md:119:  backend into both the cache and the canonical local path used by `launch`.
+docs/operators.md:148:  logical reference onto another Linux host once the execution lane requires it.

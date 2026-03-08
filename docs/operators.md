@@ -19,10 +19,10 @@ Run the sample-config commands from the repository root so
 
 ```bash
 cargo run -p port-cli -- doctor
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
 cargo run -p port-cli -- --config examples/port.toml doctor
 cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 cargo run -p port-cli -- machine list
@@ -30,14 +30,44 @@ cargo run -p port-cli -- machine status --machine demo
 cargo run -p port-cli -- machine stop --machine demo
 ```
 
-Artifacts land under `artifacts/`. Runtime manifests and console logs land under
-the chosen runtime root, which defaults to `runtime/`.
+Artifact variants land under
+`artifacts/<kind>/<name>/<architecture>/<substrate>/<protection-mode>/`.
+Runtime manifests and console logs land under the chosen runtime root, which
+defaults to `runtime/`.
+
+Artifact mobility quick reference:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
+rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
+```
+
+Those commands use the artifact's configured mobility backend. In the sample
+config, that means a file-backed store at `artifact-store/demo-fs/` plus a
+local cache at `.port/cache/`.
+
+The local lifecycle commands are the canonical way to manage a launched Port
+machine:
+
+- `port machine list` enumerates Port-managed runtime directories under the
+  local runtime root and gives you the inventory view for locally owned
+  machines.
+- `port machine status --machine <name>` reads one machine's local runtime
+  state back out of that runtime root so you can inspect manifests, pid files,
+  config paths, and console/log paths without talking to Firecracker directly.
+- `port machine stop --machine <name>` stops a Port-managed local machine and
+  clears runtime ownership details that would otherwise make a relaunch
+  ambiguous.
 
 Important prerequisite note:
 
 - The sample artifact and launch workflow assumes `firecracker`,
   artifact-build tools, and the Linux networking utilities that `port doctor`
   checks are available in the execution environment.
+- `nix develop` is one way to provide those tools, but it is not a Port
+  runtime requirement. Installing the required tools on the host directly is
+  equally valid.
 - If `port doctor` reports a missing dependency, treat that as the explanation
   for why a later `port machine launch` example will fail.
 
@@ -56,6 +86,11 @@ Current lifecycle behavior:
   hosted contract. In hosted Port, the CLI keeps the same verbs while a
   node-local agent plus control plane take over runtime ownership.
 
+Use those lifecycle commands as the first inspection and recovery surface after
+launch. The intended local path is `launch`, then `list` or `status` to inspect
+what Port owns under `runtime/`, then `stop` when you want Port to end and
+cleanly release that local runtime state.
+
 Current guest-command behavior:
 
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now work against
@@ -68,6 +103,20 @@ Current guest-command behavior:
   networking being up. In the sample guest image, bring loopback up before
   targeting `127.0.0.1`, for example with
   `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
+
+Current artifact-command behavior:
+
+- `port artifacts build` and `validate` operate on one selected artifact
+  variant at a time.
+- The variant vocabulary is explicit on the CLI:
+  `--architecture`, `--substrate`, and `--protection-mode`.
+- The sample config currently ships only Firecracker/standard variants, but the
+  model and help text already reserve the same command surface for PVM, Cloud
+  Hypervisor, and AVF lanes.
+- `port artifacts push` writes the selected local variant into the configured
+  backend and warms the local cache.
+- `port artifacts pull` restores the selected variant from the configured
+  backend into both the cache and the canonical local path used by `launch`.
 
 ## Remote Linux And Cloud Workflow
 
@@ -94,8 +143,12 @@ What to expect:
   the MVP.
 - `port machine launch --machine demo` remains the supported local Linux launch
   proof for the MVP.
+- Artifact mobility is already designed around that future remote workflow:
+  build or publish the selected variant on one Linux host, then pull the same
+  logical reference onto another Linux host once the execution lane requires it.
 - `port machine list`, `status`, and `stop` currently inspect only local
-  runtime roots; they do not yet enumerate or control remote/cloud hosts.
+  Port-managed runtime roots; they do not yet enumerate or control
+  remote/cloud hosts.
 - The future hosted split for lifecycle ownership and guest-operation brokering
   is documented in [`hosted.md`](hosted.md).
 

@@ -13,8 +13,9 @@ use port_agent_protocol::{
     GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
 };
 use port_model::{
-    ArtifactKind, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
-    MachineArchitecture, PortConfig, ProtectionMode,
+    ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
+    ExecutionSubstrate, HostConnection, HostPlatform, HostProvider, MachineArchitecture,
+    PortConfig, ProtectionMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -173,11 +174,29 @@ pub enum ArtifactAction {
     Validate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactRequest<'a> {
+    pub name: &'a str,
+    pub architecture: MachineArchitecture,
+    pub substrate: ExecutionSubstrate,
+    pub protection_mode: ProtectionMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactMetadata {
     pub name: String,
     pub kind: ArtifactKind,
+    pub reference: ArtifactReference,
+    pub selector: ArtifactSelector,
     pub path: PathBuf,
+    pub cache_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactTransfer {
+    pub artifact: ArtifactMetadata,
+    pub store_path: PathBuf,
+    pub bytes_copied: u64,
 }
 
 pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
@@ -227,16 +246,27 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
 
     if let Some(config) = config {
         for (name, artifact) in config.artifacts.all() {
-            checks.push(path_check(
-                format!("artifact:{name}"),
-                &artifact.path,
-                true,
-                &format!("Artifact path '{}' exists.", artifact.path.display()),
-                &format!(
-                    "Artifact path '{}' is missing. Build or fetch the artifact first.",
-                    artifact.path.display()
-                ),
-            ));
+            if let Some(variant) = resolve_native_standard_variant(artifact) {
+                checks.push(path_check(
+                    format!("artifact:{name}"),
+                    &variant.path,
+                    true,
+                    &format!("Artifact variant '{}' exists.", variant.path.display()),
+                    &format!(
+                        "Artifact variant '{}' is missing. Build or pull the native variant first.",
+                        variant.path.display()
+                    ),
+                ));
+            } else {
+                checks.push(DoctorCheck {
+                    name: format!("artifact:{name}"),
+                    ok: false,
+                    required: true,
+                    detail: String::from(
+                        "Artifact does not define a native Firecracker/standard variant for this host.",
+                    ),
+                });
+            }
         }
 
         for (name, host) in &config.hosts {
@@ -289,12 +319,48 @@ pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
     }
 }
 
-pub fn build_artifact(config: &PortConfig, name: &str) -> Result<ArtifactMetadata> {
-    run_artifact_pipeline(config, name, ArtifactAction::Build)
+pub fn build_artifact(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+) -> Result<ArtifactMetadata> {
+    run_artifact_pipeline(config, request, ArtifactAction::Build)
 }
 
-pub fn validate_artifact(config: &PortConfig, name: &str) -> Result<ArtifactMetadata> {
-    run_artifact_pipeline(config, name, ArtifactAction::Validate)
+pub fn validate_artifact(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+) -> Result<ArtifactMetadata> {
+    run_artifact_pipeline(config, request, ArtifactAction::Validate)
+}
+
+pub fn push_artifact(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+) -> Result<ArtifactTransfer> {
+    let artifact = resolve_artifact_metadata(config, request)?;
+    let store_path = push_store_path(config, &artifact)?;
+    let bytes_copied = copy_file(&artifact.path, &store_path)?;
+    let _ = copy_file(&artifact.path, &artifact.cache_path)?;
+    Ok(ArtifactTransfer {
+        artifact,
+        store_path,
+        bytes_copied,
+    })
+}
+
+pub fn pull_artifact(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+) -> Result<ArtifactTransfer> {
+    let artifact = resolve_artifact_metadata(config, request)?;
+    let store_path = pull_store_path(config, &artifact)?;
+    let bytes_copied = copy_file(&store_path, &artifact.cache_path)?;
+    let _ = copy_file(&artifact.cache_path, &artifact.path)?;
+    Ok(ArtifactTransfer {
+        artifact,
+        store_path,
+        bytes_copied,
+    })
 }
 
 pub fn launch_local_machine(
@@ -337,6 +403,7 @@ pub fn launch_local_machine(
     if !machine_check.ok {
         bail!("machine contract failed: {}", machine_check.detail);
     }
+    let resolved_architecture = resolve_machine_architecture(machine.architecture)?;
 
     let report = collect_doctor_report(Some(config));
     let failures = report.blocking_failures();
@@ -361,9 +428,37 @@ pub fn launch_local_machine(
     })?;
     prepare_runtime_state(&paths, request.machine_name)?;
 
+    let kernel_variant = kernel
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "kernel artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.kernel, resolved_architecture, machine.substrate, machine.protection_mode
+            )
+        })?;
+    let guest_variant = guest_image
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "guest image artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.guest_image,
+                resolved_architecture,
+                machine.substrate,
+                machine.protection_mode
+            )
+        })?;
+
     let config_payload = build_firecracker_config(
-        kernel.path.clone(),
-        guest_image.path.clone(),
+        kernel_variant.path.clone(),
+        guest_variant.path.clone(),
         machine.vcpu_count,
         machine.memory_mib,
         machine.kernel_args.clone(),
@@ -1123,17 +1218,16 @@ fn find_binary(binary: &str) -> Option<PathBuf> {
 
 fn run_artifact_pipeline(
     config: &PortConfig,
-    name: &str,
+    request: ArtifactRequest<'_>,
     action: ArtifactAction,
 ) -> Result<ArtifactMetadata> {
-    let (kind, spec) = config
-        .artifacts
-        .lookup_named(name)
-        .with_context(|| format!("unknown artifact '{name}'"))?;
+    ensure_native_build_lane(request.architecture)?;
+    let artifact = resolve_artifact_metadata(config, request)?;
+    let kind = artifact.kind;
     let script = artifact_script(kind, action)?;
 
     let status = Command::new(&script)
-        .arg(&spec.path)
+        .arg(&artifact.path)
         .current_dir(repo_root()?)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
@@ -1148,11 +1242,161 @@ fn run_artifact_pipeline(
         );
     }
 
+    Ok(artifact)
+}
+
+fn ensure_native_build_lane(architecture: MachineArchitecture) -> Result<()> {
+    let native = resolve_machine_architecture(MachineArchitecture::Native)
+        .context("failed to determine host architecture")?;
+    if architecture == native {
+        Ok(())
+    } else {
+        bail!(
+            "artifact build and validate pipelines currently run only for the native host architecture {:?}; requested {:?}",
+            native,
+            architecture
+        )
+    }
+}
+
+fn resolve_native_standard_variant(spec: &port_model::ArtifactSpec) -> Option<&ArtifactVariant> {
+    let architecture = resolve_machine_architecture(MachineArchitecture::Native).ok()?;
+    spec.variant(
+        architecture,
+        ExecutionSubstrate::Firecracker,
+        ProtectionMode::Standard,
+    )
+}
+
+fn resolve_artifact_metadata(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+) -> Result<ArtifactMetadata> {
+    let (kind, spec) = config
+        .artifacts
+        .lookup_named(request.name)
+        .with_context(|| format!("unknown artifact '{}'", request.name))?;
+    let variant = spec
+        .variant(
+            request.architecture,
+            request.substrate,
+            request.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "artifact '{}' has no variant for {:?}/{:?}/{:?}",
+                request.name, request.architecture, request.substrate, request.protection_mode
+            )
+        })?;
     Ok(ArtifactMetadata {
-        name: name.to_string(),
+        name: request.name.to_string(),
         kind,
-        path: spec.path.clone(),
+        reference: spec.reference.clone(),
+        selector: variant.selector,
+        path: variant.path.clone(),
+        cache_path: cache_path_for(spec, variant),
     })
+}
+
+fn cache_path_for(spec: &port_model::ArtifactSpec, variant: &ArtifactVariant) -> PathBuf {
+    spec.distribution
+        .cache_root
+        .join(&spec.reference.registry)
+        .join(&spec.reference.repository)
+        .join(&spec.reference.version)
+        .join(architecture_dir(variant.selector.architecture))
+        .join(substrate_dir(variant.selector.substrate))
+        .join(protection_mode_dir(variant.selector.protection_mode))
+        .join(
+            variant
+                .path
+                .file_name()
+                .unwrap_or_else(|| std::ffi::OsStr::new("artifact")),
+        )
+}
+
+fn push_store_path(config: &PortConfig, artifact: &ArtifactMetadata) -> Result<PathBuf> {
+    let (_, spec) = config
+        .artifacts
+        .lookup_named(&artifact.name)
+        .with_context(|| format!("unknown artifact '{}'", artifact.name))?;
+    store_path(&spec.distribution.push, artifact)
+        .context("push backend does not support Port artifact publishing yet")
+}
+
+fn pull_store_path(config: &PortConfig, artifact: &ArtifactMetadata) -> Result<PathBuf> {
+    let (_, spec) = config
+        .artifacts
+        .lookup_named(&artifact.name)
+        .with_context(|| format!("unknown artifact '{}'", artifact.name))?;
+    store_path(&spec.distribution.pull, artifact)
+        .context("pull backend does not support Port artifact fetching yet")
+}
+
+fn store_path(store: &ArtifactStore, artifact: &ArtifactMetadata) -> Result<PathBuf> {
+    match store {
+        ArtifactStore::FileSystem { root } => Ok(root
+            .join(&artifact.reference.registry)
+            .join(&artifact.reference.repository)
+            .join(&artifact.reference.version)
+            .join(architecture_dir(artifact.selector.architecture))
+            .join(substrate_dir(artifact.selector.substrate))
+            .join(protection_mode_dir(artifact.selector.protection_mode))
+            .join(
+                artifact
+                    .path
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("artifact")),
+            )),
+        ArtifactStore::OciRegistry { reference } => bail!(
+            "OCI registry backend '{}' is reserved in the model but not implemented in the runtime yet",
+            reference
+        ),
+        ArtifactStore::HostedApi { endpoint } => bail!(
+            "Hosted API backend '{}' is reserved in the model but not implemented in the runtime yet",
+            endpoint
+        ),
+    }
+}
+
+fn copy_file(source: &Path, destination: &Path) -> Result<u64> {
+    if !source.is_file() {
+        bail!("artifact source '{}' does not exist", source.display());
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create '{}'", parent.display()))?;
+    }
+    fs::copy(source, destination).with_context(|| {
+        format!(
+            "failed to copy artifact from '{}' to '{}'",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
+fn architecture_dir(architecture: MachineArchitecture) -> &'static str {
+    match architecture {
+        MachineArchitecture::Native => "native",
+        MachineArchitecture::X86_64 => "x86_64",
+        MachineArchitecture::Aarch64 => "aarch64",
+    }
+}
+
+fn substrate_dir(substrate: ExecutionSubstrate) -> &'static str {
+    match substrate {
+        ExecutionSubstrate::Firecracker => "firecracker",
+        ExecutionSubstrate::CloudHypervisor => "cloud-hypervisor",
+        ExecutionSubstrate::Avf => "avf",
+    }
+}
+
+fn protection_mode_dir(mode: ProtectionMode) -> &'static str {
+    match mode {
+        ProtectionMode::Standard => "standard",
+        ProtectionMode::Pvm => "pvm",
+    }
 }
 
 fn artifact_script(kind: ArtifactKind, action: ArtifactAction) -> Result<PathBuf> {

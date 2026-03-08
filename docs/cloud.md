@@ -44,6 +44,7 @@ perform remote launch yet.
 4. For the current MVP, run `port machine launch --machine demo` only on a Linux host that passes `port doctor`.
 5. If you try `port machine launch --machine cloud-aws` or another remote machine, Port intentionally fails fast with guidance about the current boundary.
 6. `port machine list`, `port machine status`, and `port machine stop` currently inspect local runtime roots only; they are not yet a remote-cloud inventory surface.
+7. Artifact mobility already uses the future-hosted vocabulary: build or publish a selected variant with `port artifacts push ...`, then pull that same logical reference onto the Linux host that will eventually own execution.
 
 ## Operator Mapping
 
