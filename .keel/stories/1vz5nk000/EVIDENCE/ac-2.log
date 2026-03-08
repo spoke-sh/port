@@ -1,0 +1,106 @@
+---
+recorded_at: 2026-03-07T21:12:36.389368672-08:00
+mode: manual
+files: [".keel/stories/1vz5nk000/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+== cargo test -q -p port-cli ==
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+== port --help hosted guest excerpt ==
+
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned
+  macOS lane.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch
+  is supported.
+Execution Lanes:
+  Firecracker + standard on Linux is the current shipped lane.
+  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit
+  plus pvm artifact variants.
+
+== hosted guest runtime docs excerpt ==
+crates/port-cli/src/lib.rs:64:  Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
+crates/port-cli/src/lib.rs:66:  Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
+crates/port-cli/src/lib.rs:67:  This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
+crates/port-cli/src/lib.rs:68:  Detached forwarding, Unix-socket forwarding, monitoring, secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
+crates/port-cli/src/lib.rs:228:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:235:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:242:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:249:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:262:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:271:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:284:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:293:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:306:        runtime_root: PathBuf,
+crates/port-cli/src/lib.rs:513:            runtime_root,
+crates/port-cli/src/lib.rs:520:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:537:        MachineCommand::List { runtime_root } => {
+crates/port-cli/src/lib.rs:538:            let machines = port_runtime::list_machines(&config, &runtime_root)?;
+crates/port-cli/src/lib.rs:542:                    runtime_root.display()
+crates/port-cli/src/lib.rs:567:            runtime_root,
+crates/port-cli/src/lib.rs:569:            let status = port_runtime::machine_status(&config, &runtime_root, &machine)?;
+crates/port-cli/src/lib.rs:599:            runtime_root,
+crates/port-cli/src/lib.rs:604:                &runtime_root,
+crates/port-cli/src/lib.rs:633:            runtime_root,
+crates/port-cli/src/lib.rs:641:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:658:            runtime_root,
+crates/port-cli/src/lib.rs:668:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:681:            runtime_root,
+crates/port-cli/src/lib.rs:689:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:705:            runtime_root,
+crates/port-cli/src/lib.rs:715:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:731:            runtime_root,
+crates/port-cli/src/lib.rs:740:                    runtime_root: &runtime_root,
+crates/port-cli/src/lib.rs:898:                runtime_root,
+crates/port-cli/src/lib.rs:902:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:930:                runtime_root,
+crates/port-cli/src/lib.rs:934:                assert_eq!(runtime_root, std::path::Path::new("runtime"));
+crates/port-cli/src/lib.rs:942:    fn parses_guest_copy_direction_and_runtime_root() {
+crates/port-cli/src/lib.rs:962:                runtime_root,
+crates/port-cli/src/lib.rs:968:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:1011:            Command::Machine(MachineCommand::List { runtime_root }) => {
+crates/port-cli/src/lib.rs:1012:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:1030:                runtime_root,
+crates/port-cli/src/lib.rs:1033:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+crates/port-cli/src/lib.rs:1053:                runtime_root,
+crates/port-cli/src/lib.rs:1057:                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+docs/hosted.md:202:- `runtime_root = "runtime/hosted/aws-linux-node"`
+docs/hosted.md:220:  control-plane contract plus the configured node `runtime_root`
+docs/hosted.md:229:  the hosted control-plane contract plus the configured node `runtime_root`
+docs/hosted.md:230:- this first hosted guest-runtime slice is also config-backed and in-process:
+docs/hosted.md:234:- hosted guest attach failures surface the control plane and node-routing
+docs/hosted.md:280:Hosted guest attach contract for a hosted machine such as `cloud-aws`:
+docs/hosted.md:306:  detached and Unix-socket forwarding -> monitoring and `top` ->
+README.md:226:  `[host_groups.<name>]`, with capability, node-agent `runtime_root`, and
+README.md:232:  hosted runtime slice now runs through configured node `runtime_root`
+README.md:235:- Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
+README.md:238:  protocol frames stay unchanged. The first hosted guest-runtime slice now runs
+README.md:239:  through configured node `runtime_root` directories, so the canonical `guest`
+

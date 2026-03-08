@@ -9,9 +9,9 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    read_frame, write_frame, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
+    GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
@@ -183,7 +183,8 @@ trait MachineDriver {
 
     fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata>;
 
-    fn list_machines(&self, config: &PortConfig, runtime_root: &Path) -> Result<Vec<MachineStatus>>;
+    fn list_machines(&self, config: &PortConfig, runtime_root: &Path)
+    -> Result<Vec<MachineStatus>>;
 
     fn machine_status(
         &self,
@@ -660,8 +661,11 @@ pub fn machine_status(
     machine_name: &str,
 ) -> Result<MachineStatus> {
     if config.machines.contains_key(machine_name) {
-        return driver_for_machine(config, machine_name)?
-            .machine_status(config, runtime_root, machine_name);
+        return driver_for_machine(config, machine_name)?.machine_status(
+            config,
+            runtime_root,
+            machine_name,
+        );
     }
 
     firecracker_local_machine_status(runtime_root, machine_name)
@@ -694,8 +698,12 @@ pub fn stop_machine(
     timeout: Duration,
 ) -> Result<StopResult> {
     if config.machines.contains_key(machine_name) {
-        return driver_for_machine(config, machine_name)?
-            .stop_machine(config, runtime_root, machine_name, timeout);
+        return driver_for_machine(config, machine_name)?.stop_machine(
+            config,
+            runtime_root,
+            machine_name,
+            timeout,
+        );
     }
 
     firecracker_local_stop_machine(runtime_root, machine_name, timeout)
@@ -1100,7 +1108,9 @@ fn hosted_machine_resolution(
     let control = config.machine_control_contract(machine_name)?;
     let hosted_identity = config
         .hosted_api_identity_contract(machine_name)?
-        .ok_or_else(|| anyhow!("machine '{machine_name}' does not target a hosted control plane"))?;
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
     let placeholder_root = hosted_placeholder_runtime_root(&hosted_identity.control_plane);
 
     let summary = match config.hosted_machine_summary_contract(machine_name) {
@@ -1215,7 +1225,12 @@ fn hosted_control_plane_launch_machine(
         .with_context(|| format!("unknown host '{}'", machine.host))?;
     let hosted_identity = config
         .hosted_api_identity_contract(request.machine_name)?
-        .ok_or_else(|| anyhow!("machine '{}' does not target a hosted control plane", request.machine_name))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "machine '{}' does not target a hosted control plane",
+                request.machine_name
+            )
+        })?;
     bail!(
         "{}",
         remote_launch_guidance(
@@ -1251,7 +1266,10 @@ fn hosted_control_plane_stop_machine(
             pid: status.pid,
             control,
             runtime_dir: status.runtime_dir,
-            detail: format!("hosted stop could not route to a node agent: {}", status.detail),
+            detail: format!(
+                "hosted stop could not route to a node agent: {}",
+                status.detail
+            ),
         });
     };
 
@@ -1293,6 +1311,46 @@ fn hosted_control_plane_stop_machine(
             result.detail, resolution.control_plane, node_name
         ),
         ..result
+    })
+}
+
+fn hosted_control_plane_guest_endpoint(
+    config: &PortConfig,
+    request: &GuestRequest<'_>,
+) -> Result<GuestEndpoint> {
+    let resolution = hosted_machine_resolution(config, request.machine_name)?;
+    let attach_detail = match config.hosted_guest_attach_contract(request.machine_name) {
+        Ok(Some(attach)) => attach.detail,
+        Ok(None) => {
+            bail!(
+                "machine '{}' does not target a hosted control plane guest route",
+                request.machine_name
+            );
+        }
+        Err(_) => String::from(
+            "Hosted guest attach preserves the canonical guest protocol through control-plane authorization and node-agent brokerage.",
+        ),
+    };
+    let Some(node_name) = resolution.node_name else {
+        bail!(
+            "control plane '{}' could not authorize guest attach for machine '{}': {}",
+            resolution.control_plane,
+            request.machine_name,
+            resolution.status.detail
+        );
+    };
+
+    let routed_request = GuestRequest {
+        machine_name: request.machine_name,
+        runtime_root: &resolution.runtime_root,
+        operation: request.operation.clone(),
+    };
+
+    resolve_firecracker_guest_endpoint(config, &routed_request).with_context(|| {
+        format!(
+            "control plane '{}' authorized guest attach for machine '{}' and routed it to node '{}'. {}",
+            resolution.control_plane, request.machine_name, node_name, attach_detail
+        )
     })
 }
 
@@ -1373,7 +1431,9 @@ fn provider_check(
         detail: match connection {
             HostConnection::Local => detail,
             HostConnection::HostedControlPlane { control_plane } => {
-                format!("{detail} Hosted routing is modeled through control plane '{control_plane}'.")
+                format!(
+                    "{detail} Hosted routing is modeled through control plane '{control_plane}'."
+                )
             }
         },
     })
@@ -2229,7 +2289,11 @@ impl MachineDriver for FirecrackerLocalDriver {
         firecracker_local_launch_machine(config, request)
     }
 
-    fn list_machines(&self, _config: &PortConfig, runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+    fn list_machines(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+    ) -> Result<Vec<MachineStatus>> {
         firecracker_local_list_machines(runtime_root)
     }
 
@@ -2270,7 +2334,11 @@ impl MachineDriver for HostedControlPlaneDriver {
         hosted_control_plane_launch_machine(config, request)
     }
 
-    fn list_machines(&self, config: &PortConfig, _runtime_root: &Path) -> Result<Vec<MachineStatus>> {
+    fn list_machines(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+    ) -> Result<Vec<MachineStatus>> {
         let mut hosted_names = config
             .machines
             .iter()
@@ -2310,13 +2378,10 @@ impl MachineDriver for HostedControlPlaneDriver {
 
     fn guest_endpoint(
         &self,
-        _config: &PortConfig,
+        config: &PortConfig,
         request: &GuestRequest<'_>,
     ) -> Result<GuestEndpoint> {
-        bail!(
-            "machine '{}' targets a hosted control plane, but hosted `port guest ...` runtime brokerage is not implemented in this slice yet",
-            request.machine_name
-        );
+        hosted_control_plane_guest_endpoint(config, request)
     }
 }
 
@@ -2489,16 +2554,16 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        artifact_script, build_firecracker_config, collect_doctor_report, copy_guest_file,
-        driver_for_machine, execute_guest_operation, launch_local_machine, list_machines,
-        machine_status, path_check, prepare_guest_forward, prepare_runtime_state, read_pid_file,
-        repo_root, stop_machine, ArtifactAction, DoctorCheck, GuestCopyRequest,
-        GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest, MachineDriverKind,
-        MachineRuntimeState, RuntimePaths, StopResult,
+        ArtifactAction, DoctorCheck, GuestCopyRequest, GuestForwardRequest, GuestRequest,
+        LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState, RuntimePaths,
+        StopResult, artifact_script, build_firecracker_config, collect_doctor_report,
+        copy_guest_file, driver_for_machine, execute_guest_operation, launch_local_machine,
+        list_machines, machine_status, path_check, prepare_guest_forward, prepare_runtime_state,
+        read_pid_file, repo_root, stop_machine,
     };
     use port_agent_protocol::{
-        read_frame, write_frame, CopyDirection, ExecRequest, ExecResult, GuestOperation,
-        OperationResult, RequestEnvelope, ResponseEnvelope, StreamKind,
+        CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
+        ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
     use port_model::{
         ArtifactKind, ExecutionSubstrate, FirecrackerSupport, HostConnection, HostPlatform,
@@ -2753,10 +2818,12 @@ mod tests {
         assert!(gcp.detail.contains("future Firecracker lane"));
         assert!(!azure.ok);
         assert!(azure.detail.contains("unsupported"));
-        assert!(report
-            .notes
-            .iter()
-            .any(|note| note.contains("local Linux only")));
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains("local Linux only"))
+        );
     }
 
     #[test]
@@ -2842,7 +2909,8 @@ mod tests {
         let mut config = PortConfig::sample();
         config.machines.retain(|name, _| name == "demo");
 
-        let machines = list_machines(&config, tempdir.path()).expect("machine listing should succeed");
+        let machines =
+            list_machines(&config, tempdir.path()).expect("machine listing should succeed");
         assert_eq!(machines.len(), 3);
 
         let running = machines
@@ -2949,8 +3017,13 @@ mod tests {
         .expect("manifest should write");
         fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
 
-        let result = stop_machine(&PortConfig::sample(), tempdir.path(), "demo", Duration::from_secs(2))
-            .expect("stop should succeed");
+        let result = stop_machine(
+            &PortConfig::sample(),
+            tempdir.path(),
+            "demo",
+            Duration::from_secs(2),
+        )
+        .expect("stop should succeed");
         assert_eq!(
             result,
             StopResult {
@@ -3015,7 +3088,10 @@ mod tests {
             .iter()
             .find(|machine| machine.machine_name == "cloud-aws")
             .expect("hosted machine should appear in machine list");
-        assert_eq!(hosted.control, port_model::MachineControlContract::hosted_control_plane());
+        assert_eq!(
+            hosted.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
         assert_eq!(hosted.runtime_dir, hosted_paths.runtime_dir);
     }
 
@@ -3035,7 +3111,10 @@ mod tests {
 
         let mut command = Command::new("bash");
         command
-            .args(["-lc", "exec -a firecracker /bin/sh -c 'sleep 30' --id cloud-aws"])
+            .args([
+                "-lc",
+                "exec -a firecracker /bin/sh -c 'sleep 30' --id cloud-aws",
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -3047,9 +3126,8 @@ mod tests {
         write_manifest(&paths, "cloud-aws", child.id());
         fs::write(&paths.pid_path, format!("{}\n", child.id())).expect("pid file should write");
 
-        let result =
-            stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(2))
-                .expect("hosted stop should succeed");
+        let result = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(2))
+            .expect("hosted stop should succeed");
         assert_eq!(
             result.control,
             port_model::MachineControlContract::hosted_control_plane()
@@ -3063,13 +3141,105 @@ mod tests {
     }
 
     #[test]
+    fn hosted_guest_exec_routes_through_node_runtime_root() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener
+                .accept()
+                .expect("should accept hosted guest transport");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => {
+                    assert_eq!(
+                        request.command,
+                        vec![String::from("/bin/echo"), String::from("hosted-ok")]
+                    );
+                }
+                other => panic!("unexpected hosted guest operation: {other:?}"),
+            }
+
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("hosted-ok\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        });
+
+        let result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("hosted-ok")],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
+        .expect("hosted guest exec should succeed");
+
+        match result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "hosted-ok\n"),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        server.join().expect("server thread should complete");
+    }
+
+    #[test]
+    fn hosted_guest_exec_explains_unresolved_node_routing() {
+        let error = execute_guest_operation(
+            &PortConfig::sample(),
+            GuestRequest {
+                machine_name: "cloud-azure",
+                runtime_root: Path::new("runtime"),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/true")],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
+        .expect_err("unresolved hosted node routing should fail");
+
+        let message = error.to_string();
+        assert!(message.contains("control plane 'demo'"));
+        assert!(message.contains("cloud-azure"));
+        assert!(message.contains("no hosted node inventory record matches that host"));
+    }
+
+    #[test]
     fn machine_status_reports_missing_and_malformed_runtime_state() {
         let tempdir = tempdir().expect("tempdir should exist");
         let error = machine_status(&PortConfig::sample(), tempdir.path(), "missing")
             .expect_err("missing machine should fail");
-        assert!(error
-            .to_string()
-            .contains("runtime state for machine 'missing' does not exist"));
+        assert!(
+            error
+                .to_string()
+                .contains("runtime state for machine 'missing' does not exist")
+        );
 
         let broken_paths = RuntimePaths::for_machine(tempdir.path(), "broken");
         fs::create_dir_all(&broken_paths.runtime_dir).expect("broken runtime dir should exist");

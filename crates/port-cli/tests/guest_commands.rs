@@ -9,14 +9,9 @@ use std::time::Duration;
 use port_model::PortConfig;
 use tempfile::tempdir;
 
-fn write_config(path: &Path) {
-    fs::write(
-        path,
-        PortConfig::sample()
-            .to_toml_string()
-            .expect("sample config should encode"),
-    )
-    .expect("config should write");
+fn write_config(path: &Path, config: &PortConfig) {
+    fs::write(path, config.to_toml_string().expect("config should encode"))
+        .expect("config should write");
 }
 
 fn port_bin() -> &'static str {
@@ -51,28 +46,28 @@ fn runtime_socket(runtime_root: &Path, machine: &str) -> PathBuf {
     runtime_root.join(machine).join("guest-agent.sock")
 }
 
-#[test]
-fn cli_guest_commands_cover_all_capabilities() {
-    let temp = tempdir().expect("tempdir should exist");
-    let guest_root = temp.path().join("guest-root");
-    let runtime_root = temp.path().join("runtime");
-    let config_path = temp.path().join("port.toml");
-    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
-    fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
-    write_config(&config_path);
+fn add_runtime_root(command: &mut Command, runtime_root: Option<&Path>) {
+    if let Some(runtime_root) = runtime_root {
+        command.arg("--runtime-root").arg(runtime_root);
+    }
+}
 
-    let socket_path = runtime_socket(&runtime_root, "demo");
-    spawn_agent(&socket_path, &guest_root);
-
-    let exec = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+fn run_guest_capability_suite(
+    config_path: &Path,
+    machine: &str,
+    runtime_root: Option<&Path>,
+    guest_root: &Path,
+    temp_root: &Path,
+) {
+    let mut exec = Command::new(port_bin());
+    exec.arg("--config")
+        .arg(config_path)
         .arg("guest")
         .arg("exec")
         .arg("--machine")
-        .arg("demo")
-        .arg("--runtime-root")
-        .arg(&runtime_root)
+        .arg(machine);
+    add_runtime_root(&mut exec, runtime_root);
+    let exec = exec
         .arg("--")
         .arg("/bin/sh")
         .arg("-lc")
@@ -82,17 +77,17 @@ fn cli_guest_commands_cover_all_capabilities() {
     assert!(exec.status.success());
     assert_eq!(String::from_utf8_lossy(&exec.stdout), "exec-ok");
 
-    let host_source = temp.path().join("host.txt");
+    let host_source = temp_root.join("host.txt");
     fs::write(&host_source, "copy-ok").expect("host file");
-    let copy = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let mut copy = Command::new(port_bin());
+    copy.arg("--config")
+        .arg(config_path)
         .arg("guest")
         .arg("copy")
         .arg("--machine")
-        .arg("demo")
-        .arg("--runtime-root")
-        .arg(&runtime_root)
+        .arg(machine);
+    add_runtime_root(&mut copy, runtime_root);
+    let copy = copy
         .arg("--direction")
         .arg("host-to-guest")
         .arg("--source")
@@ -106,16 +101,17 @@ fn cli_guest_commands_cover_all_capabilities() {
         fs::read_to_string(guest_root.join("workspace/copied.txt")).expect("copied file"),
         "copy-ok"
     );
-    let host_roundtrip = temp.path().join("roundtrip.txt");
-    let copy_back = Command::new(port_bin())
+    let host_roundtrip = temp_root.join("roundtrip.txt");
+    let mut copy_back = Command::new(port_bin());
+    copy_back
         .arg("--config")
-        .arg(&config_path)
+        .arg(config_path)
         .arg("guest")
         .arg("copy")
         .arg("--machine")
-        .arg("demo")
-        .arg("--runtime-root")
-        .arg(&runtime_root)
+        .arg(machine);
+    add_runtime_root(&mut copy_back, runtime_root);
+    let copy_back = copy_back
         .arg("--direction")
         .arg("guest-to-host")
         .arg("--source")
@@ -133,15 +129,15 @@ fn cli_guest_commands_cover_all_capabilities() {
         String::from_utf8_lossy(&copy_back.stdout).contains(&host_roundtrip.display().to_string())
     );
 
-    let pty = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let mut pty = Command::new(port_bin());
+    pty.arg("--config")
+        .arg(config_path)
         .arg("guest")
         .arg("pty")
         .arg("--machine")
-        .arg("demo")
-        .arg("--runtime-root")
-        .arg(&runtime_root)
+        .arg(machine);
+    add_runtime_root(&mut pty, runtime_root);
+    let pty = pty
         .arg("--")
         .arg("/bin/sh")
         .arg("-lc")
@@ -151,15 +147,15 @@ fn cli_guest_commands_cover_all_capabilities() {
     assert!(pty.status.success());
     assert!(String::from_utf8_lossy(&pty.stdout).contains("pty-ok"));
 
-    let logs = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let mut logs = Command::new(port_bin());
+    logs.arg("--config")
+        .arg(config_path)
         .arg("guest")
         .arg("logs")
         .arg("--machine")
-        .arg("demo")
-        .arg("--runtime-root")
-        .arg(&runtime_root)
+        .arg(machine);
+    add_runtime_root(&mut logs, runtime_root);
+    let logs = logs
         .arg("--path")
         .arg("/var/log/app.log")
         .arg("--tail-lines")
@@ -181,15 +177,16 @@ fn cli_guest_commands_cover_all_capabilities() {
     let listen_addr = reserved.local_addr().expect("listen addr");
     drop(reserved);
 
-    let mut forward = Command::new(port_bin())
+    let mut forward = Command::new(port_bin());
+    forward
         .arg("--config")
-        .arg(&config_path)
+        .arg(config_path)
         .arg("guest")
         .arg("forward")
         .arg("--machine")
-        .arg("demo")
-        .arg("--runtime-root")
-        .arg(&runtime_root)
+        .arg(machine);
+    add_runtime_root(&mut forward, runtime_root);
+    let mut forward = forward
         .arg("--listen")
         .arg(listen_addr.to_string())
         .arg("--target")
@@ -221,4 +218,51 @@ fn cli_guest_commands_cover_all_capabilities() {
         !status.success(),
         "forward process should have been terminated"
     );
+}
+
+#[test]
+fn cli_guest_commands_cover_all_capabilities() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let runtime_root = temp.path().join("runtime");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
+
+    let config = PortConfig::sample();
+    write_config(&config_path, &config);
+
+    let socket_path = runtime_socket(&runtime_root, "demo");
+    spawn_agent(&socket_path, &guest_root);
+
+    run_guest_capability_suite(
+        &config_path,
+        "demo",
+        Some(&runtime_root),
+        &guest_root,
+        temp.path(),
+    );
+}
+
+#[test]
+fn cli_guest_commands_cover_hosted_control_plane_runtime() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
+
+    let mut config = PortConfig::sample();
+    config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = hosted_runtime_root.clone();
+    write_config(&config_path, &config);
+
+    let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
+    spawn_agent(&socket_path, &guest_root);
+
+    run_guest_capability_suite(&config_path, "cloud-aws", None, &guest_root, temp.path());
 }

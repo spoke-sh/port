@@ -63,8 +63,9 @@ Hosted Control:
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
   `port machine list|status|stop` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
-  Hosted guest attach is now modeled explicitly: the control plane authorizes the attach, the node agent opens the host-local guest transport, and `port guest exec|copy|pty|logs|forward` keep the same request and response frames.
-  In the MVP, those guest verbs still run only through the local runtime path; the hosted lane is a published bridge contract for the next control-plane, node-agent, and follow-on service slices.
+  Hosted guest attach now resolves `port guest exec|copy|pty|logs|forward` through control-plane contracts plus node-agent runtime roots while keeping the existing guest protocol unchanged.
+  This first hosted guest-runtime slice is config-backed and in-process: Port resolves the owning node from hosted inventory, then attaches to the node runtime root's host-local guest transport.
+  Detached forwarding, Unix-socket forwarding, monitoring, secrets, services, sandboxes, and SDK clients remain explicit follow-on slices.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
   Azure remains an explicitly unsupported Firecracker provider lane.";

@@ -235,8 +235,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
   a control-plane-authorized attach followed by node-agent guest brokerage to
   the in-guest `port-guest-agent`. The canonical `guest` verbs and guest
-  protocol frames stay unchanged; the hosted guest bridge is modeled today, not
-  runnable yet.
+  protocol frames stay unchanged. The first hosted guest-runtime slice now runs
+  through configured node `runtime_root` directories, so the canonical `guest`
+  verbs work for hosted machines without introducing hosted-only aliases.
 - Hosted inventory that lacks a matching node runtime binding currently surfaces
   as `malformed` in `port machine list|status` so unresolved hosted ownership is
   visible instead of silently dropped.

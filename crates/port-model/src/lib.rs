@@ -2163,7 +2163,11 @@ mod tests {
             .validate()
             .expect_err("missing runtime_root should fail validation");
 
-        assert!(error.to_string().contains("must declare a non-empty runtime_root"));
+        assert!(
+            error
+                .to_string()
+                .contains("must declare a non-empty runtime_root")
+        );
     }
 
     #[test]

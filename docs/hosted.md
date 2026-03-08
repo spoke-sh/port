@@ -225,6 +225,15 @@ What is runnable today:
 - hosted machines with unresolved inventory, such as a host without a matching
   node runtime binding, surface as `malformed` so the control-plane mismatch is
   explicit to the operator
+- hosted `guest exec`, `copy`, `pty`, `logs`, and `forward` now resolve through
+  the hosted control-plane contract plus the configured node `runtime_root`
+- this first hosted guest-runtime slice is also config-backed and in-process:
+  Port resolves hosted ownership from the control-plane and node inventory
+  model, then attaches to the node-agent runtime root's host-local guest
+  transport instead of inventing hosted-only guest verbs
+- hosted guest attach failures surface the control plane and node-routing
+  context directly, so missing guest sockets or unresolved hosted node
+  ownership stay visible to the operator
 
 ## Canonical Machine Control Contract
 
@@ -291,12 +300,11 @@ That means hosted Port still uses the same guest-operation model for `exec`,
 `copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
 stream.
 
-What still remains after this contract:
+What still remains after this runtime slice:
 
-- no hosted `port guest ...` runtime path ships yet
 - follow-on order after this foundation is:
-  hosted guest runtime -> detached and Unix-socket forwarding -> monitoring and
-  `top` -> secrets/services/sandboxes -> SDK/API clients
+  detached and Unix-socket forwarding -> monitoring and `top` ->
+  secrets/services/sandboxes -> SDK/API clients
 - those follow-on capabilities are downstream of the authenticated API,
   inventory, lifecycle, and guest-attach foundation; they are not already
   shipped
