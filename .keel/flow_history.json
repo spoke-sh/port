@@ -3,10 +3,10 @@
   "weekly": [
     {
       "week_start": "2026-03-02",
-      "stories_done": 27,
+      "stories_done": 28,
       "voyages_done": 9,
       "cycle_min_hours": 0.0375,
-      "cycle_median_hours": 0.10916666666666666,
+      "cycle_median_hours": 0.11194444444444444,
       "cycle_max_hours": 0.7536111111111111,
       "acceptance_wait_median_hours": 0.0019444444444444444
     },

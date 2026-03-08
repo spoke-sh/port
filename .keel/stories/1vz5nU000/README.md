@@ -2,11 +2,13 @@
 id: 1vz5nU000
 title: Implement Hosted Control Plane Runtime Path
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-07T20:31:20
-updated_at: 2026-03-07T20:37:23
+updated_at: 2026-03-07T21:05:35
 scope: 1vz4Yn000/1vz5mg000
 started_at: 2026-03-07T20:37:23
+submitted_at: 2026-03-07T21:05:29
+completed_at: 2026-03-07T21:05:35
 ---
 
 # Implement Hosted Control Plane Runtime Path
