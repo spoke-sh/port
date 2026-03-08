@@ -102,6 +102,7 @@ cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact 
 cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
 cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
 cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
 ```
 
 Interpretation:
@@ -116,6 +117,28 @@ Interpretation:
   scripts
 - `port machine launch` still blocks on the unprepared PVM host kit even when
   the PVM artifact build/validate workflow passes
+- `port machine launch --machine demo` remains the preserved standard
+  Firecracker proof and should keep working independently of the PVM artifact
+  workflow
+
+Hosted PVM admission workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-aws
+```
+
+Interpretation:
+
+- `cloud-generic` is the sample hosted denial case: if you switch it to
+  `protection_mode = "pvm"`, Port marks it `malformed` with an explicit
+  placement reason because `generic-linux-node` advertises `state = "planned"`
+- `cloud-aws` is the sample hosted admission-ready case: if you switch it to
+  `protection_mode = "pvm"`, the hosted inventory contract accepts placement
+  because `aws-linux-node` advertises `state = "ready"`
+- hosted `machine launch` is still partial, so admission-ready hosted PVM
+  placement does not yet imply a shipped remote launch path
 
 ## AVF Contract
 
@@ -223,6 +246,9 @@ Current behavior:
   config.
 - `port machine launch` still supports only local Linux launch in the MVP and
   returns provider-specific guidance for remote Linux or cloud hosts.
+- hosted PVM placement is now gated explicitly before that provider guidance:
+  unplaceable hosted PVM machines fail with node readiness detail instead of
+  looking like generic transport failures.
 - `port guest exec`, `copy`, `pty`, `logs`, and `forward` now speak the shared
   guest-agent protocol through the canonical CLI and return structured results
   rendered as human-readable CLI output.

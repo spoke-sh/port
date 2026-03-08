@@ -1,0 +1,139 @@
+kernel protection mode: pvm
+kernel source: http://spec.ccfc.min.s3.amazonaws.com/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel artifact: artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+built kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/pvm at artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+validated kernel: artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+kernel protection mode: pvm
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel bytes: 44278288
+validated kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/pvm at artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+    Finished `release` profile [optimized] target(s) in 0.06s
+e2fsck 1.47.3 (8-Jul-2025)
+guest image artifact: artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: pvm
+guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent
+built guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/pvm at artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+e2fsck 1.47.3 (8-Jul-2025)
+validated guest image: artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: pvm
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/pvm at artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4
+kernel protection mode: standard
+kernel source: http://spec.ccfc.min.s3.amazonaws.com/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel artifact: artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+built kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/standard at artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+    Finished `release` profile [optimized] target(s) in 0.06s
+e2fsck 1.47.3 (8-Jul-2025)
+guest image artifact: artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent
+built guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+check[ok]: artifact:demo-kernel (required=true) - Artifact variant 'artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux' exists.
+check[ok]: artifact:demo-guest (required=true) - Artifact variant 'artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' exists.
+check[ok]: host:aws-linux (required=false) - provider 'aws' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[fail]: host:azure-linux (required=false) - provider 'azure' is explicitly unsupported for the Firecracker MVP; do not expect a working launch path. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:gcp-linux (required=false) - provider 'gcp' remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: host:generic-linux (required=false) - provider 'generic-linux' is modeled for a future remote Linux control lane, but remote launch is not implemented in the MVP. Hosted routing is modeled through control plane 'demo'.
+check[ok]: pvm:local:x86_64:host-platform (required=false) - Host 'local' matches the Linux platform required for the Firecracker/PVM host kit.
+check[ok]: pvm:local:x86_64:host-architecture (required=false) - Host architecture 'x86_64' matches the PVM host-kit requirement.
+check[fail]: pvm:local:x86_64:boot-line (required=false) - Host boot line is missing required PVM argument(s): pti=off. Reboot into the prepared host kit; the standard Firecracker lane is not a PVM fallback.
+check[fail]: pvm:local:x86_64:firecracker-binary (required=false) - Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible.
+check[fail]: pvm:local:aarch64 (required=false) - Firecracker/PVM on 'aarch64' remains research-only. Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path.
+check[ok]: control-plane:demo (required=false) - Hosted control plane 'demo' targets 'http://127.0.0.1:52973' with audience 'port-hosted-demo' and expects a bearer token from env:PORT_DEMO_TOKEN via the 'authorization' header.
+check[ok]: machine:cloud-aws (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-azure (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-gcp (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+check[ok]: machine:cloud-generic (required=false) - Machine models Firecracker/Pvm/X86_64 with compatible artifacts.
+check[ok]: machine:demo (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators should run Port on a Linux host because Firecracker local launch requires Linux and /dev/kvm.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.
+note: Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.
+machine: cloud-generic
+state: malformed
+pid: (none)
+inventory scope: hosted-fleet
+inventory owner: hosted-control-plane
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+status source: control-plane-inventory-and-node-agent-runtime
+launch route: hosted-control-plane
+inventory route: hosted-control-plane
+status route: hosted-control-plane
+stop route: hosted-control-plane
+guest route: hosted-control-plane
+runtime dir: .port/hosted/demo/cloud-generic
+config path: .port/hosted/demo/cloud-generic/firecracker-config.json
+manifest: .port/hosted/demo/cloud-generic/manifest.json
+pid file: .port/hosted/demo/cloud-generic/firecracker.pid
+firecracker log: .port/hosted/demo/cloud-generic/firecracker.log
+console stdout: .port/hosted/demo/cloud-generic/console.stdout.log
+console stderr: .port/hosted/demo/cloud-generic/console.stderr.log
+detail: control plane 'demo' cannot place machine 'cloud-generic': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+launched machine: demo
+pid: 2758580
+runtime dir: /var/tmp/tmp.4kCYXIFer1/runtime/demo
+firecracker binary: /nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker
+config path: /var/tmp/tmp.4kCYXIFer1/runtime/demo/firecracker-config.json
+firecracker log: /var/tmp/tmp.4kCYXIFer1/runtime/demo/firecracker.log
+console stdout: /var/tmp/tmp.4kCYXIFer1/runtime/demo/console.stdout.log
+console stderr: /var/tmp/tmp.4kCYXIFer1/runtime/demo/console.stderr.log
+manifest: /var/tmp/tmp.4kCYXIFer1/runtime/demo/manifest.json
+machine: demo
+state: running
+pid: 2758580
+inventory scope: local-runtime-root
+inventory owner: local-runtime-root
+lifecycle owner: local-port-runtime
+guest broker: local-runtime-transport
+status source: runtime-manifest-and-host-process
+launch route: direct-local-runtime
+inventory route: direct-local-runtime
+status route: direct-local-runtime
+stop route: direct-local-runtime
+guest route: direct-local-runtime
+runtime dir: /var/tmp/tmp.4kCYXIFer1/runtime/demo
+config path: /var/tmp/tmp.4kCYXIFer1/runtime/demo/firecracker-config.json
+manifest: /var/tmp/tmp.4kCYXIFer1/runtime/demo/manifest.json
+pid file: /var/tmp/tmp.4kCYXIFer1/runtime/demo/firecracker.pid
+firecracker log: /var/tmp/tmp.4kCYXIFer1/runtime/demo/firecracker.log
+console stdout: /var/tmp/tmp.4kCYXIFer1/runtime/demo/console.stdout.log
+console stderr: /var/tmp/tmp.4kCYXIFer1/runtime/demo/console.stderr.log
+detail: live Firecracker process matches runtime manifest
+machine: demo
+previous state: running
+current state: stopped
+pid: 2758580
+inventory scope: local-runtime-root
+lifecycle owner: local-port-runtime
+status source: runtime-manifest-and-host-process
+stop route: direct-local-runtime
+runtime dir: /var/tmp/tmp.4kCYXIFer1/runtime/demo
+detail: sent SIGTERM to pid and cleaned stale runtime sockets
+check[ok]: pvm:local:x86_64:host-platform (required=false) - Host 'local' matches the Linux platform required for the Firecracker/PVM host kit.
+check[fail]: pvm:local:x86_64:boot-line (required=false) - Host boot line is missing required PVM argument(s): pti=off. Reboot into the prepared host kit; the standard Firecracker lane is not a PVM fallback.
+check[fail]: pvm:local:x86_64:firecracker-binary (required=false) - Missing the patched PVM Firecracker binary. Set PORT_PVM_FIRECRACKER_BINARY or put 'firecracker-pvm' on PATH; the standard firecracker binary is not compatible.
+machine: cloud-generic
+state: malformed
+detail: control plane 'demo' cannot place machine 'cloud-generic': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+detail: control plane 'demo' cannot place machine 'cloud-generic': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+detail: control plane 'demo' cannot place machine 'cloud-generic': machine 'cloud-generic' requires PVM on x86_64 via firecracker; no hosted nodes satisfy that requirement; rejected nodes: generic-linux-node (pvm-ready state is required but node advertises planned)
+launched machine: demo
+runtime dir: /var/tmp/tmp.4kCYXIFer1/runtime/demo
+machine: demo
+inventory owner: local-runtime-root
+machine: demo
+current state: stopped

@@ -58,6 +58,10 @@ if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q 'port-gues
   echo "guest image init does not launch port-guest-agent" >&2
   exit 1
 fi
+if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q '/etc/port-protection-mode'; then
+  echo "guest image init does not load the protection-mode marker" >&2
+  exit 1
+fi
 
 guest_image_size="$(stat -c '%s' "$guest_image_path")"
 printf 'validated guest image: %s\n' "$guest_image_path"

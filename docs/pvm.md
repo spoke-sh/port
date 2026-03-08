@@ -107,6 +107,46 @@ The same operator workflow should also leave the standard Firecracker lane
 usable. Building or validating `x86_64/firecracker/pvm` artifacts does not
 replace the standard `x86_64/firecracker/standard` artifacts or their paths.
 
+## Hosted Admission Workflow
+
+Hosted PVM work is now explicit about placement versus launch:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+```
+
+Interpret those sample hosts this way:
+
+- `cloud-generic` is the sample denial path. If you change it to
+  `protection_mode = "pvm"`, Port reports the machine as `malformed` with
+  placement detail because `generic-linux-node` advertises a PVM lane in
+  `planned` state rather than `ready`.
+- `cloud-aws` is the sample admission-ready path. If you change it to
+  `protection_mode = "pvm"`, Port accepts hosted placement because
+  `aws-linux-node` advertises a `ready` x86_64 PVM lane.
+- hosted `machine launch` is still a follow-on runtime slice. Admission-ready
+  placement means the hosted inventory and control-plane contracts are
+  coherent; it does not yet mean Port can boot the remote PVM VM.
+
+## Preserved Standard Lane
+
+The PVM workflow is additive. The standard Firecracker lane must stay usable
+while PVM work continues:
+
+```bash
+port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode standard
+port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode standard
+port --config examples/port.toml machine launch --machine demo
+```
+
+Those commands prove that:
+
+- standard Firecracker artifacts remain separate from the PVM artifact kit
+- the shipped local Linux launch lane is still `standard`, not PVM
+- PVM admission failures must never silently fall back to the standard lane
+
 ## arm64 Boundary
 
 Port keeps the arm64 decision explicit:
@@ -132,6 +172,7 @@ The implementation order after this contract is:
    artifacts explicitly.
 5. Teach the hosted/node-agent lane how to place workloads only on hosts that
    advertise the PVM host kit.
+6. Turn hosted placement readiness into a real hosted launch path.
 
 ## Research Basis
 

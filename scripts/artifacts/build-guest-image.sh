@@ -116,6 +116,7 @@ mount_if_needed sysfs sysfs /sys
 mkdir -p /run/port /tmp /var/log
 
 guest_control_port=7000
+protection_mode="$(cat /etc/port-protection-mode 2>/dev/null || echo unknown)"
 for token in $(cat /proc/cmdline); do
   case "$token" in
     port.guest_control_port=*)

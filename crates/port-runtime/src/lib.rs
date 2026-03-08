@@ -2910,13 +2910,15 @@ fn run_artifact_pipeline(
 fn ensure_native_build_lane(architecture: MachineArchitecture) -> Result<()> {
     let native = resolve_machine_architecture(MachineArchitecture::Native)
         .context("failed to determine host architecture")?;
-    if architecture == native {
+    let requested = resolve_machine_architecture(architecture)
+        .with_context(|| format!("failed to resolve requested architecture '{architecture:?}'"))?;
+    if requested == native {
         Ok(())
     } else {
         bail!(
             "artifact build and validate pipelines currently run only for the native host architecture {:?}; requested {:?}",
             native,
-            architecture
+            requested
         )
     }
 }
@@ -2938,16 +2940,18 @@ fn resolve_artifact_metadata(
         .artifacts
         .lookup_named(request.name)
         .with_context(|| format!("unknown artifact '{}'", request.name))?;
-    let variant = spec
-        .variant(
-            request.architecture,
-            request.substrate,
-            request.protection_mode,
+    let architecture = resolve_machine_architecture(request.architecture).with_context(|| {
+        format!(
+            "failed to resolve requested architecture '{:?}'",
+            request.architecture
         )
+    })?;
+    let variant = spec
+        .variant(architecture, request.substrate, request.protection_mode)
         .with_context(|| {
             format!(
                 "artifact '{}' has no variant for {:?}/{:?}/{:?}",
-                request.name, request.architecture, request.substrate, request.protection_mode
+                request.name, architecture, request.substrate, request.protection_mode
             )
         })?;
     Ok(ArtifactMetadata {
@@ -3982,10 +3986,11 @@ mod tests {
         LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
         StopResult, artifact_script, build_firecracker_config, collect_doctor_report,
         collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
-        execute_guest_operation, launch_local_machine, list_machines, machine_monitor,
-        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
-        read_pid_file, repo_root, resolve_artifact_metadata, select_firecracker_binary,
-        serve_control_plane, serve_node_agent, stop_machine,
+        ensure_native_build_lane, execute_guest_operation, launch_local_machine, list_machines,
+        machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, read_pid_file, repo_root, resolve_artifact_metadata,
+        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
+        serve_node_agent, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, GuestOperation, OperationResult, RequestEnvelope,
@@ -4306,6 +4311,38 @@ mod tests {
             pvm.cache_path,
             PathBuf::from(".port/cache/demo-fs/port/demo-kernel/v1/x86_64/firecracker/pvm/vmlinux")
         );
+    }
+
+    #[test]
+    fn resolve_artifact_metadata_accepts_the_native_alias() {
+        let config = PortConfig::sample();
+
+        let native = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::Native,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: port_model::ProtectionMode::Standard,
+            },
+        )
+        .expect("native selector should resolve");
+
+        assert_eq!(native.selector.architecture, MachineArchitecture::X86_64);
+        assert_eq!(
+            native.path,
+            PathBuf::from("artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux")
+        );
+    }
+
+    #[test]
+    fn native_artifact_build_lane_accepts_the_native_alias() {
+        ensure_native_build_lane(MachineArchitecture::Native)
+            .expect("native alias should resolve to the host architecture");
+        let concrete = resolve_machine_architecture(MachineArchitecture::Native)
+            .expect("host architecture should resolve");
+        ensure_native_build_lane(concrete)
+            .expect("concrete native architecture should remain accepted");
     }
 
     #[test]

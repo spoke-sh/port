@@ -69,6 +69,17 @@ PVM foundation workflow:
   port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for the future runtime lane.
   Firecracker/PVM launch remains blocked on a prepared host kit and a patched `firecracker-pvm` binary even after the artifact commands pass.
+Hosted PVM admission workflow:
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-generic
+  Switch `cloud-generic` to `protection_mode = \"pvm\"` to see an explicit hosted placement denial against `generic-linux-node state = planned`.
+  Switch `cloud-aws` to `protection_mode = \"pvm\"` to see the hosted admission-ready inventory path against `aws-linux-node state = ready`.
+  Hosted launch is still partial, so admission-ready placement does not yet imply a shipped hosted runtime path.
+Standard lane preservation:
+  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode standard
+  port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode standard
+  port --config examples/port.toml machine launch --machine demo
+  PVM admission failures must never silently fall back to the standard Firecracker lane.
   Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
   The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
 Cloud Linux:

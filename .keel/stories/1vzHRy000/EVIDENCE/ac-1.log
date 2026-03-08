@@ -1,0 +1,460 @@
+Port manages microVM-backed workloads through one canonical CLI and shared machine model.
+Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud
+Hypervisor, and Apple Virtualization Framework are modeled explicitly as planned or research-backed
+lanes; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics;
+macOS and Windows operators use Linux, WSL, or future substrate-specific workflows.
+
+Usage: port [OPTIONS] <COMMAND>
+
+Commands:
+  doctor         Inspect platform support and host requirements
+  artifacts      Build and validate kernel or guest artifacts
+  machine        Launch and inspect Port-managed machines
+  guest          Reach guest agent capabilities
+  service        Manage machine-bound secrets, services, and sandboxes
+  control-plane  Serve hosted control-plane endpoints
+  node-agent     Serve hosted node-agent endpoints
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>
+          Load a Port model from a TOML file instead of using the built-in sample
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Example assumptions:
+  Run these sample-config commands from the repository root.
+  Local artifact and launch workflows require the needed host tools to be available in the execution
+  environment.
+  Treat `port doctor` as the gate for whether local `port machine launch` can succeed.
+
+Runnable local workflow:
+  port doctor
+  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+  port --config examples/port.toml artifacts build --artifact demo-guest --architecture native
+  port --config examples/port.toml artifacts push --artifact demo-kernel --architecture native
+  port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture native
+  port --config examples/port.toml doctor
+  port --config examples/port.toml machine launch --machine demo
+  port --config examples/port.toml machine list
+  port --config examples/port.toml machine status --machine demo
+  port --config examples/port.toml machine monitor --machine demo
+  port --config examples/port.toml machine top --machine demo
+  port --config examples/port.toml machine stop --machine demo
+
+Guest workflow examples:
+  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
+  port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source
+  ./host.txt --destination /workspace/host.txt
+  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log
+  --tail-lines 50
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target
+  127.0.0.1:80
+  port --config examples/port.toml guest forward --machine demo --listen unix:/tmp/port-demo.sock
+  --target unix:/var/run/app.sock
+  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target
+  127.0.0.1:80 --lifecycle detached --name demo-web
+Service workflow examples:
+  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value
+  s3cr3t
+  port --config examples/port.toml service apply --machine cloud-aws --name web --kind service
+  --secret API_TOKEN=demo-token -- /app/web --listen :8080
+  port --config examples/port.toml service apply --machine cloud-aws --name buildbox --kind sandbox
+  --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
+  port --config examples/port.toml service list --machine cloud-aws
+  port --config examples/port.toml service status --machine cloud-aws --name web
+  port --config examples/port.toml service stop --machine cloud-aws --name web
+  `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs
+  through the live guest transport.
+  `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket
+  listeners through the same command family.
+  Guest-side `forward --target` addresses still depend on the guest network state. In the sample
+  guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec
+  --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
+
+Platform Support:
+  Linux: local Firecracker launch is supported when port doctor passes.
+  macOS: run Port on a Linux host today; Apple Virtualization Framework is the first-class planned
+  macOS lane.
+  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch
+  is supported.
+Execution Lanes:
+  Firecracker + standard on Linux is the current shipped lane.
+  Firecracker + pvm on x86_64 is planned for cloud cost control and depends on a dedicated host kit
+  plus pvm artifact variants.
+  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker
+  runtime path.
+PVM foundation workflow:
+  port --config examples/port.toml doctor
+  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64
+  --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64
+  --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64
+  --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64
+  --substrate firecracker --protection-mode pvm
+  Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for the future runtime lane.
+  Firecracker/PVM launch remains blocked on a prepared host kit and a patched `firecracker-pvm`
+  binary even after the artifact commands pass.
+Hosted PVM admission workflow:
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane
+  demo --bind 127.0.0.1:7040
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-generic
+  Switch `cloud-generic` to `protection_mode = "pvm"` to see an explicit hosted placement denial
+  against `generic-linux-node state = planned`.
+  Switch `cloud-aws` to `protection_mode = "pvm"` to see the hosted admission-ready inventory path
+  against `aws-linux-node state = ready`.
+  Hosted launch is still partial, so admission-ready placement does not yet imply a shipped hosted
+  runtime path.
+Standard lane preservation:
+  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64
+  --substrate firecracker --protection-mode standard
+  port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64
+  --substrate firecracker --protection-mode standard
+  port --config examples/port.toml machine launch --machine demo
+  PVM admission failures must never silently fall back to the standard Firecracker lane.
+  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
+  The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial
+  ports for console capture.
+Cloud Linux:
+  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port
+  doctor.
+  port machine launch remains local-Linux-only in the MVP and returns provider-aware guidance for
+  remote hosts.
+Artifact Mobility:
+  `port artifacts build` and `validate` materialize one canonical local variant selected by
+  architecture, substrate, and protection mode.
+  `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config
+  ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
+Hosted Control:
+  Local Port still owns launch and guest-runtime lifecycle directly today.
+  `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine
+  and guest routes.
+  Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind
+  127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal
+  routes from one hosted node runtime root.
+  Hosted demo flow:
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node
+    aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane
+    demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws --
+    /bin/sh -lc 'uname -a'`
+  Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts
+  plus node-agent runtime roots while preserving the current machine and guest vocabulary.
+  The sample config now declares `[control_planes.demo]` with endpoint
+  `https://port.example.internal`.
+  Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the
+  `authorization` header.
+  Demo control-plane servers bind explicit node-agent endpoints with `--node-binding
+  <node>=<endpoint>,<token>`.
+  Remote/cloud sample hosts now use `mode = "hosted-control-plane"` and `control_plane = "demo"`
+  instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime
+  slice has a concrete node-agent state location.
+  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and
+  hosted-control-plane machines; hosted entries resolve through node inventory and surface
+  unresolved hosted inventory as `malformed` instead of hiding it.
+  Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control
+  plane and node agent while keeping the existing guest protocol unchanged.
+  Hosted `guest copy` in the single-node demo still assumes the referenced host paths are visible on
+  the node host; streamed remote file transport remains follow-on work.
+  Hosted `guest forward` still uses the repo-local guest transport lane for its listener lifecycle
+  while streamed hosted forwarding remains follow-on work.
+  `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached
+  forward manifests.
+  `port service secret` and `port service apply|list|status|stop` now store service and sandbox
+  specs under that same resolved runtime owner while keeping real hosted execution as follow-on
+  work.
+Service Control:
+  `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox
+  work on the same service surface instead of inventing a second runtime model.
+  Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime
+  root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
+  `port service apply` persists desired state, guest command, secret bindings, and hosted routing
+  context; real guest execution and teardown remain explicit follow-on work.
+  `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service
+  request construction.
+  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus
+  aarch64 research-only decision.
+  See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta
+  workflow contract.
+  Azure remains an explicitly unsupported Firecracker provider lane.
+## PVM Contract
+
+Port's PVM position is intentionally concrete:
+
+- keep Firecracker/PVM on `x86_64` as the first implementation lane
+- treat it as a dedicated host kit plus artifact kit, not just a model flag
+- keep Firecracker/PVM on `aarch64` research-only until there is a supportable
+  Firecracker runtime path
+
+The full host-kit, artifact-kit, validation, and follow-on implementation
+contract lives in [`docs/pvm.md`](docs/pvm.md).
+
+Repository-local PVM foundation workflow:
+
+```bash
+cargo run -p port-cli -- --config examples/port.toml doctor
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
+```
+
+Interpretation:
+
+- passing artifact commands mean the `x86_64/firecracker/pvm` artifact kit is
+  materialized locally
+- `port doctor` now emits `pvm:local:x86_64:*` checks for platform,
+  architecture, boot-line, and patched-binary readiness
+- a missing `pti=off` boot arg or `firecracker-pvm` binary is an explicit host
+  kit failure, not a signal to fall back to the standard Firecracker lane
+- `aarch64/firecracker/pvm` remains research-only in the model, docs, and
+  scripts
+- `port machine launch` still blocks on the unprepared PVM host kit even when
+  the PVM artifact build/validate workflow passes
+- `port machine launch --machine demo` remains the preserved standard
+  Firecracker proof and should keep working independently of the PVM artifact
+  workflow
+
+Hosted PVM admission workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-aws
+```
+
+Interpretation:
+
+- `cloud-generic` is the sample hosted denial case: if you switch it to
+  `protection_mode = "pvm"`, Port marks it `malformed` with an explicit
+  placement reason because `generic-linux-node` advertises `state = "planned"`
+- `cloud-aws` is the sample hosted admission-ready case: if you switch it to
+  `protection_mode = "pvm"`, the hosted inventory contract accepts placement
+  because `aws-linux-node` advertises `state = "ready"`
+- hosted `machine launch` is still partial, so admission-ready hosted PVM
+  placement does not yet imply a shipped remote launch path
+
+## AVF Contract
+## Hosted Admission Workflow
+
+Hosted PVM work is now explicit about placement versus launch:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+```
+
+Interpret those sample hosts this way:
+
+- `cloud-generic` is the sample denial path. If you change it to
+  `protection_mode = "pvm"`, Port reports the machine as `malformed` with
+  placement detail because `generic-linux-node` advertises a PVM lane in
+  `planned` state rather than `ready`.
+- `cloud-aws` is the sample admission-ready path. If you change it to
+  `protection_mode = "pvm"`, Port accepts hosted placement because
+  `aws-linux-node` advertises a `ready` x86_64 PVM lane.
+- hosted `machine launch` is still a follow-on runtime slice. Admission-ready
+  placement means the hosted inventory and control-plane contracts are
+  coherent; it does not yet mean Port can boot the remote PVM VM.
+
+## Preserved Standard Lane
+
+The PVM workflow is additive. The standard Firecracker lane must stay usable
+while PVM work continues:
+
+```bash
+port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode standard
+port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode standard
+port --config examples/port.toml machine launch --machine demo
+```
+
+Those commands prove that:
+
+- standard Firecracker artifacts remain separate from the PVM artifact kit
+- the shipped local Linux launch lane is still `standard`, not PVM
+- PVM admission failures must never silently fall back to the standard lane
+
+## arm64 Boundary
+
+Port keeps the arm64 decision explicit:
+
+- upstream arm64 work around protected virtualization, pKVM, and protected
+  guest memory is relevant research input
+- that upstream activity does not yet equal a shippable Firecracker/PVM lane
+  for Port
+- Port will not claim arm64 Firecracker/PVM support in the CLI, model,
+  artifacts, or docs until the host kit, VMM path, artifact kit, and runtime
+  proof all exist
+
+This is a hard product boundary, not a soft maybe.
+
+## Follow-On Work
+# Hosted PVM admission example:
+#   switching [machines.cloud-generic] to protection_mode = "pvm" should now
+#   fail placement because this node only advertises a planned PVM lane.
+host = "generic-linux"
+runtime_root = "runtime/hosted/generic-linux-node"
+notes = ["Generic Linux is the baseline hosted node contract before scheduler policy exists."]
+
+[nodes.generic-linux-node.capabilities]
+providers = ["generic-linux"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.generic-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the sample inventory."]
+
+[nodes.aws-linux-node]
+# Hosted PVM admission-ready example:
+#   switching [machines.cloud-aws] to protection_mode = "pvm" should pass the
+#   hosted placement gate because this node advertises a ready PVM lane, even
+#   though hosted launch remains a follow-on runtime slice.
+host = "aws-linux"
+runtime_root = "runtime/hosted/aws-linux-node"
+notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
+
+[nodes.aws-linux-node.capabilities]
+providers = ["aws"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.aws-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "ready"
+notes = ["AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit."]
+
+[nodes.gcp-linux-node]
+host = "gcp-linux"
+runtime_root = "runtime/hosted/gcp-linux-node"
+notes = ["GCP is modeled as a hosted node so placement and lifecycle work can remain provider-aware."]
+
+[nodes.gcp-linux-node.capabilities]
+providers = ["gcp"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.gcp-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+notes = ["GCP remains modeled as a planned PVM node until a prepared host kit is explicitly advertised."]
+
+[host_groups.remote-linux]
+placement = "explicit-membership"
+nodes = ["generic-linux-node", "aws-linux-node", "gcp-linux-node"]
+notes = ["This group is the first hosted placement boundary; later scheduler, monitoring, and services work should reuse it instead of inventing another inventory axis."]
+
+[host_groups.aws-builders]
+placement = "explicit-membership"
+nodes = ["aws-linux-node"]
+notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
+
+[machines.demo]
+# Standard shipped lane:
+#   keep this machine on protection_mode = "standard" when you want the real
+#   local Firecracker launch proof while PVM remains a gated admission lane.
+host = "local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.demo.guest]
+vsock_cid = 52
+control_port = 7000
+console_log = "runtime/demo/console.log"
+
+[machines.cloud-generic]
+# Hosted denial example:
+#   change protection_mode to "pvm" to see Port reject placement because
+#   generic-linux-node only advertises state = "planned".
+host = "generic-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-generic.guest]
+vsock_cid = 60
+control_port = 7000
+console_log = "runtime/cloud-generic/console.log"
+
+[machines.cloud-aws]
+# Hosted admission-ready example:
+#   change protection_mode to "pvm" to model a hosted machine whose node
+#   inventory advertises state = "ready" for x86_64 Firecracker/PVM.
+host = "aws-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-aws.guest]
+vsock_cid = 61
+control_port = 7000
+console_log = "runtime/cloud-aws/console.log"
+
+[machines.cloud-gcp]
+  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker
+Hosted PVM admission workflow:
+Standard lane preservation:
+| Firecracker | `standard` | `x86_64`, `aarch64`, or `native` | Supported today | This is the real Linux execution lane behind today's `port machine launch` workflow |
+| Firecracker | `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path here |
+| Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
+- keep Firecracker/PVM on `aarch64` research-only until there is a supportable
+- `aarch64/firecracker/pvm` remains research-only in the model, docs, and
+Hosted PVM admission workflow:
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-aws
+- `cloud-generic` is the sample hosted denial case: if you switch it to
+- `cloud-aws` is the sample hosted admission-ready case: if you switch it to
+port artifacts build --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+port artifacts validate --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+port artifacts push --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+| `generic-linux` | `cloud-generic` | Partial | `port doctor` reports the future remote Linux lane; `port machine launch` tells you to run Port on that Linux host directly |
+| `aws` | `cloud-aws` | Partial | `port doctor` reports AWS as a justified future lane; `port machine launch --machine cloud-aws` fails with AWS-specific guidance |
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
+- `architecture = "native" | "x86_64" | "aarch64"`
+## Hosted Admission Workflow
+## Preserved Standard Lane
+## arm64 Boundary
+# `aarch64` Firecracker/PVM remains research-only until Port has a supportable
+decision = "research-only"
+operator_prerequisites = ["Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path."]
+# Hosted PVM admission example:
+# Hosted PVM admission-ready example:
+# Standard shipped lane:

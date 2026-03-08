@@ -170,6 +170,9 @@ name = "artifact-variants"
 blocking = true
 detail = "Confirm both kernel and guest-image artifacts exist for x86_64/firecracker/pvm and pass their variant-specific validation steps."
 
+# Keep this boundary explicit in the sample config too:
+# `aarch64` Firecracker/PVM remains research-only until Port has a supportable
+# host-kit, VMM, artifact, and runtime contract.
 [[hosts.local.firecracker.pvm_lanes]]
 architecture = "aarch64"
 decision = "research-only"
@@ -233,6 +236,9 @@ local_launch = false
 notes = ["Azure is modeled explicitly through the demo hosted control plane so diagnostics can report it as unsupported."]
 
 [nodes.generic-linux-node]
+# Hosted PVM admission example:
+#   switching [machines.cloud-generic] to protection_mode = "pvm" should now
+#   fail placement because this node only advertises a planned PVM lane.
 host = "generic-linux"
 runtime_root = "runtime/hosted/generic-linux-node"
 notes = ["Generic Linux is the baseline hosted node contract before scheduler policy exists."]
@@ -250,6 +256,10 @@ state = "planned"
 notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the sample inventory."]
 
 [nodes.aws-linux-node]
+# Hosted PVM admission-ready example:
+#   switching [machines.cloud-aws] to protection_mode = "pvm" should pass the
+#   hosted placement gate because this node advertises a ready PVM lane, even
+#   though hosted launch remains a follow-on runtime slice.
 host = "aws-linux"
 runtime_root = "runtime/hosted/aws-linux-node"
 notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
@@ -294,6 +304,9 @@ nodes = ["aws-linux-node"]
 notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
 
 [machines.demo]
+# Standard shipped lane:
+#   keep this machine on protection_mode = "standard" when you want the real
+#   local Firecracker launch proof while PVM remains a gated admission lane.
 host = "local"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
@@ -311,6 +324,9 @@ control_port = 7000
 console_log = "runtime/demo/console.log"
 
 [machines.cloud-generic]
+# Hosted denial example:
+#   change protection_mode to "pvm" to see Port reject placement because
+#   generic-linux-node only advertises state = "planned".
 host = "generic-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
@@ -328,6 +344,9 @@ control_port = 7000
 console_log = "runtime/cloud-generic/console.log"
 
 [machines.cloud-aws]
+# Hosted admission-ready example:
+#   change protection_mode to "pvm" to model a hosted machine whose node
+#   inventory advertises state = "ready" for x86_64 Firecracker/PVM.
 host = "aws-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"
