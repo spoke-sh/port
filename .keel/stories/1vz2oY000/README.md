@@ -2,11 +2,12 @@
 id: 1vz2oY000
 title: Add Machine Inventory Status And Stop
 type: feat
-status: in-progress
+status: needs-human-verification
 created_at: 2026-03-07T17:20:14
-updated_at: 2026-03-07T17:40:53
+updated_at: 2026-03-07T17:52:04
 scope: 1vz2eV000/1vz2ky000
 started_at: 2026-03-07T17:40:53
+submitted_at: 2026-03-07T17:52:04
 ---
 
 # Add Machine Inventory Status And Stop
