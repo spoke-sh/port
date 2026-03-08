@@ -34,6 +34,7 @@
           rust
           pkgs.just
           pkgs.cargo-nextest
+          pkgs.cargo-llvm-cov
           keelPkg
           pkgs.curl
         ];

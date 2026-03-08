@@ -611,6 +611,18 @@ The current Rust verification command is:
 cargo test
 ```
 
+Common repository tasks are also available through `just` once you enter the
+dev shell:
+
+```bash
+just doctor
+just flow
+just test
+just demo-doctor
+just demo-build-kernel protection=pvm architecture=x86-64
+just demo-build-guest protection=pvm architecture=x86-64
+```
+
 ## License
 
 Port is available under the [MIT License](LICENSE).
