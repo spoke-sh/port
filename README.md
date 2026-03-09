@@ -360,8 +360,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted `guest copy` now transfers bytes through the control-plane and
   node-agent path using the shared guest copy protocol, so the demo lane no
   longer assumes the client host paths are visible on the selected node.
-- Hosted `guest forward` still uses the repo-local guest transport lane for its
-  listener lifecycle while streamed hosted forwarding remains follow-on work.
+- Hosted `guest forward` now starts a node-owned listener through the hosted
+  control-plane and node-agent path. Hosted detached lifecycle management for
+  `forward` remains follow-on work.
 - Hosted inventory that lacks a matching node runtime binding currently
   fails with explicit control-plane and route context instead of being silently
   dropped.
@@ -395,10 +396,10 @@ bash scripts/hosted-demo.sh
 That demo script prepares temporary hosted server and client configs, starts
 `port-guest-agent`, `port node-agent serve`, and `port control-plane serve`,
 then runs canonical hosted `port machine status`, `port guest exec`,
-`port guest copy`, and `port guest logs` commands end-to-end. It also prints
-the current single-node demo limits: hosted `copy` still assumes node-visible
-host paths, and hosted `forward` still keeps its listener lifecycle on the
-repo-local guest transport path.
+`port guest copy`, and `port guest logs` commands end-to-end. Hosted
+`guest forward` now starts a node-owned listener through that same control-
+plane and node-agent path, while hosted detached lifecycle management remains
+follow-on work.
 
 ## Linux Local Workflow
 

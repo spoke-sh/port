@@ -301,8 +301,9 @@ What is runnable today:
 - hosted `guest copy` now relays bytes through the control plane and node
   agent using the shared guest copy protocol, so client-side host paths no
   longer need to be visible on the selected node
-- hosted `guest forward` still keeps its listener lifecycle on the repo-local
-  guest transport lane while streamed hosted forwarding remains follow-on work
+- hosted `guest forward` now starts a node-owned listener through the live
+  hosted control-plane and node-agent path while keeping the same canonical
+  command family
 - hosted `service secret put|list|remove` now stores machine-scoped secret
   references under the resolved runtime owner instead of inventing a separate
   hosted secret store
@@ -383,15 +384,15 @@ That means hosted Port still uses the same guest-operation model for `exec`,
 `copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
 stream.
 
-Hosted `guest forward` keeps the same command family, but the first live hosted
-lane does not yet stream that listener lifecycle over the hosted HTTP path.
-Foreground and detached listener management still depend on the repo-local
-guest transport implementation.
+Hosted `guest forward` keeps the same command family and now starts a
+node-owned listener through the hosted control-plane and node-agent path.
+Hosted detached lifecycle management does not ship yet, so `--list`, `--stop`,
+and `--lifecycle detached` remain explicit follow-on work for hosted lanes.
 
 What still remains after this runtime slice:
 
 - retries and richer client policies on top of the shipped transport
-- streamed hosted file transfer and hosted forward lifecycle transport
+- hosted detached forward lifecycle management
 - advanced auth/tenancy work on top of the same API paths
 
 ## Hosted API Shape

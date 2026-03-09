@@ -6,7 +6,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use port_agent_protocol::{
-    CopyDirection, ExecRequest, GuestOperation, LogsRequest, OperationResult, PtyRequest,
+    CopyDirection, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, OperationResult,
+    PtyRequest,
 };
 use port_model::{
     ExecutionSubstrate, HostConnection, MachineArchitecture, PortConfig, ProtectionMode,
@@ -119,8 +120,8 @@ Hosted Control:
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
   `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
-  Hosted `guest copy` in the single-node demo still assumes the referenced host paths are visible on the node host; streamed remote file transport remains follow-on work.
-  Hosted `guest forward` still uses the repo-local guest transport lane for its listener lifecycle while streamed hosted forwarding remains follow-on work.
+  Hosted `guest copy` now streams bytes through the live control-plane and node-agent path.
+  Hosted `guest forward` now starts a node-owned listener through the live control-plane and node-agent path; detached hosted lifecycle management remains follow-on work.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
   `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
 Service Control:
@@ -1413,7 +1414,13 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
             stop,
         } => {
             ensure_machine_exists(config, &machine)?;
+            let hosted = machine_uses_hosted_control_plane(config, &machine)?;
             if list {
+                if hosted {
+                    bail!(
+                        "hosted guest forward does not support --list yet; inspect node-owned forward state through `port machine monitor` or `top`"
+                    );
+                }
                 if stop {
                     bail!("--list and --stop are mutually exclusive");
                 }
@@ -1423,6 +1430,11 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
                 return list_detached_forwards(config, &machine, &runtime_root);
             }
             if stop {
+                if hosted {
+                    bail!(
+                        "hosted guest forward does not support --stop yet; node-owned detached lifecycle management remains follow-on work"
+                    );
+                }
                 if listen.is_some() || target.is_some() {
                     bail!("--stop does not accept --listen or --target");
                 }
@@ -1434,6 +1446,36 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
 
             let listen = listen.context("forward serve requires --listen")?;
             let target = target.context("forward serve requires --target")?;
+            if hosted {
+                if lifecycle == ForwardLifecycleArg::Detached {
+                    bail!(
+                        "hosted guest forward does not support `--lifecycle detached` yet; use the default hosted start path"
+                    );
+                }
+                if name.is_some() {
+                    bail!(
+                        "hosted guest forward does not accept `--name` until detached hosted lifecycle management ships"
+                    );
+                }
+                let result = port_runtime::execute_guest_operation(
+                    config,
+                    GuestRequest {
+                        machine_name: &machine,
+                        runtime_root: &runtime_root,
+                        operation: GuestOperation::Forward(ForwardRequest {
+                            listen: listen.clone(),
+                            target: target.clone(),
+                        }),
+                    },
+                )?;
+                let OperationResult::Forward(result) = result else {
+                    bail!("unexpected guest forward result: {result:?}");
+                };
+                println!("forward listening: {}", result.listen);
+                println!("forward target: {}", result.target);
+                println!("forward lifecycle: hosted-control-plane");
+                return Ok(());
+            }
             match lifecycle {
                 ForwardLifecycleArg::Foreground => {
                     let session = port_runtime::prepare_guest_forward(

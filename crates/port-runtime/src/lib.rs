@@ -3960,14 +3960,14 @@ pub fn execute_guest_operation(
     config: &PortConfig,
     request: GuestRequest<'_>,
 ) -> Result<OperationResult> {
-    if matches!(
-        &request.operation,
-        GuestOperation::Copy(_) | GuestOperation::Forward(_)
-    ) {
+    let hosted = machine_is_hosted(config, request.machine_name)?;
+    if matches!(&request.operation, GuestOperation::Copy(_))
+        || (matches!(&request.operation, GuestOperation::Forward(_)) && !hosted)
+    {
         bail!("copy and forward use dedicated runtime flows");
     }
 
-    if machine_is_hosted(config, request.machine_name)? {
+    if hosted {
         return hosted_control_plane_guest_operation(config, request);
     }
 
@@ -4329,9 +4329,13 @@ fn hosted_control_plane_guest_operation(
                 .logs(request.machine_name, logs)
                 .context("failed to encode hosted guest logs request")?,
         ),
-        GuestOperation::Copy(_) | GuestOperation::Forward(_) => {
-            bail!("copy and forward use dedicated runtime flows");
-        }
+        GuestOperation::Forward(forward) => client.execute_json(
+            client
+                .guest()
+                .forward(request.machine_name, forward)
+                .context("failed to encode hosted guest forward request")?,
+        ),
+        GuestOperation::Copy(_) => bail!("copy uses a dedicated runtime flow"),
     }
     .map_err(|error| {
         anyhow!(
@@ -5506,8 +5510,8 @@ mod tests {
         serve_node_agent, stop_machine,
     };
     use port_agent_protocol::{
-        CopyDirection, ExecRequest, ExecResult, GuestOperation, LogsRequest, LogsResult,
-        OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind,
+        CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
+        LogsResult, OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind,
         StreamResponseFrame, read_frame, write_frame,
     };
     use port_hosted_protocol::{HostedError, HostedRouteContext};
@@ -6844,10 +6848,8 @@ exec sleep 30
             runtime.block_on(async move {
                 let listener =
                     TcpListener::from_std(listener).expect("listener should convert to tokio");
-                let router = Router::new().route(
-                    "/v1/machines/{machine}/guest:copy:stream",
-                    post(handler),
-                );
+                let router =
+                    Router::new().route("/v1/machines/{machine}/guest:copy:stream", post(handler));
                 let _ = axum::serve(listener, router).await;
             });
         });
@@ -6965,6 +6967,177 @@ exec sleep 30
         assert!(message.contains("guest:copy:stream"), "{message}");
         assert!(
             message.contains("stream route deliberately unavailable"),
+            "{message}"
+        );
+        assert!(message.contains("control-plane=demo"), "{message}");
+        assert!(message.contains("machine=cloud-aws"), "{message}");
+        assert!(message.contains("node=aws-linux-node"), "{message}");
+        assert!(
+            message.contains("/runtime/hosted/aws-linux-node/cloud-aws"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn hosted_guest_forward_routes_through_live_control_plane() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("forward accept");
+            let reader_stream = stream.try_clone().expect("forward clone");
+            let mut reader = BufReader::new(reader_stream);
+            let request: RequestEnvelope = read_frame(&mut reader).expect("forward request");
+            let GuestOperation::Forward(request) = request.operation else {
+                panic!("unexpected hosted forward operation");
+            };
+            assert_eq!(request.target, "127.0.0.1:8081");
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Bytes,
+                    size_bytes: None,
+                },
+            )
+            .expect("forward accepted should encode");
+            stream
+                .write_all(b"ready")
+                .expect("forward eager bytes should write");
+            stream.flush().expect("forward eager bytes should flush");
+            let mut echoed = [0_u8; 32];
+            let len = reader.read(&mut echoed).expect("forward bytes should read");
+            stream
+                .write_all(&echoed[..len])
+                .expect("forward bytes should echo");
+        });
+
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        let result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Forward(ForwardRequest {
+                    listen: String::from("127.0.0.1:0"),
+                    target: String::from("127.0.0.1:8081"),
+                }),
+            },
+        )
+        .expect("hosted guest forward should succeed");
+
+        let OperationResult::Forward(result) = result else {
+            panic!("unexpected hosted forward result: {result:?}");
+        };
+        let mut forwarded = None;
+        for _ in 0..100 {
+            match TcpStream::connect(&result.listen) {
+                Ok(stream) => {
+                    forwarded = Some(stream);
+                    break;
+                }
+                Err(_) => thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        let mut forwarded = forwarded.expect("should connect to hosted forwarded listener");
+        let mut eager = [0_u8; 5];
+        forwarded
+            .read_exact(&mut eager)
+            .expect("forward eager bytes should read");
+        assert_eq!(&eager, b"ready");
+        forwarded
+            .write_all(b"hosted-forward-ok")
+            .expect("forward write");
+        forwarded
+            .shutdown(Shutdown::Write)
+            .expect("forward shutdown");
+        let mut echoed = Vec::new();
+        forwarded
+            .read_to_end(&mut echoed)
+            .expect("forward read should complete");
+        assert_eq!(echoed, b"hosted-forward-ok");
+
+        server
+            .join()
+            .expect("hosted forward server thread should complete");
+    }
+
+    #[test]
+    fn hosted_guest_forward_errors_include_route_context() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        async fn handler(AxumPath(machine): AxumPath<String>) -> (StatusCode, Json<HostedError>) {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(HostedError {
+                    route: Some(HostedRouteContext {
+                        control_plane: Some(String::from("demo")),
+                        machine_name: Some(machine),
+                        node_name: Some(String::from("aws-linux-node")),
+                        runtime_root: Some(PathBuf::from(
+                            "/runtime/hosted/aws-linux-node/cloud-aws",
+                        )),
+                        ..HostedRouteContext::default()
+                    }),
+                    message: String::from("forward route deliberately unavailable"),
+                }),
+            )
+        }
+
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should become nonblocking");
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            runtime.block_on(async move {
+                let listener =
+                    TcpListener::from_std(listener).expect("listener should convert to tokio");
+                let router =
+                    Router::new().route("/v1/machines/{machine}/guest:forward", post(handler));
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{addr}");
+
+        let error = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Forward(ForwardRequest {
+                    listen: String::from("127.0.0.1:0"),
+                    target: String::from("127.0.0.1:8081"),
+                }),
+            },
+        )
+        .expect_err("hosted guest forward should surface the hosted route failure");
+
+        let message = error.to_string();
+        assert!(message.contains("guest:forward"), "{message}");
+        assert!(
+            message.contains("forward route deliberately unavailable"),
             "{message}"
         );
         assert!(message.contains("control-plane=demo"), "{message}");

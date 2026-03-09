@@ -31,7 +31,8 @@ Still planned:
 - retries and richer client policies on top of the shipped transport
 - generated or versioned external API packages beyond the in-repo Rust crate
 - advanced auth, RBAC, and multi-tenant concerns
-- streamed hosted file transfer and fully remote hosted forward lifecycle work
+- hosted detached forward lifecycle management on top of the shipped hosted
+  forward start path
 
 ## Example
 

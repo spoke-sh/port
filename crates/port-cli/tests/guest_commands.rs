@@ -528,6 +528,58 @@ fn cli_guest_commands_cover_hosted_control_plane_runtime() {
         &guest_root,
         temp.path(),
     );
+
+    let target = TcpListener::bind("127.0.0.1:0").expect("target listener");
+    let target_addr = target.local_addr().expect("target addr");
+    thread::spawn(move || {
+        let (mut stream, _) = target.accept().expect("accept target");
+        let mut buf = [0_u8; 32];
+        let len = stream.read(&mut buf).expect("read target");
+        stream.write_all(&buf[..len]).expect("write target");
+    });
+    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve listen port");
+    let listen_addr = reserved.local_addr().expect("listen addr");
+    drop(reserved);
+
+    let forward = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--listen")
+        .arg(listen_addr.to_string())
+        .arg("--target")
+        .arg(target_addr.to_string())
+        .output()
+        .expect("hosted forward command");
+    assert!(forward.status.success());
+    let stdout = String::from_utf8_lossy(&forward.stdout);
+    assert!(stdout.contains("forward listening:"), "{stdout}");
+    assert!(
+        stdout.contains("forward lifecycle: hosted-control-plane"),
+        "{stdout}"
+    );
+
+    let mut forwarded = None;
+    for _ in 0..100 {
+        match TcpStream::connect(listen_addr) {
+            Ok(stream) => {
+                forwarded = Some(stream);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(20)),
+        }
+    }
+    let mut forwarded = forwarded.expect("connect hosted forwarded listener");
+    forwarded
+        .write_all(b"hosted-forward-ok")
+        .expect("write forwarded");
+    let mut buf = [0_u8; 32];
+    let len = forwarded.read(&mut buf).expect("read forwarded");
+    assert_eq!(&buf[..len], b"hosted-forward-ok");
 }
 
 #[test]
@@ -535,12 +587,68 @@ fn cli_guest_forward_supports_hosted_unix_socket_mode() {
     let temp = tempdir().expect("tempdir should exist");
     let guest_root = temp.path().join("guest-root");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
-    let config_path = temp.path().join("port.toml");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
     fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
-    write_config(&config_path, &hosted_config(&hosted_runtime_root));
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
 
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
+
+    let mut node_command = Command::new(port_bin());
+    node_command
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(&node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(&node_addr);
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .arg("--node-binding")
+        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
 
     let target_path = temp.path().join("target.sock");
     let listen_path = temp.path().join("listen.sock");
@@ -552,9 +660,10 @@ fn cli_guest_forward_supports_hosted_unix_socket_mode() {
         stream.write_all(&buf[..len]).expect("write target");
     });
 
-    let mut forward = Command::new(port_bin())
+    let forward = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
         .arg("--config")
-        .arg(&config_path)
+        .arg(&client_config_path)
         .arg("guest")
         .arg("forward")
         .arg("--machine")
@@ -563,10 +672,15 @@ fn cli_guest_forward_supports_hosted_unix_socket_mode() {
         .arg(format!("unix:{}", listen_path.display()))
         .arg("--target")
         .arg(format!("unix:{}", target_path.display()))
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .expect("forward command");
+    assert!(forward.status.success());
+    let stdout = String::from_utf8_lossy(&forward.stdout);
+    assert!(stdout.contains("forward listening:"), "{stdout}");
+    assert!(
+        stdout.contains("forward lifecycle: hosted-control-plane"),
+        "{stdout}"
+    );
 
     let mut forwarded = None;
     for _ in 0..100 {
@@ -583,40 +697,16 @@ fn cli_guest_forward_supports_hosted_unix_socket_mode() {
     let mut buf = [0_u8; 32];
     let len = forwarded.read(&mut buf).expect("read forwarded");
     assert_eq!(&buf[..len], b"unix-ok");
-
-    let _ = forward.kill();
-    let status = forward.wait().expect("forward process should exit");
-    assert!(
-        !status.success(),
-        "forward process should have been terminated"
-    );
 }
 
 #[test]
-fn cli_guest_forward_supports_hosted_detached_lifecycle() {
+fn cli_guest_forward_rejects_hosted_detached_lifecycle() {
     let temp = tempdir().expect("tempdir should exist");
-    let guest_root = temp.path().join("guest-root");
-    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let config_path = temp.path().join("port.toml");
-    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
-    write_config(&config_path, &hosted_config(&hosted_runtime_root));
-
-    let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
-    spawn_agent(&socket_path, &guest_root);
-
-    let target = TcpListener::bind("127.0.0.1:0").expect("target listener");
-    let target_addr = target.local_addr().expect("target addr");
-    thread::spawn(move || {
-        let (mut stream, _) = target.accept().expect("accept target");
-        let mut buf = [0_u8; 32];
-        let len = stream.read(&mut buf).expect("read target");
-        stream.write_all(&buf[..len]).expect("write target");
-    });
-    let reserved = TcpListener::bind("127.0.0.1:0").expect("reserve listen port");
-    let listen_addr = reserved.local_addr().expect("listen addr");
-    drop(reserved);
+    write_config(&config_path, &PortConfig::sample());
 
     let start = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
         .arg("--config")
         .arg(&config_path)
         .arg("guest")
@@ -624,84 +714,16 @@ fn cli_guest_forward_supports_hosted_detached_lifecycle() {
         .arg("--machine")
         .arg("cloud-aws")
         .arg("--listen")
-        .arg(listen_addr.to_string())
+        .arg("127.0.0.1:8081")
         .arg("--target")
-        .arg(target_addr.to_string())
+        .arg("127.0.0.1:80")
         .arg("--lifecycle")
         .arg("detached")
-        .arg("--name")
-        .arg("hosted-detached")
         .output()
         .expect("detached start command");
-    assert!(start.status.success());
+    assert!(!start.status.success());
     assert!(
-        String::from_utf8_lossy(&start.stdout).contains("forward lifecycle: detached"),
-        "stdout: {} stderr: {}",
-        String::from_utf8_lossy(&start.stdout),
         String::from_utf8_lossy(&start.stderr)
-    );
-
-    let list = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
-        .arg("guest")
-        .arg("forward")
-        .arg("--machine")
-        .arg("cloud-aws")
-        .arg("--list")
-        .output()
-        .expect("detached list command");
-    assert!(list.status.success());
-    let list_stdout = String::from_utf8_lossy(&list.stdout);
-    assert!(list_stdout.contains("forward: hosted-detached"));
-    assert!(list_stdout.contains("state: running"));
-
-    let mut forwarded = None;
-    for _ in 0..100 {
-        match TcpStream::connect(listen_addr) {
-            Ok(stream) => {
-                forwarded = Some(stream);
-                break;
-            }
-            Err(_) => thread::sleep(Duration::from_millis(20)),
-        }
-    }
-    let mut forwarded = forwarded.expect("connect detached listener");
-    forwarded
-        .write_all(b"detached-ok")
-        .expect("write forwarded");
-    let mut buf = [0_u8; 32];
-    let len = forwarded.read(&mut buf).expect("read forwarded");
-    assert_eq!(&buf[..len], b"detached-ok");
-
-    let stop = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
-        .arg("guest")
-        .arg("forward")
-        .arg("--machine")
-        .arg("cloud-aws")
-        .arg("--stop")
-        .arg("--name")
-        .arg("hosted-detached")
-        .output()
-        .expect("detached stop command");
-    assert!(stop.status.success());
-    assert!(String::from_utf8_lossy(&stop.stdout).contains("forward state: stopped"));
-
-    let list_after = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
-        .arg("guest")
-        .arg("forward")
-        .arg("--machine")
-        .arg("cloud-aws")
-        .arg("--list")
-        .output()
-        .expect("detached list after stop");
-    assert!(list_after.status.success());
-    assert!(
-        String::from_utf8_lossy(&list_after.stdout)
-            .contains("no detached forwards found for machine 'cloud-aws'")
+            .contains("hosted guest forward does not support `--lifecycle detached` yet")
     );
 }
