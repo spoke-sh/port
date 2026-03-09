@@ -16,7 +16,8 @@ use port_agent_protocol::{
     render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::{
-    HostedDetachedForwardState, HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
+    HostedDetachedForwardStartRequest, HostedDetachedForwardState,
+    HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
     HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
 };
 use port_model::{
@@ -4581,6 +4582,70 @@ fn hosted_control_plane_guest_operation(
             request.machine_name
         )
     })?;
+    Ok(response.result)
+}
+
+pub fn start_hosted_detached_forward(
+    config: &PortConfig,
+    machine_name: &str,
+    listen: &str,
+    target: &str,
+    name: Option<&str>,
+) -> Result<HostedDetachedForwardStatusContract> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<HostedDetachedForwardStatusContract> = client
+        .execute_json(
+            client
+                .guest()
+                .forward_detached_start(
+                    machine_name,
+                    HostedDetachedForwardStartRequest {
+                        listen: listen.to_string(),
+                        target: target.to_string(),
+                        name: name.map(ToOwned::to_owned),
+                    },
+                )
+                .context("failed to encode hosted detached forward start request")?,
+        )
+        .map_err(|error| {
+            anyhow!(
+                "failed to start detached forward for machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+pub fn list_hosted_detached_forwards(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Vec<HostedDetachedForwardStatusContract>> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<Vec<HostedDetachedForwardStatusContract>> = client
+        .execute_json(client.guest().forward_detached_list(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to list detached forwards for machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+pub fn stop_hosted_detached_forward(
+    config: &PortConfig,
+    machine_name: &str,
+    forward_name: &str,
+) -> Result<HostedDetachedForwardStopResult> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<HostedDetachedForwardStopResult> = client
+        .execute_json(client.guest().forward_detached_stop(machine_name, forward_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to stop detached forward '{}' for machine '{}' through the live hosted control-plane route: {error}",
+                forward_name, machine_name
+            )
+        })?;
     Ok(response.result)
 }
 

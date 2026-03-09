@@ -123,8 +123,8 @@ Hosted Control:
   `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
   Hosted `guest copy` now streams bytes through the live control-plane and node-agent path.
-  Hosted `guest forward` now starts a node-owned listener through the live control-plane and node-agent path; detached hosted lifecycle management remains follow-on work.
-  Hosted `guest forward` currently supports the default start path only; `--list`, `--stop`, `--lifecycle detached`, and `--name` remain local-only until hosted detached lifecycle management ships.
+  Hosted `guest forward` now supports foreground and detached lifecycle modes plus `--list`, `--stop`, and `--name` through the live control-plane and node-agent path.
+  Hosted detached forward returns a node-owned listener address and keeps detached lifecycle state under the node runtime root.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
   `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
 Service Control:
@@ -1419,31 +1419,53 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
             ensure_machine_exists(config, &machine)?;
             let hosted = machine_uses_hosted_control_plane(config, &machine)?;
             if list {
-                if hosted {
-                    bail!(
-                        "hosted guest forward does not support --list yet; inspect node-owned forward state through `port machine monitor` or `top`"
-                    );
-                }
                 if stop {
                     bail!("--list and --stop are mutually exclusive");
                 }
                 if listen.is_some() || target.is_some() {
                     bail!("--list does not accept --listen or --target");
                 }
+                if hosted {
+                    let forwards = port_runtime::list_hosted_detached_forwards(config, &machine)?;
+                    if forwards.is_empty() {
+                        println!("no detached forwards found for machine '{}'", machine);
+                        return Ok(());
+                    }
+                    for forward in forwards {
+                        let state = format!("{:?}", forward.state).to_ascii_lowercase();
+                        println!("forward: {}", forward.name);
+                        println!("state: {}", state);
+                        if let Some(pid) = forward.pid {
+                            println!("pid: {}", pid);
+                        }
+                        println!("listen: {}", forward.listen);
+                        println!("target: {}", forward.target);
+                        println!("stdout: {}", forward.stdout_log.display());
+                        println!("stderr: {}", forward.stderr_log.display());
+                        println!();
+                    }
+                    return Ok(());
+                }
                 return list_detached_forwards(config, &machine, &runtime_root);
             }
             if stop {
-                if hosted {
-                    bail!(
-                        "hosted guest forward does not support --stop yet; node-owned detached lifecycle management remains follow-on work"
-                    );
-                }
                 if listen.is_some() || target.is_some() {
                     bail!("--stop does not accept --listen or --target");
                 }
                 let name = name
                     .as_deref()
                     .context("--stop requires --name to select a detached forward")?;
+                if hosted {
+                    let result =
+                        port_runtime::stop_hosted_detached_forward(config, &machine, name)?;
+                    println!("forward name: {}", result.name);
+                    println!("forward lifecycle: detached");
+                    println!("forward state: stopped");
+                    if let Some(pid) = result.pid {
+                        println!("forward pid: {}", pid);
+                    }
+                    return Ok(());
+                }
                 return stop_detached_forward(config, &machine, &runtime_root, name);
             }
 
@@ -1451,14 +1473,26 @@ fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortCon
             let target = target.context("forward serve requires --target")?;
             if hosted {
                 if lifecycle == ForwardLifecycleArg::Detached {
-                    bail!(
-                        "hosted guest forward does not support `--lifecycle detached` yet; use the default hosted start path"
-                    );
+                    let result = port_runtime::start_hosted_detached_forward(
+                        config,
+                        &machine,
+                        &listen,
+                        &target,
+                        name.as_deref(),
+                    )?;
+                    println!("forward name: {}", result.name);
+                    println!("forward listening: {}", result.listen);
+                    println!("forward target: {}", result.target);
+                    println!("forward lifecycle: detached");
+                    if let Some(pid) = result.pid {
+                        println!("forward pid: {}", pid);
+                    }
+                    println!("forward stdout: {}", result.stdout_log.display());
+                    println!("forward stderr: {}", result.stderr_log.display());
+                    return Ok(());
                 }
                 if name.is_some() {
-                    bail!(
-                        "hosted guest forward does not accept `--name` until detached hosted lifecycle management ships"
-                    );
+                    bail!("--name requires `--lifecycle detached`");
                 }
                 let result = port_runtime::execute_guest_operation(
                     config,
