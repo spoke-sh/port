@@ -2,11 +2,12 @@
 id: 1vzTTJ000
 title: Route Hosted Machine Launch Through Registered Nodes
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T22:48:05
-updated_at: 2026-03-08T23:31:32
+updated_at: 2026-03-08T23:44:00
 scope: 1vzTQB000/1vzTR9000
 started_at: 2026-03-08T23:31:32
+completed_at: 2026-03-08T23:44:00
 ---
 
 # Route Hosted Machine Launch Through Registered Nodes
