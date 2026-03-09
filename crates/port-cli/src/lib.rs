@@ -70,7 +70,8 @@ Multi-node hosted service workflow:
 Current hosted service limits:
   No autoscaling or rescheduling yet.
   Deterministic-first-fit is the only shipped scheduler policy.
-  No broader fleet policy or external inventory yet.
+  No broader fleet policy yet.
+  Imported inventory exists, but it is still a control-plane-owned state file contract rather than a first-class `port inventory import` command.
   `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
   `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
@@ -124,26 +125,27 @@ Artifact Mobility:
   `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
 Hosted Control:
   Local Port still owns the shipped standard-lane launch path directly, and hosted prepared-node PVM launch now routes through the control plane and node agent.
-  `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
-  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root and registers that ownership with the configured control plane.
+  `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes and reloads durable fleet state from `.port/hosted/<control-plane>/registered-nodes.json` plus `.port/hosted/<control-plane>/imported-inventory.json`.
+  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root and refreshes durable node registration plus heartbeat ownership to the configured control plane.
   Hosted demo flow:
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'`
+  Imported inventory is currently a control-plane-owned state-file contract, not a first-class `port inventory import` command: seed or sync `.port/hosted/<control-plane>/imported-inventory.json`, then inspect it through `port machine list|status`.
   Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
   `--node-binding <node>=<endpoint>,<token>` remains a bootstrap or debug override when a node cannot self-register yet.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
-  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
+  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted `machine status` surfaces configured, imported, registered, freshness, selected-node, and routing-eligibility detail for each hosted node, and that fleet state survives control-plane restart because it is reloaded from the durable state files.
   Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
   Hosted `guest copy` now streams bytes through the live control-plane and node-agent path.
   Hosted `guest forward` now supports foreground and detached lifecycle modes plus `--list`, `--stop`, and `--name` through the live control-plane and node-agent path.
   Hosted detached forward returns a node-owned listener address and keeps detached lifecycle state under the node runtime root.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
-  Current hosted fleet limits: no autoscaling, no broader fleet policy, and no external inventory yet.
+  Current hosted fleet limits: no autoscaling, no broader fleet policy, and no first-class `port inventory import` command yet.
   Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
 Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
@@ -559,7 +561,9 @@ pub enum GuestCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ControlPlaneCommand {
-    #[command(about = "Serve hosted machine and guest routes over authenticated HTTP")]
+    #[command(
+        about = "Serve hosted machine and guest routes over authenticated HTTP and reload durable fleet state"
+    )]
     Serve {
         #[arg(long)]
         control_plane: String,
@@ -572,7 +576,9 @@ pub enum ControlPlaneCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum NodeAgentCommand {
-    #[command(about = "Serve one hosted node's runtime-root-backed machine and guest routes")]
+    #[command(
+        about = "Serve one hosted node's runtime-root-backed machine and guest routes while refreshing durable registration"
+    )]
     Serve {
         #[arg(long)]
         node: String,

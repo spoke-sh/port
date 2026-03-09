@@ -359,7 +359,82 @@ Current hosted service limits:
 
 - No autoscaling or rescheduling yet.
 - Deterministic-first-fit is the only shipped scheduler policy.
-- No broader fleet policy or external inventory yet.
+- No broader fleet policy yet.
+- Imported inventory exists, but it is still a control-plane-owned state file
+  contract rather than a first-class `port inventory import` command.
+
+## Durable Fleet Workflow
+
+Port now ships a repository-local durable fleet workflow for the hosted demo
+lane. The canonical operator surfaces stay the same:
+
+- `port control-plane serve` owns and reloads durable hosted fleet state
+- `port node-agent serve` refreshes live registration and heartbeat state
+- `port machine list|status` surface the merged hosted fleet view
+
+Repository-local workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+```
+
+Durable state files:
+
+- live registration and heartbeat:
+  `.port/hosted/<control-plane>/registered-nodes.json`
+- imported inventory:
+  `.port/hosted/<control-plane>/imported-inventory.json`
+
+Current imported-inventory contract:
+
+- the file is owned by the control plane, not by a separate hosted-only CLI
+  family
+- records must resolve onto configured node names instead of inventing a
+  second fleet namespace
+- `port machine status` merges configured inventory, imported inventory, and
+  live registration into one canonical fleet view
+
+Illustrative imported-inventory skeleton:
+
+```json
+{
+  "control_plane": "demo",
+  "nodes": {
+    "aws-linux-node": {
+      "provider": "aws",
+      "provenance": "inventory-sync",
+      "imported_at": 123,
+      "capability_summary": {
+        "providers": ["aws"],
+        "platforms": ["linux"],
+        "substrates": ["firecracker"],
+        "architectures": ["x86_64"],
+        "protection_modes": ["standard", "pvm"]
+      }
+    }
+  }
+}
+```
+
+The real `capability_summary` must still match the configured node capability
+contract exactly, including any populated `pvm_lanes`, or the control plane
+will reject the imported record during validation.
+
+What `port machine status --machine cloud-aws` now surfaces for each hosted
+node:
+
+- whether the node is configured
+- whether imported inventory exists for that node
+- whether a live registration exists
+- freshness state (`live`, `stale`, or `missing-registration`)
+- routing eligibility and selected-node detail
+
+Restart behavior is now part of the contract. Restarting
+`port control-plane serve` reloads both durable state files, so the canonical
+`port machine status` view remains available after control-plane restart
+instead of depending on process-local memory.
 
 ## Canonical Machine Control Contract
 

@@ -1,0 +1,91 @@
+---
+recorded_at: 2026-03-09T01:37:03.293103469-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzUq9000/verify-ac-2.sh
+---
+== status before control-plane restart ==
+machine: cloud-aws
+state: malformed
+pid: (none)
+inventory scope: hosted-fleet
+inventory owner: hosted-control-plane
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+status source: control-plane-inventory-and-node-agent-runtime
+launch route: hosted-control-plane
+inventory route: hosted-control-plane
+status route: hosted-control-plane
+stop route: hosted-control-plane
+guest route: hosted-control-plane
+runtime dir: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws
+config path: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/firecracker-config.json
+manifest: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/manifest.json
+pid file: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/firecracker.pid
+firecracker log: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/firecracker.log
+console stdout: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/console.stdout.log
+console stderr: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/console.stderr.log
+fleet nodes:
+  node: aws-linux-node
+  configured: true
+  imported: true
+  registered: true
+  selected: true
+  freshness: live
+  routing eligibility: eligible
+  import provenance: inventory-sync
+  imported at: 123
+  refreshed at: 1773045422
+  ttl seconds: 15
+  fresh until: 1773045437
+  node detail: Selected by the current control-plane route. Imported from 'inventory-sync' at 123. Registered with a live node-agent refresh at 1773045422 and ttl 15s (fresh until 1773045437).
+detail: node 'aws-linux-node' failed to serve machine 'cloud-aws': runtime state for machine 'cloud-aws' does not exist under '/var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node'
+
+== status after control-plane restart ==
+machine: cloud-aws
+state: malformed
+pid: (none)
+inventory scope: hosted-fleet
+inventory owner: hosted-control-plane
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+status source: control-plane-inventory-and-node-agent-runtime
+launch route: hosted-control-plane
+inventory route: hosted-control-plane
+status route: hosted-control-plane
+stop route: hosted-control-plane
+guest route: hosted-control-plane
+runtime dir: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws
+config path: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/firecracker-config.json
+manifest: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/manifest.json
+pid file: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/firecracker.pid
+firecracker log: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/firecracker.log
+console stdout: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/console.stdout.log
+console stderr: /var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node/cloud-aws/console.stderr.log
+fleet nodes:
+  node: aws-linux-node
+  configured: true
+  imported: true
+  registered: true
+  selected: true
+  freshness: live
+  routing eligibility: eligible
+  import provenance: inventory-sync
+  imported at: 123
+  refreshed at: 1773045422
+  ttl seconds: 15
+  fresh until: 1773045437
+  node detail: Selected by the current control-plane route. Imported from 'inventory-sync' at 123. Registered with a live node-agent refresh at 1773045422 and ttl 15s (fresh until 1773045437).
+detail: node 'aws-linux-node' failed to serve machine 'cloud-aws': runtime state for machine 'cloud-aws' does not exist under '/var/tmp/tmp.gnvfqKEjYB/runtime/hosted/aws-linux-node'
+1:machine: cloud-aws
+4:inventory scope: hosted-fleet
+22:  node: aws-linux-node
+24:  imported: true
+25:  registered: true
+27:  freshness: live
+28:  routing eligibility: eligible
+1:machine: cloud-aws
+4:inventory scope: hosted-fleet
+22:  node: aws-linux-node
+24:  imported: true
+25:  registered: true
+27:  freshness: live
+28:  routing eligibility: eligible

@@ -1,0 +1,47 @@
+---
+recorded_at: 2026-03-09T01:37:03.445473515-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzUq9000/verify-ac-3.sh
+---
+════════════════════════════════════════════════════════════════════════════════
+
+ Governance    Research     Planning     Execution  Verification      Done      
+────────────▶────────────▶────────────▶────────────▶────────────▶───────────────
+      0            0            0            1            0            80       
+
+════════════════════════════════════════════════════════════════════════════════
+
+┌── [1mHUMAN QUEUE (To Start/Accept)[0m ───┐  ┌──── [1mAGENT QUEUE (To Implement)[0m ────┐
+│  to accept         0 ░░░░░░░░░░    │  │  ready             0 ░░░░░░░░░░    │
+│  to start          0 ░░░░░░░░░░    │  │  in-flight         1 ▒░░░░░░░░░    │
+│  to calibrate      0 ░░░░░░░░░░    │  │  blocked           0 ░░░░░░░░░░    │
+└────────────────────────────────────┘  └────────────────────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+  Flow Assessment: 1 stories in execution with 40.0 stories/week throughput
+  Suggested: Focus on completing in-flight implementation
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+  Strategic Capacity
+────────────────────────────────────────────────────────────────────────────────
+
+     EPIC                                                        CAPACITY
+  ⚪ [1m[36m1vydg7000[39m[0m Port MVP                                          [███████████████] [D:13 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vz2eV000[39m[0m Cloud Substrate And PVM Strategy                  [███████████████] [D: 4 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vz3ck000[39m[0m PVM And Multi-Substrate Execution                 [███████████████] [D:13 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vz4Yn000[39m[0m Hosted Control Plane And Operator Surface         [███████████████] [D:15 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vzETR000[39m[0m Hosted Runtime Transport                          [███████████████] [D: 9 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vzJKE000[39m[0m Executable Pvm And Avf Lanes                      [███████████████] [D: 8 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vzMVF000[39m[0m Streamed Guest Sessions And Hosted Transfer       [███████████████] [D: 5 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vzSbL000[39m[0m Hosted Scheduler And Multi-Node Services          [███████████████] [D: 4 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vzTQB000[39m[0m Hosted Fleet Registration And Machine Placement   [███████████████] [D: 5 R: 0 F: 0 B: 0 I: 0]
+  ⚪ [1m[36m1vzUnI000[39m[0m Durable Hosted Fleet Control                      [████████████▒▒▒] [D: 4 R: 0 F: 1 B: 0 I: 0]
+│  to accept         0 ░░░░░░░░░░    │  │  ready             0 ░░░░░░░░░░    │
+│  to calibrate      0 ░░░░░░░░░░    │  │  blocked           0 ░░░░░░░░░░    │
+│  to start          0 ░░░░░░░░░░    │  │  in-flight         1 ▒░░░░░░░░░    │
+  ⚪ [1m[36m1vzUnI000[39m[0m Durable Hosted Fleet Control                      [████████████▒▒▒] [D: 4 R: 0 F: 1 B: 0 I: 0]
+32:| [Define Durable Hosted Registry Contract](../../../../stories/1vzUq5000/README.md) | feat | done |
+33:| [Persist Hosted Registration And Freshness](../../../../stories/1vzUq6000/README.md) | feat | done |
+34:| [Materialize Imported Fleet Inventory](../../../../stories/1vzUq7000/README.md) | feat | done |
+35:| [Surface Durable Hosted Fleet State](../../../../stories/1vzUq8000/README.md) | feat | done |
+36:| [Publish Durable Hosted Fleet Workflow](../../../../stories/1vzUq9000/README.md) | feat | in-progress |

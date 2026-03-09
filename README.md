@@ -353,7 +353,8 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted `machine launch` now uses that same control-plane plus node-agent path
   for prepared x86_64 PVM machines. Other hosted launch paths still return
   provider-aware guidance instead of pretending they are live.
-- Registered hosted node workflow for the current demo lane:
+- Registered hosted node workflow and durable fleet inspection for the current
+  demo lane:
 
 ```bash
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
@@ -362,6 +363,19 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
 ```
 
+- `port node-agent serve` refreshes live node registration and heartbeat state
+  into `.port/hosted/demo/registered-nodes.json`.
+- Imported inventory is now a real control-plane contract under
+  `.port/hosted/demo/imported-inventory.json`; there is not yet a first-class
+  `port inventory import` command, so the current operator path is to seed or
+  sync that file and then inspect the result through `port machine list|status`.
+- `port machine status --machine cloud-aws` now surfaces per-node configured,
+  imported, registered, freshness, selected, and routing-eligibility state so
+  operators can tell live, stale, and imported-only fleet members apart
+  without reading runtime files directly.
+- Control-plane restart recovery is now part of the supported repo-local hosted
+  workflow: restarting `port control-plane serve` reloads both durable fleet
+  files and preserves the canonical `port machine status` view.
 - `port control-plane serve --node-binding <node>=<endpoint>,<token>` remains
   available only as a bootstrap or debug override when a node cannot
   self-register yet.
@@ -387,7 +401,7 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --mac
   fails with explicit control-plane and route context instead of being silently
   dropped.
 - Current hosted fleet limits remain explicit: no autoscaling, no broader fleet
-  policy, and no external inventory yet.
+  policy, and no first-class `port inventory import` command yet.
 - `port machine monitor` and `port machine top` now make the hosted monitoring
   boundary explicit: they inspect node-agent-owned runtime state, detached
   forwards, and live processes, but they are not yet a full metrics,
@@ -459,8 +473,10 @@ Current hosted service limits:
 
 - No autoscaling or rescheduling yet.
 - Deterministic-first-fit is the only shipped scheduler policy.
-- No fleet manager, durable node registration, or broader service orchestration
-  yet.
+- No higher-level fleet manager or broader service orchestration yet.
+- Durable node registration and imported inventory now exist, but placement
+  still depends on the current deterministic-first-fit policy plus explicit
+  node inventory instead of a richer fleet manager.
 
 ## Linux Local Workflow
 
