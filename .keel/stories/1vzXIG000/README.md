@@ -2,11 +2,12 @@
 id: 1vzXIG000
 title: Publish Hosted Standard Cloud Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-09T02:56:42
-updated_at: 2026-03-09T03:26:32
+updated_at: 2026-03-09T03:41:04
 scope: 1vzXFf000/1vzXFy000
 started_at: 2026-03-09T03:26:32
+completed_at: 2026-03-09T03:41:04
 ---
 
 # Publish Hosted Standard Cloud Workflow

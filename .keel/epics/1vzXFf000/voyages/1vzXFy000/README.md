@@ -25,11 +25,11 @@ started_at: 2026-03-09T02:57:21
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Hosted Standard Placement Contract](../../../../stories/1vzXG2000/README.md) | feat | done |
 | [Route Standard Cloud Launch Through Hosted Runtime](../../../../stories/1vzXIF000/README.md) | feat | done |
-| [Publish Hosted Standard Cloud Workflow](../../../../stories/1vzXIG000/README.md) | feat | backlog |
+| [Publish Hosted Standard Cloud Workflow](../../../../stories/1vzXIG000/README.md) | feat | done |
 <!-- END GENERATED -->
