@@ -77,6 +77,9 @@ struct ControlPlaneStateInner {
     registered_state_path: PathBuf,
     registered_state: RwLock<RegisteredNodeStateFile>,
     registered_nodes: RwLock<BTreeMap<String, RegisteredNodeRecord>>,
+    machine_placement_state_path: PathBuf,
+    machine_placement_state: RwLock<MachinePlacementStateFile>,
+    machine_placements: RwLock<BTreeMap<String, HostedMachinePlacementRecord>>,
     client: Client,
 }
 
@@ -86,6 +89,23 @@ struct RegisteredNodeStateFile {
     control_plane: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     nodes: BTreeMap<String, HostedNodeRegistration>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct MachinePlacementStateFile {
+    control_plane: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    machines: BTreeMap<String, HostedMachinePlacementRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct HostedMachinePlacementRecord {
+    node_name: String,
+    runtime_root: PathBuf,
+    placed_at_unix_s: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placement_detail: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -243,6 +263,139 @@ fn persist_registered_node_state(path: &PathBuf, state: &RegisteredNodeStateFile
 }
 
 #[allow(dead_code)]
+fn machine_placement_state_path(control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root(control_plane).join("machine-placements.json")
+}
+
+fn load_machine_placement_state(
+    path: &PathBuf,
+    control_plane: &str,
+) -> Result<MachinePlacementStateFile> {
+    if !path.exists() {
+        return Ok(MachinePlacementStateFile {
+            control_plane: control_plane.to_string(),
+            ..MachinePlacementStateFile::default()
+        });
+    }
+
+    let bytes = std::fs::read(path).with_context(|| {
+        format!(
+            "failed to read machine placement state at '{}'",
+            path.display()
+        )
+    })?;
+    let state: MachinePlacementStateFile = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "failed to decode machine placement state at '{}'",
+            path.display()
+        )
+    })?;
+    Ok(state)
+}
+
+fn persist_machine_placement_state(
+    path: &PathBuf,
+    state: &MachinePlacementStateFile,
+) -> Result<()> {
+    let parent = path.parent().with_context(|| {
+        format!(
+            "machine placement state path '{}' has no parent directory",
+            path.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create machine placement state directory '{}'",
+            parent.display()
+        )
+    })?;
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(state).context("failed to encode machine placement state")?,
+    )
+    .with_context(|| {
+        format!(
+            "failed to write machine placement state '{}'",
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn validate_machine_placement_state(
+    config: &PortConfig,
+    state: &MachinePlacementStateFile,
+) -> Result<BTreeMap<String, HostedMachinePlacementRecord>> {
+    if state.control_plane.trim().is_empty() {
+        bail!("machine placement state must declare a non-empty control plane");
+    }
+    if !config.control_planes.contains_key(&state.control_plane) {
+        bail!(
+            "machine placement state references unknown control plane '{}'",
+            state.control_plane
+        );
+    }
+
+    let inventory = config.hosted_inventory_contract().map_err(|error| {
+        anyhow!("machine placement state could not load hosted inventory: {error}")
+    })?;
+    let mut placements = BTreeMap::new();
+    for (machine_name, placement) in &state.machines {
+        let summary = config
+            .hosted_machine_summary_contract(machine_name)
+            .map_err(|error| {
+                anyhow!(
+                    "machine placement state could not resolve hosted machine '{}': {error}",
+                    machine_name
+                )
+            })?
+            .ok_or_else(|| {
+                anyhow!(
+                    "machine placement state references unknown hosted machine '{}'",
+                    machine_name
+                )
+            })?;
+        if summary.control_plane != state.control_plane {
+            bail!(
+                "machine placement state for '{}' belongs to control plane '{}', not '{}'",
+                machine_name,
+                summary.control_plane,
+                state.control_plane
+            );
+        }
+        let node = inventory.nodes.get(&placement.node_name).ok_or_else(|| {
+            anyhow!(
+                "machine placement state for '{}' references unknown node '{}'",
+                machine_name,
+                placement.node_name
+            )
+        })?;
+        if node.control_plane != state.control_plane {
+            bail!(
+                "machine placement state for '{}' references node '{}' on control plane '{}', not '{}'",
+                machine_name,
+                placement.node_name,
+                node.control_plane,
+                state.control_plane
+            );
+        }
+        if node.runtime_root != placement.runtime_root {
+            bail!(
+                "machine placement state for '{}' records runtime root '{}' for node '{}', but inventory now declares '{}'",
+                machine_name,
+                placement.runtime_root.display(),
+                placement.node_name,
+                node.runtime_root.display()
+            );
+        }
+        placements.insert(machine_name.clone(), placement.clone());
+    }
+
+    Ok(placements)
+}
+
+#[allow(dead_code)]
 fn validate_registered_node_state(
     config: &PortConfig,
     state: &RegisteredNodeStateFile,
@@ -370,6 +523,16 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
                 request.control_plane
             )
         })?;
+    let machine_placement_state_path = machine_placement_state_path(&request.control_plane);
+    let machine_placement_state =
+        load_machine_placement_state(&machine_placement_state_path, &request.control_plane)
+            .with_context(|| {
+                format!(
+                    "control plane '{}' could not load machine placement state",
+                    request.control_plane
+                )
+            })?;
+    let machine_placements = machine_placement_state.machines.clone();
 
     let auth_header = control_plane.auth.header.clone();
 
@@ -383,6 +546,9 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             registered_state_path,
             registered_state: RwLock::new(registered_state),
             registered_nodes: RwLock::new(registered_nodes),
+            machine_placement_state_path,
+            machine_placement_state: RwLock::new(machine_placement_state),
+            machine_placements: RwLock::new(machine_placements),
             client: Client::new(),
         }),
     })
@@ -558,6 +724,60 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
     )
 }
 
+async fn machine_launch(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let (binding, route_context) = match resolve_node_binding(&state, &summary) {
+        Ok(result) => result,
+        Err((route_context, message)) => {
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
+        }
+    };
+
+    let launch_route = HostedNodeRoute::Machine(HostedMachineRoute::Launch {
+        machine_name: machine.clone(),
+    });
+    match proxy_json::<HostedSuccess<LaunchMetadata>>(
+        &state,
+        &binding,
+        launch_route,
+        Method::POST,
+        None,
+        route_context.clone(),
+    )
+    .await
+    {
+        Ok(success) => {
+            if let Err(message) = store_machine_placement(
+                &state,
+                &machine,
+                &route_context,
+                success.result.launched_at_unix_s,
+            ) {
+                return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
+            }
+            json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: route_context,
+                    result: success.result,
+                },
+            )
+        }
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route_context)),
+    }
+}
+
 async fn machine_status(
     State(state): State<ControlPlaneState>,
     Path(machine): Path<String>,
@@ -648,17 +868,7 @@ async fn machine_command(
     headers: HeaderMap,
 ) -> Response {
     if let Some(machine_name) = machine.strip_suffix(":launch") {
-        return proxy_machine_route(
-            &state,
-            &headers,
-            machine_name,
-            HostedNodeRoute::Machine(HostedMachineRoute::Launch {
-                machine_name: machine_name.to_string(),
-            }),
-            Method::POST,
-            None,
-        )
-        .await;
+        return machine_launch(State(state), Path(machine_name.to_string()), headers).await;
     }
 
     if let Some(machine_name) = machine.strip_suffix(":stop") {
@@ -1359,6 +1569,67 @@ fn store_registered_node_refresh(
         )
     })? = next_records;
     Ok(record)
+}
+
+fn store_machine_placement(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    route_context: &HostedRouteContext,
+    launched_at_unix_s: u64,
+) -> Result<HostedMachinePlacementRecord, String> {
+    let node_name = route_context.node_name.clone().ok_or_else(|| {
+        format!(
+            "control plane '{}' resolved machine '{}' without a selected node",
+            state.inner.control_plane, machine_name
+        )
+    })?;
+    let runtime_root = route_context.runtime_root.clone().ok_or_else(|| {
+        format!(
+            "control plane '{}' resolved machine '{}' without a selected runtime root",
+            state.inner.control_plane, machine_name
+        )
+    })?;
+
+    let current_state = state
+        .inner
+        .machine_placement_state
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect machine placement state",
+                state.inner.control_plane
+            )
+        })?
+        .clone();
+    let placement = HostedMachinePlacementRecord {
+        node_name,
+        runtime_root,
+        placed_at_unix_s: launched_at_unix_s,
+        placement_detail: route_context.placement_detail.clone(),
+    };
+
+    let mut next_state = current_state;
+    next_state.control_plane = state.inner.control_plane.clone();
+    next_state
+        .machines
+        .insert(machine_name.to_string(), placement.clone());
+    let next_placements = next_state.machines.clone();
+    persist_machine_placement_state(&state.inner.machine_placement_state_path, &next_state)
+        .map_err(|error| error.to_string())?;
+
+    *state.inner.machine_placement_state.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update machine placement state",
+            state.inner.control_plane
+        )
+    })? = next_state;
+    *state.inner.machine_placements.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update machine placement records",
+            state.inner.control_plane
+        )
+    })? = next_placements;
+    Ok(placement)
 }
 
 fn resolve_known_node_binding(
@@ -3077,6 +3348,9 @@ mod tests {
 
     #[derive(Clone)]
     struct MockNodeState {
+        node_name: String,
+        runtime_root: PathBuf,
+        pid: u32,
         headers: Arc<Mutex<Vec<String>>>,
         bodies: Arc<Mutex<Vec<String>>>,
     }
@@ -3086,6 +3360,14 @@ mod tests {
         assert_eq!(
             registered_node_state_path("demo"),
             PathBuf::from(".port/hosted/demo/registered-nodes.json")
+        );
+    }
+
+    #[test]
+    fn machine_placement_state_path_is_scoped_under_control_plane_runtime_root() {
+        assert_eq!(
+            machine_placement_state_path("demo"),
+            PathBuf::from(".port/hosted/demo/machine-placements.json")
         );
     }
 
@@ -3561,6 +3843,9 @@ mod tests {
         }
 
         let mock_state = MockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: PathBuf::from("runtime/hosted/aws-linux-node"),
+            pid: 9876,
             headers: Arc::new(Mutex::new(Vec::new())),
             bodies: Arc::new(Mutex::new(Vec::new())),
         };
@@ -3638,6 +3923,189 @@ mod tests {
                 .iter()
                 .any(|body| body.contains("\"type\":\"exec\""))
         );
+    }
+
+    #[tokio::test]
+    async fn control_plane_launch_selects_registered_node_deterministically_and_persists_placement()
+    {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("placement");
+        let token_var = unique_test_env("PORT_TEST_PLACEMENT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut preferred_node = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws node should exist")
+            .clone();
+        preferred_node.runtime_root = tempdir.path().join("hosted/aaa-linux-node");
+        config
+            .nodes
+            .insert(String::from("aaa-linux-node"), preferred_node.clone());
+
+        let preferred_state = MockNodeState {
+            node_name: String::from("aaa-linux-node"),
+            runtime_root: preferred_node.runtime_root.clone(),
+            pid: 1111,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let fallback_state = MockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: config.nodes["aws-linux-node"].runtime_root.clone(),
+            pid: 2222,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let preferred_addr = serve_mock_node_agent_named(preferred_state.clone()).await;
+        let fallback_addr = serve_mock_node_agent_named(fallback_state.clone()).await;
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        persist_registered_node_state(
+            &registered_node_state_path(&control_plane),
+            &RegisteredNodeStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([
+                    (
+                        String::from("aaa-linux-node"),
+                        HostedNodeRegistration {
+                            endpoint: format!("http://{preferred_addr}"),
+                            token: String::from("node-secret"),
+                            registered_at: now,
+                            refreshed_at: now,
+                            ttl_seconds: 30,
+                        },
+                    ),
+                    (
+                        String::from("aws-linux-node"),
+                        HostedNodeRegistration {
+                            endpoint: format!("http://{fallback_addr}"),
+                            token: String::from("node-secret"),
+                            registered_at: now,
+                            refreshed_at: now,
+                            ttl_seconds: 30,
+                        },
+                    ),
+                ]),
+            },
+        )
+        .expect("registered state should persist");
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let client = Client::new();
+        for _ in 0..2 {
+            let launch = client
+                .post(format!(
+                    "http://{control_addr}/v1/machines/cloud-aws:launch"
+                ))
+                .header("authorization", "Bearer demo-token")
+                .send()
+                .await
+                .expect("launch request should complete");
+            assert_eq!(launch.status(), StatusCode::OK);
+            let body: HostedSuccess<LaunchMetadata> =
+                launch.json().await.expect("launch body should decode");
+            assert_eq!(body.route.node_name.as_deref(), Some("aaa-linux-node"));
+            assert_eq!(body.result.pid, 1111);
+        }
+
+        assert_eq!(
+            preferred_state.headers.lock().expect("headers lock").len(),
+            2
+        );
+        assert!(
+            fallback_state
+                .headers
+                .lock()
+                .expect("headers lock")
+                .is_empty()
+        );
+
+        let placements: MachinePlacementStateFile = serde_json::from_slice(
+            &std::fs::read(machine_placement_state_path(&control_plane))
+                .expect("machine placement state should read"),
+        )
+        .expect("machine placement state should decode");
+        let placement = placements
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws placement should persist");
+        assert_eq!(placement.node_name, "aaa-linux-node");
+        assert_eq!(placement.runtime_root, preferred_node.runtime_root);
+        assert!(
+            placement
+                .placement_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("aaa-linux-node")
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn control_plane_launch_rejects_stale_registered_node_with_explicit_detail() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("stale-placement");
+        let token_var = unique_test_env("PORT_TEST_STALE_PLACEMENT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        persist_registered_node_state(
+            &registered_node_state_path(&control_plane),
+            &RegisteredNodeStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    HostedNodeRegistration {
+                        endpoint: String::from("http://127.0.0.1:9"),
+                        token: String::from("node-secret"),
+                        registered_at: now.saturating_sub(10),
+                        refreshed_at: now.saturating_sub(10),
+                        ttl_seconds: 1,
+                    },
+                )]),
+            },
+        )
+        .expect("registered state should persist");
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let response = Client::new()
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws:launch"
+            ))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("launch request should complete");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let error: HostedError = response.json().await.expect("error body should decode");
+        assert!(error.message.contains("stale"), "{}", error.message);
+        assert!(error.message.contains("aws-linux-node"));
+        assert!(error.message.contains("cloud-aws"));
+        let route = error.route.expect("route context should exist");
+        assert_eq!(route.control_plane.as_deref(), Some(control_plane.as_str()));
+        assert_eq!(route.machine_name.as_deref(), Some("cloud-aws"));
+        assert_eq!(route.candidate_nodes, vec![String::from("aws-linux-node")]);
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[tokio::test]
@@ -4151,6 +4619,10 @@ mod tests {
     }
 
     async fn serve_mock_node_agent(state: MockNodeState) -> SocketAddr {
+        serve_mock_node_agent_named(state).await
+    }
+
+    async fn serve_mock_node_agent_named(state: MockNodeState) -> SocketAddr {
         async fn status_handler(
             State(state): State<MockNodeState>,
             headers: HeaderMap,
@@ -4167,7 +4639,7 @@ mod tests {
                 route: HostedRouteContext {
                     control_plane: Some(String::from("demo")),
                     machine_name: Some(machine.clone()),
-                    node_name: Some(String::from("aws-linux-node")),
+                    node_name: Some(state.node_name.clone()),
                     ..HostedRouteContext::default()
                 },
                 result: MachineStatus {
@@ -4175,25 +4647,13 @@ mod tests {
                     state: MachineRuntimeState::Running,
                     pid: Some(4321),
                     control: port_model::MachineControlContract::hosted_control_plane(),
-                    runtime_dir: PathBuf::from("runtime/hosted/aws-linux-node/cloud-aws"),
-                    config_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker-config.json",
-                    ),
-                    manifest_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/manifest.json",
-                    ),
-                    pid_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker.pid",
-                    ),
-                    firecracker_log: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker.log",
-                    ),
-                    stdout_log: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/console.stdout.log",
-                    ),
-                    stderr_log: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/console.stderr.log",
-                    ),
+                    runtime_dir: state.runtime_root.join("cloud-aws"),
+                    config_path: state.runtime_root.join("cloud-aws/firecracker-config.json"),
+                    manifest_path: state.runtime_root.join("cloud-aws/manifest.json"),
+                    pid_path: state.runtime_root.join("cloud-aws/firecracker.pid"),
+                    firecracker_log: state.runtime_root.join("cloud-aws/firecracker.log"),
+                    stdout_log: state.runtime_root.join("cloud-aws/console.stdout.log"),
+                    stderr_log: state.runtime_root.join("cloud-aws/console.stderr.log"),
                     detail: String::from("mock status"),
                 },
             })
@@ -4220,7 +4680,7 @@ mod tests {
                 route: HostedRouteContext {
                     control_plane: Some(String::from("demo")),
                     machine_name: Some(String::from("cloud-aws")),
-                    node_name: Some(String::from("aws-linux-node")),
+                    node_name: Some(state.node_name.clone()),
                     ..HostedRouteContext::default()
                 },
                 result: OperationResult::Exec(ExecResult {
@@ -4250,30 +4710,20 @@ mod tests {
                 route: HostedRouteContext {
                     control_plane: Some(String::from("demo")),
                     machine_name: Some(machine_name.clone()),
-                    node_name: Some(String::from("aws-linux-node")),
+                    node_name: Some(state.node_name.clone()),
                     ..HostedRouteContext::default()
                 },
                 result: LaunchMetadata {
                     machine_name,
-                    pid: 9876,
+                    pid: state.pid,
                     launched_at_unix_s: 1,
-                    runtime_dir: PathBuf::from("runtime/hosted/aws-linux-node/cloud-aws"),
+                    runtime_dir: state.runtime_root.join("cloud-aws"),
                     firecracker_binary: PathBuf::from("/usr/bin/firecracker-pvm"),
-                    config_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker-config.json",
-                    ),
-                    log_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/firecracker.log",
-                    ),
-                    stdout_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/console.stdout.log",
-                    ),
-                    stderr_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/console.stderr.log",
-                    ),
-                    manifest_path: PathBuf::from(
-                        "runtime/hosted/aws-linux-node/cloud-aws/manifest.json",
-                    ),
+                    config_path: state.runtime_root.join("cloud-aws/firecracker-config.json"),
+                    log_path: state.runtime_root.join("cloud-aws/firecracker.log"),
+                    stdout_path: state.runtime_root.join("cloud-aws/console.stdout.log"),
+                    stderr_path: state.runtime_root.join("cloud-aws/console.stderr.log"),
+                    manifest_path: state.runtime_root.join("cloud-aws/manifest.json"),
                 },
             })
         }

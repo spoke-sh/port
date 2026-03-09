@@ -537,6 +537,19 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
         .parse::<u32>()
         .expect("pid should parse");
     assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
+    let placement_state: serde_json::Value = serde_json::from_slice(
+        &fs::read(".port/hosted/demo/machine-placements.json")
+            .expect("machine placement state should exist"),
+    )
+    .expect("machine placement state should decode");
+    assert_eq!(
+        placement_state["machines"]["cloud-aws"]["node_name"].as_str(),
+        Some("aws-linux-node")
+    );
+    assert_eq!(
+        placement_state["machines"]["cloud-aws"]["runtime_root"].as_str(),
+        Some(hosted_runtime_root.to_string_lossy().as_ref())
+    );
 
     let _ = Command::new("kill").arg(pid.to_string()).status();
 }
