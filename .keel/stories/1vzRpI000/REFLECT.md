@@ -33,4 +33,15 @@ Format:
 
 ## Observations
 
-TODO: What went well? What was difficult? What surprised you?
+- The implementation was already shipped in the runtime layer, but the public
+  surfaces were inconsistent: CLI help and several canonical docs still
+  described hosted service execution as follow-on work. The story value was in
+  aligning the operator contract rather than changing runtime behavior.
+- `keel story record` again wrote the wrong inline proof file for AC-01 after
+  recording AC-02. The story README had to be corrected manually before
+  commit. This is now a recurring board-tooling issue worth treating as a
+  process constraint during submission.
+- Grep-based proof scripts need to use fixed-string fragments instead of
+  single-line full sentences because the canonical docs wrap long sentences
+  across Markdown lines. Shorter fixed checks made the story verification
+  stable.
