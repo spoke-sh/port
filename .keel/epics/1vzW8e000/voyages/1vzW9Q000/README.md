@@ -1,12 +1,13 @@
 ---
 id: 1vzW9Q000
 title: Hosted Artifact Push And Pull
-status: in-progress
+status: done
 epic: 1vzW8e000
 created_at: 2026-03-09T01:39:44
 index: 1
 updated_at: 2026-03-09T01:45:28
 started_at: 2026-03-09T01:45:59
+completed_at: 2026-03-09T02:48:18
 ---
 
 # Hosted Artifact Push And Pull
@@ -20,17 +21,19 @@ started_at: 2026-03-09T01:45:59
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Hosted Artifact Backend Contract](../../../../stories/1vzWCG000/README.md) | feat | done |
 | [Implement Hosted Artifact Control Plane Routes](../../../../stories/1vzWCI000/README.md) | feat | done |
 | [Route Artifact Push And Pull Through Hosted Backend](../../../../stories/1vzWCJ000/README.md) | feat | done |
-| [Publish Hosted Artifact Mobility Workflow](../../../../stories/1vzWCK000/README.md) | feat | backlog |
+| [Publish Hosted Artifact Mobility Workflow](../../../../stories/1vzWCK000/README.md) | feat | done |
 <!-- END GENERATED -->
