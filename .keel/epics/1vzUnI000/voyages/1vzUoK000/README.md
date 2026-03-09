@@ -1,11 +1,12 @@
 ---
 id: 1vzUoK000
 title: Persistent Registration And Inventory Sync
-status: planned
+status: in-progress
 epic: 1vzUnI000
 created_at: 2026-03-09T00:13:52
 index: 1
 updated_at: 2026-03-09T00:20:39
+started_at: 2026-03-09T00:21:26
 ---
 
 # Persistent Registration And Inventory Sync

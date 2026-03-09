@@ -3717,7 +3717,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn control_plane_registration_route_persists_and_refreshes_state() {
+    async fn hosted_registry_persistence_control_plane_registration_route_persists_and_refreshes_state()
+     {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
         let control_plane = unique_test_control_plane("registration-route");
@@ -3805,7 +3806,7 @@ mod tests {
     }
 
     #[test]
-    fn node_agent_registers_and_refreshes_against_control_plane() {
+    fn hosted_registry_persistence_node_agent_registers_and_refreshes_against_control_plane() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
         let control_plane = unique_test_control_plane("node-refresh");
@@ -3893,6 +3894,132 @@ mod tests {
             "expected a later refresh than {first_seen}, got {}",
             refreshed.nodes["aws-linux-node"].refreshed_at
         );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn hosted_registry_persistence_reconstructs_routes_from_durable_state_after_restart() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("restart-recovery");
+        let token_var = unique_test_env("PORT_TEST_RESTART_RECOVERY_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let node_addr =
+            serve_test_node_agent(config.clone(), "aws-linux-node", "node-secret").await;
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        persist_registered_node_state(
+            &registered_node_state_path(&control_plane),
+            &RegisteredNodeStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    HostedNodeRegistration {
+                        endpoint: format!("http://{node_addr}"),
+                        token: String::from("node-secret"),
+                        registered_at: now.saturating_sub(5),
+                        refreshed_at: now,
+                        ttl_seconds: 60,
+                    },
+                )]),
+            },
+        )
+        .expect("registered state should persist");
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let response = Client::new()
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws/guest:exec"
+            ))
+            .header("authorization", "Bearer demo-token")
+            .header(CONTENT_TYPE, "application/json")
+            .body(
+                serde_json::to_vec(&GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/true")],
+                    cwd: None,
+                    env: BTreeMap::new(),
+                }))
+                .expect("guest exec request should encode"),
+            )
+            .send()
+            .await
+            .expect("guest exec request should complete");
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .expect("guest exec body should decode");
+        assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+        let error: HostedError =
+            serde_json::from_str(&body).expect("guest exec body should decode");
+        assert!(
+            error.message.contains("guest agent socket"),
+            "{}",
+            error.message
+        );
+        assert_eq!(
+            error
+                .route
+                .as_ref()
+                .and_then(|route| route.node_name.as_deref()),
+            Some("aws-linux-node")
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn hosted_registry_persistence_surfaces_control_plane_and_path_context_on_decode_failure() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("decode-failure");
+        let token_var = unique_test_env("PORT_TEST_DECODE_FAILURE_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let state_path = registered_node_state_path(&control_plane);
+        std::fs::create_dir_all(
+            state_path
+                .parent()
+                .expect("registered state path should have a parent"),
+        )
+        .expect("registered state dir should exist");
+        std::fs::write(&state_path, b"{not-valid-json")
+            .expect("corrupt registered state should write");
+
+        let error = match build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        ) {
+            Ok(_) => panic!("corrupt registered state should fail to load"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+        assert!(message.contains(&format!("control plane '{}'", control_plane)));
+        assert!(
+            message.contains(state_path.to_string_lossy().as_ref()),
+            "{message}"
+        );
+        assert!(message.contains("registered node state"), "{message}");
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -4342,7 +4469,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn control_plane_launch_rejects_stale_registered_node_with_explicit_detail() {
+    async fn hosted_registry_persistence_control_plane_launch_rejects_stale_registered_node_with_explicit_detail()
+     {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
         let control_plane = unique_test_control_plane("stale-placement");
@@ -4881,6 +5009,7 @@ mod tests {
         config: PortConfig,
         node_bindings: Vec<HostedNodeBinding>,
     ) -> SocketAddr {
+        cleanup_registered_state("demo");
         serve_test_control_plane_named(&config, "demo", node_bindings).await
     }
 
@@ -4913,6 +5042,10 @@ mod tests {
     }
 
     async fn serve_mock_node_agent_named(state: MockNodeState) -> SocketAddr {
+        async fn ready_handler() -> StatusCode {
+            StatusCode::OK
+        }
+
         async fn status_handler(
             State(state): State<MockNodeState>,
             headers: HeaderMap,
@@ -5023,6 +5156,7 @@ mod tests {
             .expect("listener should bind");
         let addr = listener.local_addr().expect("addr should exist");
         let router = Router::new()
+            .route("/__ready", get(ready_handler))
             .route(
                 "/v1/node/machines/{machine}",
                 get(status_handler).post(launch_handler),
@@ -5035,6 +5169,7 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
         });
+        wait_for_http_ready(addr, "/__ready", &[], true).await;
         addr
     }
 
@@ -5086,6 +5221,31 @@ mod tests {
         panic!("timed out after {:?}", timeout);
     }
 
+    async fn wait_for_http_ready(
+        addr: SocketAddr,
+        path: &str,
+        headers: &[(&str, &str)],
+        require_success: bool,
+    ) {
+        let client = Client::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let mut request = client.get(format!("http://{addr}{path}"));
+            for (name, value) in headers {
+                request = request.header(*name, *value);
+            }
+            if let Ok(response) = request.send().await {
+                if !require_success || response.status().is_success() {
+                    return;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("timed out after {:?}", Duration::from_secs(5));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     fn cleanup_registered_state(control_plane: &str) {
         let path = registered_node_state_path(control_plane);
         if let Some(parent) = path.parent() {
@@ -5110,6 +5270,13 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(listener, node_agent_router(state)).await;
         });
+        wait_for_http_ready(
+            addr,
+            "/v1/node/machines/cloud-aws",
+            &[("x-port-node-agent-token", token)],
+            false,
+        )
+        .await;
         addr
     }
 

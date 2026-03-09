@@ -54,7 +54,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | planned |
+| [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
