@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+libc.workspace = true
 portable-pty.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
 serde.workspace = true

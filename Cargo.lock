@@ -871,6 +871,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
  "port-agent-protocol",
  "portable-pty",
  "serde",
