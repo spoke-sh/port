@@ -247,9 +247,9 @@ Current behavior:
 - `port artifacts build` and `port artifacts validate` now run real in-repo
   kernel and guest-image pipelines for the selected artifact variant.
 - `port artifacts push` and `port artifacts pull` now use the artifact's
-  configured mobility backend. The sample config ships a file-backed
-  registry/cache contract, while OCI and hosted backends are modeled but still
-  reserved.
+  configured mobility backend. The sample config defaults to a file-backed
+  registry/cache contract, and `hosted-api` is also executable when the
+  selected artifact points at a live control plane. OCI remains follow-on work.
 - `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
   `ip`, and `iptables`. When you pass `--config`, it also validates the native
   Firecracker/standard artifact variant paths required on the current host.
@@ -603,6 +603,20 @@ rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
 cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
 ```
 
+Hosted backend proof:
+
+- Copy `examples/port.toml` to a temp config and replace the existing
+  `[control_planes.demo]`,
+  `[artifacts.kernels.demo-kernel.distribution.push]`, and
+  `[artifacts.kernels.demo-kernel.distribution.pull]` sections with the
+  hosted-api snippet in [`docs/artifacts.md`](docs/artifacts.md).
+- Start the control plane with `PORT_DEMO_TOKEN=demo-token`.
+- Build, push, remove the local kernel path, then pull the same variant back
+  through the canonical CLI.
+- Hosted artifact bytes persist under
+  `.port/hosted/<control-plane>/artifacts/...` on the control-plane owner, not
+  under the caller's local file-backed store root.
+
 Artifact contracts:
 
 - `demo-kernel` fetches a pinned Firecracker-compatible kernel from the official
@@ -624,9 +638,11 @@ Artifact contracts:
   cache root at `.port/cache/`. `push` writes the selected variant into that
   store and warms the cache; `pull` restores the selected variant from the
   store into both the cache and the canonical local path used by launch.
-- OCI and hosted artifact backends are modeled explicitly in the shared config
-  and CLI story, but the current runtime only implements the file-backed
-  backend.
+- The hosted artifact backend is now executable through the control plane when
+  an artifact distribution backend is switched to `hosted-api`. Hosted pushes
+  and pulls use bearer-token auth from `PORT_DEMO_TOKEN` and persist under
+  `.port/hosted/<control-plane>/artifacts/...`.
+- OCI artifact distribution remains follow-on work.
 
 Detailed contracts, inputs, outputs, and validation expectations live in
 [`docs/artifacts.md`](docs/artifacts.md).

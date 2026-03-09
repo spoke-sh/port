@@ -21,10 +21,11 @@ Each artifact now carries four related concepts:
 
 In the sample model:
 
-- the shipped backend is `file-system`
+- the shipped backends are `file-system` and `hosted-api`
 - the sample store root is `artifact-store/demo-fs/`
 - the sample cache root is `.port/cache/`
-- reserved but not yet executable backends are `oci-registry` and `hosted-api`
+- hosted control-plane storage lives under `.port/hosted/<control-plane>/artifacts/`
+- `oci-registry` remains follow-on work
 
 ## Canonical CLI
 
@@ -44,6 +45,50 @@ port --config examples/port.toml artifacts push --artifact demo-kernel --archite
 rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
 port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
 ```
+
+Hosted backend proof:
+
+1. Copy `examples/port.toml` to a temp config.
+2. Replace the existing `[control_planes.demo]`,
+   `[artifacts.kernels.demo-kernel.distribution.push]`, and
+   `[artifacts.kernels.demo-kernel.distribution.pull]` sections with:
+
+```toml
+[control_planes.demo]
+endpoint = "http://127.0.0.1:7040"
+audience = "port-hosted-demo"
+
+[artifacts.kernels.demo-kernel.distribution.push]
+backend = "hosted-api"
+endpoint = "http://127.0.0.1:7040"
+
+[artifacts.kernels.demo-kernel.distribution.pull]
+backend = "hosted-api"
+endpoint = "http://127.0.0.1:7040"
+```
+
+3. Run the hosted round trip through the canonical CLI:
+
+```bash
+cp examples/port.toml /tmp/port-hosted-artifacts.toml
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+port --config /tmp/port-hosted-artifacts.toml artifacts build --artifact demo-kernel --architecture native
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts push --artifact demo-kernel --architecture native
+# On x86_64 remove artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux.
+# On aarch64 remove artifacts/kernel/demo/aarch64/firecracker/standard/vmlinux.
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts pull --artifact demo-kernel --architecture native
+```
+
+The hosted control plane owns the stored bytes for that workflow. For
+`demo-kernel`, Port persists the selected variant under:
+
+- `.port/hosted/<control-plane>/artifacts/<registry>/<repository>/<version>/<architecture>/<substrate>/<protection-mode>/<filename>`
+
+Auth expectations:
+
+- the hosted artifact route uses the configured bearer token contract
+- the sample control plane reads that token from `PORT_DEMO_TOKEN`
+- the CLI sends it through the configured `authorization` header
 
 The selector flags are the canonical compatibility surface:
 
@@ -157,7 +202,11 @@ for that lane lives in
   `debugfs`, and related tooling, but it is optional. Port also works when
   those tools are installed directly on the host.
 - `push` and `pull` are the canonical artifact-mobility verbs even though the
-  sample runtime currently implements only the file-backed backend.
-- The file-backed backend is not the long-term hosted product story by itself;
-  it is the shipped proof that Port's artifact vocabulary can span local build,
-  publish, fetch, cache, and compatibility selection without changing the CLI.
+  shipped runtime now implements both the file-backed and hosted-api backends.
+- The hosted control plane owns `.port/hosted/<control-plane>/artifacts/` for
+  hosted pushes and pulls; the local caller still keeps the selected cache copy
+  under `.port/cache/`.
+- The file-backed backend is still useful for repo-local proofs, but it is no
+  longer the only executable artifact distribution path.
+- `oci-registry` remains explicit follow-on work rather than a compatibility or
+  fallback backend.

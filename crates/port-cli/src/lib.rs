@@ -122,7 +122,16 @@ Cloud Linux:
   hosted `port machine launch` now supports admission-ready x86_64 PVM machines through the live control-plane and node-agent path; other remote launch paths still return provider-aware guidance.
 Artifact Mobility:
   `port artifacts build` and `validate` materialize one canonical local variant selected by architecture, substrate, and protection mode.
-  `port artifacts push` and `pull` use the artifact's configured mobility backend. The sample config ships a file-backed registry/cache contract; OCI and hosted backends remain modeled but reserved.
+  `port artifacts push` and `pull` use the selected artifact variant's configured mobility backend.
+  The checked-in sample config defaults to the file-backed store for local proofs and cache warming.
+Hosted artifact workflow:
+  Copy `examples/port.toml` to a temp config, point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`, and switch the selected artifact distribution `push` and `pull` backends from `file-system` to `hosted-api` with that same endpoint.
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+  port --config /tmp/port-hosted-artifacts.toml artifacts build --artifact demo-kernel --architecture native
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts push --artifact demo-kernel --architecture native
+  Remove the local artifact path printed by `build` or `push`, then run `PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts pull --artifact demo-kernel --architecture native`.
+  Hosted pushes land in `.port/hosted/<control-plane>/artifacts/...` under the control-plane owner, and hosted auth uses the configured bearer token from `PORT_DEMO_TOKEN`.
+  OCI remains follow-on work.
 Hosted Control:
   Local Port still owns the shipped standard-lane launch path directly, and hosted prepared-node PVM launch now routes through the control plane and node agent.
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes and reloads durable fleet state from `.port/hosted/<control-plane>/registered-nodes.json` plus `.port/hosted/<control-plane>/imported-inventory.json`.
@@ -2151,6 +2160,8 @@ mod tests {
             "node-binding",
             "bootstrap or debug",
             "machine list",
+            "Hosted artifact workflow",
+            "OCI remains follow-on work",
             "first-class `port inventory import` command",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");

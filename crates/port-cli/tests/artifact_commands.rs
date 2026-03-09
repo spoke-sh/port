@@ -32,6 +32,26 @@ fn selector_dir(architecture: MachineArchitecture) -> &'static str {
     }
 }
 
+fn concrete_selector_dir(architecture: MachineArchitecture) -> &'static str {
+    match architecture {
+        MachineArchitecture::Native => match std::env::consts::ARCH {
+            "x86_64" => "x86_64",
+            "aarch64" => "aarch64",
+            other => panic!("unsupported native architecture '{other}'"),
+        },
+        MachineArchitecture::X86_64 => "x86_64",
+        MachineArchitecture::Aarch64 => "aarch64",
+    }
+}
+
+fn architecture_flag(architecture: MachineArchitecture) -> &'static str {
+    match architecture {
+        MachineArchitecture::Native => "native",
+        MachineArchitecture::X86_64 => "x86-64",
+        MachineArchitecture::Aarch64 => "aarch64",
+    }
+}
+
 fn hosted_artifact_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -123,6 +143,7 @@ fn configure_hosted_kernel_paths(
     local_root: &Path,
     cache_root: &Path,
     endpoint: &str,
+    architecture: MachineArchitecture,
 ) -> (PathBuf, PathBuf, PathBuf) {
     let kernel = config
         .artifacts
@@ -145,8 +166,9 @@ fn configure_hosted_kernel_paths(
             .join("vmlinux");
     }
 
+    let selector_dir = concrete_selector_dir(architecture);
     let local_path = local_root
-        .join("x86_64")
+        .join(selector_dir)
         .join("firecracker")
         .join("standard")
         .join("vmlinux");
@@ -155,7 +177,7 @@ fn configure_hosted_kernel_paths(
         .join("port")
         .join("demo-kernel")
         .join("v1")
-        .join("x86_64")
+        .join(selector_dir)
         .join("firecracker")
         .join("standard")
         .join("vmlinux");
@@ -164,7 +186,7 @@ fn configure_hosted_kernel_paths(
         .join("port")
         .join("demo-kernel")
         .join("v1")
-        .join("x86_64")
+        .join(selector_dir)
         .join("firecracker")
         .join("standard")
         .join("vmlinux");
@@ -246,7 +268,7 @@ fn cli_artifact_push_and_pull_round_trip_variant_contract() {
 }
 
 #[test]
-fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
+fn cli_artifact_build_push_and_pull_round_trip_through_hosted_backend() {
     let _guard = hosted_artifact_lock().lock().expect("lock should work");
     unsafe {
         std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
@@ -257,6 +279,8 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
     let cache_root = temp.path().join("artifact-cache");
     let control_plane_addr = reserve_addr();
     let endpoint = format!("http://{control_plane_addr}");
+    let architecture = MachineArchitecture::Native;
+    let selector_dir = concrete_selector_dir(architecture);
     let _ = fs::remove_dir_all(".port/hosted/demo");
 
     let mut config = PortConfig::sample();
@@ -265,9 +289,42 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         .get_mut("demo")
         .expect("demo control plane should exist")
         .endpoint = endpoint.clone();
-    let (local_path, cache_path, store_path) =
-        configure_hosted_kernel_paths(&mut config, &local_root, &cache_root, &endpoint);
+    let (local_path, cache_path, store_path) = configure_hosted_kernel_paths(
+        &mut config,
+        &local_root,
+        &cache_root,
+        &endpoint,
+        architecture,
+    );
     write_config(&config_path, &config);
+
+    let build = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("build")
+        .arg("--artifact")
+        .arg("demo-kernel")
+        .arg("--architecture")
+        .arg(architecture_flag(architecture))
+        .output()
+        .expect("build command");
+    assert!(
+        build.status.success(),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_stdout = String::from_utf8_lossy(&build.stdout);
+    assert!(
+        build_stdout.contains("built kernel artifact 'demo-kernel'"),
+        "{build_stdout}"
+    );
+    assert!(
+        build_stdout.contains(&format!("for {selector_dir}/firecracker/standard")),
+        "{build_stdout}"
+    );
+    let built_bytes = fs::read(&local_path).expect("build should materialize local artifact");
 
     let (server_tx, server_rx) = mpsc::channel();
     let server_config = config.clone();
@@ -285,10 +342,6 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
     });
     wait_for_tcp_or_server_error(&endpoint["http://".len()..], &server_rx, "control plane");
 
-    fs::create_dir_all(local_path.parent().expect("local parent"))
-        .expect("local parent should exist");
-    fs::write(&local_path, "demo-kernel-hosted-bytes").expect("local artifact should write");
-
     let push = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")
         .arg("--config")
@@ -298,7 +351,7 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         .arg("--artifact")
         .arg("demo-kernel")
         .arg("--architecture")
-        .arg("x86-64")
+        .arg(architecture_flag(architecture))
         .output()
         .expect("push command");
     assert!(
@@ -313,7 +366,7 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         "{push_stdout}"
     );
     assert!(
-        push_stdout.contains("for x86_64/firecracker/standard"),
+        push_stdout.contains(&format!("for {selector_dir}/firecracker/standard")),
         "{push_stdout}"
     );
     assert!(push_stdout.contains("backend: hosted-api"), "{push_stdout}");
@@ -330,8 +383,8 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         "{push_stdout}"
     );
     assert_eq!(
-        fs::read_to_string(&store_path).expect("store path should exist"),
-        "demo-kernel-hosted-bytes"
+        fs::read(&store_path).expect("store path should exist"),
+        built_bytes
     );
 
     fs::remove_file(&local_path).expect("local artifact should be removable");
@@ -346,7 +399,7 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         .arg("--artifact")
         .arg("demo-kernel")
         .arg("--architecture")
-        .arg("x86-64")
+        .arg(architecture_flag(architecture))
         .output()
         .expect("pull command");
     assert!(
@@ -361,7 +414,7 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         "{pull_stdout}"
     );
     assert!(
-        pull_stdout.contains("for x86_64/firecracker/standard"),
+        pull_stdout.contains(&format!("for {selector_dir}/firecracker/standard")),
         "{pull_stdout}"
     );
     assert!(pull_stdout.contains("backend: hosted-api"), "{pull_stdout}");
@@ -378,12 +431,12 @@ fn cli_artifact_push_and_pull_round_trip_through_hosted_backend() {
         "{pull_stdout}"
     );
     assert_eq!(
-        fs::read_to_string(&local_path).expect("local path should be restored"),
-        "demo-kernel-hosted-bytes"
+        fs::read(&local_path).expect("local path should be restored"),
+        built_bytes
     );
     assert_eq!(
-        fs::read_to_string(&cache_path).expect("cache path should be restored"),
-        "demo-kernel-hosted-bytes"
+        fs::read(&cache_path).expect("cache path should be restored"),
+        built_bytes
     );
 
     let _ = fs::remove_dir_all(".port/hosted/demo");

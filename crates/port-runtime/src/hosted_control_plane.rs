@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, bail};
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
@@ -762,7 +762,10 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
             "/v1/nodes/{node}/registration",
             post(node_registration_refresh),
         )
-        .route("/v1/artifacts:push", post(artifact_push))
+        .route(
+            "/v1/artifacts:push",
+            post(artifact_push).layer(DefaultBodyLimit::disable()),
+        )
         .route("/v1/artifacts:pull", post(artifact_pull))
         .route("/v1/machines", get(list_machines))
         .route(
@@ -4432,6 +4435,7 @@ mod tests {
         let control_plane_addr =
             serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
 
+        let upload_body = vec![b'k'; 3 * 1024 * 1024 + 17];
         let mut upload =
             Client::new().post(format!("http://{control_plane_addr}/v1/artifacts:push"));
         for (name, value) in &headers {
@@ -4442,7 +4446,7 @@ mod tests {
                 PORT_ARTIFACT_TRANSFER_HEADER,
                 serde_json::to_string(&request).expect("artifact metadata should encode"),
             )
-            .body("demo-kernel-bytes")
+            .body(upload_body.clone())
             .send()
             .await
             .expect("artifact upload should complete");
@@ -4450,10 +4454,10 @@ mod tests {
         let uploaded: HostedSuccess<HostedArtifactTransferResult> =
             upload.json().await.expect("upload response should decode");
         assert_eq!(uploaded.result.store_path, request.store_path);
-        assert_eq!(uploaded.result.bytes_copied, 17);
+        assert_eq!(uploaded.result.bytes_copied, upload_body.len() as u64);
         assert_eq!(
             std::fs::read(&request.store_path).expect("uploaded artifact should persist"),
-            b"demo-kernel-bytes"
+            upload_body
         );
 
         let mut download =
@@ -4474,7 +4478,9 @@ mod tests {
                 .await
                 .expect("downloaded artifact should decode")
                 .as_ref(),
-            b"demo-kernel-bytes"
+            std::fs::read(&request.store_path)
+                .expect("stored artifact should exist")
+                .as_slice()
         );
 
         cleanup_registered_state(&control_plane);
