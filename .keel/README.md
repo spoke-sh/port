@@ -56,11 +56,12 @@
 |--------|--------|
 | [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | done |
 
-### [Artifact Mobility And Hosted Distribution](epics/1vzW8e000/) (done)
+### [Artifact Mobility And Hosted Distribution](epics/1vzW8e000/) (active)
 
 | Voyage | Status |
 |--------|--------|
 | [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | done |
+| [OCI Artifact Registry Mobility](epics/1vzW8e000/voyages/1vzeWr000/) | in-progress |
 
 ### [Hosted Standard Cloud Launch](epics/1vzXFf000/) (done)
 
