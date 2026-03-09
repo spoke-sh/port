@@ -1184,6 +1184,42 @@ impl HostedNodeCapabilities {
             .iter()
             .find(|lane| lane.architecture == architecture)
     }
+
+    #[must_use]
+    pub fn is_populated(&self) -> bool {
+        !self.providers.is_empty()
+            && !self.platforms.is_empty()
+            && !self.substrates.is_empty()
+            && !self.architectures.is_empty()
+            && !self.protection_modes.is_empty()
+    }
+
+    #[must_use]
+    pub fn is_subset_of(&self, configured: &Self) -> bool {
+        self.providers
+            .iter()
+            .all(|provider| configured.providers.contains(provider))
+            && self
+                .platforms
+                .iter()
+                .all(|platform| configured.platforms.contains(platform))
+            && self
+                .substrates
+                .iter()
+                .all(|substrate| configured.substrates.contains(substrate))
+            && self
+                .architectures
+                .iter()
+                .all(|architecture| configured.architectures.contains(architecture))
+            && self
+                .protection_modes
+                .iter()
+                .all(|mode| configured.protection_modes.contains(mode))
+            && self
+                .pvm_lanes
+                .iter()
+                .all(|lane| configured.pvm_lanes.contains(lane))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1227,6 +1263,14 @@ pub enum HostedSchedulerPolicy {
 pub struct HostedInventoryContract {
     pub nodes: BTreeMap<String, HostedNodeContract>,
     pub host_groups: BTreeMap<String, HostedHostGroupContract>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedImportedNodeRecord {
+    pub provider: HostProvider,
+    pub provenance: String,
+    pub imported_at: u64,
+    pub capability_summary: HostedNodeCapabilities,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

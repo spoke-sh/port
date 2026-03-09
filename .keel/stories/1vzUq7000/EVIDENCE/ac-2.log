@@ -1,0 +1,12 @@
+---
+recorded_at: 2026-03-09T00:51:39.001593755-07:00
+command: nix develop -c cargo test -q -p port-runtime hosted_imported_inventory
+---
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 79 filtered out; finished in 0.01s
+
+
+--- stderr ---
+path '/home/alex/workspace/spoke-sh/port/.keel' does not contain a 'flake.nix', searching up

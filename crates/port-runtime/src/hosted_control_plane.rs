@@ -21,9 +21,9 @@ use port_hosted_protocol::{
     HostedSuccess,
 };
 use port_model::{
-    ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
-    HostedMachineSummaryContract, HostedNodeRegistration, HostedRegisteredNodeContract, PortConfig,
-    ProtectionMode,
+    ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostProvider,
+    HostedAuthTokenSource, HostedImportedNodeRecord, HostedMachineSummaryContract,
+    HostedNodeRegistration, HostedRegisteredNodeContract, PortConfig, ProtectionMode,
 };
 use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
@@ -78,6 +78,12 @@ struct ControlPlaneStateInner {
     registered_state_path: PathBuf,
     registered_state: RwLock<RegisteredNodeStateFile>,
     registered_nodes: RwLock<BTreeMap<String, RegisteredNodeRecord>>,
+    #[allow(dead_code)]
+    imported_inventory_path: PathBuf,
+    #[allow(dead_code)]
+    imported_inventory_state: RwLock<ImportedInventoryStateFile>,
+    #[allow(dead_code)]
+    imported_inventory: RwLock<BTreeMap<String, ImportedNodeRecord>>,
     machine_placement_state_path: PathBuf,
     machine_placement_state: RwLock<MachinePlacementStateFile>,
     machine_placements: RwLock<BTreeMap<String, HostedMachinePlacementRecord>>,
@@ -90,6 +96,14 @@ struct RegisteredNodeStateFile {
     control_plane: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     nodes: BTreeMap<String, HostedNodeRegistration>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct ImportedInventoryStateFile {
+    control_plane: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    nodes: BTreeMap<String, HostedImportedNodeRecord>,
 }
 
 #[allow(dead_code)]
@@ -133,6 +147,15 @@ struct NodeAgentStateInner {
 struct RegisteredNodeRecord {
     binding: HostedNodeBinding,
     contract: HostedRegisteredNodeContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImportedNodeRecord {
+    node_name: String,
+    provider: HostProvider,
+    provenance: String,
+    imported_at: u64,
+    capability_summary: port_model::HostedNodeCapabilities,
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +239,11 @@ fn registered_node_state_path(control_plane: &str) -> PathBuf {
     hosted_placeholder_runtime_root(control_plane).join("registered-nodes.json")
 }
 
+#[allow(dead_code)]
+fn imported_inventory_state_path(control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root(control_plane).join("imported-inventory.json")
+}
+
 fn load_registered_node_state(
     path: &PathBuf,
     control_plane: &str,
@@ -260,6 +288,62 @@ fn persist_registered_node_state(path: &PathBuf, state: &RegisteredNodeStateFile
         serde_json::to_vec_pretty(state).context("failed to encode registered node state")?,
     )
     .with_context(|| format!("failed to write registered node state '{}'", path.display()))?;
+    Ok(())
+}
+
+fn load_imported_inventory_state(
+    path: &PathBuf,
+    control_plane: &str,
+) -> Result<ImportedInventoryStateFile> {
+    if !path.exists() {
+        return Ok(ImportedInventoryStateFile {
+            control_plane: control_plane.to_string(),
+            ..ImportedInventoryStateFile::default()
+        });
+    }
+
+    let bytes = std::fs::read(path).with_context(|| {
+        format!(
+            "failed to read imported inventory state at '{}'",
+            path.display()
+        )
+    })?;
+    let state: ImportedInventoryStateFile = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "failed to decode imported inventory state at '{}'",
+            path.display()
+        )
+    })?;
+    Ok(state)
+}
+
+#[allow(dead_code)]
+fn persist_imported_inventory_state(
+    path: &PathBuf,
+    state: &ImportedInventoryStateFile,
+) -> Result<()> {
+    let parent = path.parent().with_context(|| {
+        format!(
+            "imported inventory state path '{}' has no parent directory",
+            path.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create imported inventory state directory '{}'",
+            parent.display()
+        )
+    })?;
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(state).context("failed to encode imported inventory state")?,
+    )
+    .with_context(|| {
+        format!(
+            "failed to write imported inventory state '{}'",
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -455,6 +539,100 @@ fn registered_node_records(
     Ok(records)
 }
 
+fn imported_provider_label(provider: HostProvider) -> String {
+    serde_json::to_string(&provider)
+        .unwrap_or_else(|_| format!("{provider:?}"))
+        .trim_matches('"')
+        .to_string()
+}
+
+fn imported_inventory_records(
+    config: &PortConfig,
+    path: &PathBuf,
+    state: &ImportedInventoryStateFile,
+) -> Result<BTreeMap<String, ImportedNodeRecord>> {
+    if state.control_plane.trim().is_empty() {
+        bail!(
+            "imported inventory state at '{}' must declare a non-empty control plane",
+            path.display()
+        );
+    }
+    if !config.control_planes.contains_key(&state.control_plane) {
+        bail!(
+            "imported inventory state at '{}' references unknown control plane '{}'",
+            path.display(),
+            state.control_plane
+        );
+    }
+
+    let inventory = config.hosted_inventory_contract().map_err(|error| {
+        anyhow!(
+            "imported inventory state at '{}' could not load hosted inventory: {error}",
+            path.display()
+        )
+    })?;
+    let mut records = BTreeMap::new();
+    for (node_name, imported) in &state.nodes {
+        let configured = inventory.nodes.get(node_name).ok_or_else(|| {
+            anyhow!(
+                "imported inventory state at '{}' for control plane '{}' references unknown configured node '{}'",
+                path.display(),
+                state.control_plane,
+                node_name
+            )
+        })?;
+        if configured.control_plane != state.control_plane {
+            bail!(
+                "imported inventory state at '{}' for node '{}' belongs to control plane '{}', not '{}'",
+                path.display(),
+                node_name,
+                configured.control_plane,
+                state.control_plane
+            );
+        }
+        if !configured
+            .capabilities
+            .providers
+            .contains(&imported.provider)
+        {
+            bail!(
+                "imported inventory state at '{}' for node '{}' conflicts on provider: imported '{}' is not permitted by configured capabilities",
+                path.display(),
+                node_name,
+                imported_provider_label(imported.provider)
+            );
+        }
+        if !imported.capability_summary.is_populated() {
+            bail!(
+                "imported inventory state at '{}' for node '{}' must declare a populated capability summary",
+                path.display(),
+                node_name
+            );
+        }
+        if !imported
+            .capability_summary
+            .is_subset_of(&configured.capabilities)
+        {
+            bail!(
+                "imported inventory state at '{}' for node '{}' conflicts on capability_summary with the configured inventory contract",
+                path.display(),
+                node_name
+            );
+        }
+        records.insert(
+            node_name.clone(),
+            ImportedNodeRecord {
+                node_name: node_name.clone(),
+                provider: imported.provider,
+                provenance: imported.provenance.clone(),
+                imported_at: imported.imported_at,
+                capability_summary: imported.capability_summary.clone(),
+            },
+        );
+    }
+    Ok(records)
+}
+
 fn current_unix_timestamp_seconds() -> Result<u64> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -524,6 +702,23 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
                 request.control_plane
             )
         })?;
+    let imported_inventory_path = imported_inventory_state_path(&request.control_plane);
+    let imported_inventory_state =
+        load_imported_inventory_state(&imported_inventory_path, &request.control_plane)
+            .with_context(|| {
+                format!(
+                    "control plane '{}' could not load imported inventory state",
+                    request.control_plane
+                )
+            })?;
+    let imported_inventory =
+        imported_inventory_records(&config, &imported_inventory_path, &imported_inventory_state)
+            .with_context(|| {
+                format!(
+                    "control plane '{}' could not validate imported inventory state",
+                    request.control_plane
+                )
+            })?;
     let machine_placement_state_path = machine_placement_state_path(&request.control_plane);
     let machine_placement_state =
         load_machine_placement_state(&machine_placement_state_path, &request.control_plane)
@@ -547,6 +742,9 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             registered_state_path,
             registered_state: RwLock::new(registered_state),
             registered_nodes: RwLock::new(registered_nodes),
+            imported_inventory_path,
+            imported_inventory_state: RwLock::new(imported_inventory_state),
+            imported_inventory: RwLock::new(imported_inventory),
             machine_placement_state_path,
             machine_placement_state: RwLock::new(machine_placement_state),
             machine_placements: RwLock::new(machine_placements),
@@ -3714,6 +3912,185 @@ mod tests {
             "{}",
             error
         );
+    }
+
+    #[test]
+    fn hosted_imported_inventory_persists_and_loads_imported_node_records() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("imported-inventory");
+        let token_var = unique_test_env("PORT_TEST_IMPORTED_INVENTORY_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let imported_state = ImportedInventoryStateFile {
+            control_plane: control_plane.clone(),
+            nodes: BTreeMap::from([(
+                String::from("aws-linux-node"),
+                HostedImportedNodeRecord {
+                    provider: HostProvider::Aws,
+                    provenance: String::from("inventory-sync"),
+                    imported_at: 123,
+                    capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                },
+            )]),
+        };
+        let imported_path = imported_inventory_state_path(&control_plane);
+        persist_imported_inventory_state(&imported_path, &imported_state)
+            .expect("imported inventory should persist");
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should load imported inventory");
+
+        assert_eq!(state.inner.imported_inventory_path, imported_path);
+        assert_eq!(
+            *state
+                .inner
+                .imported_inventory_state
+                .read()
+                .expect("imported inventory state lock"),
+            imported_state
+        );
+        let imported_contract = state
+            .inner
+            .imported_inventory
+            .read()
+            .expect("imported inventory lock")
+            .get("aws-linux-node")
+            .expect("imported node contract should exist")
+            .clone();
+        assert_eq!(imported_contract.node_name, "aws-linux-node");
+        assert_eq!(imported_contract.provider, HostProvider::Aws);
+        assert_eq!(imported_contract.provenance, "inventory-sync");
+        assert_eq!(imported_contract.imported_at, 123);
+        assert_eq!(
+            imported_contract.capability_summary,
+            config.nodes["aws-linux-node"].capabilities
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn hosted_imported_inventory_rejects_unknown_runtime_only_nodes() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("unknown-import");
+        let token_var = unique_test_env("PORT_TEST_UNKNOWN_IMPORT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let imported_path = imported_inventory_state_path(&control_plane);
+        persist_imported_inventory_state(
+            &imported_path,
+            &ImportedInventoryStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([(
+                    String::from("runtime-only-node"),
+                    HostedImportedNodeRecord {
+                        provider: HostProvider::Aws,
+                        provenance: String::from("inventory-sync"),
+                        imported_at: 456,
+                        capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                    },
+                )]),
+            },
+        )
+        .expect("imported inventory should persist");
+
+        let error = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .err()
+        .expect("unknown imported node should fail");
+        let message = format!("{error:#}");
+        assert!(message.contains("runtime-only-node"), "{message}");
+        assert!(
+            message.contains(imported_path.to_string_lossy().as_ref()),
+            "{message}"
+        );
+        assert!(message.contains(&control_plane), "{message}");
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn hosted_imported_inventory_surfaces_import_path_and_node_on_conflict() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("conflicting-import");
+        let token_var = unique_test_env("PORT_TEST_CONFLICTING_IMPORT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let imported_path = imported_inventory_state_path(&control_plane);
+        persist_imported_inventory_state(
+            &imported_path,
+            &ImportedInventoryStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    HostedImportedNodeRecord {
+                        provider: HostProvider::Gcp,
+                        provenance: String::from("inventory-sync"),
+                        imported_at: 789,
+                        capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                    },
+                )]),
+            },
+        )
+        .expect("conflicting imported inventory should persist");
+
+        let error = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .err()
+        .expect("conflicting imported node should fail");
+        let message = format!("{error:#}");
+        assert!(message.contains("aws-linux-node"), "{message}");
+        assert!(
+            message.contains(imported_path.to_string_lossy().as_ref()),
+            "{message}"
+        );
+        assert!(message.contains("provider"), "{message}");
+        assert!(message.contains("gcp"), "{message}");
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[tokio::test]

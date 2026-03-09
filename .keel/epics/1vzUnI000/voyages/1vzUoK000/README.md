@@ -25,12 +25,12 @@ started_at: 2026-03-09T00:21:26
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/5 stories complete
+**Progress:** 1/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Durable Hosted Registry Contract](../../../../stories/1vzUq5000/README.md) | feat | backlog |
-| [Persist Hosted Registration And Freshness](../../../../stories/1vzUq6000/README.md) | feat | backlog |
+| [Persist Hosted Registration And Freshness](../../../../stories/1vzUq6000/README.md) | feat | done |
 | [Materialize Imported Fleet Inventory](../../../../stories/1vzUq7000/README.md) | feat | backlog |
 | [Surface Durable Hosted Fleet State](../../../../stories/1vzUq8000/README.md) | feat | backlog |
 | [Publish Durable Hosted Fleet Workflow](../../../../stories/1vzUq9000/README.md) | feat | backlog |
