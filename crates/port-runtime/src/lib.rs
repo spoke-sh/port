@@ -485,6 +485,7 @@ pub struct GuestForwardRequest<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineDriverKind {
     FirecrackerLocal,
+    CloudHypervisorLocal,
     AvfLocal,
     HostedControlPlane,
 }
@@ -536,6 +537,9 @@ trait MachineDriver {
 
 #[derive(Debug, Default, Clone, Copy)]
 struct FirecrackerLocalDriver;
+
+#[derive(Debug, Default, Clone, Copy)]
+struct CloudHypervisorLocalDriver;
 
 #[derive(Debug, Default, Clone, Copy)]
 struct AvfLocalDriver;
@@ -1093,6 +1097,240 @@ fn avf_launcher_from_env() -> Option<PathBuf> {
     env::var_os("PORT_AVF_LAUNCHER").map(PathBuf::from)
 }
 
+fn cloud_hypervisor_local_launch_machine(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+) -> Result<LaunchMetadata> {
+    config
+        .validate()
+        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+
+    let machine = config
+        .machines
+        .get(request.machine_name)
+        .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+
+    if host.platform != HostPlatform::Linux {
+        bail!(
+            "Cloud Hypervisor local launch requires a Linux host; machine '{}' targets host '{}' with platform {:?}",
+            request.machine_name,
+            machine.host,
+            host.platform
+        );
+    }
+
+    if !matches!(&host.connection, HostConnection::Local) {
+        let hosted_identity = config
+            .hosted_api_identity_contract(request.machine_name)
+            .with_context(|| {
+                format!(
+                    "failed to resolve hosted API identity for machine '{}'",
+                    request.machine_name
+                )
+            })?;
+        bail!(
+            "{}",
+            remote_launch_guidance(
+                request.machine_name,
+                &machine.host,
+                host.provider,
+                hosted_identity.as_ref(),
+            )
+        );
+    }
+
+    if machine.protection_mode != ProtectionMode::Standard {
+        bail!(
+            "Cloud Hypervisor local launch only supports protection_mode = standard; machine '{}' requested {:?}",
+            request.machine_name,
+            machine.protection_mode
+        );
+    }
+
+    let kernel = config
+        .artifact(&machine.kernel)
+        .with_context(|| format!("unknown kernel artifact '{}'", machine.kernel))?;
+    let guest_image = config
+        .artifact(&machine.guest_image)
+        .with_context(|| format!("unknown guest image artifact '{}'", machine.guest_image))?;
+    let machine_check =
+        machine_contract_check(request.machine_name, host, machine, kernel, guest_image);
+    if !machine_check.ok {
+        bail!("machine contract failed: {}", machine_check.detail);
+    }
+
+    let resolved_architecture = resolve_machine_architecture(machine.architecture)?;
+    let kernel_variant = kernel
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "kernel artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.kernel, resolved_architecture, machine.substrate, machine.protection_mode
+            )
+        })?;
+    let guest_variant = guest_image
+        .variant(
+            resolved_architecture,
+            machine.substrate,
+            machine.protection_mode,
+        )
+        .with_context(|| {
+            format!(
+                "guest image artifact '{}' is missing a variant for {:?}/{:?}/{:?}",
+                machine.guest_image,
+                resolved_architecture,
+                machine.substrate,
+                machine.protection_mode
+            )
+        })?;
+
+    let failures = launch_preflight_checks(machine, &kernel_variant.path, &guest_variant.path)
+        .into_iter()
+        .filter(|check| check.required && !check.ok)
+        .collect::<Vec<_>>();
+    if !failures.is_empty() {
+        let details = failures
+            .into_iter()
+            .map(|failure| format!("{}: {}", failure.name, failure.detail))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bail!("cloud-hypervisor host preflight failed: {details}");
+    }
+
+    let cloud_hypervisor_binary = find_binary("cloud-hypervisor").ok_or_else(|| {
+        anyhow!(
+            "Cloud Hypervisor local launch requires 'cloud-hypervisor' on PATH for machine '{}'",
+            request.machine_name
+        )
+    })?;
+
+    let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
+    fs::create_dir_all(&paths.runtime_dir).with_context(|| {
+        format!(
+            "failed to create runtime directory '{}'",
+            paths.runtime_dir.display()
+        )
+    })?;
+    prepare_cloud_hypervisor_runtime_state(&paths, request.machine_name)?;
+
+    let config_path = cloud_hypervisor_config_path(&paths);
+    let log_path = cloud_hypervisor_log_path(&paths);
+    let api_socket_path = cloud_hypervisor_api_socket_path(&paths);
+    let config_payload = CloudHypervisorLaunchConfig {
+        machine_name: request.machine_name.to_string(),
+        runtime_dir: paths.runtime_dir.clone(),
+        kernel_path: kernel_variant.path.clone(),
+        guest_image_path: guest_variant.path.clone(),
+        vcpu_count: machine.vcpu_count,
+        memory_mib: machine.memory_mib,
+        kernel_args: machine.kernel_args.clone(),
+        rootfs_read_only: machine.rootfs_read_only,
+        api_socket_path: api_socket_path.clone(),
+        console_log: log_path.clone(),
+    };
+    write_json_file(&config_path, &config_payload)?;
+    File::create(&log_path)
+        .with_context(|| format!("failed to create '{}'", log_path.display()))?;
+
+    let stdout = File::create(&paths.stdout_log)
+        .with_context(|| format!("failed to create '{}'", paths.stdout_log.display()))?;
+    let stderr = File::create(&paths.stderr_log)
+        .with_context(|| format!("failed to create '{}'", paths.stderr_log.display()))?;
+
+    let disk_arg = format!(
+        "path={},readonly={}",
+        guest_variant.path.display(),
+        if machine.rootfs_read_only {
+            "on"
+        } else {
+            "off"
+        }
+    );
+    let serial_arg = format!("file={}", log_path.display());
+    let api_socket_arg = format!("path={}", api_socket_path.display());
+    let cpu_arg = format!("boot={}", machine.vcpu_count);
+    let memory_arg = format!("size={}M", machine.memory_mib);
+
+    let mut child = Command::new(&cloud_hypervisor_binary)
+        .arg("--kernel")
+        .arg(&kernel_variant.path)
+        .arg("--disk")
+        .arg(disk_arg)
+        .arg("--cmdline")
+        .arg(&machine.kernel_args)
+        .arg("--cpus")
+        .arg(cpu_arg)
+        .arg("--memory")
+        .arg(memory_arg)
+        .arg("--console")
+        .arg("off")
+        .arg("--serial")
+        .arg(serial_arg)
+        .arg("--api-socket")
+        .arg(api_socket_arg)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .with_context(|| {
+            format!(
+                "failed to start Cloud Hypervisor '{}'",
+                cloud_hypervisor_binary.display()
+            )
+        })?;
+
+    if let Some(status) = wait_for_boot(&mut child, request.boot_wait)? {
+        bail!(
+            "cloud-hypervisor exited before boot wait elapsed with status {status}; inspect '{}' and '{}'",
+            paths.stdout_log.display(),
+            paths.stderr_log.display()
+        );
+    }
+
+    let launched_at_unix_s = unix_timestamp_now()?;
+    fs::write(&paths.pid_path, format!("{}\n", child.id()))
+        .with_context(|| format!("failed to write pid file '{}'", paths.pid_path.display()))?;
+
+    let metadata = LaunchMetadata {
+        machine_name: request.machine_name.to_string(),
+        pid: child.id(),
+        launched_at_unix_s,
+        runtime_dir: paths.runtime_dir.clone(),
+        firecracker_binary: cloud_hypervisor_binary.clone(),
+        config_path: config_path.clone(),
+        log_path: log_path.clone(),
+        stdout_path: paths.stdout_log.clone(),
+        stderr_path: paths.stderr_log.clone(),
+        manifest_path: paths.manifest_path.clone(),
+    };
+    write_json_file(&paths.manifest_path, &metadata)?;
+
+    let runtime_metadata = CloudHypervisorRuntimeMetadata {
+        machine_name: request.machine_name.to_string(),
+        pid: child.id(),
+        binary: cloud_hypervisor_binary,
+        config_path,
+        metadata_path: cloud_hypervisor_runtime_metadata_path(&paths),
+        api_socket_path,
+        console_log: log_path,
+        launched_at_unix_s,
+    };
+    write_json_file(
+        &cloud_hypervisor_runtime_metadata_path(&paths),
+        &runtime_metadata,
+    )?;
+
+    Ok(metadata)
+}
+
 fn avf_local_launch_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
@@ -1290,6 +1528,9 @@ pub fn list_machines(config: &PortConfig, runtime_root: &Path) -> Result<Vec<Mac
     for machine in local_runtime_driver().list_machines(config, runtime_root)? {
         machines.insert(machine.machine_name.clone(), machine);
     }
+    for machine in CloudHypervisorLocalDriver.list_machines(config, runtime_root)? {
+        machines.insert(machine.machine_name.clone(), machine);
+    }
     for machine in AvfLocalDriver.list_machines(config, runtime_root)? {
         machines.insert(machine.machine_name.clone(), machine);
     }
@@ -1376,12 +1617,12 @@ fn resolve_live_pid_by_existence(
     manifest_pid: Option<u32>,
 ) -> Result<Option<u32>> {
     if let Some(pid) = pid_from_file {
-        if process_cmdline(pid)?.is_some() {
+        if process_exists(pid)? {
             return Ok(Some(pid));
         }
     }
     if let Some(pid) = manifest_pid {
-        if Some(pid) != pid_from_file && process_cmdline(pid)?.is_some() {
+        if Some(pid) != pid_from_file && process_exists(pid)? {
             return Ok(Some(pid));
         }
     }
@@ -1507,6 +1748,122 @@ fn avf_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<M
     })
 }
 
+fn cloud_hypervisor_local_machine_status(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineStatus> {
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    if !paths.runtime_dir.exists() {
+        bail!(
+            "runtime state for machine '{}' does not exist under '{}'",
+            machine_name,
+            runtime_root.display()
+        );
+    }
+
+    let pid_from_file = match read_pid_file(&paths.pid_path) {
+        Ok(pid) => pid,
+        Err(error) => {
+            return Ok(cloud_hypervisor_malformed_machine_status(
+                machine_name,
+                &paths,
+                error.to_string(),
+            ));
+        }
+    };
+    if !paths.manifest_path.exists() {
+        return Ok(cloud_hypervisor_malformed_machine_status(
+            machine_name,
+            &paths,
+            format!(
+                "runtime manifest '{}' is missing",
+                paths.manifest_path.display()
+            ),
+        ));
+    }
+
+    let metadata_path = cloud_hypervisor_runtime_metadata_path(&paths);
+    if !metadata_path.exists() {
+        return Ok(cloud_hypervisor_malformed_machine_status(
+            machine_name,
+            &paths,
+            format!(
+                "Cloud Hypervisor runtime metadata '{}' is missing",
+                metadata_path.display()
+            ),
+        ));
+    }
+
+    let manifest = match read_launch_metadata(&paths.manifest_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Ok(cloud_hypervisor_malformed_machine_status(
+                machine_name,
+                &paths,
+                format!(
+                    "failed to parse manifest '{}': {error}",
+                    paths.manifest_path.display()
+                ),
+            ));
+        }
+    };
+    let metadata: CloudHypervisorRuntimeMetadata = match read_json_file(&metadata_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Ok(cloud_hypervisor_malformed_machine_status(
+                machine_name,
+                &paths,
+                format!(
+                    "failed to parse Cloud Hypervisor runtime metadata '{}': {error}",
+                    metadata_path.display()
+                ),
+            ));
+        }
+    };
+
+    let live_pid = resolve_live_pid_by_existence(pid_from_file, Some(manifest.pid))?;
+    let pid = live_pid.or(pid_from_file).or(Some(manifest.pid));
+    let (state, detail) = match live_pid {
+        Some(_) => (
+            MachineRuntimeState::Running,
+            format!(
+                "live Cloud Hypervisor process matches runtime manifest; metadata '{}'",
+                metadata_path.display()
+            ),
+        ),
+        None if pid_from_file.is_some() => (
+            MachineRuntimeState::Stale,
+            format!(
+                "recorded Cloud Hypervisor pid is no longer live; metadata '{}'",
+                metadata_path.display()
+            ),
+        ),
+        None => (
+            MachineRuntimeState::Stopped,
+            format!(
+                "launch manifest exists but no live Cloud Hypervisor process is recorded; metadata '{}'",
+                metadata_path.display()
+            ),
+        ),
+    };
+
+    Ok(MachineStatus {
+        machine_name: machine_name.to_string(),
+        state,
+        pid,
+        control: MachineControlContract::local_runtime_root(),
+        runtime_dir: paths.runtime_dir,
+        config_path: metadata.config_path,
+        manifest_path: paths.manifest_path,
+        pid_path: paths.pid_path,
+        firecracker_log: metadata.console_log,
+        stdout_log: paths.stdout_log,
+        stderr_log: paths.stderr_log,
+        hosted_fleet_nodes: Vec::new(),
+        detail,
+    })
+}
+
 fn firecracker_local_machine_monitor(
     runtime_root: &Path,
     machine_name: &str,
@@ -1520,6 +1877,14 @@ fn avf_local_machine_monitor(
     machine_name: &str,
 ) -> Result<MachineMonitorReport> {
     let status = avf_local_machine_status(runtime_root, machine_name)?;
+    machine_monitor_report(status, None, None, Vec::new())
+}
+
+fn cloud_hypervisor_local_machine_monitor(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineMonitorReport> {
+    let status = cloud_hypervisor_local_machine_status(runtime_root, machine_name)?;
     machine_monitor_report(status, None, None, Vec::new())
 }
 
@@ -1547,6 +1912,69 @@ fn avf_local_machine_top(runtime_root: &Path, machine_name: &str) -> Result<Mach
             state: status.state,
             pid: status.pid,
             command: avf_command,
+            source: metadata_path,
+            detail: status.detail.clone(),
+        });
+    }
+    for forward in load_detached_forward_statuses(&status.runtime_dir, &status.machine_name)? {
+        let command = match forward.pid {
+            Some(pid) => process_cmdline(pid)?,
+            None => None,
+        };
+        entries.push(MachineTopEntry {
+            kind: MachineTopEntryKind::DetachedForward,
+            name: forward.name,
+            state: forward.state,
+            pid: forward.pid,
+            command,
+            source: forward.manifest_path,
+            detail: format!(
+                "{} listen={} target={}",
+                forward.detail, forward.listen, forward.target
+            ),
+        });
+    }
+    entries.sort_by(|left, right| {
+        machine_top_entry_rank(left.kind)
+            .cmp(&machine_top_entry_rank(right.kind))
+            .then(left.name.cmp(&right.name))
+    });
+
+    Ok(MachineTopReport {
+        machine_name: status.machine_name,
+        state: status.state,
+        pid: status.pid,
+        control: status.control,
+        control_plane: None,
+        node_name: None,
+        host_groups: Vec::new(),
+        runtime_dir: status.runtime_dir,
+        detail: status.detail,
+        entries,
+    })
+}
+
+fn cloud_hypervisor_local_machine_top(
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineTopReport> {
+    let status = cloud_hypervisor_local_machine_status(runtime_root, machine_name)?;
+    let command = match status.pid {
+        Some(pid) => process_cmdline(pid)?,
+        None => None,
+    };
+    let metadata_path = cloud_hypervisor_runtime_metadata_path(&RuntimePaths::for_machine(
+        runtime_root,
+        machine_name,
+    ));
+    let mut entries = Vec::new();
+    if status.pid.is_some() || status.manifest_path.exists() {
+        entries.push(MachineTopEntry {
+            kind: MachineTopEntryKind::Hypervisor,
+            name: String::from("cloud-hypervisor"),
+            state: status.state,
+            pid: status.pid,
+            command,
             source: metadata_path,
             detail: status.detail.clone(),
         });
@@ -2305,6 +2733,88 @@ fn avf_local_stop_machine(
     }
 }
 
+fn cloud_hypervisor_local_stop_machine(
+    runtime_root: &Path,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let status = cloud_hypervisor_local_machine_status(runtime_root, machine_name)?;
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+
+    match status.state {
+        MachineRuntimeState::Running => {
+            let pid = status
+                .pid
+                .context("running machine status did not include a pid")?;
+            signal_process(pid, libc::SIGTERM).with_context(|| {
+                format!(
+                    "failed to stop Cloud Hypervisor machine '{}' with SIGTERM",
+                    machine_name
+                )
+            })?;
+            if !wait_for_pid_exit(pid, timeout)? {
+                signal_process(pid, libc::SIGKILL).with_context(|| {
+                    format!(
+                        "failed to force-stop Cloud Hypervisor machine '{}' with SIGKILL",
+                        machine_name
+                    )
+                })?;
+                if !wait_for_pid_exit(pid, Duration::from_secs(1))? {
+                    bail!(
+                        "Cloud Hypervisor machine '{}' did not stop after SIGTERM/SIGKILL for pid {}",
+                        machine_name,
+                        pid
+                    );
+                }
+            }
+            cleanup_cloud_hypervisor_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Running,
+                current_state: MachineRuntimeState::Stopped,
+                pid: Some(pid),
+                control: MachineControlContract::local_runtime_root(),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from(
+                    "sent SIGTERM to Cloud Hypervisor pid and cleaned transient runtime paths",
+                ),
+            })
+        }
+        MachineRuntimeState::Stopped => {
+            cleanup_cloud_hypervisor_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Stopped,
+                current_state: MachineRuntimeState::Stopped,
+                pid: status.pid,
+                control: MachineControlContract::local_runtime_root(),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from("Cloud Hypervisor machine was already stopped"),
+            })
+        }
+        MachineRuntimeState::Stale => {
+            cleanup_cloud_hypervisor_runtime_transient_paths(&paths)?;
+
+            Ok(StopResult {
+                machine_name: machine_name.to_string(),
+                previous_state: MachineRuntimeState::Stale,
+                current_state: MachineRuntimeState::Stopped,
+                pid: status.pid,
+                control: MachineControlContract::local_runtime_root(),
+                runtime_dir: paths.runtime_dir,
+                detail: String::from(
+                    "cleaned stale Cloud Hypervisor runtime state for already-stopped machine",
+                ),
+            })
+        }
+        MachineRuntimeState::Malformed => {
+            bail!("cannot stop malformed Cloud Hypervisor runtime state")
+        }
+    }
+}
+
 fn wait_for_boot(
     child: &mut std::process::Child,
     boot_wait: Duration,
@@ -2349,6 +2859,22 @@ fn avf_runtime_metadata_path(paths: &RuntimePaths) -> PathBuf {
     paths.runtime_dir.join("avf-runtime.json")
 }
 
+fn cloud_hypervisor_config_path(paths: &RuntimePaths) -> PathBuf {
+    paths.runtime_dir.join("cloud-hypervisor-config.json")
+}
+
+fn cloud_hypervisor_log_path(paths: &RuntimePaths) -> PathBuf {
+    paths.runtime_dir.join("cloud-hypervisor.log")
+}
+
+fn cloud_hypervisor_api_socket_path(paths: &RuntimePaths) -> PathBuf {
+    paths.runtime_dir.join("cloud-hypervisor.api.sock")
+}
+
+fn cloud_hypervisor_runtime_metadata_path(paths: &RuntimePaths) -> PathBuf {
+    paths.runtime_dir.join("cloud-hypervisor-runtime.json")
+}
+
 fn prepare_avf_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()> {
     if let Some(pid) = read_pid_file(&paths.pid_path)? {
         if process_exists(pid)? {
@@ -2366,6 +2892,21 @@ fn prepare_avf_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result
     remove_stale_runtime_path(&paths.guest_agent_socket, "guest-agent socket")?;
 
     Ok(())
+}
+
+fn prepare_cloud_hypervisor_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()> {
+    if let Some(pid) = read_pid_file(&paths.pid_path)? {
+        if process_exists(pid)? {
+            bail!(
+                "machine '{}' already appears to be running with pid {} in '{}'; stop it first or choose a different --runtime-root",
+                machine_name,
+                pid,
+                paths.runtime_dir.display()
+            );
+        }
+    }
+
+    cleanup_cloud_hypervisor_runtime_transient_paths(paths)
 }
 
 fn inspect_machine(
@@ -2604,6 +3145,15 @@ fn cleanup_runtime_transient_paths(paths: &RuntimePaths) -> Result<()> {
     Ok(())
 }
 
+fn cleanup_cloud_hypervisor_runtime_transient_paths(paths: &RuntimePaths) -> Result<()> {
+    cleanup_runtime_transient_paths(paths)?;
+    remove_stale_runtime_path(
+        &cloud_hypervisor_api_socket_path(paths),
+        "Cloud Hypervisor API socket",
+    )?;
+    Ok(())
+}
+
 fn malformed_machine_status(
     machine_name: &str,
     paths: &RuntimePaths,
@@ -2617,6 +3167,28 @@ fn malformed_machine_status(
         MachineRuntimeState::Malformed,
         detail,
     )
+}
+
+fn cloud_hypervisor_malformed_machine_status(
+    machine_name: &str,
+    paths: &RuntimePaths,
+    detail: String,
+) -> MachineStatus {
+    MachineStatus {
+        machine_name: machine_name.to_string(),
+        state: MachineRuntimeState::Malformed,
+        pid: None,
+        control: MachineControlContract::local_runtime_root(),
+        runtime_dir: paths.runtime_dir.clone(),
+        config_path: cloud_hypervisor_config_path(paths),
+        manifest_path: paths.manifest_path.clone(),
+        pid_path: paths.pid_path.clone(),
+        firecracker_log: cloud_hypervisor_log_path(paths),
+        stdout_log: paths.stdout_log.clone(),
+        stderr_log: paths.stderr_log.clone(),
+        hosted_fleet_nodes: Vec::new(),
+        detail,
+    }
 }
 
 fn synthetic_machine_status(
@@ -6945,6 +7517,103 @@ impl MachineDriver for FirecrackerLocalDriver {
     }
 }
 
+impl MachineDriver for CloudHypervisorLocalDriver {
+    fn kind(&self) -> MachineDriverKind {
+        MachineDriverKind::CloudHypervisorLocal
+    }
+
+    fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata> {
+        cloud_hypervisor_local_launch_machine(config, request)
+    }
+
+    fn list_machines(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+    ) -> Result<Vec<MachineStatus>> {
+        if !runtime_root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut machines = Vec::new();
+        for entry in fs::read_dir(runtime_root)
+            .with_context(|| format!("failed to read runtime root '{}'", runtime_root.display()))?
+        {
+            let entry = entry.with_context(|| {
+                format!(
+                    "failed to read an entry from runtime root '{}'",
+                    runtime_root.display()
+                )
+            })?;
+            if !entry
+                .file_type()
+                .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+                .is_dir()
+            {
+                continue;
+            }
+            let machine_name = entry.file_name().to_string_lossy().into_owned();
+            let paths = RuntimePaths::for_machine(runtime_root, &machine_name);
+            if cloud_hypervisor_runtime_metadata_path(&paths).exists() {
+                machines.push(cloud_hypervisor_local_machine_status(
+                    runtime_root,
+                    &machine_name,
+                )?);
+            }
+        }
+        machines.sort_by(|left, right| left.machine_name.cmp(&right.machine_name));
+        Ok(machines)
+    }
+
+    fn machine_status(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineStatus> {
+        cloud_hypervisor_local_machine_status(runtime_root, machine_name)
+    }
+
+    fn stop_machine(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+        timeout: Duration,
+    ) -> Result<StopResult> {
+        cloud_hypervisor_local_stop_machine(runtime_root, machine_name, timeout)
+    }
+
+    fn machine_monitor(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineMonitorReport> {
+        cloud_hypervisor_local_machine_monitor(runtime_root, machine_name)
+    }
+
+    fn machine_top(
+        &self,
+        _config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineTopReport> {
+        cloud_hypervisor_local_machine_top(runtime_root, machine_name)
+    }
+
+    fn guest_endpoint(
+        &self,
+        _config: &PortConfig,
+        request: &GuestRequest<'_>,
+    ) -> Result<GuestEndpoint> {
+        bail!(
+            "machine '{}' is running on Cloud Hypervisor, but Port has not implemented Cloud Hypervisor guest transport yet",
+            request.machine_name
+        )
+    }
+}
+
 impl MachineDriver for AvfLocalDriver {
     fn kind(&self) -> MachineDriverKind {
         MachineDriverKind::AvfLocal
@@ -7120,10 +7789,7 @@ fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<Box<dyn
         HostConnection::HostedControlPlane { .. } => Ok(Box::new(HostedControlPlaneDriver)),
         HostConnection::Local => match machine.substrate {
             ExecutionSubstrate::Firecracker => Ok(Box::new(FirecrackerLocalDriver)),
-            ExecutionSubstrate::CloudHypervisor => bail!(
-                "machine '{}' targets Cloud Hypervisor, but Port has not implemented a Cloud Hypervisor driver yet",
-                machine_name
-            ),
+            ExecutionSubstrate::CloudHypervisor => Ok(Box::new(CloudHypervisorLocalDriver)),
             ExecutionSubstrate::Avf => Ok(Box::new(AvfLocalDriver)),
         },
     }
@@ -7270,6 +7936,32 @@ struct AvfLaunchConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CloudHypervisorLaunchConfig {
+    machine_name: String,
+    runtime_dir: PathBuf,
+    kernel_path: PathBuf,
+    guest_image_path: PathBuf,
+    vcpu_count: u8,
+    memory_mib: u32,
+    kernel_args: String,
+    rootfs_read_only: bool,
+    api_socket_path: PathBuf,
+    console_log: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CloudHypervisorRuntimeMetadata {
+    machine_name: String,
+    pid: u32,
+    binary: PathBuf,
+    config_path: PathBuf,
+    metadata_path: PathBuf,
+    api_socket_path: PathBuf,
+    console_log: PathBuf,
+    launched_at_unix_s: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct AvfRuntimeMetadata {
     machine_name: String,
     pid: u32,
@@ -7306,21 +7998,24 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, ControlPlaneServeRequest, DoctorCheck,
-        DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding,
-        LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
-        NodeAgentServeRequest, RuntimePaths, ServiceApplyRequest, ServiceDefinitionRecord,
-        ServiceDesiredState, ServiceKind, ServiceRuntimeState, ServiceSecretBinding, StopResult,
-        apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
-        build_firecracker_config, collect_doctor_report, collect_doctor_report_with_facts,
-        copy_guest_file, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        hosted_placeholder_runtime_root, launch_local_machine, list_machine_services,
-        list_machines, machine_monitor, machine_service_status, machine_status, machine_top,
-        path_check, prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
-        put_machine_secret, read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
-        resolve_artifact_store_contract, resolve_machine_architecture, select_firecracker_binary,
-        serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
-        service_status_from_record, stop_machine, stop_machine_service,
+        ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, CloudHypervisorRuntimeMetadata,
+        ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts, GuestCopyRequest,
+        GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
+        MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
+        ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
+        ServiceRuntimeState, ServiceSecretBinding, StopResult, apply_machine_service,
+        artifact_script, avf_local_launch_machine_with_host_os, build_firecracker_config,
+        cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
+        cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
+        collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
+        ensure_native_build_lane, execute_guest_operation, hosted_placeholder_runtime_root,
+        launch_local_machine, list_machine_services, list_machines, machine_monitor,
+        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
+        read_pid_file, repo_root, resolve_artifact_metadata, resolve_artifact_store_contract,
+        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
+        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
+        stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -7836,6 +8531,44 @@ mod tests {
             .path = guest_path;
     }
 
+    fn write_fake_cloud_hypervisor_artifacts(config: &mut PortConfig, root: &Path) {
+        let kernel_path = root.join("cloud-hypervisor-vmlinux");
+        let guest_path = root.join("cloud-hypervisor-rootfs.ext4");
+        fs::write(&kernel_path, b"fake-cloud-hypervisor-kernel")
+            .expect("cloud-hypervisor kernel variant should write");
+        fs::write(&guest_path, b"fake-cloud-hypervisor-rootfs")
+            .expect("cloud-hypervisor guest variant should write");
+
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::CloudHypervisor
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("cloud-hypervisor kernel variant should exist")
+            .path = kernel_path;
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::CloudHypervisor
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("cloud-hypervisor guest variant should exist")
+            .path = guest_path;
+    }
+
     struct ScopedPathEnv {
         original: Option<std::ffi::OsString>,
     }
@@ -8252,6 +8985,14 @@ exec sleep 30
         let driver = driver_for_machine(&config, "demo").expect("driver should resolve");
 
         assert_eq!(driver.kind(), MachineDriverKind::AvfLocal);
+    }
+
+    #[test]
+    fn driver_selection_routes_cloud_hypervisor_machine_to_local_driver() {
+        let config = PortConfig::sample();
+        let driver = driver_for_machine(&config, "demo-ch").expect("driver should resolve");
+
+        assert_eq!(driver.kind(), MachineDriverKind::CloudHypervisorLocal);
     }
 
     #[test]
@@ -10537,6 +11278,82 @@ exec sleep 30
         assert_eq!(stopped.current_state, MachineRuntimeState::Stopped);
         assert_eq!(stopped.pid, Some(metadata.pid));
         assert!(stopped.detail.contains("AVF"));
+    }
+
+    #[test]
+    fn cloud_hypervisor_launch_status_and_stop_write_canonical_runtime_state() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = PortConfig::sample();
+        write_fake_cloud_hypervisor_artifacts(&mut config, tempdir.path());
+        let fake_binary = write_fake_firecracker_binary(tempdir.path(), "cloud-hypervisor");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let metadata = cloud_hypervisor_local_launch_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo-ch",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect("cloud hypervisor launch should succeed");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo-ch");
+        let runtime_metadata: CloudHypervisorRuntimeMetadata =
+            read_json_file(&paths.runtime_dir.join("cloud-hypervisor-runtime.json"))
+                .expect("cloud hypervisor runtime metadata should decode");
+
+        assert_eq!(metadata.machine_name, "demo-ch");
+        assert_eq!(metadata.firecracker_binary, fake_binary);
+        assert_eq!(metadata.config_path, cloud_hypervisor_config_path(&paths));
+        assert_eq!(metadata.log_path, cloud_hypervisor_log_path(&paths));
+        assert!(metadata.manifest_path.exists());
+        assert_eq!(runtime_metadata.machine_name, "demo-ch");
+        assert_eq!(runtime_metadata.binary, fake_binary);
+        assert_eq!(runtime_metadata.pid, metadata.pid);
+        assert_eq!(runtime_metadata.config_path, metadata.config_path);
+        assert_eq!(
+            runtime_metadata.api_socket_path,
+            cloud_hypervisor_api_socket_path(&paths)
+        );
+        assert_eq!(runtime_metadata.console_log, metadata.log_path);
+
+        let status = machine_status(&config, tempdir.path(), "demo-ch")
+            .expect("status should route through cloud hypervisor driver");
+        assert_eq!(status.state, MachineRuntimeState::Running);
+        assert_eq!(status.pid, Some(metadata.pid));
+        assert_eq!(status.config_path, metadata.config_path);
+        assert_eq!(status.firecracker_log, metadata.log_path);
+        assert!(status.detail.contains("Cloud Hypervisor"));
+        assert!(status.detail.contains("cloud-hypervisor-runtime.json"));
+
+        let stopped = stop_machine(&config, tempdir.path(), "demo-ch", Duration::from_secs(1))
+            .expect("stop should route through cloud hypervisor driver");
+        assert_eq!(stopped.previous_state, MachineRuntimeState::Running);
+        assert_eq!(stopped.current_state, MachineRuntimeState::Stopped);
+        assert_eq!(stopped.pid, Some(metadata.pid));
+        assert!(stopped.detail.contains("Cloud Hypervisor"));
+    }
+
+    #[test]
+    fn cloud_hypervisor_launch_surfaces_missing_binary_preflight() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = PortConfig::sample();
+        write_fake_cloud_hypervisor_artifacts(&mut config, tempdir.path());
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "demo-ch",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("launch should fail without cloud-hypervisor binary");
+
+        let message = error.to_string();
+        assert!(message.contains("Cloud Hypervisor local launch requires"));
+        assert!(message.contains("cloud-hypervisor"));
+        assert!(message.contains("demo-ch"));
     }
 
     #[test]

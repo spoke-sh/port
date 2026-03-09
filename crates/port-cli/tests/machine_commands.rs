@@ -488,6 +488,44 @@ fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Pat
         .path = guest_path;
 }
 
+fn write_fake_cloud_hypervisor_artifacts(config: &mut PortConfig, root: &Path) {
+    let kernel_path = root.join("cloud-hypervisor-vmlinux");
+    let guest_path = root.join("cloud-hypervisor-rootfs.ext4");
+    fs::write(&kernel_path, b"fake-cloud-hypervisor-kernel")
+        .expect("cloud hypervisor kernel should write");
+    fs::write(&guest_path, b"fake-cloud-hypervisor-rootfs")
+        .expect("cloud hypervisor guest should write");
+
+    config
+        .artifacts
+        .kernels
+        .get_mut("demo-kernel")
+        .expect("demo-kernel should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::CloudHypervisor
+                && variant.selector.protection_mode == ProtectionMode::Standard
+        })
+        .expect("cloud hypervisor kernel variant should exist")
+        .path = kernel_path;
+    config
+        .artifacts
+        .guest_images
+        .get_mut("demo-guest")
+        .expect("demo-guest should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::CloudHypervisor
+                && variant.selector.protection_mode == ProtectionMode::Standard
+        })
+        .expect("cloud hypervisor guest variant should exist")
+        .path = guest_path;
+}
+
 fn write_fake_pvm_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
     let kernel_path = root.join("pvm-vmlinux");
     let guest_path = root.join("pvm-rootfs.ext4");
@@ -575,6 +613,125 @@ fn cli_doctor_and_launch_surface_sample_avf_workflow_boundary() {
     );
     let stderr = String::from_utf8_lossy(&launch.stderr);
     assert!(stderr.contains("AVF local launch requires running Port on macOS"));
+}
+
+#[test]
+fn cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("runtime");
+    let mut config = PortConfig::sample();
+    write_fake_cloud_hypervisor_artifacts(&mut config, temp.path());
+    write_config(&config_path, &config);
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "cloud-hypervisor");
+    let path_env = prepend_path_env(temp.path());
+
+    let launch = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("demo-ch")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(
+        launch_stdout.contains("launched machine: demo-ch"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("hypervisor binary:"),
+        "{launch_stdout}"
+    );
+    assert!(launch_stdout.contains("hypervisor log:"), "{launch_stdout}");
+    assert!(
+        launch_stdout.contains(fake_binary.to_string_lossy().as_ref()),
+        "{launch_stdout}"
+    );
+
+    let status = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("demo-ch")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("machine: demo-ch"),
+        "{status_stdout}"
+    );
+    assert!(status_stdout.contains("state: running"), "{status_stdout}");
+    assert!(status_stdout.contains("hypervisor log:"), "{status_stdout}");
+    assert!(
+        status_stdout.contains("Cloud Hypervisor"),
+        "{status_stdout}"
+    );
+
+    let stop = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("demo-ch")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop_stdout.contains("machine: demo-ch"), "{stop_stdout}");
+    assert!(
+        stop_stdout.contains("previous state: running"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("current state: stopped"),
+        "{stop_stdout}"
+    );
+}
+
+#[test]
+fn cli_machine_launch_surfaces_missing_cloud_hypervisor_binary() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("runtime");
+    let mut config = PortConfig::sample();
+    write_fake_cloud_hypervisor_artifacts(&mut config, temp.path());
+    write_config(&config_path, &config);
+
+    let launch = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("demo-ch")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(!launch.status.success(), "{launch:?}");
+    let stderr = String::from_utf8_lossy(&launch.stderr);
+    assert!(
+        stderr.contains("Cloud Hypervisor local launch requires"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("cloud-hypervisor"), "{stderr}");
+    assert!(stderr.contains("demo-ch"), "{stderr}");
 }
 
 #[test]

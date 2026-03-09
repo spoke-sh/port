@@ -990,11 +990,11 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("pid: {}", metadata.pid);
             println!("runtime dir: {}", metadata.runtime_dir.display());
             println!(
-                "firecracker binary: {}",
+                "hypervisor binary: {}",
                 metadata.firecracker_binary.display()
             );
             println!("config path: {}", metadata.config_path.display());
-            println!("firecracker log: {}", metadata.log_path.display());
+            println!("hypervisor log: {}", metadata.log_path.display());
             println!("console stdout: {}", metadata.stdout_path.display());
             println!("console stderr: {}", metadata.stderr_path.display());
             println!("manifest: {}", metadata.manifest_path.display());
@@ -1150,7 +1150,7 @@ fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
     writeln!(&mut output, "pid file: {}", status.pid_path.display()).expect("write should succeed");
     writeln!(
         &mut output,
-        "firecracker log: {}",
+        "hypervisor log: {}",
         status.firecracker_log.display()
     )
     .expect("write should succeed");
@@ -1373,7 +1373,7 @@ fn print_machine_monitor(report: &port_runtime::MachineMonitorReport) {
     println!("config path: {}", report.config_path.display());
     println!("manifest: {}", report.manifest_path.display());
     println!("pid file: {}", report.pid_path.display());
-    println!("firecracker log: {}", report.firecracker_log.display());
+    println!("hypervisor log: {}", report.firecracker_log.display());
     println!("console stdout: {}", report.stdout_log.display());
     println!("console stderr: {}", report.stderr_log.display());
     println!("detached forwards: {}", report.detached_forwards.len());
