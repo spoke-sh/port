@@ -365,6 +365,11 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   through the hosted control-plane and node-agent path. `--list`, `--stop`,
   and `--name` now manage node-owned detached forward state under the selected
   node runtime root instead of falling back to repo-local runtime files.
+- Hosted `port service` now has a repository-local multi-node workflow through
+  explicit host groups and node bindings: `service apply --host-group
+  aws-secondary` selects one eligible node, while `service list|status|stop`
+  surface the selected node, target host group, scheduler, and runtime state
+  through the canonical service output.
 - Hosted inventory that lacks a matching node runtime binding currently
   fails with explicit control-plane and route context instead of being silently
   dropped.
@@ -402,6 +407,43 @@ then runs canonical hosted `port machine status`, `port guest exec`,
 start, list, and stop commands end-to-end. Detached forward lifecycle now
 stays on the same control-plane and node-agent path as the foreground hosted
 guest bridge.
+
+## Multi-Node Hosted Service Workflow
+
+The first hosted multi-node service slice stays on the canonical `port service`
+surface instead of introducing a scheduler-only command family.
+
+Repository-local workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+```
+
+What operators should expect:
+
+- `service apply --host-group aws-secondary` selects one eligible member of
+  that explicit host group and stores the placement under the selected node
+  runtime root.
+- `service list`, `status`, and `stop` surface the selected node, target host
+  group, scheduler, and runtime state through the same canonical service
+  output.
+- If the control plane later loses the selected node binding, `service list`,
+  `status`, and `stop` still surface the stored placement and explain the
+  stale-binding failure instead of collapsing into a generic hosted error.
+
+Current hosted service limits:
+
+- No autoscaling or rescheduling yet.
+- Deterministic-first-fit is the only shipped scheduler policy.
+- No fleet manager, durable node registration, or broader service orchestration
+  yet.
 
 ## Linux Local Workflow
 

@@ -322,6 +322,42 @@ What is runnable today:
   managed process through that same hosted route while surfacing runtime state
   back through the canonical `port service` surface
 
+## Multi-Node Hosted Service Workflow
+
+The first multi-node hosted service slice is intentionally narrow: it proves
+host-group-targeted placement and canonical service visibility without claiming
+full hosted fleet management.
+
+Repository-local workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+```
+
+Why this is the canonical workflow:
+
+- `service apply --host-group aws-secondary` targets the existing hosted
+  inventory model instead of inventing a second scheduler command family.
+- The selected node remains visible through `service list`, `status`, and
+  `stop`, together with the target host group, scheduler, and runtime state.
+- If the selected node binding goes stale, the stored placement remains
+  operator-visible through the same service commands so routing drift is not
+  hidden behind a generic hosted control-plane failure.
+
+Current hosted service limits:
+
+- No autoscaling or rescheduling yet.
+- Deterministic-first-fit is the only shipped scheduler policy.
+- No fleet manager, durable node registration, or broader service orchestration
+  yet.
+
 ## Canonical Machine Control Contract
 
 Port now names the lifecycle and inventory contract explicitly so later hosted
@@ -487,4 +523,4 @@ the shared route and auth contract from `port-hosted-protocol`.
   designed boundary rather than a shipped orchestration path.
 - The hosted contract is executable through the canonical CLI and mirrored by
   the SDK, but the shipped lane is still explicitly a repository-local,
-  single-node demo rather than a hardened multi-node hosted product.
+  explicit-binding demo rather than a hardened hosted fleet product.

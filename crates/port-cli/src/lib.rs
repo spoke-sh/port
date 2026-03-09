@@ -55,6 +55,20 @@ Service workflow examples:
   port --config examples/port.toml service list --machine cloud-aws
   port --config examples/port.toml service status --machine cloud-aws --name web
   port --config examples/port.toml service stop --machine cloud-aws --name web
+Multi-node hosted service workflow:
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+  `port service list|status|stop` surface the selected node, target host group, scheduler, and runtime state for the stored placement.
+Current hosted service limits:
+  No autoscaling or rescheduling yet.
+  Deterministic-first-fit is the only shipped scheduler policy.
+  No fleet manager, durable node registration, or broader service orchestration yet.
   `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
   `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.

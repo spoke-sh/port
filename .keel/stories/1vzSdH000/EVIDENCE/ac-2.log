@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-03-08T22:41:54.516911287-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzSdH000/verify-ac-2.sh
+---
+Current hosted service limits:
+  No autoscaling or rescheduling yet.
+  Deterministic-first-fit is the only shipped scheduler policy.
+  No fleet manager, durable node registration, or broader service orchestration yet.
+docs/hosted.md:354:Current hosted service limits:
+README.md:441:Current hosted service limits:
+docs/hosted.md:356:- No autoscaling or rescheduling yet.
+README.md:443:- No autoscaling or rescheduling yet.
+docs/hosted.md:357:- Deterministic-first-fit is the only shipped scheduler policy.
+README.md:444:- Deterministic-first-fit is the only shipped scheduler policy.
+docs/hosted.md:358:- No fleet manager, durable node registration, or broader service orchestration
+README.md:445:- No fleet manager, durable node registration, or broader service orchestration

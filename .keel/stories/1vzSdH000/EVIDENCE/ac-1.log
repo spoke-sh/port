@@ -1,0 +1,37 @@
+---
+recorded_at: 2026-03-08T22:41:54.306658899-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzSdH000/verify-ac-1.sh
+---
+Multi-node hosted service workflow:
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node
+  --bind 127.0.0.1:9234 --token node-secret
+  serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+    aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
+  aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane
+  demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+  demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+    demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+  --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
+  --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws
+  --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc
+  --name api
+  --name api
+  `port service list|status|stop` surface the selected node, target host group, scheduler, and
+  runtime state for the stored placement.
+docs/hosted.md:325:## Multi-Node Hosted Service Workflow
+README.md:411:## Multi-Node Hosted Service Workflow
+docs/hosted.md:338:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+README.md:423:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+docs/hosted.md:339:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+README.md:424:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+docs/hosted.md:340:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+README.md:425:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+docs/hosted.md:341:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+README.md:426:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+README.md:371:  surface the selected node, target host group, scheduler, and runtime state
+docs/hosted.md:349:  `stop`, together with the target host group, scheduler, and runtime state.
