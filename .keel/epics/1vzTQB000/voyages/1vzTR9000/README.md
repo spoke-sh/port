@@ -25,13 +25,13 @@ started_at: 2026-03-08T22:50:43
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/5 stories complete
+**Progress:** 2/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Publish Registered Hosted Machine Workflow](../../../../stories/1vzTSY000/README.md) | feat | backlog |
 | [Define Registered Node Contract And State](../../../../stories/1vzTT1000/README.md) | feat | done |
-| [Implement Node Agent Registration Refresh](../../../../stories/1vzTTI000/README.md) | feat | backlog |
+| [Implement Node Agent Registration Refresh](../../../../stories/1vzTTI000/README.md) | feat | done |
 | [Route Hosted Machine Launch Through Registered Nodes](../../../../stories/1vzTTJ000/README.md) | feat | backlog |
 | [Surface Registered Placement Through Machine Commands](../../../../stories/1vzTTK000/README.md) | feat | backlog |
 <!-- END GENERATED -->
