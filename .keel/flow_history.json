@@ -21,7 +21,7 @@
       "week_start": "2026-03-02",
       "stories_done": 63,
       "voyages_done": 17,
-      "epics_done": 7,
+      "epics_done": 6,
       "cycle_min_hours": 0.0375,
       "cycle_median_hours": 0.14722222222222223,
       "cycle_max_hours": 9.095277777777778,
@@ -30,7 +30,7 @@
       "voyage_cycle_median_hours": 1.0508333333333333,
       "voyage_cycle_max_hours": 10.171666666666667,
       "epic_cycle_min_hours": 0.7786111111111111,
-      "epic_cycle_median_hours": 4.015555555555555,
+      "epic_cycle_median_hours": 3.7516666666666665,
       "epic_cycle_max_hours": 17.763055555555557
     },
     {
