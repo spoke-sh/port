@@ -1,0 +1,36 @@
+---
+id: 1vzTR9000
+title: Registered Nodes And Machine Launch Placement
+status: planned
+epic: 1vzTQB000
+created_at: 2026-03-08T22:45:51
+index: 1
+updated_at: 2026-03-08T22:50:12
+---
+
+# Registered Nodes And Machine Launch Placement
+
+> Let a node agent register with the hosted control plane and route canonical machine launch onto an eligible registered node with operator-visible placement detail.
+
+## Documents
+
+<!-- BEGIN DOCUMENTS -->
+| Document | Description |
+|----------|-------------|
+| [SRS.md](SRS.md) | Requirements and verification criteria |
+| [SDD.md](SDD.md) | Architecture and implementation details |
+<!-- END DOCUMENTS -->
+
+## Stories
+
+<!-- BEGIN GENERATED -->
+**Progress:** 0/5 stories complete
+
+| Title | Type | Status |
+|-------|------|--------|
+| [Publish Registered Hosted Machine Workflow](../../../../stories/1vzTSY000/README.md) | feat | backlog |
+| [Define Registered Node Contract And State](../../../../stories/1vzTT1000/README.md) | feat | backlog |
+| [Implement Node Agent Registration Refresh](../../../../stories/1vzTTI000/README.md) | feat | backlog |
+| [Route Hosted Machine Launch Through Registered Nodes](../../../../stories/1vzTTJ000/README.md) | feat | backlog |
+| [Surface Registered Placement Through Machine Commands](../../../../stories/1vzTTK000/README.md) | feat | backlog |
+<!-- END GENERATED -->
