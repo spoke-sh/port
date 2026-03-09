@@ -1230,6 +1230,81 @@ pub struct HostedInventoryContract {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedNodeRegistration {
+    pub endpoint: String,
+    pub token: String,
+    pub registered_at: u64,
+    pub refreshed_at: u64,
+    pub ttl_seconds: u64,
+}
+
+impl HostedNodeRegistration {
+    pub fn freshness(
+        &self,
+        control_plane: &str,
+        node_name: &str,
+    ) -> Result<HostedNodeFreshnessContract, ValidationError> {
+        if self.endpoint.trim().is_empty() {
+            return Err(ValidationError::new(format!(
+                "registered node '{}' for control plane '{}' must declare a non-empty endpoint",
+                node_name, control_plane
+            )));
+        }
+        if self.token.trim().is_empty() {
+            return Err(ValidationError::new(format!(
+                "registered node '{}' for control plane '{}' must declare a non-empty token",
+                node_name, control_plane
+            )));
+        }
+        if self.ttl_seconds == 0 {
+            return Err(ValidationError::new(format!(
+                "registered node '{}' for control plane '{}' must declare a ttl_seconds greater than zero",
+                node_name, control_plane
+            )));
+        }
+        if self.refreshed_at < self.registered_at {
+            return Err(ValidationError::new(format!(
+                "registered node '{}' for control plane '{}' cannot refresh before its initial registration ({} < {})",
+                node_name, control_plane, self.refreshed_at, self.registered_at
+            )));
+        }
+        let fresh_until = self
+            .refreshed_at
+            .checked_add(self.ttl_seconds)
+            .ok_or_else(|| {
+                ValidationError::new(format!(
+                    "registered node '{}' for control plane '{}' overflowed its freshness window",
+                    node_name, control_plane
+                ))
+            })?;
+        Ok(HostedNodeFreshnessContract {
+            registered_at: self.registered_at,
+            refreshed_at: self.refreshed_at,
+            ttl_seconds: self.ttl_seconds,
+            fresh_until,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedNodeFreshnessContract {
+    pub registered_at: u64,
+    pub refreshed_at: u64,
+    pub ttl_seconds: u64,
+    pub fresh_until: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedRegisteredNodeContract {
+    pub node_name: String,
+    pub endpoint: String,
+    pub freshness: HostedNodeFreshnessContract,
+    pub node: HostedNodeContract,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_groups: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedNodeContract {
     pub host: String,
     pub runtime_root: PathBuf,
@@ -1260,6 +1335,42 @@ pub struct HostedMachineSummaryContract {
     pub host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
     pub placement_detail: String,
     pub control: MachineControlContract,
+}
+
+impl HostedInventoryContract {
+    pub fn hosted_registered_node_contract(
+        &self,
+        control_plane: &str,
+        node_name: &str,
+        registration: &HostedNodeRegistration,
+    ) -> Result<HostedRegisteredNodeContract, ValidationError> {
+        let node = self.nodes.get(node_name).ok_or_else(|| {
+            ValidationError::new(format!(
+                "registered node '{}' does not exist in hosted inventory for control plane '{}'",
+                node_name, control_plane
+            ))
+        })?;
+        if node.control_plane != control_plane {
+            return Err(ValidationError::new(format!(
+                "registered node '{}' belongs to control plane '{}', not '{}'",
+                node_name, node.control_plane, control_plane
+            )));
+        }
+        let freshness = registration.freshness(control_plane, node_name)?;
+        let host_groups = self
+            .host_groups
+            .iter()
+            .filter(|(_, group)| group.nodes.iter().any(|member| member == node_name))
+            .map(|(group_name, _)| group_name.clone())
+            .collect();
+        Ok(HostedRegisteredNodeContract {
+            node_name: node_name.to_string(),
+            endpoint: registration.endpoint.trim().to_string(),
+            freshness,
+            node: node.clone(),
+            host_groups,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2660,6 +2771,82 @@ mod tests {
             remote_group
                 .nodes
                 .contains(&String::from("generic-linux-node"))
+        );
+
+        let registered = contract
+            .hosted_registered_node_contract(
+                "demo",
+                "aws-linux-node",
+                &super::HostedNodeRegistration {
+                    endpoint: String::from("http://127.0.0.1:9001"),
+                    token: String::from("node-demo-token"),
+                    registered_at: 10,
+                    refreshed_at: 25,
+                    ttl_seconds: 30,
+                },
+            )
+            .expect("registered node contract should resolve");
+        assert_eq!(registered.node_name, "aws-linux-node");
+        assert_eq!(registered.endpoint, "http://127.0.0.1:9001");
+        assert_eq!(registered.freshness.registered_at, 10);
+        assert_eq!(registered.freshness.refreshed_at, 25);
+        assert_eq!(registered.freshness.fresh_until, 55);
+        assert_eq!(registered.node.runtime_root, aws_node.runtime_root);
+        assert!(
+            registered
+                .host_groups
+                .contains(&String::from("remote-linux"))
+        );
+        assert!(
+            registered
+                .host_groups
+                .contains(&String::from("aws-builders"))
+        );
+    }
+
+    #[test]
+    fn hosted_registered_node_contract_rejects_invalid_registration_inputs() {
+        let config = PortConfig::sample();
+        let contract = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory contract should resolve");
+
+        let missing_endpoint = contract
+            .hosted_registered_node_contract(
+                "demo",
+                "aws-linux-node",
+                &super::HostedNodeRegistration {
+                    endpoint: String::from(" "),
+                    token: String::from("node-demo-token"),
+                    registered_at: 10,
+                    refreshed_at: 25,
+                    ttl_seconds: 30,
+                },
+            )
+            .expect_err("blank endpoint should fail");
+        assert!(
+            missing_endpoint
+                .to_string()
+                .contains("must declare a non-empty endpoint")
+        );
+
+        let stale_refresh = contract
+            .hosted_registered_node_contract(
+                "demo",
+                "aws-linux-node",
+                &super::HostedNodeRegistration {
+                    endpoint: String::from("http://127.0.0.1:9001"),
+                    token: String::from("node-demo-token"),
+                    registered_at: 50,
+                    refreshed_at: 25,
+                    ttl_seconds: 30,
+                },
+            )
+            .expect_err("refresh before registration should fail");
+        assert!(
+            stale_refresh
+                .to_string()
+                .contains("cannot refresh before its initial registration")
         );
     }
 

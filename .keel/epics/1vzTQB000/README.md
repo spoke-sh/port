@@ -22,5 +22,5 @@ index: 5
 **Progress:** 0/1 voyages complete, 0/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Registered Nodes And Machine Launch Placement](voyages/1vzTR9000/) | planned | 0/5 |
+| [Registered Nodes And Machine Launch Placement](voyages/1vzTR9000/) | in-progress | 0/5 |
 <!-- END GENERATED -->

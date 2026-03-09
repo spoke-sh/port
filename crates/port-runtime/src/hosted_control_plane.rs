@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::io::{BufReader, Cursor};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
@@ -19,12 +20,13 @@ use port_hosted_protocol::{
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
-    HostedMachineSummaryContract, PortConfig, ProtectionMode,
+    HostedMachineSummaryContract, HostedNodeRegistration, HostedRegisteredNodeContract, PortConfig,
+    ProtectionMode,
 };
 use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 
 use crate::{
@@ -34,12 +36,11 @@ use crate::{
     ServiceSecretBinding, StopResult, apply_hosted_machine_service_live, copy_guest_file,
     copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
     hosted_placeholder_runtime_root, hosted_stored_service_placements, launch_local_machine,
-    list_detached_forwards, list_machine_secrets_local,
-    machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
-    machine_top as runtime_machine_top, prepare_guest_forward, put_machine_secret_local,
-    refresh_hosted_machine_service_list, refresh_hosted_machine_service_runtime,
-    start_detached_forward, stop_detached_forward, stop_hosted_machine_service_live,
-    stop_machine as runtime_stop_machine,
+    list_detached_forwards, list_machine_secrets_local, machine_monitor as runtime_machine_monitor,
+    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
+    prepare_guest_forward, put_machine_secret_local, refresh_hosted_machine_service_list,
+    refresh_hosted_machine_service_runtime, start_detached_forward, stop_detached_forward,
+    stop_hosted_machine_service_live, stop_machine as runtime_stop_machine,
 };
 use port_agent_protocol::{
     CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
@@ -72,6 +73,14 @@ struct ControlPlaneStateInner {
     auth_value: String,
     node_bindings: BTreeMap<String, HostedNodeBinding>,
     client: Client,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct RegisteredNodeStateFile {
+    control_plane: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    nodes: BTreeMap<String, HostedNodeRegistration>,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +158,45 @@ fn append_route_detail(detail: String, route: &HostedRouteContext) -> String {
         return detail;
     };
     format!("{detail} Routed through control plane '{control_plane}' and node '{node_name}'.")
+}
+
+#[allow(dead_code)]
+fn registered_node_state_path(control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root(control_plane).join("registered-nodes.json")
+}
+
+#[allow(dead_code)]
+fn validate_registered_node_state(
+    config: &PortConfig,
+    state: &RegisteredNodeStateFile,
+) -> Result<BTreeMap<String, HostedRegisteredNodeContract>> {
+    if state.control_plane.trim().is_empty() {
+        bail!("registered node state must declare a non-empty control plane");
+    }
+    if !config.control_planes.contains_key(&state.control_plane) {
+        bail!(
+            "registered node state references unknown control plane '{}'",
+            state.control_plane
+        );
+    }
+
+    let inventory = config.hosted_inventory_contract().map_err(|error| {
+        anyhow!("registered node state could not load hosted inventory: {error}")
+    })?;
+    let mut contracts = BTreeMap::new();
+    for (node_name, registration) in &state.nodes {
+        let contract = inventory
+            .hosted_registered_node_contract(&state.control_plane, node_name, registration)
+            .map_err(|error| {
+                anyhow!(
+                    "registered node state for control plane '{}' is invalid: {}",
+                    state.control_plane,
+                    error
+                )
+            })?;
+        contracts.insert(node_name.clone(), contract);
+    }
+    Ok(contracts)
 }
 
 pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest) -> Result<()> {
@@ -689,7 +737,13 @@ async fn service_list(
         services.push(refresh_or_stored_service_status(&state, &machine, placement).await);
     }
     services.sort_by(|left, right| left.name.cmp(&right.name));
-    json_response(StatusCode::OK, &HostedSuccess { route, result: services })
+    json_response(
+        StatusCode::OK,
+        &HostedSuccess {
+            route,
+            result: services,
+        },
+    )
 }
 
 async fn service_status(
@@ -704,21 +758,25 @@ async fn service_status(
         Ok(summary) => summary,
         Err(response) => return response,
     };
-    let route = HostedRouteContext::from_machine_summary(&summary).with_service_name(service.clone());
-    let placements =
-        match hosted_stored_service_placements(&state.inner.config, &machine, Some(&service)) {
-            Ok(placements) => placements,
-            Err(error) => {
-                return error_response(
-                    StatusCode::BAD_GATEWAY,
-                    format!(
-                        "control plane '{}' could not inspect stored placement for service '{}' on machine '{}': {error}",
-                        state.inner.control_plane, service, machine
-                    ),
-                    Some(route),
-                );
-            }
-        };
+    let route =
+        HostedRouteContext::from_machine_summary(&summary).with_service_name(service.clone());
+    let placements = match hosted_stored_service_placements(
+        &state.inner.config,
+        &machine,
+        Some(&service),
+    ) {
+        Ok(placements) => placements,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "control plane '{}' could not inspect stored placement for service '{}' on machine '{}': {error}",
+                    state.inner.control_plane, service, machine
+                ),
+                Some(route),
+            );
+        }
+    };
     match placements.len() {
         0 => error_response(
             StatusCode::NOT_FOUND,
@@ -729,7 +787,10 @@ async fn service_status(
             Some(route),
         ),
         1 => {
-            let placement = placements.into_iter().next().expect("single placement must exist");
+            let placement = placements
+                .into_iter()
+                .next()
+                .expect("single placement must exist");
             let response = refresh_or_stored_service_status(&state, &machine, placement).await;
             json_response(
                 StatusCode::OK,
@@ -763,8 +824,8 @@ async fn service_command(
             Ok(summary) => summary,
             Err(response) => return response,
         };
-        let route =
-            HostedRouteContext::from_machine_summary(&summary).with_service_name(service_name.to_string());
+        let route = HostedRouteContext::from_machine_summary(&summary)
+            .with_service_name(service_name.to_string());
         let placements = match hosted_stored_service_placements(
             &state.inner.config,
             &machine,
@@ -803,7 +864,10 @@ async fn service_command(
             );
         }
 
-        let placement = placements.into_iter().next().expect("single placement must exist");
+        let placement = placements
+            .into_iter()
+            .next()
+            .expect("single placement must exist");
         let Some(node_name) = placement.status.node_name.clone() else {
             return json_response(
                 StatusCode::OK,
@@ -2539,6 +2603,69 @@ mod tests {
     struct MockNodeState {
         headers: Arc<Mutex<Vec<String>>>,
         bodies: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[test]
+    fn registered_node_state_path_is_scoped_under_control_plane_runtime_root() {
+        assert_eq!(
+            registered_node_state_path("demo"),
+            PathBuf::from(".port/hosted/demo/registered-nodes.json")
+        );
+    }
+
+    #[test]
+    fn registered_node_state_validates_into_registered_contracts() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let state = RegisteredNodeStateFile {
+            control_plane: String::from("demo"),
+            nodes: BTreeMap::from([(
+                String::from("aws-linux-node"),
+                HostedNodeRegistration {
+                    endpoint: String::from("http://127.0.0.1:9001"),
+                    token: String::from("node-secret"),
+                    registered_at: 10,
+                    refreshed_at: 25,
+                    ttl_seconds: 30,
+                },
+            )]),
+        };
+
+        let contracts =
+            validate_registered_node_state(&config, &state).expect("state should validate");
+        let contract = &contracts["aws-linux-node"];
+        assert_eq!(contract.node_name, "aws-linux-node");
+        assert_eq!(contract.endpoint, "http://127.0.0.1:9001");
+        assert_eq!(contract.freshness.fresh_until, 55);
+        assert!(contract.host_groups.contains(&String::from("aws-builders")));
+        assert!(contract.host_groups.contains(&String::from("remote-linux")));
+    }
+
+    #[test]
+    fn registered_node_state_rejects_invalid_registration_detail() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let state = RegisteredNodeStateFile {
+            control_plane: String::from("demo"),
+            nodes: BTreeMap::from([(
+                String::from("aws-linux-node"),
+                HostedNodeRegistration {
+                    endpoint: String::from("http://127.0.0.1:9001"),
+                    token: String::from(" "),
+                    registered_at: 10,
+                    refreshed_at: 25,
+                    ttl_seconds: 30,
+                },
+            )]),
+        };
+
+        let error =
+            validate_registered_node_state(&config, &state).expect_err("blank token should fail");
+        assert!(
+            error.to_string().contains("must declare a non-empty token"),
+            "{}",
+            error
+        );
     }
 
     #[tokio::test]

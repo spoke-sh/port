@@ -2,10 +2,11 @@
 id: 1vzTT1000
 title: Define Registered Node Contract And State
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T22:47:47
-updated_at: 2026-03-08T22:50:12
+updated_at: 2026-03-08T22:50:56
 scope: 1vzTQB000/1vzTR9000
+started_at: 2026-03-08T22:50:56
 ---
 
 # Define Registered Node Contract And State

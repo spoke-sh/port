@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use port_model::{
     HostedApiIdentityContract, HostedAuthScheme, HostedGuestAttachContract,
-    HostedMachineSummaryContract, HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner,
-    MachineLifecycleOwner,
+    HostedMachineSummaryContract, HostedNodeRegistration, HostedSchedulerPolicy,
+    MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
 };
 use serde::{Deserialize, Serialize};
 
@@ -197,12 +197,18 @@ pub enum HostedServiceRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HostedRegistrationRoute {
+    Refresh { node_name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostedControlPlaneRoute {
     Machine(HostedMachineRoute),
     Guest(HostedGuestRoute),
     GuestStream(HostedGuestStreamRoute),
     DetachedForward(HostedDetachedForwardRoute),
     Service(HostedServiceRoute),
+    Registration(HostedRegistrationRoute),
 }
 
 impl HostedControlPlaneRoute {
@@ -214,6 +220,7 @@ impl HostedControlPlaneRoute {
             Self::GuestStream(route) => guest_stream_route_path(route),
             Self::DetachedForward(route) => detached_forward_route_path(route),
             Self::Service(route) => service_route_path(route),
+            Self::Registration(route) => registration_route_path(route),
         }
     }
 }
@@ -329,6 +336,13 @@ pub struct HostedError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedNodeRegistrationRequest {
+    pub control_plane: String,
+    pub node_name: String,
+    pub registration: HostedNodeRegistration,
+}
+
 fn machine_route_path(route: &HostedMachineRoute) -> String {
     match route {
         HostedMachineRoute::List => String::from("/v1/machines"),
@@ -408,6 +422,14 @@ fn service_route_path(route: &HostedServiceRoute) -> String {
             machine_name,
             service_name,
         } => format!("/v1/machines/{machine_name}/services/{service_name}:stop"),
+    }
+}
+
+fn registration_route_path(route: &HostedRegistrationRoute) -> String {
+    match route {
+        HostedRegistrationRoute::Refresh { node_name } => {
+            format!("/v1/nodes/{node_name}/registration")
+        }
     }
 }
 
@@ -513,15 +535,16 @@ mod tests {
     use serde_json::to_value;
 
     use port_model::{
-        HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
-        PortConfig,
+        HostedNodeRegistration, HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner,
+        MachineLifecycleOwner, PortConfig,
     };
 
     use super::{
         HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
         HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
-        HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext, HostedServiceRoute,
-        HostedSuccess, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
+        HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
+        PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -602,6 +625,13 @@ mod tests {
             })
             .path(),
             "/v1/machines/cloud-aws/services/buildbox"
+        );
+        assert_eq!(
+            HostedControlPlaneRoute::Registration(HostedRegistrationRoute::Refresh {
+                node_name: String::from("aws-linux-node"),
+            })
+            .path(),
+            "/v1/nodes/aws-linux-node/registration"
         );
     }
 
@@ -715,6 +745,43 @@ mod tests {
             body["result"]["nodes"]["aws-linux-node"]["capabilities"]["pvm_lanes"][0]["state"],
             "ready"
         );
+    }
+
+    #[test]
+    fn hosted_registration_request_and_contract_serialize_stably() {
+        let request = HostedNodeRegistrationRequest {
+            control_plane: String::from("demo"),
+            node_name: String::from("aws-linux-node"),
+            registration: HostedNodeRegistration {
+                endpoint: String::from("http://127.0.0.1:9001"),
+                token: String::from("node-demo-token"),
+                registered_at: 10,
+                refreshed_at: 25,
+                ttl_seconds: 30,
+            },
+        };
+        let body = to_value(&request).expect("registration request should serialize");
+        assert_eq!(body["control_plane"], "demo");
+        assert_eq!(body["node_name"], "aws-linux-node");
+        assert_eq!(body["registration"]["endpoint"], "http://127.0.0.1:9001");
+        assert_eq!(body["registration"]["token"], "node-demo-token");
+        assert_eq!(body["registration"]["ttl_seconds"], 30);
+
+        let config = PortConfig::sample();
+        let registered = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory should resolve")
+            .hosted_registered_node_contract("demo", "aws-linux-node", &request.registration)
+            .expect("registered node contract should resolve");
+        let success = to_value(HostedSuccess {
+            route: HostedRouteContext::default(),
+            result: registered,
+        })
+        .expect("registered node success should serialize");
+        assert_eq!(success["result"]["node_name"], "aws-linux-node");
+        assert_eq!(success["result"]["endpoint"], "http://127.0.0.1:9001");
+        assert_eq!(success["result"]["freshness"]["fresh_until"], 55);
+        assert_eq!(success["result"]["host_groups"][0], "aws-builders");
     }
 
     #[test]

@@ -48,7 +48,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Registered Nodes And Machine Launch Placement](epics/1vzTQB000/voyages/1vzTR9000/) | planned |
+| [Registered Nodes And Machine Launch Placement](epics/1vzTQB000/voyages/1vzTR9000/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

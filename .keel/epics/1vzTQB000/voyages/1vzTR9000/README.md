@@ -1,11 +1,12 @@
 ---
 id: 1vzTR9000
 title: Registered Nodes And Machine Launch Placement
-status: planned
+status: in-progress
 epic: 1vzTQB000
 created_at: 2026-03-08T22:45:51
 index: 1
 updated_at: 2026-03-08T22:50:12
+started_at: 2026-03-08T22:50:43
 ---
 
 # Registered Nodes And Machine Launch Placement
