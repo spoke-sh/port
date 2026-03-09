@@ -1,0 +1,167 @@
+---
+recorded_at: 2026-03-09T10:25:38.639877875-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "Cloud Hypervisor|cloud-hypervisor|demo-ch|cli_hosted_cloud_hypervisor|cli_cloud_hypervisor_guest" README.md docs/cloud.md docs/operators.md examples/port.toml crates/port-cli/src/lib.rs'
+---
+examples/port.toml:46:path = "artifacts/kernel/demo/x86_64/cloud-hypervisor/standard/vmlinux"
+examples/port.toml:50:substrate = "cloud-hypervisor"
+examples/port.toml:54:path = "artifacts/kernel/demo/aarch64/cloud-hypervisor/standard/vmlinux"
+examples/port.toml:58:substrate = "cloud-hypervisor"
+examples/port.toml:122:path = "artifacts/guest/demo/x86_64/cloud-hypervisor/standard/rootfs.ext4"
+examples/port.toml:126:substrate = "cloud-hypervisor"
+examples/port.toml:130:path = "artifacts/guest/demo/aarch64/cloud-hypervisor/standard/rootfs.ext4"
+examples/port.toml:134:substrate = "cloud-hypervisor"
+examples/port.toml:341:# Hosted Cloud Hypervisor proof:
+examples/port.toml:343:#   config and switch [machines.cloud-aws].substrate to "cloud-hypervisor",
+examples/port.toml:345:#   [nodes.aws-linux-node.capabilities].substrates to ["cloud-hypervisor"] when
+examples/port.toml:346:#   you want the hosted Cloud Hypervisor workflow. Leaving this node on
+examples/port.toml:427:[machines.demo-ch]
+examples/port.toml:428:# Local Cloud Hypervisor lane:
+examples/port.toml:430:#   `cloud-hypervisor` binary for this machine without falling back to Firecracker.
+examples/port.toml:434:substrate = "cloud-hypervisor"
+examples/port.toml:442:[machines.demo-ch.guest]
+examples/port.toml:445:console_log = "runtime/demo-ch/console.log"
+examples/port.toml:493:# Hosted Cloud Hypervisor proof:
+examples/port.toml:495:#   http://127.0.0.1:7040, switch substrate to "cloud-hypervisor", switch
+examples/port.toml:497:#   [nodes.aws-linux-node.capabilities].substrates to ["cloud-hypervisor"].
+crates/port-cli/src/lib.rs:96:  Cloud Hypervisor + standard now ships as a proof-backed local and hosted lane through the canonical machine and guest verbs.
+crates/port-cli/src/lib.rs:122:Local Cloud Hypervisor workflow:
+crates/port-cli/src/lib.rs:124:  port --config examples/port.toml machine launch --machine demo-ch
+crates/port-cli/src/lib.rs:125:  port --config examples/port.toml machine status --machine demo-ch
+crates/port-cli/src/lib.rs:126:  port --config examples/port.toml guest exec --machine demo-ch -- /bin/sh -lc 'uname -a'
+crates/port-cli/src/lib.rs:127:  port --config examples/port.toml guest copy --machine demo-ch --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+crates/port-cli/src/lib.rs:128:  port --config examples/port.toml guest pty --machine demo-ch -- /bin/sh -lc 'printf ch-pty-ok'
+crates/port-cli/src/lib.rs:129:  port --config examples/port.toml guest logs --machine demo-ch --path /var/log/app.log --tail-lines 20
+crates/port-cli/src/lib.rs:130:  port --config examples/port.toml guest forward --machine demo-ch --listen 127.0.0.1:8080 --target 127.0.0.1:80
+crates/port-cli/src/lib.rs:131:  port --config examples/port.toml machine stop --machine demo-ch
+crates/port-cli/src/lib.rs:132:Hosted Cloud Hypervisor workflow:
+crates/port-cli/src/lib.rs:133:  Copy `examples/port.toml` to `/tmp/port-cloud-hypervisor.toml`, point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`, switch `machines.cloud-aws.substrate` to `cloud-hypervisor`, switch `machines.cloud-aws.architecture` to `x86_64`, and switch `nodes.aws-linux-node.capabilities.substrates` to `[\"cloud-hypervisor\"]`.
+crates/port-cli/src/lib.rs:134:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+crates/port-cli/src/lib.rs:135:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+crates/port-cli/src/lib.rs:136:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+crates/port-cli/src/lib.rs:137:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+crates/port-cli/src/lib.rs:138:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+crates/port-cli/src/lib.rs:139:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+crates/port-cli/src/lib.rs:140:Repository-local Cloud Hypervisor proof:
+crates/port-cli/src/lib.rs:149:  cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+crates/port-cli/src/lib.rs:150:  cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+crates/port-cli/src/lib.rs:151:  cargo test -q -p port-cli --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
+crates/port-cli/src/lib.rs:153:  Firecracker-only nodes are rejected explicitly for hosted Cloud Hypervisor; Port does not silently fall back.
+crates/port-cli/src/lib.rs:159:  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as substrate lanes, and `port doctor` reports their lane-specific host contracts before launch.
+crates/port-cli/src/lib.rs:227:    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly and surfaced through shared machine and guest verbs; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics; macOS and Windows operators use the same CLI while substrate-specific prerequisites stay explicit.",
+crates/port-cli/src/lib.rs:996:            ExecutionSubstrate::CloudHypervisor => "cloud-hypervisor",
+crates/port-cli/src/lib.rs:2261:            "Cloud Hypervisor",
+crates/port-cli/src/lib.rs:2262:            "Local Cloud Hypervisor workflow",
+crates/port-cli/src/lib.rs:2263:            "Hosted Cloud Hypervisor workflow",
+crates/port-cli/src/lib.rs:2264:            "Repository-local Cloud Hypervisor proof",
+docs/operators.md:119:  while the same command surface remains reserved for PVM and Cloud Hypervisor
+docs/operators.md:141:cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-ch
+docs/operators.md:150:- `port machine launch --machine demo-ch` is the canonical local Cloud
+docs/operators.md:152:  contract is missing, for example when `cloud-hypervisor` is not on `PATH`.
+docs/operators.md:184:Hosted Cloud Hypervisor workflow:
+docs/operators.md:186:1. Copy `examples/port.toml` to `/tmp/port-cloud-hypervisor.toml`.
+docs/operators.md:188:3. Switch `machines.cloud-aws.substrate` to `cloud-hypervisor`.
+docs/operators.md:191:   `["cloud-hypervisor"]`.
+docs/operators.md:194:PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+docs/operators.md:195:PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+docs/operators.md:196:PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+docs/operators.md:197:PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+docs/operators.md:198:PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+docs/operators.md:199:PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+docs/operators.md:205:  rejected-node proof for the hosted Cloud Hypervisor lane
+docs/operators.md:207:- Cloud Hypervisor is a `standard`-only Port lane today
+docs/cloud.md:6:`x86_64`, and Cloud Hypervisor with `standard` protection. The shared model
+docs/cloud.md:25:| Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Local + hosted / partial | Lifecycle and guest flows now reuse the canonical machine and guest verbs through the local driver boundary and the hosted control-plane plus node-agent path |
+docs/cloud.md:70:## Local Cloud Hypervisor Workflow
+docs/cloud.md:72:Use the checked-in `machines.demo-ch` lane when you want a Linux-local Cloud
+docs/cloud.md:77:port --config examples/port.toml machine launch --machine demo-ch
+docs/cloud.md:78:port --config examples/port.toml machine status --machine demo-ch
+docs/cloud.md:79:port --config examples/port.toml guest exec --machine demo-ch -- /bin/sh -lc 'uname -a'
+docs/cloud.md:80:port --config examples/port.toml guest copy --machine demo-ch --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+docs/cloud.md:81:port --config examples/port.toml guest pty --machine demo-ch -- /bin/sh -lc 'printf ch-pty-ok'
+docs/cloud.md:82:port --config examples/port.toml guest logs --machine demo-ch --path /var/log/app.log --tail-lines 20
+docs/cloud.md:83:port --config examples/port.toml guest forward --machine demo-ch --listen 127.0.0.1:8080 --target 127.0.0.1:80
+docs/cloud.md:84:port --config examples/port.toml machine stop --machine demo-ch
+docs/cloud.md:95:cargo test -q -p port-cli --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
+docs/cloud.md:98:## Hosted Cloud Hypervisor Workflow
+docs/cloud.md:101:Cloud Hypervisor proof, copy the sample to a temporary config and make these
+docs/cloud.md:105:2. Set `machines.cloud-aws.substrate = "cloud-hypervisor"`.
+docs/cloud.md:107:4. Set `nodes.aws-linux-node.capabilities.substrates = ["cloud-hypervisor"]`.
+docs/cloud.md:113:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+docs/cloud.md:114:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+docs/cloud.md:115:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+docs/cloud.md:116:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+docs/cloud.md:117:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+docs/cloud.md:118:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+docs/cloud.md:121:Repository-local proof for the hosted Cloud Hypervisor lane:
+docs/cloud.md:127:cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+docs/cloud.md:128:cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+docs/cloud.md:135:  rejected-node proof for hosted Cloud Hypervisor; Port does not fall back
+docs/cloud.md:136:- Cloud Hypervisor is a `standard`-only Port lane today
+docs/cloud.md:138:- `aarch64` Cloud Hypervisor remains modeled in artifacts and machine contracts,
+README.md:66:hosted control-plane and node-agent path, Cloud Hypervisor now has proof-backed
+README.md:83:| Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Local + hosted / partial | Lifecycle and guest workflows reuse the canonical machine and guest verbs; unsupported provider or node-capability combinations still fail fast |
+README.md:166:- hosted Cloud Hypervisor is now a second standard hosted lane; Azure and
+README.md:170:## Cloud Hypervisor Contract
+README.md:172:Port's Cloud Hypervisor position is now explicit and proof-backed:
+README.md:179:  compatible Cloud Hypervisor `standard` lane
+README.md:181:Local Cloud Hypervisor workflow:
+README.md:185:port --config examples/port.toml machine launch --machine demo-ch
+README.md:186:port --config examples/port.toml machine status --machine demo-ch
+README.md:187:port --config examples/port.toml guest exec --machine demo-ch -- /bin/sh -lc 'uname -a'
+README.md:188:port --config examples/port.toml guest copy --machine demo-ch --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+README.md:189:port --config examples/port.toml guest pty --machine demo-ch -- /bin/sh -lc 'printf ch-pty-ok'
+README.md:190:port --config examples/port.toml guest logs --machine demo-ch --path /var/log/app.log --tail-lines 20
+README.md:191:port --config examples/port.toml guest forward --machine demo-ch --listen 127.0.0.1:8080 --target 127.0.0.1:80
+README.md:192:port --config examples/port.toml machine stop --machine demo-ch
+README.md:195:Repository-local Cloud Hypervisor proof:
+README.md:203:cargo test -q -p port-cli --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
+README.md:206:Hosted Cloud Hypervisor workflow:
+README.md:208:1. Copy `examples/port.toml` to `/tmp/port-cloud-hypervisor.toml`.
+README.md:210:3. Switch `machines.cloud-aws.substrate` to `cloud-hypervisor` and set
+README.md:213:   `["cloud-hypervisor"]` and keep
+README.md:217:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+README.md:218:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+README.md:219:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+README.md:220:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+README.md:221:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+README.md:222:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+README.md:225:Hosted Cloud Hypervisor proof:
+README.md:231:cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+README.md:232:cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+README.md:238:- `machines.demo-ch` is the canonical local Cloud Hypervisor proof machine in
+README.md:242:  Cloud Hypervisor lane
+README.md:243:- the node must advertise `cloud-hypervisor`; leaving the node on
+README.md:246:- Cloud Hypervisor currently ships only as `standard` protection; Cloud
+README.md:249:  or providers without a compatible Cloud Hypervisor capability fail fast
+README.md:286:port artifacts build --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:287:port artifacts validate --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:288:port artifacts push --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:289:port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:430:Cloud Hypervisor now ships as a second `standard` hosted lane as well. Keep the
+README.md:432:move `cloud-aws` plus `aws-linux-node` onto the `cloud-hypervisor` substrate
+README.md:433:when you want the hosted Cloud Hypervisor proof:
+README.md:436:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+README.md:437:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+README.md:438:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+README.md:439:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+README.md:440:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+README.md:441:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+README.md:444:Repo-local proof for that hosted Cloud Hypervisor lane:
+README.md:448:cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+README.md:456:- Cloud Hypervisor remains `standard`-only in Port today
+README.md:903:- `substrate = "firecracker" | "cloud-hypervisor" | "avf"`
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

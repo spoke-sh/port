@@ -68,11 +68,11 @@
 |--------|--------|
 | [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | done |
 
-### [Cloud Hypervisor Execution Lane](epics/1vzdKB000/) (active)
+### [Cloud Hypervisor Execution Lane](epics/1vzdKB000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | in-progress |
+| [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

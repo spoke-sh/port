@@ -19,8 +19,8 @@ index: 9
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 4/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Foundation And Hosted Cloud Hypervisor Lane](voyages/1vzdKx000/) | in-progress | 4/5 |
+| [Foundation And Hosted Cloud Hypervisor Lane](voyages/1vzdKx000/) | done | 5/5 |
 <!-- END GENERATED -->
