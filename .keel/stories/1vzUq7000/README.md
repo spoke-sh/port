@@ -2,11 +2,12 @@
 id: 1vzUq7000
 title: Materialize Imported Fleet Inventory
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-09T00:15:43
-updated_at: 2026-03-09T00:41:01
+updated_at: 2026-03-09T00:52:39
 scope: 1vzUnI000/1vzUoK000
 started_at: 2026-03-09T00:41:01
+completed_at: 2026-03-09T00:52:39
 ---
 
 # Materialize Imported Fleet Inventory

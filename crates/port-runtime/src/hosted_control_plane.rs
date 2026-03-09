@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -33,6 +33,7 @@ use tokio::net::TcpListener;
 
 use crate::{
     DetachedForwardLaunchRequest, GuestCopyRequest, GuestForwardRequest, GuestRequest,
+    HostedFleetFreshnessState, HostedFleetNodeStatus, HostedFleetRoutingEligibility,
     HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
     MachineStatus, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
     ServiceSecretBinding, StopResult, apply_hosted_machine_service_live, copy_guest_file,
@@ -899,24 +900,69 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
                 )
                 .await
                 {
-                    Ok(status) => machines.push(status.result),
+                    Ok(status) => match annotate_machine_status_with_fleet_state(
+                        &state,
+                        &summary,
+                        &status.route,
+                        status.result,
+                    ) {
+                        Ok(status) => machines.push(status),
+                        Err(message) => {
+                            return error_response(
+                                StatusCode::BAD_GATEWAY,
+                                message,
+                                Some(HostedRouteContext::from_machine_summary(&summary)),
+                            );
+                        }
+                    },
                     Err(message) => {
-                        machines.push(malformed_machine_status(&summary, route, message))
+                        let status = malformed_machine_status(&summary, route.clone(), message);
+                        match annotate_machine_status_with_fleet_state(
+                            &state, &summary, &route, status,
+                        ) {
+                            Ok(status) => machines.push(status),
+                            Err(message) => {
+                                return error_response(
+                                    StatusCode::BAD_GATEWAY,
+                                    message,
+                                    Some(HostedRouteContext::from_machine_summary(&summary)),
+                                );
+                            }
+                        }
                     }
                 }
             }
-            Ok((None, route, Some(message))) => {
-                machines.push(malformed_machine_status(&summary, route, message))
-            }
+            Ok((None, route, Some(message))) => match annotate_machine_status_with_fleet_state(
+                &state,
+                &summary,
+                &route,
+                malformed_machine_status(&summary, route.clone(), message),
+            ) {
+                Ok(status) => machines.push(status),
+                Err(message) => {
+                    return error_response(
+                        StatusCode::BAD_GATEWAY,
+                        message,
+                        Some(HostedRouteContext::from_machine_summary(&summary)),
+                    );
+                }
+            },
             Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => {
-                machines.push(malformed_machine_status(
+                let route = HostedRouteContext::from_machine_summary(&summary);
+                let status = malformed_machine_status(
                     &summary,
-                    HostedRouteContext::from_machine_summary(&summary),
+                    route.clone(),
                     format!(
                         "control plane '{}' resolved an inconsistent routing state for machine '{}'",
                         state.inner.control_plane, machine_name
                     ),
-                ));
+                );
+                match annotate_machine_status_with_fleet_state(&state, &summary, &route, status) {
+                    Ok(status) => machines.push(status),
+                    Err(message) => {
+                        return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
+                    }
+                }
             }
             Err(message) => {
                 return error_response(StatusCode::BAD_GATEWAY, message, None);
@@ -1018,23 +1064,52 @@ async fn machine_status(
             )
             .await
             {
-                Ok(status) => json_response(StatusCode::OK, &status),
-                Err(message) => json_response(
+                Ok(status) => match annotate_machine_status_with_fleet_state(
+                    &state,
+                    &summary,
+                    &status.route,
+                    status.result,
+                ) {
+                    Ok(result) => json_response(
+                        StatusCode::OK,
+                        &HostedSuccess {
+                            route: status.route,
+                            result,
+                        },
+                    ),
+                    Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route)),
+                },
+                Err(message) => {
+                    let status = malformed_machine_status(&summary, route.clone(), message);
+                    match annotate_machine_status_with_fleet_state(&state, &summary, &route, status)
+                    {
+                        Ok(result) => json_response(
+                            StatusCode::OK,
+                            &HostedSuccess {
+                                route: route.clone(),
+                                result,
+                            },
+                        ),
+                        Err(message) => {
+                            error_response(StatusCode::BAD_GATEWAY, message, Some(route))
+                        }
+                    }
+                }
+            }
+        }
+        Ok((None, route, Some(message))) => {
+            let status = malformed_machine_status(&summary, route.clone(), message);
+            match annotate_machine_status_with_fleet_state(&state, &summary, &route, status) {
+                Ok(result) => json_response(
                     StatusCode::OK,
                     &HostedSuccess {
                         route: route.clone(),
-                        result: malformed_machine_status(&summary, route, message),
+                        result,
                     },
                 ),
+                Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route)),
             }
         }
-        Ok((None, route, Some(message))) => json_response(
-            StatusCode::OK,
-            &HostedSuccess {
-                route: route.clone(),
-                result: malformed_machine_status(&summary, route, message),
-            },
-        ),
         Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
@@ -2460,8 +2535,193 @@ fn malformed_machine_status(
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        hosted_fleet_nodes: Vec::new(),
         detail,
     }
+}
+
+fn annotate_machine_status_with_fleet_state(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+    route_context: &HostedRouteContext,
+    mut status: MachineStatus,
+) -> Result<MachineStatus, String> {
+    status.hosted_fleet_nodes = hosted_fleet_node_statuses(state, summary, route_context)?;
+    Ok(status)
+}
+
+fn hosted_fleet_node_statuses(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+    route_context: &HostedRouteContext,
+) -> Result<Vec<HostedFleetNodeStatus>, String> {
+    let now = current_unix_timestamp_seconds().map_err(|error| {
+        format!(
+            "control plane '{}' could not inspect hosted fleet state for machine '{}': {error}",
+            state.inner.control_plane, summary.machine_name
+        )
+    })?;
+    let registered_nodes = state.inner.registered_nodes.read().map_err(|_| {
+        format!(
+            "control plane '{}' could not inspect hosted fleet state for machine '{}': registered-node state lock poisoned",
+            state.inner.control_plane, summary.machine_name
+        )
+    })?;
+    let imported_inventory = state.inner.imported_inventory.read().map_err(|_| {
+        format!(
+            "control plane '{}' could not inspect hosted fleet state for machine '{}': imported-inventory state lock poisoned",
+            state.inner.control_plane, summary.machine_name
+        )
+    })?;
+
+    let mut relevant_nodes = BTreeSet::new();
+    relevant_nodes.extend(summary.candidate_nodes.iter().cloned());
+    relevant_nodes.extend(summary.rejected_nodes.keys().cloned());
+    if let Some(node_name) = route_context.node_name.as_ref() {
+        relevant_nodes.insert(node_name.clone());
+    }
+
+    let mut statuses = Vec::new();
+    for node_name in relevant_nodes {
+        let configured = state.inner.config.nodes.get(&node_name).ok_or_else(|| {
+            format!(
+                "control plane '{}' could not merge hosted fleet state for machine '{}': affected node '{}' is not present in the configured hosted inventory",
+                state.inner.control_plane, summary.machine_name, node_name
+            )
+        })?;
+        let configured_provider = state
+            .inner
+            .config
+            .hosts
+            .get(&configured.host)
+            .map(|host| host.provider)
+            .ok_or_else(|| {
+                format!(
+                    "control plane '{}' could not merge hosted fleet state for machine '{}': affected node '{}' references unknown host '{}'",
+                    state.inner.control_plane, summary.machine_name, node_name, configured.host
+                )
+            })?;
+        let imported = imported_inventory.get(&node_name);
+        if let Some(imported) = imported {
+            if imported.provider != configured_provider {
+                return Err(format!(
+                    "control plane '{}' could not merge hosted fleet state for machine '{}': affected node '{}' has imported provider '{:?}' but configured provider '{:?}'",
+                    state.inner.control_plane,
+                    summary.machine_name,
+                    node_name,
+                    imported.provider,
+                    configured_provider
+                ));
+            }
+            if !imported.capability_summary.is_populated() {
+                return Err(format!(
+                    "control plane '{}' could not merge hosted fleet state for machine '{}': affected node '{}' has an empty imported capability summary",
+                    state.inner.control_plane, summary.machine_name, node_name
+                ));
+            }
+            if !imported
+                .capability_summary
+                .is_subset_of(&configured.capabilities)
+            {
+                return Err(format!(
+                    "control plane '{}' could not merge hosted fleet state for machine '{}': affected node '{}' has imported capabilities outside the configured node contract",
+                    state.inner.control_plane, summary.machine_name, node_name
+                ));
+            }
+        }
+
+        let selected = route_context.node_name.as_deref() == Some(node_name.as_str());
+        let registration = registered_nodes.get(&node_name);
+        let (registered, freshness, refreshed_at_unix_s, ttl_seconds, fresh_until_unix_s) =
+            match registration {
+                Some(record) if record.contract.freshness.fresh_until >= now => (
+                    true,
+                    HostedFleetFreshnessState::Live,
+                    Some(record.contract.freshness.refreshed_at),
+                    Some(record.contract.freshness.ttl_seconds),
+                    Some(record.contract.freshness.fresh_until),
+                ),
+                Some(record) => (
+                    true,
+                    HostedFleetFreshnessState::Stale,
+                    Some(record.contract.freshness.refreshed_at),
+                    Some(record.contract.freshness.ttl_seconds),
+                    Some(record.contract.freshness.fresh_until),
+                ),
+                None => (
+                    false,
+                    HostedFleetFreshnessState::MissingRegistration,
+                    None,
+                    None,
+                    None,
+                ),
+            };
+
+        let mut detail_parts = Vec::new();
+        if selected {
+            detail_parts.push(String::from("Selected by the current control-plane route."));
+        }
+        if let Some(reason) = summary.rejected_nodes.get(&node_name) {
+            detail_parts.push(format!("Rejected for routing: {reason}"));
+        }
+        if let Some(imported) = imported {
+            detail_parts.push(format!(
+                "Imported from '{}' at {}.",
+                imported.provenance, imported.imported_at
+            ));
+        } else {
+            detail_parts.push(String::from("No imported inventory record."));
+        }
+        match registration {
+            Some(record) if record.contract.freshness.fresh_until >= now => {
+                detail_parts.push(format!(
+                    "Registered with a live node-agent refresh at {} and ttl {}s (fresh until {}).",
+                    record.contract.freshness.refreshed_at,
+                    record.contract.freshness.ttl_seconds,
+                    record.contract.freshness.fresh_until
+                ))
+            }
+            Some(record) => detail_parts.push(format!(
+                "Registered node-agent refresh at {} with ttl {}s expired at {}.",
+                record.contract.freshness.refreshed_at,
+                record.contract.freshness.ttl_seconds,
+                record.contract.freshness.fresh_until
+            )),
+            None => detail_parts.push(String::from("No registered node-agent endpoint.")),
+        }
+
+        let routing_eligibility = if summary.rejected_nodes.contains_key(&node_name) {
+            HostedFleetRoutingEligibility::Rejected
+        } else {
+            match freshness {
+                HostedFleetFreshnessState::Live => HostedFleetRoutingEligibility::Eligible,
+                HostedFleetFreshnessState::Stale => {
+                    HostedFleetRoutingEligibility::StaleRegistration
+                }
+                HostedFleetFreshnessState::MissingRegistration => {
+                    HostedFleetRoutingEligibility::MissingRegistration
+                }
+            }
+        };
+
+        statuses.push(HostedFleetNodeStatus {
+            node_name,
+            configured: true,
+            imported: imported.is_some(),
+            registered,
+            selected,
+            freshness,
+            routing_eligibility,
+            import_provenance: imported.map(|record| record.provenance.clone()),
+            imported_at_unix_s: imported.map(|record| record.imported_at),
+            refreshed_at_unix_s,
+            ttl_seconds,
+            fresh_until_unix_s,
+            detail: detail_parts.join(" "),
+        });
+    }
+
+    Ok(statuses)
 }
 
 fn malformed_stop_result(
@@ -5137,6 +5397,73 @@ mod tests {
         assert_eq!(success.result.state, MachineRuntimeState::Malformed);
         assert!(success.result.detail.contains("aws-linux-node"));
         assert_eq!(success.route.control_plane, Some(String::from("demo")));
+        assert_eq!(success.result.hosted_fleet_nodes.len(), 1);
+        assert_eq!(
+            success.result.hosted_fleet_nodes[0].routing_eligibility,
+            crate::HostedFleetRoutingEligibility::MissingRegistration
+        );
+    }
+
+    #[tokio::test]
+    async fn hosted_fleet_state_reports_merge_failures_with_control_plane_and_node_detail() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("state should build");
+        state
+            .inner
+            .imported_inventory
+            .write()
+            .expect("imported inventory lock")
+            .insert(
+                String::from("aws-linux-node"),
+                ImportedNodeRecord {
+                    node_name: String::from("aws-linux-node"),
+                    provider: HostProvider::Gcp,
+                    provenance: String::from("inventory-sync"),
+                    imported_at: 123,
+                    capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                },
+            );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            "Bearer demo-token".parse().expect("header should parse"),
+        );
+        let response = machine_status(State(state), Path(String::from("cloud-aws")), headers).await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let error: HostedError = serde_json::from_slice(&body).expect("error should decode");
+        assert!(
+            error.message.contains("control plane 'demo'"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("cloud-aws"), "{}", error.message);
+        assert!(
+            error.message.contains("aws-linux-node"),
+            "{}",
+            error.message
+        );
+        let route = error.route.expect("route context should exist");
+        assert_eq!(route.control_plane.as_deref(), Some("demo"));
+        assert_eq!(route.machine_name.as_deref(), Some("cloud-aws"));
+        cleanup_registered_state("demo");
     }
 
     #[tokio::test]
@@ -5454,6 +5781,7 @@ mod tests {
                     firecracker_log: state.runtime_root.join("cloud-aws/firecracker.log"),
                     stdout_log: state.runtime_root.join("cloud-aws/console.stdout.log"),
                     stderr_log: state.runtime_root.join("cloud-aws/console.stderr.log"),
+                    hosted_fleet_nodes: Vec::new(),
                     detail: String::from("mock status"),
                 },
             })

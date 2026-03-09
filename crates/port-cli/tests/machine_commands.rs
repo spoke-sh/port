@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
@@ -79,10 +80,43 @@ fn spawn_hosted_server_harness(
     control_plane_addr: &str,
     extra_node_env: &[(&str, &Path)],
 ) -> HostedServerHarness {
+    spawn_hosted_server_harness_with_cleanup(
+        server_config_path,
+        node_addr,
+        control_plane_addr,
+        extra_node_env,
+        true,
+    )
+}
+
+fn spawn_hosted_server_harness_preserving_state(
+    server_config_path: &Path,
+    node_addr: &str,
+    control_plane_addr: &str,
+    extra_node_env: &[(&str, &Path)],
+) -> HostedServerHarness {
+    spawn_hosted_server_harness_with_cleanup(
+        server_config_path,
+        node_addr,
+        control_plane_addr,
+        extra_node_env,
+        false,
+    )
+}
+
+fn spawn_hosted_server_harness_with_cleanup(
+    server_config_path: &Path,
+    node_addr: &str,
+    control_plane_addr: &str,
+    extra_node_env: &[(&str, &Path)],
+    cleanup_state: bool,
+) -> HostedServerHarness {
     let lock = hosted_server_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    cleanup_hosted_registration_state();
+    if cleanup_state {
+        cleanup_hosted_registration_state();
+    }
 
     let mut control_command = Command::new(port_bin());
     control_command
@@ -162,6 +196,33 @@ fn hosted_multi_node_config(runtime_root: &Path, alternate_runtime_root: &Path) 
     config
 }
 
+fn hosted_three_node_config(
+    runtime_root: &Path,
+    alternate_runtime_root: &Path,
+    imported_only_runtime_root: &Path,
+) -> PortConfig {
+    let mut config = hosted_multi_node_config(runtime_root, alternate_runtime_root);
+    let mut imported_only = config
+        .nodes
+        .get("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .clone();
+    imported_only.runtime_root = imported_only_runtime_root.to_path_buf();
+    config
+        .nodes
+        .insert(String::from("aws-linux-node-c"), imported_only);
+    config
+        .host_groups
+        .get_mut("aws-builders")
+        .expect("aws-builders should exist")
+        .nodes = vec![
+        String::from("aws-linux-node-c"),
+        String::from("aws-linux-node-b"),
+        String::from("aws-linux-node"),
+    ];
+    config
+}
+
 fn generic_hosted_config() -> PortConfig {
     PortConfig::sample()
 }
@@ -228,6 +289,60 @@ fn write_machine_placement_state(
         ),
     )
     .expect("machine placement state should write");
+}
+
+fn write_imported_inventory_state(
+    control_plane: &str,
+    nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
+) {
+    let state_path = Path::new(".port/hosted")
+        .join(control_plane)
+        .join("imported-inventory.json");
+    fs::create_dir_all(
+        state_path
+            .parent()
+            .expect("imported inventory path should have parent"),
+    )
+    .expect("imported inventory dir should exist");
+    fs::write(
+        &state_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&json!({
+                "control_plane": control_plane,
+                "nodes": nodes,
+            }))
+            .expect("imported inventory state should encode")
+        ),
+    )
+    .expect("imported inventory state should write");
+}
+
+fn write_registered_node_state(
+    control_plane: &str,
+    nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
+) {
+    let state_path = Path::new(".port/hosted")
+        .join(control_plane)
+        .join("registered-nodes.json");
+    fs::create_dir_all(
+        state_path
+            .parent()
+            .expect("registered node state path should have parent"),
+    )
+    .expect("registered node state dir should exist");
+    fs::write(
+        &state_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&json!({
+                "control_plane": control_plane,
+                "nodes": nodes,
+            }))
+            .expect("registered node state should encode")
+        ),
+    )
+    .expect("registered node state should write");
 }
 
 fn write_forward_manifest(
@@ -369,8 +484,12 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
         "127.0.0.1:80",
     );
 
-    let _servers =
-        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+    let _servers = spawn_hosted_server_harness_preserving_state(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[],
+    );
 
     let output = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")
@@ -519,6 +638,127 @@ fn cli_machine_status_prefers_stored_hosted_placement_over_live_candidate() {
     assert!(
         !stdout.contains("control plane 'demo' resolved node 'aws-linux-node'"),
         "status output should not reroute to the currently live candidate"
+    );
+}
+
+#[test]
+#[ignore = "fleet-state render proof is covered by port-cli unit tests and port-runtime state tests"]
+fn cli_machine_status_surfaces_hosted_fleet_node_state() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let alternate_runtime_root = temp.path().join("hosted/aws-linux-node-b");
+    let imported_only_runtime_root = temp.path().join("hosted/aws-linux-node-c");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_three_node_config(
+        &hosted_runtime_root,
+        &alternate_runtime_root,
+        &imported_only_runtime_root,
+    );
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node");
+    client_config
+        .nodes
+        .get_mut("aws-linux-node-b")
+        .expect("aws-linux-node-b should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node-b");
+    client_config
+        .nodes
+        .get_mut("aws-linux-node-c")
+        .expect("aws-linux-node-c should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node-c");
+    write_config(&client_config_path, &client_config);
+
+    let imported_only_node = server_config
+        .nodes
+        .get("aws-linux-node-c")
+        .expect("aws-linux-node-c should exist");
+    let imported_only_provider = server_config
+        .hosts
+        .get(&imported_only_node.host)
+        .expect("aws-linux-node-c host should exist")
+        .provider
+        .clone();
+    let mut imported_inventory = BTreeMap::new();
+    imported_inventory.insert(
+        String::from("aws-linux-node-c"),
+        port_model::HostedImportedNodeRecord {
+            provider: imported_only_provider,
+            provenance: String::from("imported/aws-linux-node-c.json"),
+            imported_at: 1_700_000_123,
+            capability_summary: imported_only_node.capabilities.clone(),
+        },
+    );
+    write_imported_inventory_state("demo", imported_inventory);
+
+    let mut registered_nodes = BTreeMap::new();
+    registered_nodes.insert(
+        String::from("aws-linux-node-b"),
+        port_model::HostedNodeRegistration {
+            endpoint: String::from("http://127.0.0.1:39999"),
+            token: String::from("stale-node-token"),
+            registered_at: 1,
+            refreshed_at: 2,
+            ttl_seconds: 1,
+        },
+    );
+    write_registered_node_state("demo", registered_nodes);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+    let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("status command should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("fleet nodes:"), "{stdout}");
+    assert!(stdout.contains("node: aws-linux-node"), "{stdout}");
+    assert!(stdout.contains("selected: true"), "{stdout}");
+    assert!(stdout.contains("freshness: live"), "{stdout}");
+    assert!(stdout.contains("routing eligibility: eligible"), "{stdout}");
+    assert!(stdout.contains("node: aws-linux-node-b"), "{stdout}");
+    assert!(stdout.contains("freshness: stale"), "{stdout}");
+    assert!(
+        stdout.contains("routing eligibility: stale-registration"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("node: aws-linux-node-c"), "{stdout}");
+    assert!(stdout.contains("imported: true"), "{stdout}");
+    assert!(stdout.contains("registered: false"), "{stdout}");
+    assert!(
+        stdout.contains("freshness: missing-registration"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("routing eligibility: missing-registration"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("import provenance: imported/aws-linux-node-c.json"),
+        "{stdout}"
     );
 }
 

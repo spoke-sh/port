@@ -141,6 +141,68 @@ pub struct MachineStatus {
     pub firecracker_log: PathBuf,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosted_fleet_nodes: Vec<HostedFleetNodeStatus>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedFleetFreshnessState {
+    Live,
+    Stale,
+    MissingRegistration,
+}
+
+impl std::fmt::Display for HostedFleetFreshnessState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Live => f.write_str("live"),
+            Self::Stale => f.write_str("stale"),
+            Self::MissingRegistration => f.write_str("missing-registration"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedFleetRoutingEligibility {
+    Eligible,
+    Rejected,
+    MissingRegistration,
+    StaleRegistration,
+}
+
+impl std::fmt::Display for HostedFleetRoutingEligibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Eligible => f.write_str("eligible"),
+            Self::Rejected => f.write_str("rejected"),
+            Self::MissingRegistration => f.write_str("missing-registration"),
+            Self::StaleRegistration => f.write_str("stale-registration"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedFleetNodeStatus {
+    pub node_name: String,
+    pub configured: bool,
+    pub imported: bool,
+    pub registered: bool,
+    pub selected: bool,
+    pub freshness: HostedFleetFreshnessState,
+    pub routing_eligibility: HostedFleetRoutingEligibility,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_provenance: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imported_at_unix_s: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refreshed_at_unix_s: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fresh_until_unix_s: Option<u64>,
     pub detail: String,
 }
 
@@ -1324,6 +1386,7 @@ fn avf_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<M
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        hosted_fleet_nodes: Vec::new(),
         detail,
     })
 }
@@ -2275,6 +2338,7 @@ fn inspect_machine(
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        hosted_fleet_nodes: Vec::new(),
         detail,
     })
 }
@@ -2458,6 +2522,7 @@ fn synthetic_machine_status(
         firecracker_log: paths.firecracker_log.clone(),
         stdout_log: paths.stdout_log.clone(),
         stderr_log: paths.stderr_log.clone(),
+        hosted_fleet_nodes: Vec::new(),
         detail,
     }
 }
@@ -6676,6 +6741,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::post;
     use axum::{Json, Router};
+    use serde::Serialize;
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -6822,6 +6888,64 @@ mod tests {
             ),
         )
         .expect("machine placement state should write");
+    }
+
+    #[derive(Debug, Serialize)]
+    struct ImportedInventoryStateFile {
+        control_plane: String,
+        nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
+    }
+
+    #[derive(Debug, Serialize)]
+    struct RegisteredNodeStateFile {
+        control_plane: String,
+        nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
+    }
+
+    fn write_imported_inventory_state(
+        control_plane: &str,
+        nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
+    ) {
+        let state_path =
+            hosted_placeholder_runtime_root(control_plane).join("imported-inventory.json");
+        fs::create_dir_all(
+            state_path
+                .parent()
+                .expect("imported inventory path should have parent"),
+        )
+        .expect("imported inventory dir should exist");
+        fs::write(
+            &state_path,
+            serde_json::to_vec_pretty(&ImportedInventoryStateFile {
+                control_plane: control_plane.to_string(),
+                nodes,
+            })
+            .expect("imported inventory state should encode"),
+        )
+        .expect("imported inventory state should write");
+    }
+
+    fn write_registered_node_state(
+        control_plane: &str,
+        nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
+    ) {
+        let state_path =
+            hosted_placeholder_runtime_root(control_plane).join("registered-nodes.json");
+        fs::create_dir_all(
+            state_path
+                .parent()
+                .expect("registered node state path should have parent"),
+        )
+        .expect("registered node state dir should exist");
+        fs::write(
+            &state_path,
+            serde_json::to_vec_pretty(&RegisteredNodeStateFile {
+                control_plane: control_plane.to_string(),
+                nodes,
+            })
+            .expect("registered node state should encode"),
+        )
+        .expect("registered node state should write");
     }
 
     fn sample_avf_config() -> PortConfig {
@@ -8102,6 +8226,172 @@ exec sleep 30
             port_model::MachineControlContract::hosted_control_plane()
         );
         assert_eq!(hosted.runtime_dir, hosted_paths.runtime_dir);
+        assert_eq!(hosted.hosted_fleet_nodes.len(), 1);
+        assert_eq!(hosted.hosted_fleet_nodes[0].node_name, "aws-linux-node");
+        assert_eq!(
+            hosted.hosted_fleet_nodes[0].freshness,
+            crate::HostedFleetFreshnessState::Live
+        );
+        assert_eq!(
+            hosted.hosted_fleet_nodes[0].routing_eligibility,
+            crate::HostedFleetRoutingEligibility::Eligible
+        );
+    }
+
+    #[test]
+    fn hosted_fleet_state_surfaces_live_stale_and_imported_only_nodes() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let mut missing = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .clone();
+        missing.runtime_root = tempdir.path().join("hosted/aws-linux-node-c");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-c"), missing);
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        write_manifest(&paths, "cloud-aws", 424242);
+
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        write_imported_inventory_state(
+            "demo",
+            BTreeMap::from([
+                (
+                    String::from("aws-linux-node"),
+                    port_model::HostedImportedNodeRecord {
+                        provider: port_model::HostProvider::Aws,
+                        provenance: String::from("inventory-sync"),
+                        imported_at: 100,
+                        capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                    },
+                ),
+                (
+                    String::from("aws-linux-node-b"),
+                    port_model::HostedImportedNodeRecord {
+                        provider: port_model::HostProvider::Aws,
+                        provenance: String::from("inventory-sync"),
+                        imported_at: 200,
+                        capability_summary: config.nodes["aws-linux-node-b"].capabilities.clone(),
+                    },
+                ),
+                (
+                    String::from("aws-linux-node-c"),
+                    port_model::HostedImportedNodeRecord {
+                        provider: port_model::HostProvider::Aws,
+                        provenance: String::from("inventory-sync"),
+                        imported_at: 300,
+                        capability_summary: config.nodes["aws-linux-node-c"].capabilities.clone(),
+                    },
+                ),
+            ]),
+        );
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("unix timestamp should resolve")
+            .as_secs();
+        write_registered_node_state(
+            "demo",
+            BTreeMap::from([(
+                String::from("aws-linux-node-b"),
+                port_model::HostedNodeRegistration {
+                    endpoint: String::from("http://127.0.0.1:9"),
+                    token: String::from("node-secret"),
+                    registered_at: now.saturating_sub(10),
+                    refreshed_at: now.saturating_sub(10),
+                    ttl_seconds: 1,
+                },
+            )]),
+        );
+
+        let mut client_config = config.clone();
+        let control_plane_addr =
+            start_live_control_plane(&client_config, None).expect("control plane should start");
+        client_config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{control_plane_addr}");
+        start_live_named_node_agent(&client_config, "aws-linux-node")
+            .expect("named node agent should start");
+
+        let status = machine_status(&client_config, tempdir.path(), "cloud-aws")
+            .expect("hosted status should load");
+        assert_eq!(status.hosted_fleet_nodes.len(), 3);
+
+        let live = status
+            .hosted_fleet_nodes
+            .iter()
+            .find(|node| node.node_name == "aws-linux-node")
+            .expect("live node should exist");
+        assert!(live.configured);
+        assert!(live.imported);
+        assert!(live.registered);
+        assert!(live.selected);
+        assert_eq!(live.freshness, crate::HostedFleetFreshnessState::Live);
+        assert_eq!(
+            live.routing_eligibility,
+            crate::HostedFleetRoutingEligibility::Eligible
+        );
+
+        let stale = status
+            .hosted_fleet_nodes
+            .iter()
+            .find(|node| node.node_name == "aws-linux-node-b")
+            .expect("stale node should exist");
+        assert!(stale.configured);
+        assert!(stale.imported);
+        assert!(stale.registered);
+        assert!(!stale.selected);
+        assert_eq!(stale.freshness, crate::HostedFleetFreshnessState::Stale);
+        assert_eq!(
+            stale.routing_eligibility,
+            crate::HostedFleetRoutingEligibility::StaleRegistration
+        );
+        assert!(stale.detail.contains("inventory-sync"));
+        assert!(stale.detail.contains("expired"));
+
+        let missing = status
+            .hosted_fleet_nodes
+            .iter()
+            .find(|node| node.node_name == "aws-linux-node-c")
+            .expect("missing-registration node should exist");
+        assert!(missing.configured);
+        assert!(missing.imported);
+        assert!(!missing.registered);
+        assert!(!missing.selected);
+        assert_eq!(
+            missing.freshness,
+            crate::HostedFleetFreshnessState::MissingRegistration
+        );
+        assert_eq!(
+            missing.routing_eligibility,
+            crate::HostedFleetRoutingEligibility::MissingRegistration
+        );
+        assert!(
+            missing
+                .detail
+                .contains("No registered node-agent endpoint.")
+        );
+
+        let machines =
+            list_machines(&client_config, tempdir.path()).expect("machine list should load");
+        let listed = machines
+            .iter()
+            .find(|machine| machine.machine_name == "cloud-aws")
+            .expect("cloud-aws should be listed");
+        assert_eq!(listed.hosted_fleet_nodes, status.hosted_fleet_nodes);
     }
 
     #[test]

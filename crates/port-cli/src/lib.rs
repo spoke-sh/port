@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
@@ -922,6 +923,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                     println!("status source: {}", machine.control.status_source);
                     println!("status route: {}", machine.control.status_route);
                     println!("runtime dir: {}", machine.runtime_dir.display());
+                    print_hosted_fleet_nodes(&machine.hosted_fleet_nodes);
                     println!("detail: {}", machine.detail);
                     println!();
                 }
@@ -932,32 +934,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             runtime_root,
         } => {
             let status = port_runtime::machine_status(&config, &runtime_root, &machine)?;
-            println!("machine: {}", status.machine_name);
-            println!("state: {}", status.state);
-            println!(
-                "pid: {}",
-                status
-                    .pid
-                    .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
-            );
-            println!("inventory scope: {}", status.control.inventory_scope);
-            println!("inventory owner: {}", status.control.inventory_owner);
-            println!("lifecycle owner: {}", status.control.lifecycle_owner);
-            println!("guest broker: {}", status.control.guest_broker);
-            println!("status source: {}", status.control.status_source);
-            println!("launch route: {}", status.control.launch_route);
-            println!("inventory route: {}", status.control.inventory_route);
-            println!("status route: {}", status.control.status_route);
-            println!("stop route: {}", status.control.stop_route);
-            println!("guest route: {}", status.control.guest_route);
-            println!("runtime dir: {}", status.runtime_dir.display());
-            println!("config path: {}", status.config_path.display());
-            println!("manifest: {}", status.manifest_path.display());
-            println!("pid file: {}", status.pid_path.display());
-            println!("firecracker log: {}", status.firecracker_log.display());
-            println!("console stdout: {}", status.stdout_log.display());
-            println!("console stderr: {}", status.stderr_log.display());
-            println!("detail: {}", status.detail);
+            print!("{}", format_machine_status(&status));
         }
         MachineCommand::Monitor {
             machine,
@@ -1003,6 +980,155 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
     }
 
     Ok(())
+}
+
+fn print_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) {
+    let rendered = format_hosted_fleet_nodes(nodes);
+    if rendered.is_empty() {
+        return;
+    }
+    print!("{rendered}");
+}
+
+fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
+    let mut output = String::new();
+    writeln!(&mut output, "machine: {}", status.machine_name).expect("write should succeed");
+    writeln!(&mut output, "state: {}", status.state).expect("write should succeed");
+    writeln!(
+        &mut output,
+        "pid: {}",
+        status
+            .pid
+            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "inventory scope: {}",
+        status.control.inventory_scope
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "inventory owner: {}",
+        status.control.inventory_owner
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "lifecycle owner: {}",
+        status.control.lifecycle_owner
+    )
+    .expect("write should succeed");
+    writeln!(&mut output, "guest broker: {}", status.control.guest_broker)
+        .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "status source: {}",
+        status.control.status_source
+    )
+    .expect("write should succeed");
+    writeln!(&mut output, "launch route: {}", status.control.launch_route)
+        .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "inventory route: {}",
+        status.control.inventory_route
+    )
+    .expect("write should succeed");
+    writeln!(&mut output, "status route: {}", status.control.status_route)
+        .expect("write should succeed");
+    writeln!(&mut output, "stop route: {}", status.control.stop_route)
+        .expect("write should succeed");
+    writeln!(&mut output, "guest route: {}", status.control.guest_route)
+        .expect("write should succeed");
+    writeln!(&mut output, "runtime dir: {}", status.runtime_dir.display())
+        .expect("write should succeed");
+    writeln!(&mut output, "config path: {}", status.config_path.display())
+        .expect("write should succeed");
+    writeln!(&mut output, "manifest: {}", status.manifest_path.display())
+        .expect("write should succeed");
+    writeln!(&mut output, "pid file: {}", status.pid_path.display()).expect("write should succeed");
+    writeln!(
+        &mut output,
+        "firecracker log: {}",
+        status.firecracker_log.display()
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "console stdout: {}",
+        status.stdout_log.display()
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "console stderr: {}",
+        status.stderr_log.display()
+    )
+    .expect("write should succeed");
+    output.push_str(&format_hosted_fleet_nodes(&status.hosted_fleet_nodes));
+    writeln!(&mut output, "detail: {}", status.detail).expect("write should succeed");
+    output
+}
+
+fn format_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) -> String {
+    if nodes.is_empty() {
+        return String::new();
+    }
+
+    let mut output = String::new();
+    writeln!(&mut output, "fleet nodes:").expect("write should succeed");
+    for node in nodes {
+        writeln!(&mut output, "  node: {}", node.node_name).expect("write should succeed");
+        writeln!(&mut output, "  configured: {}", node.configured).expect("write should succeed");
+        writeln!(&mut output, "  imported: {}", node.imported).expect("write should succeed");
+        writeln!(&mut output, "  registered: {}", node.registered).expect("write should succeed");
+        writeln!(&mut output, "  selected: {}", node.selected).expect("write should succeed");
+        writeln!(&mut output, "  freshness: {}", node.freshness).expect("write should succeed");
+        writeln!(
+            &mut output,
+            "  routing eligibility: {}",
+            node.routing_eligibility
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
+            "  import provenance: {}",
+            node.import_provenance.as_deref().unwrap_or("(none)")
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
+            "  imported at: {}",
+            node.imported_at_unix_s
+                .map_or_else(|| String::from("(none)"), |value| value.to_string())
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
+            "  refreshed at: {}",
+            node.refreshed_at_unix_s
+                .map_or_else(|| String::from("(none)"), |value| value.to_string())
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
+            "  ttl seconds: {}",
+            node.ttl_seconds
+                .map_or_else(|| String::from("(none)"), |value| value.to_string())
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
+            "  fresh until: {}",
+            node.fresh_until_unix_s
+                .map_or_else(|| String::from("(none)"), |value| value.to_string())
+        )
+        .expect("write should succeed");
+        writeln!(&mut output, "  node detail: {}", node.detail).expect("write should succeed");
+    }
+    output
 }
 
 fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
@@ -1946,14 +2072,38 @@ pub fn render_nested_subcommand_help(path: &[&str]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clap::Parser;
 
     use super::{
         ArchitectureArg, ArtifactCommand, Cli, Command, ControlPlaneCommand, CopyDirectionArg,
         GuestCommand, HostedNodeBindingArg, MachineCommand, NodeAgentCommand, ProtectionModeArg,
-        ServiceCommand, ServiceKindArg, ServiceSecretCommand, SubstrateArg, render_help,
+        ServiceCommand, ServiceKindArg, ServiceSecretCommand, SubstrateArg,
+        format_hosted_fleet_nodes, format_machine_status, render_help,
         render_nested_subcommand_help, render_subcommand_help,
     };
+
+    fn sample_hosted_status(
+        hosted_fleet_nodes: Vec<port_runtime::HostedFleetNodeStatus>,
+        detail: &str,
+    ) -> port_runtime::MachineStatus {
+        port_runtime::MachineStatus {
+            machine_name: String::from("cloud-aws"),
+            state: port_runtime::MachineRuntimeState::Malformed,
+            pid: Some(424242),
+            control: port_model::MachineControlContract::hosted_control_plane(),
+            runtime_dir: PathBuf::from("/tmp/runtime/cloud-aws"),
+            config_path: PathBuf::from("/tmp/runtime/cloud-aws/firecracker-config.json"),
+            manifest_path: PathBuf::from("/tmp/runtime/cloud-aws/manifest.json"),
+            pid_path: PathBuf::from("/tmp/runtime/cloud-aws/firecracker.pid"),
+            firecracker_log: PathBuf::from("/tmp/runtime/cloud-aws/firecracker.log"),
+            stdout_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stdout.log"),
+            stderr_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stderr.log"),
+            hosted_fleet_nodes,
+            detail: detail.to_string(),
+        }
+    }
 
     #[test]
     fn help_includes_primary_surfaces() {
@@ -2034,6 +2184,132 @@ mod tests {
             assert!(
                 artifact_help.contains(keyword),
                 "missing artifact help keyword: {keyword}"
+            );
+        }
+    }
+
+    #[test]
+    fn hosted_fleet_render_includes_node_state_breakdown() {
+        let rendered = format_hosted_fleet_nodes(&[
+            port_runtime::HostedFleetNodeStatus {
+                node_name: String::from("aws-linux-node"),
+                configured: true,
+                imported: false,
+                registered: true,
+                selected: true,
+                freshness: port_runtime::HostedFleetFreshnessState::Live,
+                routing_eligibility: port_runtime::HostedFleetRoutingEligibility::Eligible,
+                import_provenance: None,
+                imported_at_unix_s: None,
+                refreshed_at_unix_s: Some(1773044061),
+                ttl_seconds: Some(15),
+                fresh_until_unix_s: Some(1773044076),
+                detail: String::from("Selected by the current control-plane route."),
+            },
+            port_runtime::HostedFleetNodeStatus {
+                node_name: String::from("aws-linux-node-c"),
+                configured: true,
+                imported: true,
+                registered: false,
+                selected: false,
+                freshness: port_runtime::HostedFleetFreshnessState::MissingRegistration,
+                routing_eligibility:
+                    port_runtime::HostedFleetRoutingEligibility::MissingRegistration,
+                import_provenance: Some(String::from("imported/aws-linux-node-c.json")),
+                imported_at_unix_s: Some(1_700_000_123),
+                refreshed_at_unix_s: None,
+                ttl_seconds: None,
+                fresh_until_unix_s: None,
+                detail: String::from("Imported inventory from aws-linux-node-c.json."),
+            },
+        ]);
+
+        for expected in [
+            "fleet nodes:",
+            "node: aws-linux-node",
+            "selected: true",
+            "freshness: live",
+            "routing eligibility: eligible",
+            "node: aws-linux-node-c",
+            "imported: true",
+            "registered: false",
+            "import provenance: imported/aws-linux-node-c.json",
+            "freshness: missing-registration",
+            "routing eligibility: missing-registration",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing '{expected}' in:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn hosted_fleet_render_distinguishes_live_stale_and_missing_nodes() {
+        let rendered = format_machine_status(&sample_hosted_status(
+            vec![
+                port_runtime::HostedFleetNodeStatus {
+                    node_name: String::from("aws-linux-node"),
+                    configured: true,
+                    imported: false,
+                    registered: true,
+                    selected: true,
+                    freshness: port_runtime::HostedFleetFreshnessState::Live,
+                    routing_eligibility: port_runtime::HostedFleetRoutingEligibility::Eligible,
+                    import_provenance: None,
+                    imported_at_unix_s: None,
+                    refreshed_at_unix_s: Some(1773044061),
+                    ttl_seconds: Some(15),
+                    fresh_until_unix_s: Some(1773044076),
+                    detail: String::from("Live node."),
+                },
+                port_runtime::HostedFleetNodeStatus {
+                    node_name: String::from("aws-linux-node-b"),
+                    configured: true,
+                    imported: false,
+                    registered: true,
+                    selected: false,
+                    freshness: port_runtime::HostedFleetFreshnessState::Stale,
+                    routing_eligibility:
+                        port_runtime::HostedFleetRoutingEligibility::StaleRegistration,
+                    import_provenance: None,
+                    imported_at_unix_s: None,
+                    refreshed_at_unix_s: Some(1),
+                    ttl_seconds: Some(1),
+                    fresh_until_unix_s: Some(2),
+                    detail: String::from("Registration is stale."),
+                },
+                port_runtime::HostedFleetNodeStatus {
+                    node_name: String::from("aws-linux-node-c"),
+                    configured: true,
+                    imported: true,
+                    registered: false,
+                    selected: false,
+                    freshness: port_runtime::HostedFleetFreshnessState::MissingRegistration,
+                    routing_eligibility:
+                        port_runtime::HostedFleetRoutingEligibility::MissingRegistration,
+                    import_provenance: Some(String::from("imported/aws-linux-node-c.json")),
+                    imported_at_unix_s: Some(1_700_000_123),
+                    refreshed_at_unix_s: None,
+                    ttl_seconds: None,
+                    fresh_until_unix_s: None,
+                    detail: String::from("No registered node-agent endpoint."),
+                },
+            ],
+            "control plane 'demo' could not inspect hosted fleet state for machine 'cloud-aws'",
+        ));
+
+        for expected in [
+            "freshness: live",
+            "freshness: stale",
+            "routing eligibility: stale-registration",
+            "freshness: missing-registration",
+            "routing eligibility: missing-registration",
+            "detail: control plane 'demo' could not inspect hosted fleet state for machine 'cloud-aws'",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing '{expected}' in:\n{rendered}"
             );
         }
     }

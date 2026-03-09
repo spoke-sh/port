@@ -1,0 +1,22 @@
+---
+recorded_at: 2026-03-09T01:20:02.310487760-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzUq8000/verify-ac-3.sh
+---
+== cargo test -q -p port-runtime hosted_fleet_state_reports_merge_failures_with_control_plane_and_node_detail ==
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 83 filtered out; finished in 0.00s
+
+
+== hosted inspection output render paths ==
+926:                    print_hosted_fleet_nodes(&machine.hosted_fleet_nodes);
+937:            print!("{}", format_machine_status(&status));
+985:fn print_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) {
+986:    let rendered = format_hosted_fleet_nodes(nodes);
+993:fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
+1070:    output.push_str(&format_hosted_fleet_nodes(&status.hosted_fleet_nodes));
+1075:fn format_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) -> String {
+2083:        format_hosted_fleet_nodes, format_machine_status, render_help,
+2193:        let rendered = format_hosted_fleet_nodes(&[
+2249:        let rendered = format_machine_status(&sample_hosted_status(
