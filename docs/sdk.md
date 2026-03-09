@@ -19,6 +19,10 @@ Shipped today:
 - `machines()` mirrors `port machine list|status|monitor|top|stop`
 - `guest()` mirrors `port guest exec|copy|pty|logs|forward` using the existing
   `port-agent-protocol` request payloads
+- `guest().pty_stream()`, `logs_stream()`, `copy_stream()`, and
+  `forward_stream()` publish the streamed hosted request builders when the
+  caller needs explicit control over the transport contract instead of the
+  completed JSON helper
 - `services()` mirrors `port service secret put|list|remove` plus
   `port service apply|list|status|stop`
 - `HostedClient::execute_json` performs the live HTTP request and decodes
@@ -91,6 +95,38 @@ Run the in-repo example with:
 ```bash
 cargo run -p port-sdk --example hosted-sdk
 ```
+
+The streamed hosted request builders stay explicit:
+
+```rust
+# use port_agent_protocol::{ForwardRequest, LogsRequest};
+# use port_model::PortConfig;
+# use port_sdk::HostedClient;
+let config = PortConfig::sample();
+let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+let logs = client.guest().logs_stream(
+    "cloud-aws",
+    LogsRequest {
+        path: "/var/log/app.log".into(),
+        follow: true,
+        tail_lines: None,
+    },
+)?;
+let forward = client.guest().forward_stream(
+    "cloud-aws",
+    ForwardRequest {
+        listen: "127.0.0.1:8081".into(),
+        target: "127.0.0.1:80".into(),
+    },
+)?;
+assert_eq!(logs.request.url, "https://port.example.internal/v1/machines/cloud-aws/guest:logs:stream");
+assert_eq!(forward.request.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:stream");
+# Ok::<(), anyhow::Error>(())
+```
+
+`HostedClient::execute_json` remains the live helper for the shipped JSON
+machine, guest, and service routes. Stream requests stay typed and explicit so
+the caller owns any long-lived byte-stream transport policy layered on top.
 
 ## API Shape
 

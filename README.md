@@ -577,9 +577,17 @@ cargo run -p port-cli -- --config examples/port.toml guest copy \
   --direction host-to-guest \
   --source ./host.txt --destination /workspace/host.txt
 
+cargo run -p port-cli -- --config examples/port.toml guest pty \
+  --machine demo --runtime-root /tmp/port-runtime -- \
+  /bin/sh -lc 'printf pty-ok'
+
 cargo run -p port-cli -- --config examples/port.toml guest logs \
   --machine demo --runtime-root /tmp/port-runtime \
   --path /var/log/port-agent.log --tail-lines 50
+
+cargo run -p port-cli -- --config examples/port.toml guest logs \
+  --machine demo --runtime-root /tmp/port-runtime \
+  --path /var/log/port-agent.log --follow
 
 cargo run -p port-cli -- --config examples/port.toml guest forward \
   --machine demo --runtime-root /tmp/port-runtime \
@@ -597,6 +605,10 @@ cargo run -p port-cli -- --config examples/port.toml guest forward \
 
 Current forward lifecycle:
 
+- `port guest pty` now keeps a real streamed PTY session open until the guest
+  command exits with an explicit exit frame.
+- `port guest logs --follow` now keeps the guest log stream open until the
+  stream ends or the operator interrupts the command.
 - `port guest forward` is a foreground host-side proxy. The command prints the
   bound listener address, keeps serving until you interrupt it, and opens one
   guest transport connection per inbound client.
@@ -610,6 +622,31 @@ Current forward lifecycle:
   In the sample guest image, bring loopback up before targeting
   `127.0.0.1`, for example with
   `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
+
+Hosted guest transport uses the same command family with explicit boundaries:
+
+```bash
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-hosted.toml guest pty \
+  --machine cloud-aws -- /bin/sh -lc 'printf hosted-pty-ok'
+
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-hosted.toml guest logs \
+  --machine cloud-aws --path /var/log/app.log --follow
+
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-hosted.toml guest copy \
+  --machine cloud-aws --direction host-to-guest \
+  --source ./host.txt --destination /workspace/host.txt
+
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --listen 127.0.0.1:8081 --target 127.0.0.1:80
+```
+
+- Hosted `guest pty`, `guest logs --follow`, and `guest copy` now route through
+  the live control-plane and node-agent path instead of requiring direct access
+  to the selected node runtime root.
+- Hosted `guest forward` now starts a node-owned listener and returns the
+  remote listen address through the same canonical command family.
+- Hosted `guest forward --list`, `--stop`, `--lifecycle detached`, and `--name`
+  remain follow-on work until Port ships hosted detached lifecycle management.
 
 ## Model And Example Config
 

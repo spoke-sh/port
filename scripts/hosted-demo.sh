@@ -130,5 +130,4 @@ echo "roundtrip file:"
 cat "$ROUNDTRIP_PATH"
 echo
 echo "current hosted demo limits:"
-echo "- hosted guest copy still assumes the referenced host paths are visible on the node host"
-echo "- hosted guest forward still depends on the repo-local guest transport listener lifecycle"
+echo "- hosted guest forward now starts a node-owned listener, but hosted detached lifecycle management is still follow-on work"

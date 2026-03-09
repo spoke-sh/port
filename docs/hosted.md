@@ -295,6 +295,9 @@ What is runnable today:
   detached forward processes Port recorded under that node runtime root
 - hosted `guest exec`, `copy`, `pty`, and `logs` now execute through that same
   live hosted HTTP path while preserving the existing guest protocol payloads
+- hosted `guest pty` and `guest logs --follow` now keep their streamed session
+  semantics through that hosted route instead of collapsing back to transcript-
+  only operator behavior
 - hosted guest attach failures surface the control plane and node-routing
   context directly, so missing guest sockets or unresolved hosted node
   ownership stay visible to the operator
@@ -388,6 +391,29 @@ Hosted `guest forward` keeps the same command family and now starts a
 node-owned listener through the hosted control-plane and node-agent path.
 Hosted detached lifecycle management does not ship yet, so `--list`, `--stop`,
 and `--lifecycle detached` remain explicit follow-on work for hosted lanes.
+
+Example hosted guest workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest pty \
+  --machine cloud-aws -- /bin/sh -lc 'printf hosted-pty-ok'
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest logs \
+  --machine cloud-aws --path /var/log/app.log --follow
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest copy \
+  --machine cloud-aws --direction host-to-guest \
+  --source ./host.txt --destination /workspace/host.txt
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --listen 127.0.0.1:8081 --target 127.0.0.1:80
+```
+
+- `guest pty` and `guest logs --follow` stay streamed across the hosted route.
+- `guest copy` now streams bytes through the node agent instead of assuming
+  node-visible host paths.
+- `guest forward` returns the node-owned listener address and does not require
+  a repo-local guest transport fallback any more.
 
 What still remains after this runtime slice:
 

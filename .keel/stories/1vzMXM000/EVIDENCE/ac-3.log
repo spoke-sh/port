@@ -1,0 +1,33 @@
+---
+recorded_at: 2026-03-08T19:17:59.085787432-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzMXM000/verify-ac-3.sh
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 57 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 57 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 57 filtered out; finished in 3.02s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 57 filtered out; finished in 0.51s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 57 filtered out; finished in 0.61s
+
+
+--- stderr ---
+error (ignored): error: SQLite database '/home/alex/.cache/nix/eval-cache-v5/586b56557c21f595e1b155daeafd9057d7d58f150efdea0011bad082460e6a1b.sqlite' is busy
+error (ignored): error: SQLite database '/home/alex/.cache/nix/eval-cache-v5/586b56557c21f595e1b155daeafd9057d7d58f150efdea0011bad082460e6a1b.sqlite' is busy

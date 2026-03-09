@@ -41,7 +41,9 @@ Runnable local workflow:
 Guest workflow examples:
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+  port --config examples/port.toml guest pty --machine demo -- /bin/sh -lc 'printf pty-ok'
   port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
+  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --follow
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
   port --config examples/port.toml guest forward --machine demo --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
@@ -122,6 +124,7 @@ Hosted Control:
   Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
   Hosted `guest copy` now streams bytes through the live control-plane and node-agent path.
   Hosted `guest forward` now starts a node-owned listener through the live control-plane and node-agent path; detached hosted lifecycle management remains follow-on work.
+  Hosted `guest forward` currently supports the default start path only; `--list`, `--stop`, `--lifecycle detached`, and `--name` remain local-only until hosted detached lifecycle management ships.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
   `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
 Service Control:
@@ -1858,6 +1861,8 @@ mod tests {
             "artifacts",
             "machine",
             "guest",
+            "guest pty",
+            "--follow",
             "Linux",
             "macOS",
             "Windows",
@@ -1877,6 +1882,7 @@ mod tests {
             "node-agent",
             "Artifact Mobility",
             "detached lifecycle modes",
+            "node-owned listener",
             "node-binding",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");

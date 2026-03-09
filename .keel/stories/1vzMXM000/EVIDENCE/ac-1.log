@@ -1,0 +1,56 @@
+---
+recorded_at: 2026-03-08T19:17:47.094292933-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzMXM000/verify-ac-1.sh
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+crates/port-cli/src/lib.rs:44:  port --config examples/port.toml guest pty --machine demo -- /bin/sh -lc 'printf pty-ok'
+docs/hosted.md:298:- hosted `guest pty` and `guest logs --follow` now keep their streamed session
+docs/hosted.md:412:- `guest pty` and `guest logs --follow` stay streamed across the hosted route.
+README.md:610:- `port guest logs --follow` now keeps the guest log stream open until the
+README.md:643:- Hosted `guest pty`, `guest logs --follow`, and `guest copy` now route through
+22:- `guest().pty_stream()`, `logs_stream()`, `copy_stream()`, and
+23:  `forward_stream()` publish the streamed hosted request builders when the
+docs/hosted.md:307:- hosted `guest forward` now starts a node-owned listener through the live
+docs/hosted.md:391:node-owned listener through the hosted control-plane and node-agent path.
+docs/hosted.md:415:- `guest forward` returns the node-owned listener address and does not require
+README.md:363:- Hosted `guest forward` now starts a node-owned listener through the hosted
+README.md:400:`guest forward` now starts a node-owned listener through that same control-
+README.md:646:- Hosted `guest forward` now starts a node-owned listener and returns the
+crates/port-cli/src/lib.rs:126:  Hosted `guest forward` now starts a node-owned listener through the live control-plane and node-agent path; detached hosted lifecycle management remains follow-on work.
+crates/port-cli/src/lib.rs:1885:            "node-owned listener",
+docs/hosted.md:392:Hosted detached lifecycle management does not ship yet, so `--list`, `--stop`,
+README.md:364:  control-plane and node-agent path. Hosted detached lifecycle management for
