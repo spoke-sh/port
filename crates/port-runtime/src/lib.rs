@@ -11387,6 +11387,173 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_cloud_hypervisor_launch_status_stop_route_through_live_control_plane() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .substrate = ExecutionSubstrate::CloudHypervisor;
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .substrates = vec![ExecutionSubstrate::CloudHypervisor];
+        write_fake_cloud_hypervisor_artifacts(&mut config, tempdir.path());
+        let fake_binary = write_fake_firecracker_binary(tempdir.path(), "cloud-hypervisor");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+        let placement_state_path =
+            hosted_placeholder_runtime_root("demo").join("machine-placements.json");
+
+        let metadata = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect("hosted cloud hypervisor launch should succeed");
+
+        let expected_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let expected_paths = RuntimePaths::for_machine(&expected_runtime_root, "cloud-aws");
+        assert_eq!(metadata.machine_name, "cloud-aws");
+        assert_eq!(metadata.firecracker_binary, fake_binary);
+        assert_eq!(metadata.runtime_dir, expected_paths.runtime_dir);
+        assert_eq!(metadata.manifest_path, expected_paths.manifest_path);
+        assert_eq!(
+            metadata.log_path,
+            cloud_hypervisor_log_path(&expected_paths)
+        );
+        assert!(
+            expected_paths
+                .runtime_dir
+                .join("cloud-hypervisor-runtime.json")
+                .exists()
+        );
+
+        let placement_state: serde_json::Value = serde_json::from_slice(
+            &fs::read(&placement_state_path).expect("machine placement state should exist"),
+        )
+        .expect("machine placement state should decode");
+        assert_eq!(
+            placement_state["machines"]["cloud-aws"]["node_name"].as_str(),
+            Some("aws-linux-node")
+        );
+        assert_eq!(
+            placement_state["machines"]["cloud-aws"]["runtime_root"].as_str(),
+            Some(expected_runtime_root.to_string_lossy().as_ref())
+        );
+
+        let status = machine_status(&config, tempdir.path(), "cloud-aws")
+            .expect("hosted cloud hypervisor status should load");
+        assert_eq!(status.machine_name, "cloud-aws");
+        assert_eq!(status.state, MachineRuntimeState::Running);
+        assert_eq!(
+            status.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            status.detail.contains("Cloud Hypervisor"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("control plane 'demo'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("provider 'aws'"),
+            "{}",
+            status.detail
+        );
+
+        let stop = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(1))
+            .expect("hosted cloud hypervisor stop should succeed");
+        assert_eq!(stop.machine_name, "cloud-aws");
+        assert_eq!(stop.previous_state, MachineRuntimeState::Running);
+        assert_eq!(stop.current_state, MachineRuntimeState::Stopped);
+        assert_eq!(
+            stop.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert!(stop.detail.contains("Cloud Hypervisor"), "{}", stop.detail);
+        assert!(
+            stop.detail.contains("control plane 'demo'"),
+            "{}",
+            stop.detail
+        );
+        assert!(
+            stop.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            stop.detail
+        );
+        assert!(stop.detail.contains("provider 'aws'"), "{}", stop.detail);
+    }
+
+    #[test]
+    fn hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .substrate = ExecutionSubstrate::CloudHypervisor;
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("hosted cloud hypervisor launch should reject firecracker-only nodes");
+
+        let message = error.to_string();
+        assert!(message.contains("cloud-aws"), "{message}");
+        assert!(message.contains("control plane 'demo'"), "{message}");
+        assert!(message.contains("aws-linux-node"), "{message}");
+        assert!(message.contains("cloud-hypervisor"), "{message}");
+        assert!(message.contains("rejected nodes"), "{message}");
+        assert!(
+            message.contains("requires standard protection on x86_64 via cloud-hypervisor"),
+            "{message}"
+        );
+        assert!(
+            !message.contains(
+                "failed to launch machine 'cloud-aws' through the live hosted control-plane route"
+            ),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn avf_launch_fails_fast_on_non_macos_hosts() {
         let config = sample_avf_config();
         let tempdir = tempdir().expect("tempdir should exist");

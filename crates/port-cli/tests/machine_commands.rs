@@ -1527,6 +1527,170 @@ fn cli_hosted_standard_status_and_stop_round_trip() {
 }
 
 #[test]
+fn cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    server_config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .substrate = ExecutionSubstrate::CloudHypervisor;
+    server_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .capabilities
+        .substrates = vec![ExecutionSubstrate::CloudHypervisor];
+    write_fake_cloud_hypervisor_artifacts(&mut server_config, temp.path());
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "cloud-hypervisor");
+    let joined_path = prepend_path_env(temp.path());
+    let _servers = spawn_hosted_server_harness(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[("PATH", joined_path.as_path())],
+    );
+
+    let launch = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(launch_stdout.contains("launched machine: cloud-aws"));
+    assert!(launch_stdout.contains(fake_binary.to_string_lossy().as_ref()));
+
+    let status = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("machine: cloud-aws"));
+    assert!(status_stdout.contains("detail:"));
+    assert!(status_stdout.contains("Cloud Hypervisor"));
+    assert!(status_stdout.contains("control plane 'demo'"));
+    assert!(status_stdout.contains("node 'aws-linux-node'"));
+    assert!(status_stdout.contains("provider 'aws'"));
+
+    let stop = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop_stdout.contains("machine: cloud-aws"));
+    assert!(stop_stdout.contains("detail:"));
+    assert!(stop_stdout.contains("Cloud Hypervisor"));
+    assert!(stop_stdout.contains("control plane 'demo'"));
+    assert!(stop_stdout.contains("node 'aws-linux-node'"));
+    assert!(stop_stdout.contains("provider 'aws'"));
+}
+
+#[test]
+fn cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    server_config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .substrate = ExecutionSubstrate::CloudHypervisor;
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+
+    let launch = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(!launch.status.success(), "{launch:?}");
+    let stderr = String::from_utf8_lossy(&launch.stderr);
+    assert!(stderr.contains("cloud-aws"), "{stderr}");
+    assert!(stderr.contains("control plane 'demo'"), "{stderr}");
+    assert!(stderr.contains("aws-linux-node"), "{stderr}");
+    assert!(stderr.contains("cloud-hypervisor"), "{stderr}");
+    assert!(stderr.contains("rejected nodes"), "{stderr}");
+    assert!(
+        stderr.contains("requires standard protection on x86_64 via cloud-hypervisor"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains(
+            "failed to launch machine 'cloud-aws' through the live hosted control-plane route"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn cli_machine_top_reports_hypervisor_and_forward_entries() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
