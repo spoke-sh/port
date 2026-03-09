@@ -817,6 +817,9 @@ impl PortConfig {
         for (group_name, group) in &self.host_groups {
             validate_hosted_host_group(self, group_name, group)?;
         }
+        for (artifact_name, artifact) in self.artifacts.all() {
+            validate_artifact_distribution(artifact_name, artifact)?;
+        }
 
         for (machine_name, machine) in &self.machines {
             let host = self.hosts.get(&machine.host).ok_or_else(|| {
@@ -1202,6 +1205,21 @@ impl std::fmt::Display for ArtifactReference {
     }
 }
 
+impl ArtifactReference {
+    #[must_use]
+    pub fn oci_remote_reference(&self, selector: ArtifactSelector) -> String {
+        format!(
+            "{}/{}:{}-{}-{}-{}",
+            self.registry,
+            self.repository,
+            self.version,
+            machine_architecture_label(selector.architecture),
+            execution_substrate_label(selector.substrate),
+            protection_mode_label(selector.protection_mode)
+        )
+    }
+}
+
 pub fn hosted_artifact_store_path(
     control_plane: &str,
     reference: &ArtifactReference,
@@ -1231,9 +1249,56 @@ pub struct ArtifactDistribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "backend", rename_all = "kebab-case")]
 pub enum ArtifactStore {
-    FileSystem { root: PathBuf },
-    OciRegistry { reference: String },
-    HostedApi { endpoint: String },
+    FileSystem {
+        root: PathBuf,
+    },
+    OciRegistry {
+        transport: OciRegistryTransport,
+        auth: OciRegistryAuth,
+    },
+    HostedApi {
+        endpoint: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OciRegistryTransport {
+    Https,
+    PlainHttp,
+}
+
+impl OciRegistryTransport {
+    #[must_use]
+    pub fn describe(&self) -> &'static str {
+        match self {
+            Self::Https => "https",
+            Self::PlainHttp => "plain-http",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum OciRegistryAuth {
+    Anonymous,
+    BasicEnv {
+        username_variable: String,
+        password_variable: String,
+    },
+}
+
+impl OciRegistryAuth {
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Anonymous => String::from("anonymous"),
+            Self::BasicEnv {
+                username_variable,
+                password_variable,
+            } => format!("basic-env:{username_variable}:{password_variable}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2223,6 +2288,46 @@ fn validate_artifact_spec(
     Ok(())
 }
 
+fn validate_artifact_distribution(
+    artifact_name: &str,
+    artifact: &ArtifactSpec,
+) -> Result<(), ValidationError> {
+    validate_artifact_store(artifact_name, "push", &artifact.distribution.push)?;
+    validate_artifact_store(artifact_name, "pull", &artifact.distribution.pull)?;
+    Ok(())
+}
+
+fn validate_artifact_store(
+    artifact_name: &str,
+    direction: &str,
+    store: &ArtifactStore,
+) -> Result<(), ValidationError> {
+    match store {
+        ArtifactStore::FileSystem { .. } | ArtifactStore::HostedApi { .. } => Ok(()),
+        ArtifactStore::OciRegistry { auth, .. } => match auth {
+            OciRegistryAuth::Anonymous => Ok(()),
+            OciRegistryAuth::BasicEnv {
+                username_variable,
+                password_variable,
+            } => {
+                if username_variable.trim().is_empty() {
+                    return Err(ValidationError::new(format!(
+                        "artifact '{}' {} OCI registry backend must declare a non-empty username environment variable",
+                        artifact_name, direction
+                    )));
+                }
+                if password_variable.trim().is_empty() {
+                    return Err(ValidationError::new(format!(
+                        "artifact '{}' {} OCI registry backend must declare a non-empty password environment variable",
+                        artifact_name, direction
+                    )));
+                }
+                Ok(())
+            }
+        },
+    }
+}
+
 fn validate_hosted_control_plane(
     control_plane_name: &str,
     control_plane: &HostedControlPlaneSpec,
@@ -2708,8 +2813,8 @@ mod tests {
         HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy,
         MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
         MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
-        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
-        hosted_artifact_store_path,
+        OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
+        PvmLaneDecision, hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
@@ -3014,6 +3119,67 @@ mod tests {
             PathBuf::from(
                 ".port/hosted/demo/artifacts/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux"
             )
+        );
+    }
+
+    #[test]
+    fn oci_registry_contract_derives_deterministic_remote_reference() {
+        let selector = ArtifactSelector {
+            architecture: MachineArchitecture::X86_64,
+            substrate: ExecutionSubstrate::Firecracker,
+            protection_mode: ProtectionMode::Standard,
+        };
+        let reference = ArtifactReference {
+            registry: String::from("registry.port.test:5000"),
+            repository: String::from("artifacts/demo-kernel"),
+            version: String::from("v1"),
+        };
+
+        assert_eq!(
+            reference.oci_remote_reference(selector),
+            "registry.port.test:5000/artifacts/demo-kernel:v1-x86_64-firecracker-standard"
+        );
+
+        let encoded = toml::to_string(&ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::BasicEnv {
+                username_variable: String::from("PORT_OCI_USER"),
+                password_variable: String::from("PORT_OCI_PASSWORD"),
+            },
+        })
+        .expect("oci registry store should encode");
+
+        assert!(encoded.contains("backend = \"oci-registry\""));
+        assert!(encoded.contains("transport = \"plain-http\""));
+        assert!(encoded.contains("kind = \"basic-env\""));
+        assert!(encoded.contains("username_variable = \"PORT_OCI_USER\""));
+        assert!(encoded.contains("password_variable = \"PORT_OCI_PASSWORD\""));
+    }
+
+    #[test]
+    fn oci_registry_contract_rejects_empty_basic_auth_environment_variables() {
+        let mut config = PortConfig::sample();
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .unwrap()
+            .distribution
+            .push = ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::BasicEnv {
+                username_variable: String::new(),
+                password_variable: String::from("PORT_OCI_PASSWORD"),
+            },
+        };
+
+        let error = config
+            .validate()
+            .expect_err("empty OCI auth variable names should fail validation");
+
+        assert!(
+            error.to_string().contains("OCI registry backend"),
+            "unexpected validation error: {error}"
         );
     }
 

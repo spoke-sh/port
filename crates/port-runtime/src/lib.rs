@@ -27,8 +27,8 @@ use port_model::{
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
     HostedApiIdentityContract, HostedArtifactIdentityContract, HostedImportedNodeRecord,
     HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy,
-    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmCapabilityState,
-    PvmHostKit, PvmHostKitPackage,
+    MachineArchitecture, MachineControlContract, OciRegistryAuth, OciRegistryTransport, PortConfig,
+    ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -584,6 +584,13 @@ enum ArtifactStoreContract {
     FileSystem {
         store_path: PathBuf,
     },
+    OciRegistry {
+        oras_binary: PathBuf,
+        remote_reference: String,
+        store_path: PathBuf,
+        transport: OciRegistryTransport,
+        auth: OciRegistryAuth,
+    },
     HostedApi {
         identity: HostedArtifactIdentityContract,
         transfer: HostedArtifactTransferRequest,
@@ -664,6 +671,14 @@ fn collect_doctor_report_with_facts(
                         "Artifact does not define a native Firecracker/standard variant for this host.",
                     ),
                 });
+            }
+            if let ArtifactStore::OciRegistry { auth, transport } = &artifact.distribution.push {
+                checks.push(oci_registry_dependency_check(name, "push", *transport));
+                checks.push(oci_registry_auth_check(name, "push", auth));
+            }
+            if let ArtifactStore::OciRegistry { auth, transport } = &artifact.distribution.pull {
+                checks.push(oci_registry_dependency_check(name, "pull", *transport));
+                checks.push(oci_registry_auth_check(name, "pull", auth));
             }
         }
 
@@ -769,6 +784,17 @@ pub fn push_artifact(
                 bytes_copied,
             })
         }
+        ArtifactStoreContract::OciRegistry {
+            remote_reference,
+            transport,
+            auth,
+            ..
+        } => bail!(
+            "OCI artifact push transport is not implemented yet for '{}' over {} with {} auth",
+            remote_reference,
+            transport.describe(),
+            auth.describe()
+        ),
         ArtifactStoreContract::HostedApi { identity, transfer } => {
             push_artifact_to_hosted_backend(config, artifact, identity, transfer)
         }
@@ -800,6 +826,17 @@ pub fn pull_artifact(
                 bytes_copied,
             })
         }
+        ArtifactStoreContract::OciRegistry {
+            remote_reference,
+            transport,
+            auth,
+            ..
+        } => bail!(
+            "OCI artifact pull transport is not implemented yet for '{}' over {} with {} auth",
+            remote_reference,
+            transport.describe(),
+            auth.describe()
+        ),
         ArtifactStoreContract::HostedApi { identity, transfer } => {
             pull_artifact_from_hosted_backend(config, artifact, identity, transfer)
         }
@@ -5976,6 +6013,75 @@ fn versioned_binary_check(
     }
 }
 
+fn oci_registry_dependency_check(
+    artifact_name: &str,
+    direction: &str,
+    transport: OciRegistryTransport,
+) -> DoctorCheck {
+    let mut check = binary_check(
+        &format!("artifact-store:{artifact_name}:{direction}:oras"),
+        "oras",
+        true,
+    );
+    if check.ok {
+        check.detail = format!(
+            "{} OCI registry backend will use {} transport.",
+            check.detail,
+            transport.describe()
+        );
+    } else {
+        check.detail = format!(
+            "{} Required for artifact '{}' {} OCI registry transport over {}.",
+            check.detail,
+            artifact_name,
+            direction,
+            transport.describe()
+        );
+    }
+    check
+}
+
+fn oci_registry_auth_check(
+    artifact_name: &str,
+    direction: &str,
+    auth: &OciRegistryAuth,
+) -> DoctorCheck {
+    match auth {
+        OciRegistryAuth::Anonymous => DoctorCheck {
+            name: format!("artifact-store:{artifact_name}:{direction}:auth"),
+            ok: true,
+            required: true,
+            detail: format!(
+                "Artifact '{}' {} OCI registry backend uses anonymous auth.",
+                artifact_name, direction
+            ),
+        },
+        OciRegistryAuth::BasicEnv {
+            username_variable,
+            password_variable,
+        } => {
+            let username_present = env::var_os(username_variable).is_some();
+            let password_present = env::var_os(password_variable).is_some();
+            DoctorCheck {
+                name: format!("artifact-store:{artifact_name}:{direction}:auth"),
+                ok: username_present && password_present,
+                required: true,
+                detail: if username_present && password_present {
+                    format!(
+                        "Artifact '{}' {} OCI registry backend will source credentials from env:{} and env:{}.",
+                        artifact_name, direction, username_variable, password_variable
+                    )
+                } else {
+                    format!(
+                        "Artifact '{}' {} OCI registry backend requires env:{} and env:{} for basic-env auth.",
+                        artifact_name, direction, username_variable, password_variable
+                    )
+                },
+            }
+        }
+    }
+}
+
 fn find_binary(binary: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
 
@@ -6153,10 +6259,9 @@ fn resolve_artifact_store_contract(
                         .unwrap_or_else(|| std::ffi::OsStr::new("artifact")),
                 ),
         }),
-        ArtifactStore::OciRegistry { reference } => bail!(
-            "OCI registry backend '{}' is reserved in the model but not implemented in the runtime yet",
-            reference
-        ),
+        ArtifactStore::OciRegistry { transport, auth } => {
+            resolve_oci_registry_contract(artifact, *transport, auth)
+        }
         ArtifactStore::HostedApi { endpoint } => {
             let identity = config
                 .hosted_artifact_identity_contract(endpoint)
@@ -6185,6 +6290,64 @@ fn resolve_artifact_store_contract(
                     store_path,
                 },
             })
+        }
+    }
+}
+
+fn resolve_oci_registry_contract(
+    artifact: &ArtifactMetadata,
+    transport: OciRegistryTransport,
+    auth: &OciRegistryAuth,
+) -> Result<ArtifactStoreContract> {
+    let remote_reference = artifact.reference.oci_remote_reference(artifact.selector);
+    let oras_binary = find_binary("oras").with_context(|| {
+        format!(
+            "OCI registry backend for artifact '{}' requires 'oras' on PATH to reach '{}' over {} transport",
+            artifact.name,
+            remote_reference,
+            transport.describe()
+        )
+    })?;
+    validate_oci_registry_auth_env(auth, artifact, &remote_reference)?;
+    Ok(ArtifactStoreContract::OciRegistry {
+        oras_binary,
+        remote_reference: remote_reference.clone(),
+        store_path: PathBuf::from(&remote_reference),
+        transport,
+        auth: auth.clone(),
+    })
+}
+
+fn validate_oci_registry_auth_env(
+    auth: &OciRegistryAuth,
+    artifact: &ArtifactMetadata,
+    remote_reference: &str,
+) -> Result<()> {
+    match auth {
+        OciRegistryAuth::Anonymous => Ok(()),
+        OciRegistryAuth::BasicEnv {
+            username_variable,
+            password_variable,
+        } => {
+            if env::var_os(username_variable).is_none() {
+                bail!(
+                    "OCI registry backend for artifact '{}' requires env:{} before accessing '{}' with {} auth",
+                    artifact.name,
+                    username_variable,
+                    remote_reference,
+                    auth.describe()
+                );
+            }
+            if env::var_os(password_variable).is_none() {
+                bail!(
+                    "OCI registry backend for artifact '{}' requires env:{} before accessing '{}' with {} auth",
+                    artifact.name,
+                    password_variable,
+                    remote_reference,
+                    auth.describe()
+                );
+            }
+            Ok(())
         }
     }
 }
@@ -8111,7 +8274,8 @@ mod tests {
     };
     use port_model::{
         ArtifactKind, ArtifactStore, ExecutionSubstrate, HostProvider, HostedImportedNodeRecord,
-        HostedSchedulerPolicy, MachineArchitecture, PortConfig, ProtectionMode, PvmCapabilityState,
+        HostedSchedulerPolicy, MachineArchitecture, OciRegistryAuth, OciRegistryTransport,
+        PortConfig, ProtectionMode, PvmCapabilityState,
     };
     use tokio::net::TcpListener;
 
@@ -8303,6 +8467,175 @@ mod tests {
             }
             other => panic!("expected hosted artifact contract, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn oci_registry_backend_requires_oras_binary_with_explicit_detail() {
+        let _path = ScopedPathEnv::replace(Path::new("/definitely-missing-port-oci-path"));
+        let mut config = PortConfig::sample();
+        {
+            let kernel = config
+                .artifacts
+                .kernels
+                .get_mut("demo-kernel")
+                .expect("sample kernel should exist");
+            kernel.reference.registry = String::from("registry.port.test:5000");
+            kernel.reference.repository = String::from("artifacts/demo-kernel");
+            kernel.distribution.push = ArtifactStore::OciRegistry {
+                transport: OciRegistryTransport::PlainHttp,
+                auth: OciRegistryAuth::Anonymous,
+            };
+        }
+
+        let artifact = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("artifact should resolve");
+
+        let push_store = config
+            .artifacts
+            .kernels
+            .get("demo-kernel")
+            .expect("sample kernel should exist")
+            .distribution
+            .push
+            .clone();
+        let error = resolve_artifact_store_contract(&config, &push_store, &artifact)
+            .expect_err("missing oras should fail fast");
+
+        assert!(
+            error.to_string().contains("oras"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.to_string().contains(
+                "registry.port.test:5000/artifacts/demo-kernel:v1-x86_64-firecracker-standard"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn oci_registry_backend_requires_basic_auth_environment_variables() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let _path = ScopedPathEnv::prepend(&tempdir.path().to_path_buf());
+        fs::write(tempdir.path().join("oras"), "#!/usr/bin/env bash\nexit 0\n")
+            .expect("fake oras should write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = tempdir.path().join("oras");
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let mut config = PortConfig::sample();
+        {
+            let kernel = config
+                .artifacts
+                .kernels
+                .get_mut("demo-kernel")
+                .expect("sample kernel should exist");
+            kernel.reference.registry = String::from("registry.port.test:5000");
+            kernel.reference.repository = String::from("artifacts/demo-kernel");
+            kernel.distribution.push = ArtifactStore::OciRegistry {
+                transport: OciRegistryTransport::PlainHttp,
+                auth: OciRegistryAuth::BasicEnv {
+                    username_variable: String::from("PORT_OCI_USER"),
+                    password_variable: String::from("PORT_OCI_PASSWORD"),
+                },
+            };
+        }
+        unsafe {
+            std::env::remove_var("PORT_OCI_USER");
+            std::env::remove_var("PORT_OCI_PASSWORD");
+        }
+
+        let artifact = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("artifact should resolve");
+        let push_store = config
+            .artifacts
+            .kernels
+            .get("demo-kernel")
+            .expect("sample kernel should exist")
+            .distribution
+            .push
+            .clone();
+        let error = resolve_artifact_store_contract(&config, &push_store, &artifact)
+            .expect_err("missing auth env should fail fast");
+
+        assert!(
+            error.to_string().contains("PORT_OCI_USER"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.to_string().contains("basic-env"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn doctor_report_surfaces_oci_registry_backend_dependency_and_auth_checks() {
+        let _path = ScopedPathEnv::replace(Path::new("/definitely-missing-port-oci-path"));
+        let mut config = PortConfig::sample();
+        {
+            let kernel = config
+                .artifacts
+                .kernels
+                .get_mut("demo-kernel")
+                .expect("sample kernel should exist");
+            kernel.distribution.push = ArtifactStore::OciRegistry {
+                transport: OciRegistryTransport::PlainHttp,
+                auth: OciRegistryAuth::BasicEnv {
+                    username_variable: String::from("PORT_OCI_USER"),
+                    password_variable: String::from("PORT_OCI_PASSWORD"),
+                },
+            };
+        }
+        unsafe {
+            std::env::remove_var("PORT_OCI_USER");
+            std::env::remove_var("PORT_OCI_PASSWORD");
+        }
+
+        let report = collect_doctor_report(Some(&config));
+        let oras_check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "artifact-store:demo-kernel:push:oras")
+            .expect("oras check should exist");
+        let auth_check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "artifact-store:demo-kernel:push:auth")
+            .expect("auth check should exist");
+
+        assert!(!oras_check.ok, "unexpected check state: {oras_check:?}");
+        assert!(
+            oras_check.detail.contains("plain-http"),
+            "unexpected detail: {}",
+            oras_check.detail
+        );
+        assert!(!auth_check.ok, "unexpected check state: {auth_check:?}");
+        assert!(
+            auth_check.detail.contains("PORT_OCI_USER"),
+            "unexpected detail: {}",
+            auth_check.detail
+        );
     }
 
     #[test]
@@ -8664,6 +8997,14 @@ mod tests {
             let joined = std::env::join_paths(entries).expect("PATH should join");
             unsafe {
                 std::env::set_var("PATH", joined);
+            }
+            Self { original }
+        }
+
+        fn replace(path: &Path) -> Self {
+            let original = std::env::var_os("PATH");
+            unsafe {
+                std::env::set_var("PATH", path);
             }
             Self { original }
         }
