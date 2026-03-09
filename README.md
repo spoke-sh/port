@@ -360,9 +360,10 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted `guest copy` now transfers bytes through the control-plane and
   node-agent path using the shared guest copy protocol, so the demo lane no
   longer assumes the client host paths are visible on the selected node.
-- Hosted `guest forward` now starts a node-owned listener through the hosted
-  control-plane and node-agent path. Hosted detached lifecycle management for
-  `forward` remains follow-on work.
+- Hosted `guest forward` now supports foreground and detached lifecycle modes
+  through the hosted control-plane and node-agent path. `--list`, `--stop`,
+  and `--name` now manage node-owned detached forward state under the selected
+  node runtime root instead of falling back to repo-local runtime files.
 - Hosted inventory that lacks a matching node runtime binding currently
   fails with explicit control-plane and route context instead of being silently
   dropped.
@@ -396,10 +397,10 @@ bash scripts/hosted-demo.sh
 That demo script prepares temporary hosted server and client configs, starts
 `port-guest-agent`, `port node-agent serve`, and `port control-plane serve`,
 then runs canonical hosted `port machine status`, `port guest exec`,
-`port guest copy`, and `port guest logs` commands end-to-end. Hosted
-`guest forward` now starts a node-owned listener through that same control-
-plane and node-agent path, while hosted detached lifecycle management remains
-follow-on work.
+`port guest copy`, `port guest logs`, and hosted detached `port guest forward`
+start, list, and stop commands end-to-end. Detached forward lifecycle now
+stays on the same control-plane and node-agent path as the foreground hosted
+guest bridge.
 
 ## Linux Local Workflow
 
@@ -646,7 +647,8 @@ PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-hosted.to
 - Hosted `guest forward` now starts a node-owned listener and returns the
   remote listen address through the same canonical command family.
 - Hosted `guest forward --list`, `--stop`, `--lifecycle detached`, and `--name`
-  remain follow-on work until Port ships hosted detached lifecycle management.
+  now execute through the live control-plane and node-agent path and inspect or
+  mutate node-owned detached forward state for the selected machine.
 
 ## Model And Example Config
 

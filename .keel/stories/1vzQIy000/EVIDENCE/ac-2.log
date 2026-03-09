@@ -1,0 +1,73 @@
+---
+recorded_at: 2026-03-08T20:57:22.936614594-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzQIy000/verify-ac-2.sh
+---
+workdir: /tmp/porthd.XwwRz3
+server config: /tmp/porthd.XwwRz3/server-port.toml
+client config: /tmp/porthd.XwwRz3/client-port.toml
+
+machine status:
+machine: cloud-aws
+state: stopped
+pid: 424242
+inventory scope: hosted-fleet
+inventory owner: hosted-control-plane
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+status source: control-plane-inventory-and-node-agent-runtime
+launch route: hosted-control-plane
+inventory route: hosted-control-plane
+status route: hosted-control-plane
+stop route: hosted-control-plane
+guest route: hosted-control-plane
+runtime dir: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws
+config path: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/firecracker-config.json
+manifest: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/manifest.json
+pid file: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/firecracker.pid
+firecracker log: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/firecracker.log
+console stdout: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/console.stdout.log
+console stderr: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/console.stderr.log
+detail: launch manifest exists but no live Firecracker process is recorded Routed through control plane 'demo' and node 'aws-linux-node'.
+
+guest exec:
+hosted-http-ok
+
+guest copy host-to-guest:
+copied 7 bytes via HostToGuest to /workspace/copied.txt
+
+guest copy guest-to-host:
+copied 7 bytes via GuestToHost to /tmp/porthd.XwwRz3/roundtrip.txt
+
+guest logs:
+second
+
+guest forward detached start:
+forward name: demo-sock
+forward listening: unix:/tmp/porthd.XwwRz3/hosted-detached.sock
+forward target: unix:/tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/guest-agent.sock
+forward lifecycle: detached
+forward pid: 147989
+forward stdout: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/forwards/demo-sock.stdout.log
+forward stderr: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/forwards/demo-sock.stderr.log
+
+guest forward detached list:
+forward: demo-sock
+state: running
+pid: 147989
+listen: unix:/tmp/porthd.XwwRz3/hosted-detached.sock
+target: unix:/tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/guest-agent.sock
+stdout: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/forwards/demo-sock.stdout.log
+stderr: /tmp/porthd.XwwRz3/hosted/aws-linux-node/cloud-aws/forwards/demo-sock.stderr.log
+
+
+guest forward detached stop:
+forward name: demo-sock
+forward lifecycle: detached
+forward state: stopped
+forward pid: 147989
+
+roundtrip file:
+copy-ok
+current hosted demo limits:
+- hosted guest forward detached lifecycle now ships through start/list/stop/name on the live control-plane path
+- retries, richer client policies, and advanced auth/tenancy remain follow-on work

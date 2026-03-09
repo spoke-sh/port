@@ -2,12 +2,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKDIR="${PORT_HOSTED_DEMO_WORKDIR:-$(mktemp -d "${TMPDIR:-/tmp}/port-hosted-demo.XXXXXX")}"
+WORKDIR="${PORT_HOSTED_DEMO_WORKDIR:-$(mktemp -d "/tmp/porthd.XXXXXX")}"
 KEEP_WORKDIR="${PORT_HOSTED_DEMO_KEEP:-0}"
 NODE_ADDR="${PORT_HOSTED_NODE_ADDR:-127.0.0.1:9234}"
 CONTROL_ADDR="${PORT_HOSTED_CONTROL_ADDR:-127.0.0.1:7040}"
 NODE_TOKEN="${PORT_HOSTED_NODE_TOKEN:-node-secret}"
 export PORT_DEMO_TOKEN="${PORT_DEMO_TOKEN:-demo-token}"
+TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+PORT_BIN="$TARGET_DIR/debug/port"
+GUEST_AGENT_BIN="$TARGET_DIR/debug/port-guest-agent"
 
 SERVER_CONFIG="$WORKDIR/server-port.toml"
 CLIENT_CONFIG="$WORKDIR/client-port.toml"
@@ -18,6 +21,7 @@ MACHINE_DIR="$HOSTED_RUNTIME_ROOT/cloud-aws"
 SOCKET_PATH="$MACHINE_DIR/guest-agent.sock"
 HOST_SOURCE="$WORKDIR/host.txt"
 ROUNDTRIP_PATH="$WORKDIR/roundtrip.txt"
+DETACHED_LISTEN_PATH="$WORKDIR/hosted-detached.sock"
 
 cleanup() {
   local status=$?
@@ -65,6 +69,9 @@ mkdir -p "$GUEST_ROOT/var/log" "$MACHINE_DIR" "$BOGUS_RUNTIME_ROOT"
 printf 'first\nsecond\n' >"$GUEST_ROOT/var/log/app.log"
 printf 'copy-ok' >"$HOST_SOURCE"
 
+(cd "$REPO_ROOT" && cargo build -q -p port-cli --bin port)
+(cd "$REPO_ROOT" && cargo build -q -p port-guest-agent --bin port-guest-agent)
+
 cp "$REPO_ROOT/examples/port.toml" "$SERVER_CONFIG"
 sed -i \
   "s#endpoint = \"https://port.example.internal\"#endpoint = \"http://$CONTROL_ADDR\"#" \
@@ -92,17 +99,17 @@ cat >"$MACHINE_DIR/manifest.json" <<EOF
 }
 EOF
 
-(cd "$REPO_ROOT" && cargo run -q -p port-guest-agent -- --socket "$SOCKET_PATH" --root "$GUEST_ROOT") \
+("$GUEST_AGENT_BIN" --socket "$SOCKET_PATH" --root "$GUEST_ROOT") \
   >"$WORKDIR/guest-agent.stdout.log" 2>"$WORKDIR/guest-agent.stderr.log" &
 GUEST_AGENT_PID=$!
 wait_for_path "$SOCKET_PATH"
 
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$SERVER_CONFIG" node-agent serve --node aws-linux-node --bind "$NODE_ADDR" --token "$NODE_TOKEN") \
+("$PORT_BIN" --config "$SERVER_CONFIG" node-agent serve --node aws-linux-node --bind "$NODE_ADDR" --token "$NODE_TOKEN") \
   >"$WORKDIR/node-agent.stdout.log" 2>"$WORKDIR/node-agent.stderr.log" &
 NODE_AGENT_PID=$!
 wait_for_tcp "$NODE_ADDR"
 
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$SERVER_CONFIG" control-plane serve --control-plane demo --bind "$CONTROL_ADDR" --node-binding "aws-linux-node=http://$NODE_ADDR,$NODE_TOKEN") \
+("$PORT_BIN" --config "$SERVER_CONFIG" control-plane serve --control-plane demo --bind "$CONTROL_ADDR" --node-binding "aws-linux-node=http://$NODE_ADDR,$NODE_TOKEN") \
   >"$WORKDIR/control-plane.stdout.log" 2>"$WORKDIR/control-plane.stderr.log" &
 CONTROL_PLANE_PID=$!
 wait_for_tcp "$CONTROL_ADDR"
@@ -112,22 +119,32 @@ echo "server config: $SERVER_CONFIG"
 echo "client config: $CLIENT_CONFIG"
 echo
 echo "machine status:"
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$CLIENT_CONFIG" machine status --machine cloud-aws)
+("$PORT_BIN" --config "$CLIENT_CONFIG" machine status --machine cloud-aws)
 echo
 echo "guest exec:"
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$CLIENT_CONFIG" guest exec --machine cloud-aws -- /bin/sh -lc 'printf hosted-http-ok')
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest exec --machine cloud-aws -- /bin/echo hosted-http-ok)
 echo
 echo "guest copy host-to-guest:"
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$CLIENT_CONFIG" guest copy --machine cloud-aws --direction host-to-guest --source "$HOST_SOURCE" --destination /workspace/copied.txt)
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest copy --machine cloud-aws --direction host-to-guest --source "$HOST_SOURCE" --destination /workspace/copied.txt)
 echo
 echo "guest copy guest-to-host:"
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$CLIENT_CONFIG" guest copy --machine cloud-aws --direction guest-to-host --source /workspace/copied.txt --destination "$ROUNDTRIP_PATH")
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest copy --machine cloud-aws --direction guest-to-host --source /workspace/copied.txt --destination "$ROUNDTRIP_PATH")
 echo
 echo "guest logs:"
-(cd "$REPO_ROOT" && cargo run -q -p port-cli -- --config "$CLIENT_CONFIG" guest logs --machine cloud-aws --path /var/log/app.log --tail-lines 1)
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest logs --machine cloud-aws --path /var/log/app.log --tail-lines 1)
+echo
+echo "guest forward detached start:"
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest forward --machine cloud-aws --listen "unix:$DETACHED_LISTEN_PATH" --target "unix:$SOCKET_PATH" --lifecycle detached --name demo-sock)
+echo
+echo "guest forward detached list:"
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest forward --machine cloud-aws --list)
+echo
+echo "guest forward detached stop:"
+("$PORT_BIN" --config "$CLIENT_CONFIG" guest forward --machine cloud-aws --stop --name demo-sock)
 echo
 echo "roundtrip file:"
 cat "$ROUNDTRIP_PATH"
 echo
 echo "current hosted demo limits:"
-echo "- hosted guest forward now starts a node-owned listener, but hosted detached lifecycle management is still follow-on work"
+echo "- hosted guest forward detached lifecycle now ships through start/list/stop/name on the live control-plane path"
+echo "- retries, richer client policies, and advanced auth/tenancy remain follow-on work"

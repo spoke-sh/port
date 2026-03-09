@@ -389,8 +389,10 @@ stream.
 
 Hosted `guest forward` keeps the same command family and now starts a
 node-owned listener through the hosted control-plane and node-agent path.
-Hosted detached lifecycle management does not ship yet, so `--list`, `--stop`,
-and `--lifecycle detached` remain explicit follow-on work for hosted lanes.
+Hosted detached lifecycle now ships through the same surface: `--lifecycle
+detached --name <forward>`, `--list`, and `--stop --name <forward>` all route
+through the live control plane and node agent and operate on node-owned
+detached forward state under the selected runtime root.
 
 Example hosted guest workflow:
 
@@ -407,6 +409,16 @@ PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest copy \
 
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
   --machine cloud-aws --listen 127.0.0.1:8081 --target 127.0.0.1:80
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --listen unix:/tmp/cloud-aws.sock --target unix:/var/run/app.sock \
+  --lifecycle detached --name demo-sock
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --list
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --stop --name demo-sock
 ```
 
 - `guest pty` and `guest logs --follow` stay streamed across the hosted route.
@@ -414,11 +426,14 @@ PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
   node-visible host paths.
 - `guest forward` returns the node-owned listener address and does not require
   a repo-local guest transport fallback any more.
+- `guest forward --lifecycle detached --name <forward>` records detached state
+  under the selected node runtime root, `--list` reads that state, and
+  `--stop --name <forward>` tears the listener down through the same hosted
+  route family.
 
 What still remains after this runtime slice:
 
 - retries and richer client policies on top of the shipped transport
-- hosted detached forward lifecycle management
 - advanced auth/tenancy work on top of the same API paths
 
 ## Hosted API Shape

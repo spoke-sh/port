@@ -23,6 +23,10 @@ Shipped today:
   `forward_stream()` publish the streamed hosted request builders when the
   caller needs explicit control over the transport contract instead of the
   completed JSON helper
+- `guest().forward_detached_start()`, `forward_detached_list()`, and
+  `forward_detached_stop()` mirror hosted `port guest forward --lifecycle
+  detached`, `--list`, and `--stop --name ...` through the same control-plane
+  route family
 - `services()` mirrors `port service secret put|list|remove` plus
   `port service apply|list|status|stop`
 - `HostedClient::execute_json` performs the live HTTP request and decodes
@@ -35,8 +39,6 @@ Still planned:
 - retries and richer client policies on top of the shipped transport
 - generated or versioned external API packages beyond the in-repo Rust crate
 - advanced auth, RBAC, and multi-tenant concerns
-- hosted detached forward lifecycle management on top of the shipped hosted
-  forward start path
 
 ## Example
 
@@ -100,6 +102,7 @@ The streamed hosted request builders stay explicit:
 
 ```rust
 # use port_agent_protocol::{ForwardRequest, LogsRequest};
+# use port_hosted_protocol::HostedDetachedForwardStartRequest;
 # use port_model::PortConfig;
 # use port_sdk::HostedClient;
 let config = PortConfig::sample();
@@ -119,8 +122,23 @@ let forward = client.guest().forward_stream(
         target: "127.0.0.1:80".into(),
     },
 )?;
+let detached = client.guest().forward_detached_start(
+    "cloud-aws",
+    HostedDetachedForwardStartRequest {
+        listen: "unix:/tmp/cloud-aws.sock".into(),
+        target: "unix:/var/run/app.sock".into(),
+        forward_name: "demo-sock".into(),
+    },
+)?;
+let detached_list = client.guest().forward_detached_list("cloud-aws");
+let detached_stop = client
+    .guest()
+    .forward_detached_stop("cloud-aws", "demo-sock");
 assert_eq!(logs.request.url, "https://port.example.internal/v1/machines/cloud-aws/guest:logs:stream");
 assert_eq!(forward.request.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:stream");
+assert_eq!(detached.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached");
+assert_eq!(detached_list.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached");
+assert_eq!(detached_stop.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached/demo-sock/stop");
 # Ok::<(), anyhow::Error>(())
 ```
 

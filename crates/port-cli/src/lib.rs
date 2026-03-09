@@ -1917,6 +1917,9 @@ mod tests {
             "Artifact Mobility",
             "detached lifecycle modes",
             "node-owned listener",
+            "--list",
+            "--stop",
+            "--name",
             "node-binding",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");

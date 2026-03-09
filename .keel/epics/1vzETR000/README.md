@@ -19,9 +19,9 @@ created_at: 2026-03-08T06:47:13
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 8/9 stories done
+**Progress:** 2/2 voyages complete, 9/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Implement Hosted Control Plane Demo Lane](voyages/1vzETX000/) | done | 5/5 |
-| [Hosted Detached Forward Lifecycle](voyages/1vzQEj000/) | in-progress | 3/4 |
+| [Hosted Detached Forward Lifecycle](voyages/1vzQEj000/) | done | 4/4 |
 <!-- END GENERATED -->

@@ -1,0 +1,48 @@
+---
+recorded_at: 2026-03-08T20:55:25.287969669-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzQIy000/verify-ac-1.sh
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+363:- Hosted `guest forward` now supports foreground and detached lifecycle modes
+649:- Hosted `guest forward --list`, `--stop`, `--lifecycle detached`, and `--name`
+392:Hosted detached lifecycle now ships through the same surface: `--lifecycle
+26:- `guest().forward_detached_start()`, `forward_detached_list()`, and
+26:- `guest().forward_detached_start()`, `forward_detached_list()`, and
+27:  `forward_detached_stop()` mirror hosted `port guest forward --lifecycle
+130:echo "guest forward detached start:"
+133:echo "guest forward detached list:"
+136:echo "guest forward detached stop:"
