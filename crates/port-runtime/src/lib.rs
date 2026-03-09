@@ -15,7 +15,10 @@ use port_agent_protocol::{
     ResponseEnvelope, StreamRequestFrame, StreamResponseFrame, parse_forward_endpoint, read_frame,
     render_forward_endpoint, write_frame,
 };
-use port_hosted_protocol::{HostedError, HostedRouteContext, HostedSuccess};
+use port_hosted_protocol::{
+    HostedDetachedForwardState, HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
+    HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
+};
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
@@ -2135,6 +2138,14 @@ struct DetachedForwardManifestRecord {
     stderr_log: PathBuf,
 }
 
+pub(crate) struct DetachedForwardLaunchRequest<'a> {
+    pub machine_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub listen: &'a str,
+    pub target: &'a str,
+    pub name: Option<&'a str>,
+}
+
 fn machine_monitor_report(
     status: MachineStatus,
     control_plane: Option<String>,
@@ -2241,6 +2252,9 @@ fn load_detached_forward_statuses(
         let entry =
             entry.with_context(|| format!("failed to inspect '{}'", forwards_dir.display()))?;
         let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
         if !entry
             .file_type()
             .with_context(|| format!("failed to inspect '{}'", path.display()))?
@@ -2317,6 +2331,230 @@ fn load_detached_forward_statuses(
     forwards.sort_by(|left, right| left.name.cmp(&right.name));
 
     Ok(forwards)
+}
+
+pub(crate) fn start_detached_forward(
+    config: &PortConfig,
+    request: DetachedForwardLaunchRequest<'_>,
+) -> Result<HostedDetachedForwardStatusContract> {
+    let state_dir = guest_forward_state_dir(config, request.machine_name, request.runtime_root)?;
+    fs::create_dir_all(&state_dir)
+        .with_context(|| format!("failed to create '{}'", state_dir.display()))?;
+
+    let name = request
+        .name
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("forward-{}", detached_forward_timestamp()));
+    let manifest_path = state_dir.join(format!("{name}.json"));
+    let config_path = state_dir.join(format!("{name}.config.toml"));
+    let stdout_log = state_dir.join(format!("{name}.stdout.log"));
+    let stderr_log = state_dir.join(format!("{name}.stderr.log"));
+
+    fs::write(
+        &config_path,
+        config
+            .to_toml_string()
+            .context("failed to encode detached forward config")?,
+    )
+    .with_context(|| format!("failed to write '{}'", config_path.display()))?;
+
+    let child = Command::new(detached_forward_executable()?)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("internal")
+        .arg("forward-daemon")
+        .arg("--machine")
+        .arg(request.machine_name)
+        .arg("--runtime-root")
+        .arg(request.runtime_root)
+        .arg("--listen")
+        .arg(request.listen)
+        .arg("--target")
+        .arg(request.target)
+        .arg("--manifest-path")
+        .arg(&manifest_path)
+        .arg("--name")
+        .arg(&name)
+        .stdin(Stdio::null())
+        .stdout(
+            File::create(&stdout_log)
+                .with_context(|| format!("failed to create '{}'", stdout_log.display()))?,
+        )
+        .stderr(
+            File::create(&stderr_log)
+                .with_context(|| format!("failed to create '{}'", stderr_log.display()))?,
+        )
+        .spawn()
+        .context("failed to start detached forward daemon")?;
+
+    let manifest = wait_for_detached_forward_manifest(
+        &manifest_path,
+        DetachedForwardManifestRecord {
+            name,
+            machine: request.machine_name.to_string(),
+            pid: child.id(),
+            listen: request.listen.to_string(),
+            target: request.target.to_string(),
+            stdout_log,
+            stderr_log,
+        },
+    )?;
+
+    hosted_detached_forward_status_from_manifest(manifest, manifest_path)
+}
+
+pub(crate) fn list_detached_forwards(
+    config: &PortConfig,
+    machine_name: &str,
+    runtime_root: &Path,
+) -> Result<Vec<HostedDetachedForwardStatusContract>> {
+    let runtime_root = resolve_guest_runtime_root(config, machine_name, runtime_root)?;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
+    load_detached_forward_statuses(&runtime_dir, machine_name)?
+        .into_iter()
+        .map(hosted_detached_forward_status_from_runtime)
+        .collect()
+}
+
+pub(crate) fn stop_detached_forward(
+    config: &PortConfig,
+    machine_name: &str,
+    runtime_root: &Path,
+    forward_name: &str,
+) -> Result<HostedDetachedForwardStopResult> {
+    let state_dir = guest_forward_state_dir(config, machine_name, runtime_root)?;
+    let manifest_path = state_dir.join(format!("{forward_name}.json"));
+    let bytes = fs::read(&manifest_path)
+        .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
+    let manifest: DetachedForwardManifestRecord = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse '{}'", manifest_path.display()))?;
+
+    if process_exists(manifest.pid)? {
+        terminate_pid(manifest.pid)?;
+    }
+    if let Some(socket_path) = manifest.listen.strip_prefix("unix:") {
+        let socket_path = Path::new(socket_path);
+        if socket_path.exists() {
+            fs::remove_file(socket_path).with_context(|| {
+                format!(
+                    "failed to remove detached forward socket '{}'",
+                    socket_path.display()
+                )
+            })?;
+        }
+    }
+    if manifest_path.exists() {
+        fs::remove_file(&manifest_path)
+            .with_context(|| format!("failed to remove '{}'", manifest_path.display()))?;
+    }
+    let config_path = state_dir.join(format!("{forward_name}.config.toml"));
+    if config_path.exists() {
+        fs::remove_file(&config_path)
+            .with_context(|| format!("failed to remove '{}'", config_path.display()))?;
+    }
+
+    Ok(HostedDetachedForwardStopResult {
+        name: manifest.name,
+        state: HostedDetachedForwardState::Stopped,
+        pid: Some(manifest.pid),
+    })
+}
+
+fn wait_for_detached_forward_manifest(
+    manifest_path: &Path,
+    fallback: DetachedForwardManifestRecord,
+) -> Result<DetachedForwardManifestRecord> {
+    for _ in 0..100 {
+        if manifest_path.exists() {
+            let bytes = fs::read(manifest_path)
+                .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
+            let manifest: DetachedForwardManifestRecord =
+                serde_json::from_slice(&bytes).with_context(|| {
+                    format!(
+                        "failed to parse detached forward manifest '{}'",
+                        manifest_path.display()
+                    )
+                })?;
+            return Ok(manifest);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    Ok(fallback)
+}
+
+fn hosted_detached_forward_status_from_runtime(
+    status: DetachedForwardStatus,
+) -> Result<HostedDetachedForwardStatusContract> {
+    Ok(HostedDetachedForwardStatusContract {
+        name: status.name,
+        state: hosted_detached_forward_state(status.state)?,
+        pid: status.pid,
+        listen: status.listen,
+        target: status.target,
+        manifest_path: status.manifest_path,
+        stdout_log: status.stdout_log,
+        stderr_log: status.stderr_log,
+        detail: status.detail,
+    })
+}
+
+fn hosted_detached_forward_status_from_manifest(
+    manifest: DetachedForwardManifestRecord,
+    manifest_path: PathBuf,
+) -> Result<HostedDetachedForwardStatusContract> {
+    Ok(HostedDetachedForwardStatusContract {
+        name: manifest.name,
+        state: HostedDetachedForwardState::Running,
+        pid: Some(manifest.pid),
+        listen: manifest.listen,
+        target: manifest.target,
+        manifest_path,
+        stdout_log: manifest.stdout_log,
+        stderr_log: manifest.stderr_log,
+        detail: String::from("detached forward process is live"),
+    })
+}
+
+fn hosted_detached_forward_state(
+    state: MachineRuntimeState,
+) -> Result<HostedDetachedForwardState> {
+    match state {
+        MachineRuntimeState::Running => Ok(HostedDetachedForwardState::Running),
+        MachineRuntimeState::Stale => Ok(HostedDetachedForwardState::Stale),
+        other => bail!("unsupported detached forward state '{other}'"),
+    }
+}
+
+fn terminate_pid(pid: u32) -> Result<()> {
+    let status = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .with_context(|| format!("failed to signal pid {pid}"))?;
+    if !status.success() {
+        bail!("failed to stop detached forward pid {pid}");
+    }
+    Ok(())
+}
+
+fn detached_forward_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn detached_forward_executable() -> Result<PathBuf> {
+    if let Ok(path) = env::var("PORT_DETACHED_FORWARD_EXECUTABLE") {
+        return Ok(PathBuf::from(path));
+    }
+
+    let workspace_port = repo_root()?.join("target/debug/port");
+    if workspace_port.exists() {
+        return Ok(workspace_port);
+    }
+
+    env::current_exe().context("failed to resolve the current port executable")
 }
 
 fn machine_top_entry_rank(kind: MachineTopEntryKind) -> u8 {
@@ -4679,6 +4917,9 @@ fn render_hosted_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(machine_name) = &route.machine_name {
         parts.push(format!("machine={machine_name}"));
     }
+    if let Some(forward_name) = &route.forward_name {
+        parts.push(format!("forward={forward_name}"));
+    }
     if let Some(node_name) = &route.node_name {
         parts.push(format!("node={node_name}"));
     }
@@ -5514,7 +5755,11 @@ mod tests {
         LogsResult, OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind,
         StreamResponseFrame, read_frame, write_frame,
     };
-    use port_hosted_protocol::{HostedError, HostedRouteContext};
+    use port_hosted_protocol::{
+        HostedDetachedForwardStartRequest, HostedDetachedForwardState,
+        HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
+        HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
+    };
     use port_model::{
         ArtifactKind, ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode,
     };
@@ -7147,6 +7392,112 @@ exec sleep 30
             message.contains("/runtime/hosted/aws-linux-node/cloud-aws"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn hosted_detached_forward_start_returns_node_owned_manifest() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let _guest_listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        let client = port_sdk::HostedClient::from_machine(&config, "cloud-aws", "demo-token")
+            .expect("hosted client should resolve");
+        let response: HostedSuccess<HostedDetachedForwardStatusContract> = client
+            .execute_json(
+                client
+                    .guest()
+                    .forward_detached_start(
+                        "cloud-aws",
+                        HostedDetachedForwardStartRequest {
+                            listen: String::from("127.0.0.1:0"),
+                            target: String::from("127.0.0.1:8081"),
+                            name: Some(String::from("demo-web")),
+                        },
+                    )
+                    .expect("detached start request should encode"),
+            )
+            .expect("hosted detached forward start should succeed");
+
+        assert_eq!(response.route.control_plane.as_deref(), Some("demo"));
+        assert_eq!(response.route.machine_name.as_deref(), Some("cloud-aws"));
+        assert_eq!(response.route.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(response.route.forward_name.as_deref(), Some("demo-web"));
+        assert_eq!(response.result.name, "demo-web");
+        assert_eq!(response.result.state, HostedDetachedForwardState::Running);
+        assert!(response.result.pid.is_some());
+        assert!(response.result.manifest_path.exists());
+        assert_eq!(
+            response.result.manifest_path,
+            paths.runtime_dir.join("forwards/demo-web.json")
+        );
+
+        let status = Command::new("kill")
+            .args(["-TERM", &response.result.pid.expect("pid should exist").to_string()])
+            .status()
+            .expect("detached forward should stop");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn hosted_detached_forward_list_and_stop_use_node_runtime_state() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let _guest_listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+        let listen_socket = tempdir.path().join("hosted-forward.sock");
+
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        let client = port_sdk::HostedClient::from_machine(&config, "cloud-aws", "demo-token")
+            .expect("hosted client should resolve");
+        let start: HostedSuccess<HostedDetachedForwardStatusContract> = client
+            .execute_json(
+                client
+                    .guest()
+                    .forward_detached_start(
+                        "cloud-aws",
+                        HostedDetachedForwardStartRequest {
+                            listen: format!("unix:{}", listen_socket.display()),
+                            target: String::from("unix:/var/run/demo.sock"),
+                            name: Some(String::from("demo-sock")),
+                        },
+                    )
+                    .expect("detached start request should encode"),
+            )
+            .expect("hosted detached forward start should succeed");
+
+        let listed: HostedSuccess<Vec<HostedDetachedForwardStatusContract>> = client
+            .execute_json(client.guest().forward_detached_list("cloud-aws"))
+            .expect("hosted detached forward list should succeed");
+        assert_eq!(listed.result.len(), 1);
+        assert_eq!(listed.result[0].name, "demo-sock");
+        assert_eq!(listed.result[0].state, HostedDetachedForwardState::Running);
+        assert!(listen_socket.exists());
+
+        let stopped: HostedSuccess<HostedDetachedForwardStopResult> = client
+            .execute_json(client.guest().forward_detached_stop("cloud-aws", "demo-sock"))
+            .expect("hosted detached forward stop should succeed");
+        assert_eq!(stopped.route.forward_name.as_deref(), Some("demo-sock"));
+        assert_eq!(stopped.result.name, "demo-sock");
+        assert_eq!(stopped.result.state, HostedDetachedForwardState::Stopped);
+        assert!(!start.result.manifest_path.exists());
+        assert!(!listen_socket.exists());
+
+        let listed_again: HostedSuccess<Vec<HostedDetachedForwardStatusContract>> = client
+            .execute_json(client.guest().forward_detached_list("cloud-aws"))
+            .expect("hosted detached forward list should succeed after stop");
+        assert!(listed_again.result.is_empty());
     }
 
     #[test]

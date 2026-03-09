@@ -255,6 +255,9 @@ fn render_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(machine_name) = &route.machine_name {
         parts.push(format!("machine={machine_name}"));
     }
+    if let Some(forward_name) = &route.forward_name {
+        parts.push(format!("forward={forward_name}"));
+    }
     if let Some(node_name) = &route.node_name {
         parts.push(format!("node={node_name}"));
     }
@@ -902,7 +905,7 @@ mod tests {
         assert_eq!(stop.method, HttpMethod::Post);
         assert_eq!(
             stop.url,
-            "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached/demo-web:stop"
+            "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached/demo-web/stop"
         );
         assert!(stop.body.is_none());
     }

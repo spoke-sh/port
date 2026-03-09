@@ -13,8 +13,9 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use port_hosted_protocol::{
-    HostedError, HostedGuestRoute, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
-    HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext, HostedSuccess,
+    HostedDetachedForwardRoute, HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute,
+    HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
+    HostedNodeRoute, HostedRouteContext, HostedSuccess,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
@@ -26,12 +27,14 @@ use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 
 use crate::{
-    GuestCopyRequest, GuestForwardRequest, GuestRequest, LaunchMetadata, LaunchRequest,
-    MachineRuntimeState, MachineStatus, RuntimePaths, StopResult, copy_guest_file,
-    copy_guest_via_endpoint, execute_guest_operation, hosted_placeholder_runtime_root,
-    launch_local_machine, machine_monitor as runtime_machine_monitor,
+    DetachedForwardLaunchRequest, GuestCopyRequest, GuestForwardRequest, GuestRequest,
+    LaunchMetadata, LaunchRequest, MachineRuntimeState, MachineStatus, RuntimePaths, StopResult,
+    copy_guest_file, copy_guest_via_endpoint, execute_guest_operation,
+    hosted_placeholder_runtime_root, launch_local_machine, list_detached_forwards,
+    machine_monitor as runtime_machine_monitor,
     machine_status as runtime_machine_status, machine_top as runtime_machine_top,
-    prepare_guest_forward, stop_machine as runtime_stop_machine,
+    prepare_guest_forward, start_detached_forward, stop_detached_forward,
+    stop_machine as runtime_stop_machine,
 };
 use port_agent_protocol::{
     CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
@@ -220,6 +223,14 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
         .route("/v1/machines/{machine}/guest:pty", post(guest_pty))
         .route("/v1/machines/{machine}/guest:logs", post(guest_logs))
         .route("/v1/machines/{machine}/guest:forward", post(guest_forward))
+        .route(
+            "/v1/machines/{machine}/guest:forward:detached",
+            get(guest_forward_detached_list).post(guest_forward_detached_start),
+        )
+        .route(
+            "/v1/machines/{machine}/guest:forward:detached/{forward}/stop",
+            post(guest_forward_detached_stop),
+        )
         .with_state(state)
 }
 
@@ -462,6 +473,62 @@ async fn guest_forward(
     body: Bytes,
 ) -> Response {
     proxy_guest_route(&state, &headers, &machine, HostedGuestVerb::Forward, body).await
+}
+
+async fn guest_forward_detached_start(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::DetachedForward(HostedDetachedForwardRoute::Start {
+            machine_name: machine.clone(),
+        }),
+        Method::POST,
+        Some(body),
+    )
+    .await
+}
+
+async fn guest_forward_detached_list(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::DetachedForward(HostedDetachedForwardRoute::List {
+            machine_name: machine.clone(),
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn guest_forward_detached_stop(
+    State(state): State<ControlPlaneState>,
+    Path((machine, forward)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::DetachedForward(HostedDetachedForwardRoute::Stop {
+            machine_name: machine.clone(),
+            forward_name: forward,
+        }),
+        Method::POST,
+        None,
+    )
+    .await
 }
 
 async fn proxy_guest_route(
@@ -923,6 +990,14 @@ fn node_agent_router(state: NodeAgentState) -> Router {
             "/v1/node/machines/{machine}/guest:forward",
             post(node_guest_forward),
         )
+        .route(
+            "/v1/node/machines/{machine}/guest:forward:detached",
+            get(node_guest_forward_detached_list).post(node_guest_forward_detached_start),
+        )
+        .route(
+            "/v1/node/machines/{machine}/guest:forward:detached/{forward}/stop",
+            post(node_guest_forward_detached_stop),
+        )
         .with_state(state)
 }
 
@@ -1066,6 +1141,127 @@ async fn node_guest_forward(
     body: Bytes,
 ) -> Response {
     node_guest_operation_response(&state, &headers, &machine, body, HostedGuestVerb::Forward)
+}
+
+async fn node_guest_forward_detached_start(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+
+    let request: HostedDetachedForwardStartRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' received invalid detached forward JSON: {error}",
+                    state.inner.node_name
+                ),
+                Some(node_route_context(&state, Some(machine))),
+            );
+        }
+    };
+
+    let (localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok((localized, route)) => (
+            localized,
+            route.with_forward_name(
+                request
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| String::from("(generated)")),
+            ),
+        ),
+        Err(response) => return response,
+    };
+
+    match start_detached_forward(
+        &localized,
+        DetachedForwardLaunchRequest {
+            machine_name: &machine,
+            runtime_root: &state.inner.runtime_root,
+            listen: &request.listen,
+            target: &request.target,
+            name: request.name.as_deref(),
+        },
+    ) {
+        Ok(result) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: route.with_forward_name(result.name.clone()),
+                result,
+            },
+        ),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to start detached forward '{}' for machine '{}': {error}",
+                state.inner.node_name,
+                route.forward_name.as_deref().unwrap_or("(generated)"),
+                machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_guest_forward_detached_list(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+
+    let (localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    match list_detached_forwards(&localized, &machine, &state.inner.runtime_root) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to list detached forwards for machine '{}': {error}",
+                state.inner.node_name, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_guest_forward_detached_stop(
+    State(state): State<NodeAgentState>,
+    Path((machine, forward)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+
+    let (localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok((localized, route)) => (localized, route.with_forward_name(forward.clone())),
+        Err(response) => return response,
+    };
+
+    match stop_detached_forward(&localized, &machine, &state.inner.runtime_root, &forward) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to stop detached forward '{}' for machine '{}': {error}",
+                state.inner.node_name, forward, machine
+            ),
+            Some(route),
+        ),
+    }
 }
 
 fn node_authorize(state: &NodeAgentState, headers: &HeaderMap) -> Option<Response> {

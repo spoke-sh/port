@@ -359,7 +359,7 @@ fn detached_forward_route_path(route: &HostedDetachedForwardRoute) -> String {
             machine_name,
             forward_name,
         } => {
-            format!("/v1/machines/{machine_name}/guest:forward:detached/{forward_name}:stop")
+            format!("/v1/machines/{machine_name}/guest:forward:detached/{forward_name}/stop")
         }
     }
 }
@@ -441,7 +441,7 @@ fn detached_forward_node_route_suffix(route: &HostedDetachedForwardRoute) -> Str
             machine_name,
             forward_name,
         } => {
-            format!("/machines/{machine_name}/guest:forward:detached/{forward_name}:stop")
+            format!("/machines/{machine_name}/guest:forward:detached/{forward_name}/stop")
         }
     }
 }
@@ -575,7 +575,7 @@ mod tests {
                 forward_name: String::from("demo-web"),
             })
             .path(),
-            "/v1/machines/cloud-aws/guest:forward:detached/demo-web:stop"
+            "/v1/machines/cloud-aws/guest:forward:detached/demo-web/stop"
         );
         assert_eq!(
             HostedControlPlaneRoute::Service(HostedServiceRoute::Status {
