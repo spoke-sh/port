@@ -19,8 +19,8 @@ index: 4
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Host Groups And Service Placement](voyages/1vzSc3000/) | in-progress | 3/4 |
+| [Host Groups And Service Placement](voyages/1vzSc3000/) | done | 4/4 |
 <!-- END GENERATED -->
