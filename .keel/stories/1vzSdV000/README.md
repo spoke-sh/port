@@ -2,11 +2,12 @@
 id: 1vzSdV000
 title: Implement Hosted Service Placement Scheduler
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T21:54:33
-updated_at: 2026-03-08T22:07:52
+updated_at: 2026-03-08T22:24:42
 scope: 1vzSbL000/1vzSc3000
 started_at: 2026-03-08T22:07:52
+completed_at: 2026-03-08T22:24:42
 ---
 
 # Implement Hosted Service Placement Scheduler
