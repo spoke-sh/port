@@ -6,19 +6,7 @@ created_at: 2026-03-09T11:32:34
 
 ## Knowledge
 
-### 1vzfPb000: Keel Story Evidence Commands Need An Explicit Repo Root
-| Field | Value |
-|-------|-------|
-| **Category** | process |
-| **Context** | Recording story proof with `keel story record --cmd` for repo-scoped commands |
-| **Insight** | `keel story record` does not guarantee execution from the repository root, so relative-path proof commands can fail even when the same command succeeds interactively from the shell |
-| **Suggested Action** | Wrap repo-scoped proof commands in `bash -lc "cd /repo/root && ..."` or use absolute paths |
-| **Applies To** | `.keel/stories/*`, `keel story record`, repo-local verification commands |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-09T19:32:34Z |
-| **Score** | 0.67 |
-| **Confidence** | 0.93 |
-| **Applied** | AC-01 and AC-02 evidence for this story use an explicit `cd /home/alex/workspace/spoke-sh/port && ...` wrapper |
+- [1vzfPb000](../../knowledge/1vzfPb000.md) Keel Story Evidence Commands Need An Explicit Repo Root
 
 ## Observations
 
