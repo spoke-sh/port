@@ -1,6 +1,16 @@
 [artifacts.kernels.demo-kernel]
 build = "port artifacts build --artifact demo-kernel"
 validate = "port artifacts validate --artifact demo-kernel"
+# Repo-local OCI registry proof:
+# - copy this file to a temp config
+# - change `registry = "demo-fs"` below to a reachable registry such as
+#   `127.0.0.1:5510`
+# - switch the demo-kernel distribution `push` and `pull` backends to
+#   `backend = "oci-registry"` with `transport = "plain-http"`
+# - set `[artifacts.kernels.demo-kernel.distribution.push.auth] kind = "anonymous"`
+#   and `[artifacts.kernels.demo-kernel.distribution.pull.auth] kind = "anonymous"`
+# - then run `just demo-push-oci` followed by `just demo-pull-oci`
+# - direct CLI use of `oci-registry` requires `oras` on PATH
 
 [artifacts.kernels.demo-kernel.reference]
 registry = "demo-fs"

@@ -4,7 +4,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1130,23 +1130,18 @@ fn pull_artifact_from_oci_registry_backend(
         );
     }
 
-    let staged_name = artifact
-        .path
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("artifact"));
-    let staged_path = scratch_dir.join(staged_name);
-    if !staged_path.is_file() {
-        bail!(
+    let staged_path = locate_oci_pulled_artifact(&scratch_dir, &artifact.path).with_context(|| {
+        format!(
             "OCI artifact pull for '{}' ({}) expected '{}' in staging directory '{}' after pulling '{}' via {} with {} auth",
             artifact.reference,
             format_artifact_selector(artifact.selector),
-            staged_name.to_string_lossy(),
+            artifact.path.display(),
             scratch_dir.display(),
             remote_reference,
             transport.describe(),
             auth.describe()
-        );
-    }
+        )
+    })?;
 
     let bytes_copied = copy_file(&staged_path, &artifact.cache_path).with_context(|| {
         format!(
@@ -6677,6 +6672,88 @@ fn oci_pull_scratch_dir(artifact: &ArtifactMetadata) -> PathBuf {
         .join(format!(".port-oci-pull-{}-{stamp}", std::process::id()))
 }
 
+fn locate_oci_pulled_artifact(scratch_dir: &Path, artifact_path: &Path) -> Result<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(relative_path) = staged_relative_artifact_path(artifact_path) {
+        candidates.push(scratch_dir.join(relative_path));
+    }
+    if let Some(file_name) = artifact_path.file_name() {
+        let by_name = scratch_dir.join(file_name);
+        if !candidates.iter().any(|candidate| candidate == &by_name) {
+            candidates.push(by_name);
+        }
+    }
+
+    for candidate in &candidates {
+        if candidate.is_file() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    let file_name = artifact_path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("artifact"));
+    let mut matches = Vec::new();
+    let mut pending = vec![scratch_dir.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).with_context(|| {
+            format!(
+                "failed to enumerate OCI pull staging directory '{}'",
+                directory.display()
+            )
+        })? {
+            let path = entry
+                .with_context(|| {
+                    format!(
+                        "failed to inspect OCI pull staging entry under '{}'",
+                        directory.display()
+                    )
+                })?
+                .path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name() == Some(file_name) {
+                matches.push(path);
+            }
+        }
+    }
+
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => bail!(
+            "no staged artifact named '{}' was found beneath '{}'",
+            file_name.to_string_lossy(),
+            scratch_dir.display()
+        ),
+        _ => bail!(
+            "multiple staged artifacts named '{}' were found beneath '{}': {}",
+            file_name.to_string_lossy(),
+            scratch_dir.display(),
+            matches
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn staged_relative_artifact_path(artifact_path: &Path) -> Option<PathBuf> {
+    let mut relative = PathBuf::new();
+    for component in artifact_path.components() {
+        match component {
+            Component::Normal(part) => relative.push(part),
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+            Component::ParentDir => relative.push(".."),
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        None
+    } else {
+        Some(relative)
+    }
+}
+
 fn format_artifact_selector(selector: ArtifactSelector) -> String {
     format!(
         "{}/{}/{}",
@@ -9249,6 +9326,31 @@ printf '%s' "demo-oci-kernel-bytes" > "${output_dir}/vmlinux"
             args.contains("demo-fs/port/demo-kernel:v1-x86_64-firecracker-standard"),
             "unexpected args: {args}"
         );
+    }
+
+    #[test]
+    fn locate_oci_pulled_artifact_prefers_preserved_relative_path() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let scratch_dir = tempdir.path().join("scratch");
+        let staged_path = scratch_dir
+            .join("artifacts")
+            .join("kernel")
+            .join("demo")
+            .join("x86_64")
+            .join("firecracker")
+            .join("standard")
+            .join("vmlinux");
+        fs::create_dir_all(staged_path.parent().expect("staged parent should exist"))
+            .expect("staged directories should create");
+        fs::write(&staged_path, b"demo-oci-kernel-bytes").expect("staged artifact should write");
+
+        let resolved = crate::locate_oci_pulled_artifact(
+            &scratch_dir,
+            Path::new("artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux"),
+        )
+        .expect("nested staged artifact should resolve");
+
+        assert_eq!(resolved, staged_path);
     }
 
     #[test]

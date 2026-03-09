@@ -22,10 +22,11 @@ Each artifact now carries four related concepts:
 In the sample model:
 
 - the shipped backends are `file-system` and `hosted-api`
+- `oci-registry` is also executable when the selected variant points at a
+  reachable OCI registry and `oras` is available on `PATH`
 - the sample store root is `artifact-store/demo-fs/`
 - the sample cache root is `.port/cache/`
 - hosted control-plane storage lives under `.port/hosted/<control-plane>/artifacts/`
-- `oci-registry` remains follow-on work
 
 ## Canonical CLI
 
@@ -45,6 +46,46 @@ port --config examples/port.toml artifacts push --artifact demo-kernel --archite
 rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
 port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
 ```
+
+Local OCI registry proof:
+
+1. Copy `examples/port.toml` to a temp config.
+2. Replace `[artifacts.kernels.demo-kernel.reference] registry = "demo-fs"`
+   with `registry = "127.0.0.1:5510"`.
+3. Replace the existing `push` and `pull` sections with:
+
+```toml
+[artifacts.kernels.demo-kernel.distribution.push]
+backend = "oci-registry"
+transport = "plain-http"
+
+[artifacts.kernels.demo-kernel.distribution.push.auth]
+kind = "anonymous"
+
+[artifacts.kernels.demo-kernel.distribution.pull]
+backend = "oci-registry"
+transport = "plain-http"
+
+[artifacts.kernels.demo-kernel.distribution.pull.auth]
+kind = "anonymous"
+```
+
+4. Start a local OCI registry. The repo-local proof tasks use Docker plus the
+   standard `registry:2` image on `127.0.0.1:5510`.
+5. Run the round trip:
+
+```bash
+just demo-push-oci
+just demo-pull-oci
+```
+
+That proof:
+
+- builds the native `demo-kernel` variant
+- pushes it through `port artifacts push`
+- removes the canonical local kernel path
+- restores it through `port artifacts pull`
+- never depends on a public registry
 
 Publish and fetch the protected `x86_64/firecracker/pvm` variant:
 
@@ -210,11 +251,12 @@ for that lane lives in
   `debugfs`, and related tooling, but it is optional. Port also works when
   those tools are installed directly on the host.
 - `push` and `pull` are the canonical artifact-mobility verbs even though the
-  shipped runtime now implements both the file-backed and hosted-api backends.
+  shipped runtime now implements the file-backed, hosted-api, and oci-registry
+  backends.
 - The hosted control plane owns `.port/hosted/<control-plane>/artifacts/` for
   hosted pushes and pulls; the local caller still keeps the selected cache copy
   under `.port/cache/`.
 - The file-backed backend is still useful for repo-local proofs, but it is no
   longer the only executable artifact distribution path.
-- `oci-registry` remains explicit follow-on work rather than a compatibility or
-  fallback backend.
+- The repo-local OCI proof uses `oras` plus a local registry container; direct
+  CLI use works the same way when those tools are installed on the host.

@@ -1,0 +1,42 @@
+---
+recorded_at: 2026-03-09T11:32:28.426600322-07:00
+command: bash -lc "cd /home/alex/workspace/spoke-sh/port && just demo-push-oci && just demo-pull-oci"
+---
+kernel protection mode: standard
+kernel source: http://spec.ccfc.min.s3.amazonaws.com/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel artifact: artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+built kernel artifact 'demo-kernel' as 127.0.0.1:5510/port/demo-kernel:v1 for x86_64/firecracker/standard at artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+pushed kernel artifact 'demo-kernel' as 127.0.0.1:5510/port/demo-kernel:v1 for x86_64/firecracker/standard
+backend: oci-registry plain-http anonymous via /nix/store/389l2d0716kg80sp7i5hvnrxbxly5pwk-oras-1.3.0/bin/oras
+local path: artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+store path: 127.0.0.1:5510/port/demo-kernel:v1-x86_64-firecracker-standard
+cache path: .port/cache/127.0.0.1:5510/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux
+bytes: 44278288
+pulled kernel artifact 'demo-kernel' as 127.0.0.1:5510/port/demo-kernel:v1 for x86_64/firecracker/standard
+backend: oci-registry plain-http anonymous via /nix/store/389l2d0716kg80sp7i5hvnrxbxly5pwk-oras-1.3.0/bin/oras
+store path: 127.0.0.1:5510/port/demo-kernel:v1-x86_64-firecracker-standard
+cache path: .port/cache/127.0.0.1:5510/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux
+local path: artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+bytes: 44278288
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config .port/demo-oci.toml artifacts build --artifact demo-kernel --architecture native`
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config .port/demo-oci.toml artifacts push --artifact demo-kernel --architecture native`
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `/home/alex/.cache/cargo-target/port/debug/port --config .port/demo-oci.toml artifacts pull --artifact demo-kernel --architecture native`

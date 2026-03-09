@@ -1,0 +1,60 @@
+---
+recorded_at: 2026-03-09T11:32:19.887460342-07:00
+command: bash -lc "cd /home/alex/workspace/spoke-sh/port && rg -n \"oci-registry|oras|zot|demo-push-oci|demo-pull-oci\" README.md docs/artifacts.md examples/port.toml justfile crates/port-cli/src/lib.rs"
+---
+crates/port-cli/src/lib.rs:45:  Copy `examples/port.toml` to a temp config and switch `demo-kernel` to `backend = \"oci-registry\"` with `transport = \"plain-http\"` and `kind = \"anonymous\"`.
+crates/port-cli/src/lib.rs:47:  Direct CLI use of `oci-registry` requires `oras` on PATH for `port artifacts push|pull`.
+crates/port-cli/src/lib.rs:48:  Repository helpers: `just demo-push-oci` then `just demo-pull-oci`
+crates/port-cli/src/lib.rs:190:  The repo-local OCI proof uses the same `port artifacts push|pull` surface with `backend = \"oci-registry\"`, `oras`, and `just demo-push-oci` / `just demo-pull-oci`.
+crates/port-cli/src/lib.rs:2293:            "just demo-push-oci",
+examples/port.toml:9:#   `backend = "oci-registry"` with `transport = "plain-http"`
+examples/port.toml:12:# - then run `just demo-push-oci` followed by `just demo-pull-oci`
+examples/port.toml:13:# - direct CLI use of `oci-registry` requires `oras` on PATH
+justfile:61:demo-push-oci config=".port/demo-oci.toml" registry="127.0.0.1:5510" registry_port="5510" container="port-demo-oci-registry":
+justfile:67:  perl -0pi -e 's#\[artifacts\.kernels\.demo-kernel\.distribution\.push\]\nbackend = "file-system"\nroot = "artifact-store/demo-fs"#\[artifacts.kernels.demo-kernel.distribution.push\]\nbackend = "oci-registry"\ntransport = "plain-http"\n\n[artifacts.kernels.demo-kernel.distribution.push.auth]\nkind = "anonymous"#' "{{config}}"
+justfile:68:  perl -0pi -e 's#\[artifacts\.kernels\.demo-kernel\.distribution\.pull\]\nbackend = "file-system"\nroot = "artifact-store/demo-fs"#\[artifacts.kernels.demo-kernel.distribution.pull\]\nbackend = "oci-registry"\ntransport = "plain-http"\n\n[artifacts.kernels.demo-kernel.distribution.pull.auth]\nkind = "anonymous"#' "{{config}}"
+justfile:71:    echo "demo-push-oci requires a container runtime; install docker or set PORT_OCI_DEMO_CONTAINER_RUNTIME" >&2
+justfile:91:    if command -v cargo >/dev/null 2>&1 && command -v oras >/dev/null 2>&1; then
+justfile:96:      echo "demo-push-oci requires cargo and oras on PATH, or nix to supply them" >&2
+justfile:103:demo-pull-oci config=".port/demo-oci.toml" container="port-demo-oci-registry":
+justfile:108:    echo "missing OCI demo config '{{config}}'; run 'just demo-push-oci' first" >&2
+justfile:112:    echo "demo-pull-oci requires a container runtime; install docker or set PORT_OCI_DEMO_CONTAINER_RUNTIME" >&2
+justfile:116:    echo "OCI demo registry '{{container}}' is not running; run 'just demo-push-oci' first" >&2
+justfile:124:      echo "unsupported native architecture '$arch' for demo-pull-oci" >&2
+justfile:130:    if command -v cargo >/dev/null 2>&1 && command -v oras >/dev/null 2>&1; then
+justfile:135:      echo "demo-pull-oci requires cargo and oras on PATH, or nix to supply them" >&2
+docs/artifacts.md:25:- `oci-registry` is also executable when the selected variant points at a
+docs/artifacts.md:26:  reachable OCI registry and `oras` is available on `PATH`
+docs/artifacts.md:59:backend = "oci-registry"
+docs/artifacts.md:66:backend = "oci-registry"
+docs/artifacts.md:78:just demo-push-oci
+docs/artifacts.md:79:just demo-pull-oci
+docs/artifacts.md:254:  shipped runtime now implements the file-backed, hosted-api, and oci-registry
+docs/artifacts.md:261:- The repo-local OCI proof uses `oras` plus a local registry container; direct
+README.md:343:  registry/cache contract, and both `hosted-api` and `oci-registry` are
+README.md:345:  reachable registry. The OCI lane requires `oras` on `PATH`.
+README.md:752:  `backend = "oci-registry"`, `transport = "plain-http"`, and
+README.md:754:- Run `just demo-push-oci` and then `just demo-pull-oci` for the repo-local
+README.md:758:- Direct CLI use follows the same flow when `oras` and a local OCI registry are
+README.md:802:  "oci-registry"`. The repo-local proof uses `oras`, `registry:2`, and the
+README.md:803:  `just demo-push-oci` / `just demo-pull-oci` tasks.
+README.md:984:just demo-push-oci
+README.md:985:just demo-pull-oci
+README.md:988:`demo-push-oci` and `demo-pull-oci` are the repo-local artifact-mobility proof
+README.md:989:for the shipped `oci-registry` backend. They use Docker's `registry:2` image,
+README.md:991:`nix develop --command ...` when `oras` is not already installed on the host.
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

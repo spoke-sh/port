@@ -41,6 +41,12 @@ Runnable local workflow:
   port --config examples/port.toml machine top --machine demo
   port --config examples/port.toml machine stop --machine demo
 
+Repo-local OCI artifact proof:
+  Copy `examples/port.toml` to a temp config and switch `demo-kernel` to `backend = \"oci-registry\"` with `transport = \"plain-http\"` and `kind = \"anonymous\"`.
+  Set `[artifacts.kernels.demo-kernel.reference].registry` to a reachable local registry such as `127.0.0.1:5510`.
+  Direct CLI use of `oci-registry` requires `oras` on PATH for `port artifacts push|pull`.
+  Repository helpers: `just demo-push-oci` then `just demo-pull-oci`
+
 Guest workflow examples:
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
   port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
@@ -181,7 +187,7 @@ Hosted artifact workflow:
   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts push --artifact demo-kernel --architecture native
   Remove the local artifact path printed by `build` or `push`, then run `PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts pull --artifact demo-kernel --architecture native`.
   Hosted pushes land in `.port/hosted/<control-plane>/artifacts/...` under the control-plane owner, and hosted auth uses the configured bearer token from `PORT_DEMO_TOKEN`.
-  OCI remains follow-on work.
+  The repo-local OCI proof uses the same `port artifacts push|pull` surface with `backend = \"oci-registry\"`, `oras`, and `just demo-push-oci` / `just demo-pull-oci`.
 Hosted Control:
   Local Port still owns the shipped direct Linux launch path, and hosted standard-cloud plus prepared-node PVM launch now route through the control plane and node agent.
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes and reloads durable fleet state from `.port/hosted/<control-plane>/registered-nodes.json` plus `.port/hosted/<control-plane>/imported-inventory.json`.
@@ -2284,7 +2290,7 @@ mod tests {
             "bootstrap or debug",
             "machine list",
             "Hosted artifact workflow",
-            "OCI remains follow-on work",
+            "just demo-push-oci",
             "first-class `port inventory import` command",
             "artifacts push --artifact demo-guest",
             "artifacts pull --artifact demo-guest",

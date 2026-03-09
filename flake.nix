@@ -33,6 +33,7 @@
         sharedInputs = [
           rust
           pkgs.just
+          pkgs.oras
           pkgs.cargo-nextest
           pkgs.cargo-llvm-cov
           keelPkg

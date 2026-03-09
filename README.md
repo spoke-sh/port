@@ -340,8 +340,9 @@ Current behavior:
   kernel and guest-image pipelines for the selected artifact variant.
 - `port artifacts push` and `port artifacts pull` now use the artifact's
   configured mobility backend. The sample config defaults to a file-backed
-  registry/cache contract, and `hosted-api` is also executable when the
-  selected artifact points at a live control plane. OCI remains follow-on work.
+  registry/cache contract, and both `hosted-api` and `oci-registry` are
+  executable when the selected artifact points at a live control plane or a
+  reachable registry. The OCI lane requires `oras` on `PATH`.
 - `port doctor` performs real host checks for Linux, `/dev/kvm`, `firecracker`,
   `ip`, and `iptables`. When you pass `--config`, it also validates the native
   Firecracker/standard artifact variant paths required on the current host.
@@ -742,6 +743,21 @@ rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
 cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
 ```
 
+Local OCI registry proof:
+
+- Copy `examples/port.toml` to a temp config.
+- Set `[artifacts.kernels.demo-kernel.reference].registry` to a reachable local
+  registry such as `127.0.0.1:5510`.
+- Replace the demo-kernel distribution `push` and `pull` backends with
+  `backend = "oci-registry"`, `transport = "plain-http"`, and
+  `kind = "anonymous"`.
+- Run `just demo-push-oci` and then `just demo-pull-oci` for the repo-local
+  proof. The helper tasks start a local `registry:2` container, build the
+  native kernel variant, push it through the CLI, remove the local kernel path,
+  and pull it back from the registry.
+- Direct CLI use follows the same flow when `oras` and a local OCI registry are
+  installed outside the repo helpers.
+
 Hosted backend proof:
 
 - Copy `examples/port.toml` to a temp config and replace the existing
@@ -781,7 +797,10 @@ Artifact contracts:
   an artifact distribution backend is switched to `hosted-api`. Hosted pushes
   and pulls use bearer-token auth from `PORT_DEMO_TOKEN` and persist under
   `.port/hosted/<control-plane>/artifacts/...`.
-- OCI artifact distribution remains follow-on work.
+- The OCI artifact backend is now executable through the same `port artifacts
+  push|pull` surface when the selected variant switches to `backend =
+  "oci-registry"`. The repo-local proof uses `oras`, `registry:2`, and the
+  `just demo-push-oci` / `just demo-pull-oci` tasks.
 
 Detailed contracts, inputs, outputs, and validation expectations live in
 [`docs/artifacts.md`](docs/artifacts.md).
@@ -962,7 +981,14 @@ just test
 just demo-doctor
 just demo-build-kernel protection=pvm architecture=x86-64
 just demo-build-guest protection=pvm architecture=x86-64
+just demo-push-oci
+just demo-pull-oci
 ```
+
+`demo-push-oci` and `demo-pull-oci` are the repo-local artifact-mobility proof
+for the shipped `oci-registry` backend. They use Docker's `registry:2` image,
+generate a temp config under `.port/demo-oci.toml`, and fall back to
+`nix develop --command ...` when `oras` is not already installed on the host.
 
 ## License
 
