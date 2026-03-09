@@ -14,16 +14,18 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post, put};
 use port_hosted_protocol::{
-    HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
+    HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedClientHeaders,
+    HostedControlPlaneRoute, HostedDetachedForwardRoute,
     HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute, HostedGuestStreamRoute,
     HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRegistrationRequest,
     HostedNodeRoute, HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute,
-    HostedSuccess,
+    HostedSuccess, PORT_ARTIFACT_TRANSFER_HEADER,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostProvider,
     HostedAuthTokenSource, HostedImportedNodeRecord, HostedMachineSummaryContract,
-    HostedNodeRegistration, HostedRegisteredNodeContract, PortConfig, ProtectionMode,
+    HostedNodeRegistration, HostedRegisteredNodeContract, MachineArchitecture, PortConfig,
+    ProtectionMode, hosted_artifact_store_path,
 };
 use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
@@ -760,6 +762,8 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
             "/v1/nodes/{node}/registration",
             post(node_registration_refresh),
         )
+        .route("/v1/artifacts:push", post(artifact_push))
+        .route("/v1/artifacts:pull", post(artifact_pull))
         .route("/v1/machines", get(list_machines))
         .route(
             "/v1/machines/{machine}",
@@ -798,6 +802,124 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
             get(service_status).post(service_command),
         )
         .with_state(state)
+}
+
+async fn artifact_push(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let route = hosted_artifact_route_context(&state);
+    let request = match decode_artifact_transfer_header(&state, &headers, &route) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let request = match canonicalize_artifact_transfer_request(&state, request, &route) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+
+    let parent = match request.store_path.parent() {
+        Some(parent) => parent,
+        None => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "{} has no parent directory",
+                    artifact_store_detail(&state, &request)
+                ),
+                Some(route),
+            );
+        }
+    };
+    if let Err(error) = std::fs::create_dir_all(parent) {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to create parent directory '{}' for {}: {error}",
+                parent.display(),
+                artifact_store_detail(&state, &request)
+            ),
+            Some(route),
+        );
+    }
+    if let Err(error) = std::fs::write(&request.store_path, &body) {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to write {}: {error}",
+                artifact_store_detail(&state, &request)
+            ),
+            Some(route),
+        );
+    }
+
+    json_response(
+        StatusCode::OK,
+        &HostedSuccess {
+            route,
+            result: HostedArtifactTransferResult {
+                artifact_name: request.artifact_name,
+                reference: request.reference,
+                selector: request.selector,
+                store_path: request.store_path,
+                bytes_copied: body.len() as u64,
+            },
+        },
+    )
+}
+
+async fn artifact_pull(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let route = hosted_artifact_route_context(&state);
+    let request: HostedArtifactTransferRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' received invalid artifact transfer JSON: {error}",
+                    state.inner.control_plane
+                ),
+                Some(route),
+            );
+        }
+    };
+    let request = match canonicalize_artifact_transfer_request(&state, request, &route) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+
+    match std::fs::read(&request.store_path) {
+        Ok(bytes) => raw_response(StatusCode::OK, bytes, "application/octet-stream"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "{} was not found",
+                artifact_store_detail(&state, &request)
+            ),
+            Some(route),
+        ),
+        Err(error) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "failed to read {}: {error}",
+                artifact_store_detail(&state, &request)
+            ),
+            Some(route),
+        ),
+    }
 }
 
 async fn node_registration_refresh(
@@ -865,6 +987,137 @@ async fn node_registration_refresh(
             },
         ),
         Err(error) => error_response(StatusCode::BAD_REQUEST, error, Some(route)),
+    }
+}
+
+fn hosted_artifact_route_context(state: &ControlPlaneState) -> HostedRouteContext {
+    HostedRouteContext {
+        control_plane: Some(state.inner.control_plane.clone()),
+        runtime_root: Some(hosted_placeholder_runtime_root(&state.inner.control_plane)),
+        ..HostedRouteContext::default()
+    }
+}
+
+fn decode_artifact_transfer_header(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    route: &HostedRouteContext,
+) -> std::result::Result<HostedArtifactTransferRequest, Response> {
+    let Some(value) = headers.get(PORT_ARTIFACT_TRANSFER_HEADER) else {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "control plane '{}' requires '{}' for hosted artifact upload",
+                state.inner.control_plane, PORT_ARTIFACT_TRANSFER_HEADER
+            ),
+            Some(route.clone()),
+        ));
+    };
+    let header = match value.to_str() {
+        Ok(header) => header,
+        Err(error) => {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' received invalid '{}' header: {error}",
+                    state.inner.control_plane, PORT_ARTIFACT_TRANSFER_HEADER
+                ),
+                Some(route.clone()),
+            ));
+        }
+    };
+    serde_json::from_str(header).map_err(|error| {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "control plane '{}' received invalid artifact transfer metadata in '{}': {error}",
+                state.inner.control_plane, PORT_ARTIFACT_TRANSFER_HEADER
+            ),
+            Some(route.clone()),
+        )
+    })
+}
+
+fn canonicalize_artifact_transfer_request(
+    state: &ControlPlaneState,
+    request: HostedArtifactTransferRequest,
+    route: &HostedRouteContext,
+) -> std::result::Result<HostedArtifactTransferRequest, Response> {
+    let canonical_store_path = hosted_artifact_store_path(
+        &state.inner.control_plane,
+        &request.reference,
+        request.selector,
+        &request.filename,
+    );
+    if request.store_path != canonical_store_path {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "{} requested non-canonical store path '{}'; canonical control-plane store path is '{}'",
+                artifact_store_detail(state, &request),
+                request.store_path.display(),
+                canonical_store_path.display()
+            ),
+            Some(route.clone()),
+        ));
+    }
+    Ok(HostedArtifactTransferRequest {
+        store_path: canonical_store_path,
+        ..request
+    })
+}
+
+fn artifact_store_detail(
+    state: &ControlPlaneState,
+    request: &HostedArtifactTransferRequest,
+) -> String {
+    let endpoint = state
+        .inner
+        .config
+        .control_planes
+        .get(&state.inner.control_plane)
+        .map(|spec| spec.endpoint.as_str())
+        .unwrap_or("<unknown>");
+    format!(
+        "hosted-api artifact '{}' ({}, selector '{}') for control plane '{}' endpoint '{}' at '{}'",
+        request.artifact_name,
+        request.reference,
+        hosted_artifact_selector_label(request.selector),
+        state.inner.control_plane,
+        endpoint,
+        request.store_path.display()
+    )
+}
+
+fn hosted_artifact_selector_label(selector: port_model::ArtifactSelector) -> String {
+    format!(
+        "{}/{}/{}",
+        hosted_artifact_architecture_label(selector.architecture),
+        hosted_artifact_substrate_label(selector.substrate),
+        hosted_artifact_protection_mode_label(selector.protection_mode)
+    )
+}
+
+fn hosted_artifact_architecture_label(architecture: MachineArchitecture) -> &'static str {
+    match architecture {
+        MachineArchitecture::Native => "native",
+        MachineArchitecture::X86_64 => "x86_64",
+        MachineArchitecture::Aarch64 => "aarch64",
+    }
+}
+
+fn hosted_artifact_substrate_label(substrate: ExecutionSubstrate) -> &'static str {
+    match substrate {
+        ExecutionSubstrate::Firecracker => "firecracker",
+        ExecutionSubstrate::CloudHypervisor => "cloud-hypervisor",
+        ExecutionSubstrate::Avf => "avf",
+    }
+}
+
+fn hosted_artifact_protection_mode_label(mode: ProtectionMode) -> &'static str {
+    match mode {
+        ProtectionMode::Standard => "standard",
+        ProtectionMode::Pvm => "pvm",
     }
 }
 
@@ -4084,7 +4337,11 @@ mod tests {
         CopyDirection, CopyRequest, ExecRequest, ExecResult, GuestOperation, OperationResult,
         RequestEnvelope, ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
-    use port_hosted_protocol::HostedNodeRegistrationRequest;
+    use port_hosted_protocol::{
+        HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedClientHeaders,
+        HostedError, HostedNodeRegistrationRequest, HostedSuccess, PORT_ARTIFACT_TRANSFER_HEADER,
+    };
+    use port_model::hosted_artifact_store_path;
     use std::io::{BufReader, Cursor, Read, Write};
     use std::net::SocketAddr;
     use std::os::unix::fs::PermissionsExt;
@@ -4103,6 +4360,44 @@ mod tests {
         bodies: Arc<Mutex<Vec<String>>>,
     }
 
+    fn sample_artifact_transfer_request(
+        config: &PortConfig,
+        control_plane: &str,
+    ) -> HostedArtifactTransferRequest {
+        let artifact = config
+            .artifacts
+            .kernels
+            .get("demo-kernel")
+            .expect("demo-kernel should exist");
+        let variant = artifact
+            .variants
+            .iter()
+            .find(|variant| {
+                variant.selector.architecture == port_model::MachineArchitecture::X86_64
+                    && variant.selector.substrate == port_model::ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == port_model::ProtectionMode::Standard
+            })
+            .expect("demo-kernel standard variant should exist");
+        let filename = variant
+            .path
+            .file_name()
+            .expect("variant filename should exist")
+            .to_string_lossy()
+            .to_string();
+        HostedArtifactTransferRequest {
+            artifact_name: String::from("demo-kernel"),
+            reference: artifact.reference.clone(),
+            selector: variant.selector,
+            filename: filename.clone(),
+            store_path: hosted_artifact_store_path(
+                control_plane,
+                &artifact.reference,
+                variant.selector,
+                &filename,
+            ),
+        }
+    }
+
     #[test]
     fn registered_node_state_path_is_scoped_under_control_plane_runtime_root() {
         assert_eq!(
@@ -4117,6 +4412,118 @@ mod tests {
             machine_placement_state_path("demo"),
             PathBuf::from(".port/hosted/demo/machine-placements.json")
         );
+    }
+
+    #[tokio::test]
+    async fn hosted_artifact_routes_persist_and_stream_selected_variant() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("artifact-routes");
+        let token_var = unique_test_env("PORT_TEST_ARTIFACT_ROUTE_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let request = sample_artifact_transfer_request(&config, &control_plane);
+        let identity = config
+            .hosted_api_identity_contract("cloud-aws")
+            .expect("hosted identity should resolve")
+            .expect("cloud-aws should use hosted control plane");
+        let headers = HostedClientHeaders::from_identity(&identity, "demo-token").to_header_map();
+        let control_plane_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+
+        let mut upload = Client::new().post(format!("http://{control_plane_addr}/v1/artifacts:push"));
+        for (name, value) in &headers {
+            upload = upload.header(name, value);
+        }
+        let upload = upload
+            .header(
+                PORT_ARTIFACT_TRANSFER_HEADER,
+                serde_json::to_string(&request).expect("artifact metadata should encode"),
+            )
+            .body("demo-kernel-bytes")
+            .send()
+            .await
+            .expect("artifact upload should complete");
+        assert_eq!(upload.status(), StatusCode::OK);
+        let uploaded: HostedSuccess<HostedArtifactTransferResult> = upload
+            .json()
+            .await
+            .expect("upload response should decode");
+        assert_eq!(uploaded.result.store_path, request.store_path);
+        assert_eq!(uploaded.result.bytes_copied, 17);
+        assert_eq!(
+            std::fs::read(&request.store_path).expect("uploaded artifact should persist"),
+            b"demo-kernel-bytes"
+        );
+
+        let mut download =
+            Client::new().post(format!("http://{control_plane_addr}/v1/artifacts:pull"));
+        for (name, value) in &headers {
+            download = download.header(name, value);
+        }
+        let download = download
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&request).expect("artifact metadata should encode"))
+            .send()
+            .await
+            .expect("artifact download should complete");
+        assert_eq!(download.status(), StatusCode::OK);
+        assert_eq!(
+            download
+                .bytes()
+                .await
+                .expect("downloaded artifact should decode")
+                .as_ref(),
+            b"demo-kernel-bytes"
+        );
+
+        cleanup_registered_state(&control_plane);
+    }
+
+    #[tokio::test]
+    async fn hosted_artifact_pull_failure_includes_backend_and_store_context() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("artifact-miss");
+        let token_var = unique_test_env("PORT_TEST_ARTIFACT_MISS_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let request = sample_artifact_transfer_request(&config, &control_plane);
+        let identity = config
+            .hosted_api_identity_contract("cloud-aws")
+            .expect("hosted identity should resolve")
+            .expect("cloud-aws should use hosted control plane");
+        let headers = HostedClientHeaders::from_identity(&identity, "demo-token").to_header_map();
+        let control_plane_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+
+        let mut download =
+            Client::new().post(format!("http://{control_plane_addr}/v1/artifacts:pull"));
+        for (name, value) in &headers {
+            download = download.header(name, value);
+        }
+        let download = download
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&request).expect("artifact metadata should encode"))
+            .send()
+            .await
+            .expect("artifact download should complete");
+        assert_eq!(download.status(), StatusCode::NOT_FOUND);
+        let error: HostedError = download.json().await.expect("error response should decode");
+        assert!(error.message.contains("hosted-api artifact 'demo-kernel'"));
+        assert!(error.message.contains("demo-fs/port/demo-kernel:v1"));
+        assert!(error.message.contains("x86_64/firecracker/standard"));
+        assert!(error.message.contains(&request.store_path.display().to_string()));
+
+        cleanup_registered_state(&control_plane);
     }
 
     #[test]

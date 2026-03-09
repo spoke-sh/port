@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub const PORT_AUDIENCE_HEADER: &str = "x-port-audience";
 pub const PORT_NODE_AGENT_TOKEN_HEADER: &str = "x-port-node-agent-token";
+pub const PORT_ARTIFACT_TRANSFER_HEADER: &str = "x-port-artifact-transfer";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedClientHeaders {
@@ -219,8 +220,16 @@ pub enum HostedRegistrationRoute {
     Refresh { node_name: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedArtifactRoute {
+    Push,
+    Pull,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostedControlPlaneRoute {
+    Artifact(HostedArtifactRoute),
     Machine(HostedMachineRoute),
     Guest(HostedGuestRoute),
     GuestStream(HostedGuestStreamRoute),
@@ -233,6 +242,7 @@ impl HostedControlPlaneRoute {
     #[must_use]
     pub fn path(&self) -> String {
         match self {
+            Self::Artifact(route) => artifact_route_path(*route),
             Self::Machine(route) => machine_route_path(route),
             Self::Guest(route) => guest_route_path(route),
             Self::GuestStream(route) => guest_stream_route_path(route),
@@ -263,6 +273,13 @@ impl HostedNodeRoute {
             Self::Service(route) => service_node_route_suffix(route),
         };
         format!("/v1/node{suffix}")
+    }
+}
+
+fn artifact_route_path(route: HostedArtifactRoute) -> String {
+    match route {
+        HostedArtifactRoute::Push => String::from("/v1/artifacts:push"),
+        HostedArtifactRoute::Pull => String::from("/v1/artifacts:pull"),
     }
 }
 
@@ -559,12 +576,12 @@ mod tests {
     };
 
     use super::{
-        HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedClientHeaders,
-        HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
+        HostedArtifactRoute, HostedArtifactTransferRequest, HostedArtifactTransferResult,
+        HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
         HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
         HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
         HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
-        PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        PORT_ARTIFACT_TRANSFER_HEADER, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -589,6 +606,14 @@ mod tests {
 
     #[test]
     fn control_plane_routes_render_canonical_paths() {
+        assert_eq!(
+            HostedControlPlaneRoute::Artifact(HostedArtifactRoute::Push).path(),
+            "/v1/artifacts:push"
+        );
+        assert_eq!(
+            HostedControlPlaneRoute::Artifact(HostedArtifactRoute::Pull).path(),
+            "/v1/artifacts:pull"
+        );
         assert_eq!(
             HostedControlPlaneRoute::Machine(HostedMachineRoute::List).path(),
             "/v1/machines"
@@ -692,6 +717,11 @@ mod tests {
             ".port/hosted/demo/artifacts/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux"
         );
         assert_eq!(result_value["bytes_copied"], 17);
+    }
+
+    #[test]
+    fn hosted_artifact_transfer_header_name_is_stable() {
+        assert_eq!(PORT_ARTIFACT_TRANSFER_HEADER, "x-port-artifact-transfer");
     }
 
     #[test]
