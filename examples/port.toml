@@ -338,6 +338,13 @@ notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the 
 #   switching [machines.cloud-aws] to protection_mode = "pvm" should pass the
 #   hosted placement gate because this node advertises a ready PVM lane and can
 #   launch once the host kit and PVM artifact paths are prepared.
+# Hosted Cloud Hypervisor proof:
+#   keep the checked-in sample on the Firecracker standard lane, then copy this
+#   config and switch [machines.cloud-aws].substrate to "cloud-hypervisor",
+#   [machines.cloud-aws].architecture to "x86_64", and
+#   [nodes.aws-linux-node.capabilities].substrates to ["cloud-hypervisor"] when
+#   you want the hosted Cloud Hypervisor workflow. Leaving this node on
+#   ["firecracker"] is the explicit rejected-node proof for that lane.
 host = "aws-linux"
 runtime_root = "runtime/hosted/aws-linux-node"
 notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
@@ -483,6 +490,13 @@ console_log = "runtime/cloud-generic/console.log"
 #   change protection_mode to "pvm" to model a hosted machine whose node
 #   inventory advertises state = "ready" for x86_64 Firecracker/PVM and can
 #   boot through the live control-plane and node-agent path once prepared.
+# Hosted Cloud Hypervisor proof:
+#   copy this file to a temp config, point [control_planes.demo].endpoint at
+#   http://127.0.0.1:7040, switch substrate to "cloud-hypervisor", switch
+#   architecture to "x86_64", and switch
+#   [nodes.aws-linux-node.capabilities].substrates to ["cloud-hypervisor"].
+#   The checked-in sample stays on Firecracker so the standard hosted lane keeps
+#   its canonical proof.
 host = "aws-linux"
 kernel = "demo-kernel"
 guest_image = "demo-guest"

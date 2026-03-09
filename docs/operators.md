@@ -138,7 +138,7 @@ Use the canonical CLI to inspect that boundary:
 
 ```bash
 cargo run -p port-cli -- --config examples/port.toml doctor
-cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
+cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-ch
 ```
 
 What to expect:
@@ -147,32 +147,68 @@ What to expect:
   and `azure` alongside the usual local Linux prerequisites.
 - `port doctor` also prints the modeled hosted control-plane endpoint,
   audience, and token source from `[control_planes.demo]`.
-- `port machine launch --machine cloud-aws` is expected to fail with AWS-
-  specific guidance because remote launch orchestration is not implemented in
-  the MVP; the error now also reports the hosted control-plane endpoint and
-  token source that would own that workflow later.
+- `port machine launch --machine demo-ch` is the canonical local Cloud
+  Hypervisor proof on Linux and fails fast only if the lane-specific host
+  contract is missing, for example when `cloud-hypervisor` is not on `PATH`.
 - `port machine launch --machine demo` remains the supported local Linux launch
   proof for the MVP.
 - Artifact mobility is already designed around that future remote workflow:
   build or publish the selected variant on one Linux host, then pull the same
   logical reference onto another Linux host once the execution lane requires it.
-- `port machine list`, `status`, and `stop` currently inspect only local
-  Port-managed runtime roots; they do not yet enumerate or control
-  remote/cloud hosts.
+- `port machine list`, `status`, `monitor`, `top`, and `stop` now inspect both
+  local Port-managed runtime roots and hosted-control-plane machines through
+  the same canonical machine family.
 - The operator-visible ownership vocabulary is already aligned with hosted
   design work: local commands report `local-runtime-root` /
   `local-port-runtime` today, and future hosted drivers are expected to report
   `hosted-control-plane` / `hosted-node-agent` through the same fields.
-- The future hosted split for lifecycle ownership and guest-operation brokering
-  is documented in [`hosted.md`](hosted.md).
+- The hosted split for lifecycle ownership and guest-operation brokering is
+  live for the demo lane and documented in [`hosted.md`](hosted.md).
 - The explicit Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
 - Remote/cloud hosts in the sample config no longer use SSH placeholders;
   they declare `mode = "hosted-control-plane"` and `control_plane = "demo"`
-  so the operator-facing contract matches the planned hosted product.
+  so the operator-facing contract matches the hosted product.
+
+Hosted standard Firecracker workflow:
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine stop --machine cloud-aws
+```
+
+Hosted Cloud Hypervisor workflow:
+
+1. Copy `examples/port.toml` to `/tmp/port-cloud-hypervisor.toml`.
+2. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
+3. Switch `machines.cloud-aws.substrate` to `cloud-hypervisor`.
+4. Switch `machines.cloud-aws.architecture` to `x86_64`.
+5. Switch `nodes.aws-linux-node.capabilities.substrates` to
+   `["cloud-hypervisor"]`.
+
+```bash
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+```
+
+Explicit unsupported boundaries:
+
+- leaving `aws-linux-node` on `substrates = ["firecracker"]` is an explicit
+  rejected-node proof for the hosted Cloud Hypervisor lane
+- Azure remains unsupported for the current hosted Linux MVP
+- Cloud Hypervisor is a `standard`-only Port lane today
 
 The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
-The hosted node-agent/control-plane split that will eventually sit behind the
-same CLI lives in [`docs/hosted.md`](hosted.md).
+The hosted node-agent/control-plane split that sits behind the same CLI lives
+in [`docs/hosted.md`](hosted.md).
 
 ## macOS Workflow
 

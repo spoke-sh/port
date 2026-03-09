@@ -1,10 +1,10 @@
 # Cloud Linux Support
 
 Port's cloud Linux story is now split across provider identity and execution
-lane. The current executable lane remains Firecracker with `standard`
-protection on Linux hosts; the shared model also represents planned or
-research-backed substrate lanes such as Firecracker/PVM, Cloud Hypervisor, and
-Apple Virtualization Framework.
+lane. The current shipped Linux execution surface spans three proof-backed
+paths: Firecracker with `standard` protection, prepared-node Firecracker/PVM on
+`x86_64`, and Cloud Hypervisor with `standard` protection. The shared model
+still represents follow-on or research-backed lanes beyond that shipped set.
 
 The hosted control-plane split that will eventually carry these remote lanes is
 defined in [`docs/hosted.md`](hosted.md).
@@ -20,10 +20,10 @@ models but does not execute yet.
 | Lane | Architectures | Current status | Notes |
 |------|---------------|----------------|-------|
 | Firecracker + `standard` | `x86_64`, `aarch64`, `native` | Supported today | The only shipped execution lane behind the current Linux launch workflow |
-| Firecracker + `pvm` | `x86_64` | Planned / partial design | Strategic lane for cloud cost control; requires dedicated host-kernel, VMM, and artifact work |
+| Firecracker + `pvm` | `x86_64` | Hosted / partial | Strategic lane for cloud cost control; requires a prepared host kit, dedicated artifact variants, and the hosted control-plane plus node-agent path |
 | Firecracker + `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path |
-| Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
-| AVF + `standard` | macOS `arm64` or `x86_64` | Planned | First-class macOS lane; keeps the canonical guest protocol over AVF virtio sockets and console capture over AVF serial ports |
+| Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Local + hosted / partial | Lifecycle and guest flows now reuse the canonical machine and guest verbs through the local driver boundary and the hosted control-plane plus node-agent path |
+| AVF + `standard` | macOS `arm64` or `x86_64` | Local / partial | First-class macOS lane; keeps the canonical guest protocol over AVF virtio sockets and console capture over AVF serial ports |
 
 ## Provider Matrix
 
@@ -66,6 +66,77 @@ Use the hosted control-plane lane to run the shipped standard cloud workflow.
    ```
 
 7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist.
+
+## Local Cloud Hypervisor Workflow
+
+Use the checked-in `machines.demo-ch` lane when you want a Linux-local Cloud
+Hypervisor proof through the canonical CLI:
+
+```bash
+port --config examples/port.toml doctor
+port --config examples/port.toml machine launch --machine demo-ch
+port --config examples/port.toml machine status --machine demo-ch
+port --config examples/port.toml guest exec --machine demo-ch -- /bin/sh -lc 'uname -a'
+port --config examples/port.toml guest copy --machine demo-ch --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
+port --config examples/port.toml guest pty --machine demo-ch -- /bin/sh -lc 'printf ch-pty-ok'
+port --config examples/port.toml guest logs --machine demo-ch --path /var/log/app.log --tail-lines 20
+port --config examples/port.toml guest forward --machine demo-ch --listen 127.0.0.1:8080 --target 127.0.0.1:80
+port --config examples/port.toml machine stop --machine demo-ch
+```
+
+Repository-local proof for the shipped local lane:
+
+```bash
+cargo test -q -p port-runtime cloud_hypervisor_launch_status_and_stop_write_canonical_runtime_state
+cargo test -q -p port-runtime cloud_hypervisor_launch_surfaces_missing_binary_preflight
+cargo test -q -p port-runtime guest_exec_uses_cloud_hypervisor_vsock_tunnel_when_runtime_socket_is_absent
+cargo test -q -p port-cli --test machine_commands cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally
+cargo test -q -p port-cli --test machine_commands cli_machine_launch_surfaces_missing_cloud_hypervisor_binary
+cargo test -q -p port-cli --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
+```
+
+## Hosted Cloud Hypervisor Workflow
+
+Keep `examples/port.toml` on the standard Firecracker hosted lane. For the
+Cloud Hypervisor proof, copy the sample to a temporary config and make these
+explicit changes:
+
+1. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
+2. Set `machines.cloud-aws.substrate = "cloud-hypervisor"`.
+3. Set `machines.cloud-aws.architecture = "x86_64"`.
+4. Set `nodes.aws-linux-node.capabilities.substrates = ["cloud-hypervisor"]`.
+5. Keep `nodes.aws-linux-node.capabilities.protection_modes = ["standard"]`.
+
+Then use the same hosted control-plane and node-agent verbs:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
+```
+
+Repository-local proof for the hosted Cloud Hypervisor lane:
+
+```bash
+cargo test -q -p port-runtime hosted_cloud_hypervisor_launch_status_stop_route_through_live_control_plane
+cargo test -q -p port-runtime hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+cargo test -q -p port-runtime hosted_guest_exec_routes_cloud_hypervisor_machine_through_node_runtime_root
+cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+cargo test -q -p port-cli --test guest_commands cli_guest_commands_cover_hosted_cloud_hypervisor_runtime
+```
+
+Unsupported boundaries stay explicit:
+
+- leaving `aws-linux-node` on `substrates = ["firecracker"]` is the explicit
+  rejected-node proof for hosted Cloud Hypervisor; Port does not fall back
+- Cloud Hypervisor is a `standard`-only Port lane today
+- Azure remains unsupported for the current hosted Linux MVP
+- `aarch64` Cloud Hypervisor remains modeled in artifacts and machine contracts,
+  but the published hosted proof is the `x86_64` sample lane
 
 ## Operator Mapping
 
