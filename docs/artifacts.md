@@ -46,6 +46,14 @@ rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
 port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
 ```
 
+Publish and fetch the protected `x86_64/firecracker/pvm` variant:
+
+```bash
+port --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+rm -f artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux
+port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+```
+
 Hosted backend proof:
 
 1. Copy `examples/port.toml` to a temp config.

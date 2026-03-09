@@ -98,6 +98,8 @@ PVM foundation workflow:
   port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
   Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for a prepared Linux node.
   Local PVM launch still requires a prepared x86_64 Linux host with the patched `firecracker-pvm` binary and the required host boot state.
 Hosted prepared-node PVM workflow:

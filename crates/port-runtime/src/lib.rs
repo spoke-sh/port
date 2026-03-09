@@ -7979,6 +7979,91 @@ exec sleep 30
     }
 
     #[test]
+    fn resolve_guest_image_metadata_distinguishes_standard_and_pvm_paths() {
+        let config = PortConfig::sample();
+
+        let standard = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-guest",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: port_model::ProtectionMode::Standard,
+            },
+        )
+        .expect("standard guest-image metadata should resolve");
+        let pvm = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-guest",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: port_model::ProtectionMode::Pvm,
+            },
+        )
+        .expect("pvm guest-image metadata should resolve");
+
+        assert_ne!(standard.path, pvm.path);
+        assert_eq!(
+            pvm.path,
+            PathBuf::from("artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4")
+        );
+        assert_eq!(
+            pvm.cache_path,
+            PathBuf::from(
+                ".port/cache/demo-fs/port/demo-guest/v1/x86_64/firecracker/pvm/rootfs.ext4"
+            )
+        );
+    }
+
+    #[test]
+    fn resolve_artifact_metadata_reports_missing_selected_pvm_variant_without_fallback() {
+        for artifact_name in ["demo-kernel", "demo-guest"] {
+            let mut config = PortConfig::sample();
+            match artifact_name {
+                "demo-kernel" => config
+                    .artifacts
+                    .kernels
+                    .get_mut(artifact_name)
+                    .expect("sample kernel should exist")
+                    .variants
+                    .retain(|variant| {
+                        variant.selector.protection_mode != port_model::ProtectionMode::Pvm
+                    }),
+                "demo-guest" => config
+                    .artifacts
+                    .guest_images
+                    .get_mut(artifact_name)
+                    .expect("sample guest image should exist")
+                    .variants
+                    .retain(|variant| {
+                        variant.selector.protection_mode != port_model::ProtectionMode::Pvm
+                    }),
+                _ => unreachable!("unexpected artifact"),
+            }
+
+            let error = resolve_artifact_metadata(
+                &config,
+                ArtifactRequest {
+                    name: artifact_name,
+                    architecture: MachineArchitecture::X86_64,
+                    substrate: ExecutionSubstrate::Firecracker,
+                    protection_mode: port_model::ProtectionMode::Pvm,
+                },
+            )
+            .expect_err("missing pvm variant should fail");
+
+            let message = error.to_string();
+            assert!(
+                message.contains(&format!("artifact '{artifact_name}' has no variant")),
+                "{message}"
+            );
+            assert!(message.contains("X86_64/Firecracker/Pvm"), "{message}");
+            assert!(!message.contains("standard"), "{message}");
+        }
+    }
+
+    #[test]
     fn resolve_artifact_metadata_accepts_the_native_alias() {
         let config = PortConfig::sample();
 

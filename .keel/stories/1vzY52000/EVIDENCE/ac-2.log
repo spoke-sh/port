@@ -1,0 +1,34 @@
+---
+recorded_at: 2026-03-09T08:24:49.932219205-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-runtime tests::resolve_artifact_metadata_distinguishes_standard_and_pvm_paths -- --exact && cargo test -q -p port-runtime tests::resolve_guest_image_metadata_distinguishes_standard_and_pvm_paths -- --exact && cargo test -q -p port-runtime tests::resolve_artifact_metadata_reports_missing_selected_pvm_variant_without_fallback -- --exact'
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 92 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 92 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 92 filtered out; finished in 0.00s
+
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

@@ -6,7 +6,7 @@ use std::sync::{Mutex, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use port_model::{ArtifactStore, MachineArchitecture, PortConfig};
+use port_model::{ArtifactStore, MachineArchitecture, PortConfig, ProtectionMode};
 use port_runtime::{ControlPlaneServeRequest, serve_control_plane};
 use tempfile::tempdir;
 
@@ -52,6 +52,13 @@ fn architecture_flag(architecture: MachineArchitecture) -> &'static str {
     }
 }
 
+fn protection_dir(mode: ProtectionMode) -> &'static str {
+    match mode {
+        ProtectionMode::Standard => "standard",
+        ProtectionMode::Pvm => "pvm",
+    }
+}
+
 fn hosted_artifact_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -89,6 +96,7 @@ fn configure_kernel_paths(
     local_root: &Path,
     store_root: &Path,
     cache_root: &Path,
+    protection_mode: ProtectionMode,
 ) -> (PathBuf, PathBuf, PathBuf) {
     let kernel = config
         .artifacts
@@ -107,14 +115,14 @@ fn configure_kernel_paths(
         variant.path = local_root
             .join(selector_dir(variant.selector.architecture))
             .join("firecracker")
-            .join("standard")
+            .join(protection_dir(variant.selector.protection_mode))
             .join("vmlinux");
     }
 
     let local_path = local_root
         .join("x86_64")
         .join("firecracker")
-        .join("standard")
+        .join(protection_dir(protection_mode))
         .join("vmlinux");
     let cache_path = cache_root
         .join("demo-fs")
@@ -123,7 +131,7 @@ fn configure_kernel_paths(
         .join("v1")
         .join("x86_64")
         .join("firecracker")
-        .join("standard")
+        .join(protection_dir(protection_mode))
         .join("vmlinux");
     let store_path = store_root
         .join("demo-fs")
@@ -132,8 +140,63 @@ fn configure_kernel_paths(
         .join("v1")
         .join("x86_64")
         .join("firecracker")
-        .join("standard")
+        .join(protection_dir(protection_mode))
         .join("vmlinux");
+
+    (local_path, cache_path, store_path)
+}
+
+fn configure_guest_paths(
+    config: &mut PortConfig,
+    local_root: &Path,
+    store_root: &Path,
+    cache_root: &Path,
+    protection_mode: ProtectionMode,
+) -> (PathBuf, PathBuf, PathBuf) {
+    let guest = config
+        .artifacts
+        .guest_images
+        .get_mut("demo-guest")
+        .expect("sample guest image should exist");
+    guest.distribution.push = ArtifactStore::FileSystem {
+        root: store_root.to_path_buf(),
+    };
+    guest.distribution.pull = ArtifactStore::FileSystem {
+        root: store_root.to_path_buf(),
+    };
+    guest.distribution.cache_root = cache_root.to_path_buf();
+
+    for variant in &mut guest.variants {
+        variant.path = local_root
+            .join(selector_dir(variant.selector.architecture))
+            .join("firecracker")
+            .join(protection_dir(variant.selector.protection_mode))
+            .join("rootfs.ext4");
+    }
+
+    let local_path = local_root
+        .join("x86_64")
+        .join("firecracker")
+        .join(protection_dir(protection_mode))
+        .join("rootfs.ext4");
+    let cache_path = cache_root
+        .join("demo-fs")
+        .join("port")
+        .join("demo-guest")
+        .join("v1")
+        .join("x86_64")
+        .join("firecracker")
+        .join(protection_dir(protection_mode))
+        .join("rootfs.ext4");
+    let store_path = store_root
+        .join("demo-fs")
+        .join("port")
+        .join("demo-guest")
+        .join("v1")
+        .join("x86_64")
+        .join("firecracker")
+        .join(protection_dir(protection_mode))
+        .join("rootfs.ext4");
 
     (local_path, cache_path, store_path)
 }
@@ -144,6 +207,7 @@ fn configure_hosted_kernel_paths(
     cache_root: &Path,
     endpoint: &str,
     architecture: MachineArchitecture,
+    protection_mode: ProtectionMode,
 ) -> (PathBuf, PathBuf, PathBuf) {
     let kernel = config
         .artifacts
@@ -162,7 +226,7 @@ fn configure_hosted_kernel_paths(
         variant.path = local_root
             .join(selector_dir(variant.selector.architecture))
             .join("firecracker")
-            .join("standard")
+            .join(protection_dir(variant.selector.protection_mode))
             .join("vmlinux");
     }
 
@@ -170,7 +234,7 @@ fn configure_hosted_kernel_paths(
     let local_path = local_root
         .join(selector_dir)
         .join("firecracker")
-        .join("standard")
+        .join(protection_dir(protection_mode))
         .join("vmlinux");
     let cache_path = cache_root
         .join("demo-fs")
@@ -179,7 +243,7 @@ fn configure_hosted_kernel_paths(
         .join("v1")
         .join(selector_dir)
         .join("firecracker")
-        .join("standard")
+        .join(protection_dir(protection_mode))
         .join("vmlinux");
     let store_path = PathBuf::from(".port/hosted/demo/artifacts")
         .join("demo-fs")
@@ -188,7 +252,7 @@ fn configure_hosted_kernel_paths(
         .join("v1")
         .join(selector_dir)
         .join("firecracker")
-        .join("standard")
+        .join(protection_dir(protection_mode))
         .join("vmlinux");
 
     (local_path, cache_path, store_path)
@@ -203,8 +267,13 @@ fn cli_artifact_push_and_pull_round_trip_variant_contract() {
     let cache_root = temp.path().join("artifact-cache");
 
     let mut config = PortConfig::sample();
-    let (local_path, cache_path, store_path) =
-        configure_kernel_paths(&mut config, &local_root, &store_root, &cache_root);
+    let (local_path, cache_path, store_path) = configure_kernel_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Standard,
+    );
     write_config(&config_path, &config);
 
     fs::create_dir_all(local_path.parent().expect("local parent"))
@@ -295,6 +364,7 @@ fn cli_artifact_build_push_and_pull_round_trip_through_hosted_backend() {
         &cache_root,
         &endpoint,
         architecture,
+        ProtectionMode::Standard,
     );
     write_config(&config_path, &config);
 
@@ -440,4 +510,331 @@ fn cli_artifact_build_push_and_pull_round_trip_through_hosted_backend() {
     );
 
     let _ = fs::remove_dir_all(".port/hosted/demo");
+}
+
+#[test]
+fn cli_artifact_build_and_validate_selected_pvm_kernel_variant() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let local_root = temp.path().join("local-artifacts");
+    let store_root = temp.path().join("artifact-store");
+    let cache_root = temp.path().join("artifact-cache");
+
+    let mut config = PortConfig::sample();
+    let (kernel_path, _, _) = configure_kernel_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Pvm,
+    );
+    write_config(&config_path, &config);
+
+    let build = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("build")
+        .arg("--artifact")
+        .arg("demo-kernel")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--substrate")
+        .arg("firecracker")
+        .arg("--protection-mode")
+        .arg("pvm")
+        .output()
+        .expect("build command");
+    assert!(
+        build.status.success(),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_stdout = String::from_utf8_lossy(&build.stdout);
+    assert!(
+        build_stdout.contains("built kernel artifact 'demo-kernel'"),
+        "{build_stdout}"
+    );
+    assert!(
+        build_stdout.contains("for x86_64/firecracker/pvm"),
+        "{build_stdout}"
+    );
+    assert!(
+        build_stdout.contains(&kernel_path.display().to_string()),
+        "{build_stdout}"
+    );
+    assert!(kernel_path.exists(), "pvm kernel path should exist");
+
+    let validate = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("validate")
+        .arg("--artifact")
+        .arg("demo-kernel")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--substrate")
+        .arg("firecracker")
+        .arg("--protection-mode")
+        .arg("pvm")
+        .output()
+        .expect("validate command");
+    assert!(
+        validate.status.success(),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&validate.stdout),
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    let validate_stdout = String::from_utf8_lossy(&validate.stdout);
+    assert!(
+        validate_stdout.contains("validated kernel artifact 'demo-kernel'"),
+        "{validate_stdout}"
+    );
+    assert!(
+        validate_stdout.contains("for x86_64/firecracker/pvm"),
+        "{validate_stdout}"
+    );
+    assert!(
+        validate_stdout.contains(&kernel_path.display().to_string()),
+        "{validate_stdout}"
+    );
+}
+
+#[test]
+fn cli_artifact_build_and_validate_selected_pvm_guest_image_variant() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let local_root = temp.path().join("local-artifacts");
+    let store_root = temp.path().join("artifact-store");
+    let cache_root = temp.path().join("artifact-cache");
+
+    let mut config = PortConfig::sample();
+    let (guest_path, _, _) = configure_guest_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Pvm,
+    );
+    write_config(&config_path, &config);
+
+    let build = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("build")
+        .arg("--artifact")
+        .arg("demo-guest")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--substrate")
+        .arg("firecracker")
+        .arg("--protection-mode")
+        .arg("pvm")
+        .output()
+        .expect("build command");
+    assert!(
+        build.status.success(),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let build_stdout = String::from_utf8_lossy(&build.stdout);
+    assert!(
+        build_stdout.contains("built guest-image artifact 'demo-guest'"),
+        "{build_stdout}"
+    );
+    assert!(
+        build_stdout.contains("for x86_64/firecracker/pvm"),
+        "{build_stdout}"
+    );
+    assert!(
+        build_stdout.contains(&guest_path.display().to_string()),
+        "{build_stdout}"
+    );
+    assert!(guest_path.exists(), "pvm guest-image path should exist");
+
+    let validate = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("validate")
+        .arg("--artifact")
+        .arg("demo-guest")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--substrate")
+        .arg("firecracker")
+        .arg("--protection-mode")
+        .arg("pvm")
+        .output()
+        .expect("validate command");
+    assert!(
+        validate.status.success(),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&validate.stdout),
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    let validate_stdout = String::from_utf8_lossy(&validate.stdout);
+    assert!(
+        validate_stdout.contains("validated guest-image artifact 'demo-guest'"),
+        "{validate_stdout}"
+    );
+    assert!(
+        validate_stdout.contains("for x86_64/firecracker/pvm"),
+        "{validate_stdout}"
+    );
+    assert!(
+        validate_stdout.contains(&guest_path.display().to_string()),
+        "{validate_stdout}"
+    );
+}
+
+#[test]
+fn cli_artifact_push_and_pull_round_trip_pvm_variant_contract_for_kernel_and_guest_image() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let local_root = temp.path().join("local-artifacts");
+    let store_root = temp.path().join("artifact-store");
+    let cache_root = temp.path().join("artifact-cache");
+
+    let mut config = PortConfig::sample();
+    let (kernel_local_path, kernel_cache_path, kernel_store_path) = configure_kernel_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Pvm,
+    );
+    let (guest_local_path, guest_cache_path, guest_store_path) = configure_guest_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Pvm,
+    );
+    write_config(&config_path, &config);
+
+    fs::create_dir_all(kernel_local_path.parent().expect("kernel parent"))
+        .expect("kernel parent should exist");
+    fs::create_dir_all(guest_local_path.parent().expect("guest parent"))
+        .expect("guest parent should exist");
+    fs::write(&kernel_local_path, "demo-pvm-kernel-bytes").expect("kernel artifact should write");
+    fs::write(&guest_local_path, "demo-pvm-guest-bytes").expect("guest artifact should write");
+
+    for (artifact, local_path, cache_path, store_path, expected_bytes) in [
+        (
+            "demo-kernel",
+            &kernel_local_path,
+            &kernel_cache_path,
+            &kernel_store_path,
+            "demo-pvm-kernel-bytes",
+        ),
+        (
+            "demo-guest",
+            &guest_local_path,
+            &guest_cache_path,
+            &guest_store_path,
+            "demo-pvm-guest-bytes",
+        ),
+    ] {
+        let push = Command::new(port_bin())
+            .arg("--config")
+            .arg(&config_path)
+            .arg("artifacts")
+            .arg("push")
+            .arg("--artifact")
+            .arg(artifact)
+            .arg("--architecture")
+            .arg("x86-64")
+            .arg("--substrate")
+            .arg("firecracker")
+            .arg("--protection-mode")
+            .arg("pvm")
+            .output()
+            .expect("push command");
+        assert!(
+            push.status.success(),
+            "stdout: {} stderr: {}",
+            String::from_utf8_lossy(&push.stdout),
+            String::from_utf8_lossy(&push.stderr)
+        );
+        let push_stdout = String::from_utf8_lossy(&push.stdout);
+        assert!(
+            push_stdout.contains("for x86_64/firecracker/pvm"),
+            "{push_stdout}"
+        );
+        assert!(
+            push_stdout.contains(&local_path.display().to_string()),
+            "{push_stdout}"
+        );
+        assert!(
+            push_stdout.contains(&store_path.display().to_string()),
+            "{push_stdout}"
+        );
+        assert!(
+            push_stdout.contains(&cache_path.display().to_string()),
+            "{push_stdout}"
+        );
+        assert_eq!(
+            fs::read_to_string(store_path).expect("store path should exist"),
+            expected_bytes
+        );
+        assert_eq!(
+            fs::read_to_string(cache_path).expect("cache path should exist"),
+            expected_bytes
+        );
+
+        fs::remove_file(local_path).expect("local artifact should be removable");
+        fs::remove_file(cache_path).expect("cache artifact should be removable");
+
+        let pull = Command::new(port_bin())
+            .arg("--config")
+            .arg(&config_path)
+            .arg("artifacts")
+            .arg("pull")
+            .arg("--artifact")
+            .arg(artifact)
+            .arg("--architecture")
+            .arg("x86-64")
+            .arg("--substrate")
+            .arg("firecracker")
+            .arg("--protection-mode")
+            .arg("pvm")
+            .output()
+            .expect("pull command");
+        assert!(
+            pull.status.success(),
+            "stdout: {} stderr: {}",
+            String::from_utf8_lossy(&pull.stdout),
+            String::from_utf8_lossy(&pull.stderr)
+        );
+        let pull_stdout = String::from_utf8_lossy(&pull.stdout);
+        assert!(
+            pull_stdout.contains("for x86_64/firecracker/pvm"),
+            "{pull_stdout}"
+        );
+        assert!(
+            pull_stdout.contains(&store_path.display().to_string()),
+            "{pull_stdout}"
+        );
+        assert!(
+            pull_stdout.contains(&cache_path.display().to_string()),
+            "{pull_stdout}"
+        );
+        assert!(
+            pull_stdout.contains(&local_path.display().to_string()),
+            "{pull_stdout}"
+        );
+        assert_eq!(
+            fs::read_to_string(local_path).expect("local path should be restored"),
+            expected_bytes
+        );
+        assert_eq!(
+            fs::read_to_string(cache_path).expect("cache path should be restored"),
+            expected_bytes
+        );
+    }
 }
