@@ -19,8 +19,8 @@ index: 7
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/4 stories done
+**Progress:** 0/1 voyages complete, 2/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted Artifact Push And Pull](voyages/1vzW9Q000/) | in-progress | 1/4 |
+| [Hosted Artifact Push And Pull](voyages/1vzW9Q000/) | in-progress | 2/4 |
 <!-- END GENERATED -->

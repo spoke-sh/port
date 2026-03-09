@@ -25,12 +25,12 @@ started_at: 2026-03-09T01:45:59
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Hosted Artifact Backend Contract](../../../../stories/1vzWCG000/README.md) | feat | done |
-| [Implement Hosted Artifact Control Plane Routes](../../../../stories/1vzWCI000/README.md) | feat | backlog |
+| [Implement Hosted Artifact Control Plane Routes](../../../../stories/1vzWCI000/README.md) | feat | done |
 | [Route Artifact Push And Pull Through Hosted Backend](../../../../stories/1vzWCJ000/README.md) | feat | backlog |
 | [Publish Hosted Artifact Mobility Workflow](../../../../stories/1vzWCK000/README.md) | feat | backlog |
 <!-- END GENERATED -->
