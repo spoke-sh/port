@@ -785,15 +785,18 @@ pub fn push_artifact(
             })
         }
         ArtifactStoreContract::OciRegistry {
+            oras_binary,
+            store_path,
             remote_reference,
             transport,
             auth,
-            ..
-        } => bail!(
-            "OCI artifact push transport is not implemented yet for '{}' over {} with {} auth",
+        } => push_artifact_to_oci_registry_backend(
+            artifact,
+            oras_binary,
+            store_path,
             remote_reference,
-            transport.describe(),
-            auth.describe()
+            transport,
+            auth,
         ),
         ArtifactStoreContract::HostedApi { identity, transfer } => {
             push_artifact_to_hosted_backend(config, artifact, identity, transfer)
@@ -874,6 +877,130 @@ fn push_artifact_to_hosted_backend(
             identity.endpoint, identity.control_plane
         ),
         bytes_copied: uploaded.result.bytes_copied,
+    })
+}
+
+fn push_artifact_to_oci_registry_backend(
+    artifact: ArtifactMetadata,
+    oras_binary: PathBuf,
+    store_path: PathBuf,
+    remote_reference: String,
+    transport: OciRegistryTransport,
+    auth: OciRegistryAuth,
+) -> Result<ArtifactTransfer> {
+    fs::metadata(&artifact.path).with_context(|| {
+        format!(
+            "failed to inspect local artifact '{}' before OCI push to '{}'",
+            artifact.path.display(),
+            remote_reference
+        )
+    })?;
+
+    let mut command = Command::new(&oras_binary);
+    command.arg("push");
+    if transport == OciRegistryTransport::PlainHttp {
+        command.arg("--plain-http");
+    }
+    let password = match &auth {
+        OciRegistryAuth::Anonymous => None,
+        OciRegistryAuth::BasicEnv {
+            username_variable,
+            password_variable,
+        } => {
+            let username = env::var(username_variable).with_context(|| {
+                format!(
+                    "OCI registry backend for artifact '{}' requires env:{} before pushing '{}'",
+                    artifact.name, username_variable, remote_reference
+                )
+            })?;
+            let password = env::var(password_variable).with_context(|| {
+                format!(
+                    "OCI registry backend for artifact '{}' requires env:{} before pushing '{}'",
+                    artifact.name, password_variable, remote_reference
+                )
+            })?;
+            command
+                .arg("--username")
+                .arg(username)
+                .arg("--password-stdin");
+            Some(password)
+        }
+    };
+    command.arg(&remote_reference);
+    command.arg(format!(
+        "{}:{}",
+        artifact.path.display(),
+        artifact_oci_layer_media_type(artifact.kind)
+    ));
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if password.is_some() {
+        command.stdin(Stdio::piped());
+    }
+
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start OCI artifact push for '{}' ({}) from '{}' to '{}' via {} with {} auth",
+            artifact.reference,
+            format_artifact_selector(artifact.selector),
+            artifact.path.display(),
+            remote_reference,
+            transport.describe(),
+            auth.describe()
+        )
+    })?;
+    if let Some(password) = password {
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("failed to open oras stdin for OCI password input")?;
+        stdin
+            .write_all(password.as_bytes())
+            .context("failed to write OCI registry password to oras stdin")?;
+        stdin
+            .write_all(b"\n")
+            .context("failed to terminate OCI registry password input")?;
+    }
+    let output = child.wait_with_output().with_context(|| {
+        format!(
+            "failed to wait for OCI artifact push of '{}' to '{}'",
+            artifact.reference, remote_reference
+        )
+    })?;
+    if !output.status.success() {
+        bail!(
+            "OCI artifact push failed for '{}' ({}) from '{}' into cache '{}' via {} with {} auth and remote '{}' using '{}'; status {}; stderr: {}; stdout: {}",
+            artifact.reference,
+            format_artifact_selector(artifact.selector),
+            artifact.path.display(),
+            artifact.cache_path.display(),
+            transport.describe(),
+            auth.describe(),
+            remote_reference,
+            oras_binary.display(),
+            output.status,
+            summarize_process_output(&output.stderr),
+            summarize_process_output(&output.stdout)
+        );
+    }
+
+    let bytes_copied = copy_file(&artifact.path, &artifact.cache_path).with_context(|| {
+        format!(
+            "failed to refresh cache '{}' after OCI push to '{}'",
+            artifact.cache_path.display(),
+            remote_reference
+        )
+    })?;
+
+    Ok(ArtifactTransfer {
+        artifact,
+        store_path,
+        backend_detail: format!(
+            "oci-registry {} {} via {}",
+            transport.describe(),
+            auth.describe(),
+            oras_binary.display()
+        ),
+        bytes_copied,
     })
 }
 
@@ -6380,6 +6507,31 @@ fn copy_reader_to_path<R: Read>(mut reader: R, destination: &Path) -> Result<u64
         .with_context(|| format!("failed to write '{}'", destination.display()))
 }
 
+fn artifact_oci_layer_media_type(kind: ArtifactKind) -> &'static str {
+    match kind {
+        ArtifactKind::Kernel => "application/vnd.port.kernel.v1+binary",
+        ArtifactKind::GuestImage => "application/vnd.port.guest-image.v1+ext4",
+    }
+}
+
+fn format_artifact_selector(selector: ArtifactSelector) -> String {
+    format!(
+        "{}/{}/{}",
+        architecture_dir(selector.architecture),
+        substrate_dir(selector.substrate),
+        protection_mode_dir(selector.protection_mode)
+    )
+}
+
+fn summarize_process_output(output: &[u8]) -> String {
+    let rendered = String::from_utf8_lossy(output).trim().to_string();
+    if rendered.is_empty() {
+        String::from("<empty>")
+    } else {
+        rendered
+    }
+}
+
 fn architecture_dir(architecture: MachineArchitecture) -> &'static str {
     match architecture {
         MachineArchitecture::Native => "native",
@@ -8417,6 +8569,22 @@ mod tests {
         (local_path, cache_path, store_path)
     }
 
+    fn install_fake_oras_script(root: &Path, body: &str) -> PathBuf {
+        let script_path = root.join("oras");
+        fs::write(&script_path, body).expect("fake oras script should write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut perms = fs::metadata(&script_path)
+                .expect("fake oras metadata should exist")
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&script_path, perms).expect("fake oras permissions should update");
+        }
+        script_path
+    }
+
     #[test]
     fn resolve_artifact_store_contract_returns_hosted_transfer_contract() {
         let mut config = PortConfig::sample();
@@ -8635,6 +8803,188 @@ mod tests {
             auth_check.detail.contains("PORT_OCI_USER"),
             "unexpected detail: {}",
             auth_check.detail
+        );
+    }
+
+    #[test]
+    fn oci_registry_push_executes_oras_and_materializes_cache() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let args_log = tempdir.path().join("oras-args.log");
+        install_fake_oras_script(
+            tempdir.path(),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${PORT_TEST_ORAS_ARGS:?}"
+"#,
+        );
+        let _path = ScopedPathEnv::prepend(tempdir.path());
+        unsafe {
+            std::env::set_var("PORT_TEST_ORAS_ARGS", &args_log);
+        }
+
+        let local_root = tempdir.path().join("local-artifacts");
+        let cache_root = tempdir.path().join("artifact-cache");
+        let mut config = PortConfig::sample();
+        let kernel = config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        kernel.distribution.cache_root = cache_root.clone();
+        kernel.distribution.push = ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::Anonymous,
+        };
+        for variant in &mut kernel.variants {
+            variant.path = local_root
+                .join(match variant.selector.architecture {
+                    MachineArchitecture::Native => "native",
+                    MachineArchitecture::X86_64 => "x86_64",
+                    MachineArchitecture::Aarch64 => "aarch64",
+                })
+                .join("firecracker")
+                .join(match variant.selector.protection_mode {
+                    ProtectionMode::Standard => "standard",
+                    ProtectionMode::Pvm => "pvm",
+                })
+                .join("vmlinux");
+        }
+
+        let artifact_path = local_root
+            .join("x86_64")
+            .join("firecracker")
+            .join("standard")
+            .join("vmlinux");
+        fs::create_dir_all(artifact_path.parent().expect("parent should exist"))
+            .expect("artifact parent should exist");
+        fs::write(&artifact_path, b"demo-oci-kernel-bytes").expect("artifact should write");
+
+        let transfer = push_artifact(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("OCI push should succeed");
+
+        assert_eq!(
+            transfer.store_path,
+            PathBuf::from("demo-fs/port/demo-kernel:v1-x86_64-firecracker-standard")
+        );
+        assert_eq!(transfer.bytes_copied, 21);
+        assert!(
+            transfer
+                .backend_detail
+                .contains("oci-registry plain-http anonymous"),
+            "unexpected backend detail: {}",
+            transfer.backend_detail
+        );
+        assert_eq!(
+            fs::read(&transfer.artifact.cache_path).expect("cache path should exist"),
+            b"demo-oci-kernel-bytes"
+        );
+
+        let args = fs::read_to_string(&args_log).expect("args log should exist");
+        assert!(args.contains("push"), "unexpected args: {args}");
+        assert!(args.contains("--plain-http"), "unexpected args: {args}");
+        assert!(
+            args.contains("demo-fs/port/demo-kernel:v1-x86_64-firecracker-standard"),
+            "unexpected args: {args}"
+        );
+        assert!(
+            args.contains("vmlinux:application/vnd.port.kernel.v1+binary"),
+            "unexpected args: {args}"
+        );
+    }
+
+    #[test]
+    fn oci_registry_push_failure_surfaces_remote_and_path_context() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        install_fake_oras_script(
+            tempdir.path(),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+echo "simulated oras push failure" >&2
+exit 19
+"#,
+        );
+        let _path = ScopedPathEnv::prepend(tempdir.path());
+
+        let local_root = tempdir.path().join("local-artifacts");
+        let cache_root = tempdir.path().join("artifact-cache");
+        let mut config = PortConfig::sample();
+        let kernel = config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        kernel.distribution.cache_root = cache_root.clone();
+        kernel.distribution.push = ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::Anonymous,
+        };
+        for variant in &mut kernel.variants {
+            variant.path = local_root
+                .join(match variant.selector.architecture {
+                    MachineArchitecture::Native => "native",
+                    MachineArchitecture::X86_64 => "x86_64",
+                    MachineArchitecture::Aarch64 => "aarch64",
+                })
+                .join("firecracker")
+                .join(match variant.selector.protection_mode {
+                    ProtectionMode::Standard => "standard",
+                    ProtectionMode::Pvm => "pvm",
+                })
+                .join("vmlinux");
+        }
+
+        let artifact_path = local_root
+            .join("x86_64")
+            .join("firecracker")
+            .join("standard")
+            .join("vmlinux");
+        fs::create_dir_all(artifact_path.parent().expect("parent should exist"))
+            .expect("artifact parent should exist");
+        fs::write(&artifact_path, b"demo-oci-kernel-bytes").expect("artifact should write");
+
+        let error = push_artifact(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect_err("OCI push should fail");
+
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("demo-fs/port/demo-kernel:v1"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("x86_64/firecracker/standard"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("demo-fs/port/demo-kernel:v1-x86_64-firecracker-standard"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains(&artifact_path.display().to_string()),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("artifact-cache"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("simulated oras push failure"),
+            "unexpected error: {rendered}"
         );
     }
 
