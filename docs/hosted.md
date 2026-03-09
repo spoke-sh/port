@@ -11,6 +11,10 @@ What is shipped today:
   `stop`
 - guest `exec`, `copy`, `pty`, `logs`, and `forward` through the canonical
   guest protocol
+- hosted standard Firecracker launch through `port machine launch` for the
+  sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines when a
+  registered hosted node owns the target runtime root and standard artifacts
+  are present
 - prepared-node x86_64 Firecracker/PVM launch through `port machine launch`
   when a hosted machine resolves to a ready node with a real PVM host kit and
   PVM artifact variants
@@ -227,7 +231,8 @@ Host-group contract:
 What this does not claim:
 
 - no scheduler behavior exists yet beyond the deterministic-first-fit contract
-- no hosted remote-launch implementation ships yet
+- no autoscaling, retry policy, or broader placement product exists beyond the
+  shipped explicit-node hosted launch path
 - no restart-policy, scheduler-policy, or hardened secret-backend product
   exists yet for hosted services and sandboxes
 - hosted `machine monitor` and `top` are runtime-inspection surfaces, not a
@@ -243,16 +248,19 @@ full remote control plane already exists.
 
 The canonical operator verbs stay the same:
 
+- `port machine launch --machine <name>`
 - `port machine list`
 - `port machine status --machine <name>`
 - `port machine monitor --machine <name>`
 - `port machine top --machine <name>`
 - `port machine stop --machine <name>`
 
-For a hosted machine, the shared model now derives four explicit contracts:
+For a hosted machine, the shared model now derives five explicit contracts:
 
 - summary: which control plane owns the machine, which hosted nodes can run it,
   and which explicit host groups include those nodes
+- launch: the placement route and runtime owner for hosted
+  `port machine launch`
 - status: the status source and route for the future hosted
   `port machine status` command
 - monitor: the runtime owner plus route for hosted `port machine monitor` and
@@ -285,6 +293,11 @@ What this means operationally:
 
 What is runnable today:
 
+- hosted `machine launch` now resolves through the live hosted HTTP path:
+  CLI/SDK -> `port control-plane serve` -> `port node-agent serve`
+- the shipped standard demo lane covers `cloud-generic`, `cloud-aws`, and
+  `cloud-gcp` when their matching hosted nodes are registered and standard
+  Firecracker artifacts exist on the selected node host
 - local `port machine list`, `status`, `monitor`, `top`, and `stop` inspect
   and manage Port-managed runtime directories on Linux
 - hosted `machine list`, `status`, `monitor`, `top`, and `stop` now resolve
@@ -319,6 +332,37 @@ What is runnable today:
   definitions under that same runtime owner, including desired state, guest
   command, secret bindings, hosted routing context, and the node-owned runtime
   record path
+
+## Hosted Standard Cloud Workflow
+
+The standard hosted cloud lane keeps the same command family and only changes
+runtime ownership:
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+```
+
+Provider mapping for the shipped sample machines:
+
+- `cloud-generic` launches through `generic-linux-node`
+- `cloud-aws` launches through `aws-linux-node`
+- `cloud-gcp` launches through `gcp-linux-node`
+
+Repository-local proof for the shipped standard hosted lane:
+
+```bash
+cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
+cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
+```
+
+Prepared-node PVM remains a second hosted launch contract layered on the same
+control-plane and node-agent route when the machine is switched to
+`protection_mode = "pvm"` and the prepared host kit exists.
 - hosted `service list|status|stop` now inspects, updates, and stops the live
   managed process through that same hosted route while surfacing runtime state
   back through the canonical `port service` surface

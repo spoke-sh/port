@@ -1,0 +1,174 @@
+---
+recorded_at: 2026-03-09T03:39:00.865119170-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && bash scripts/verify-hosted-standard-docs.sh'
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+122:Hosted standard cloud workflow:
+2161:            "Hosted standard cloud workflow",
+129:Repository-local hosted standard proof:
+2162:            "Repository-local hosted standard proof",
+README.md:147:- `cloud-generic` is the sample hosted denial case: if you switch it to
+README.md:306:| `generic-linux` | `cloud-generic` | Hosted / partial | `port doctor` reports provider and lane detail; with `port control-plane serve`, a registered `generic-linux-node`, and standard artifacts, `port machine launch --machine cloud-generic` routes through the hosted control plane and selected node |
+README.md:312:the sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines:
+README.md:323:Use the same hosted flow for `cloud-generic` with `generic-linux-node` or for
+README.md:366:  for the shipped standard cloud demo lane (`cloud-generic`, `cloud-aws`,
+README.md:405:- The same hosted standard launch contract applies to `cloud-generic` and
+docs/cloud.md:33:| `generic-linux` | `generic-linux` | `cloud-generic` | Hosted standard lane / partial implementation | `port doctor` reports provider and lane detail; with `port control-plane serve`, a registered `generic-linux-node`, and standard artifacts, `port machine launch --machine cloud-generic` routes through the hosted control plane and selected node |
+docs/cloud.md:60:5. Use the same hosted flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
+docs/hosted.md:15:  sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines when a
+docs/hosted.md:298:- the shipped standard demo lane covers `cloud-generic`, `cloud-aws`, and
+docs/hosted.md:352:- `cloud-generic` launches through `generic-linux-node`
+crates/port-cli/src/lib.rs:110:  Switch `cloud-generic` to `protection_mode = \"pvm\"` to see an explicit hosted placement denial against `generic-linux-node state = planned`.
+crates/port-cli/src/lib.rs:128:  Repeat the same hosted control-plane flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
+crates/port-cli/src/lib.rs:156:  `cloud-generic` and `cloud-gcp` use that same hosted surface with `generic-linux-node` and `gcp-linux-node`.
+README.md:131:- switch `machines.cloud-aws.protection_mode` to `pvm`
+README.md:140:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+README.md:141:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+README.md:142:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
+README.md:150:- `cloud-aws` is the sample hosted prepared-node case: once you switch it to
+README.md:307:| `aws` | `cloud-aws` | Hosted / partial | `port doctor` reports AWS readiness details; with `port control-plane serve`, a registered `aws-linux-node`, and standard artifacts, `port machine launch --machine cloud-aws` routes through the hosted control plane and selected node |
+README.md:312:the sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines:
+README.md:318:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+README.md:319:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+README.md:320:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+README.md:332:Prepared-node PVM remains a second hosted lane for `cloud-aws` when you switch
+README.md:366:  for the shipped standard cloud demo lane (`cloud-generic`, `cloud-aws`,
+README.md:374:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+README.md:376:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+README.md:377:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+README.md:386:- `port machine status --machine cloud-aws` now surfaces per-node configured,
+README.md:467:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+README.md:468:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+README.md:469:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+README.md:470:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+README.md:471:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+README.md:742:  --machine cloud-aws -- /bin/sh -lc 'printf hosted-pty-ok'
+README.md:745:  --machine cloud-aws --path /var/log/app.log --follow
+README.md:748:  --machine cloud-aws --direction host-to-guest \
+README.md:752:  --machine cloud-aws --listen 127.0.0.1:8081 --target 127.0.0.1:80
+docs/cloud.md:34:| `aws` | `aws-linux` | `cloud-aws` | Hosted standard lane / partial implementation | `port doctor` reports AWS readiness detail; with `port control-plane serve`, a registered `aws-linux-node`, and standard artifacts, `port machine launch --machine cloud-aws` routes through the hosted control plane and selected node |
+docs/cloud.md:55:   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+docs/cloud.md:56:   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+docs/cloud.md:57:   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+docs/cloud.md:68:7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist.
+docs/hosted.md:15:  sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines when a
+docs/hosted.md:109:requirements are a copied config that switches `cloud-aws` to `pvm`, PVM
+docs/hosted.md:112:--machine cloud-aws` runs through the control plane.
+docs/hosted.md:271:Current hosted lifecycle contract for a sample machine such as `cloud-aws`:
+docs/hosted.md:298:- the shipped standard demo lane covers `cloud-generic`, `cloud-aws`, and
+docs/hosted.md:345:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+docs/hosted.md:346:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+docs/hosted.md:347:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+docs/hosted.md:353:- `cloud-aws` launches through `aws-linux-node`
+docs/hosted.md:382:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+docs/hosted.md:383:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+docs/hosted.md:384:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+docs/hosted.md:385:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+docs/hosted.md:386:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+docs/hosted.md:424:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+docs/hosted.md:469:What `port machine status --machine cloud-aws` now surfaces for each hosted
+docs/hosted.md:531:Hosted guest attach contract for a hosted machine such as `cloud-aws`:
+docs/hosted.md:565:  --machine cloud-aws -- /bin/sh -lc 'printf hosted-pty-ok'
+docs/hosted.md:568:  --machine cloud-aws --path /var/log/app.log --follow
+docs/hosted.md:571:  --machine cloud-aws --direction host-to-guest \
+docs/hosted.md:575:  --machine cloud-aws --listen 127.0.0.1:8081 --target 127.0.0.1:80
+docs/hosted.md:578:  --machine cloud-aws --listen unix:/tmp/cloud-aws.sock --target unix:/var/run/app.sock \
+docs/hosted.md:582:  --machine cloud-aws --list
+docs/hosted.md:585:  --machine cloud-aws --stop --name demo-sock
+crates/port-cli/src/lib.rs:53:  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+crates/port-cli/src/lib.rs:54:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --secret API_TOKEN=demo-token -- /app/web --listen :8080
+crates/port-cli/src/lib.rs:55:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
+crates/port-cli/src/lib.rs:56:  port --config examples/port.toml service list --machine cloud-aws
+crates/port-cli/src/lib.rs:57:  port --config examples/port.toml service status --machine cloud-aws --name web
+crates/port-cli/src/lib.rs:58:  port --config examples/port.toml service stop --machine cloud-aws --name web
+crates/port-cli/src/lib.rs:63:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+crates/port-cli/src/lib.rs:64:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+crates/port-cli/src/lib.rs:65:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
+crates/port-cli/src/lib.rs:66:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+crates/port-cli/src/lib.rs:67:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+crates/port-cli/src/lib.rs:104:  Copy `examples/port.toml` to a temp config, switch `machines.cloud-aws` to `protection_mode = \"pvm\"`, and point the `x86_64/firecracker/pvm` kernel and guest variants at prepared artifact paths.
+crates/port-cli/src/lib.rs:107:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+crates/port-cli/src/lib.rs:108:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+crates/port-cli/src/lib.rs:109:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
+crates/port-cli/src/lib.rs:125:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+crates/port-cli/src/lib.rs:126:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+crates/port-cli/src/lib.rs:127:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+crates/port-cli/src/lib.rs:151:    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws`
+crates/port-cli/src/lib.rs:153:    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
+crates/port-cli/src/lib.rs:154:    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws`
+crates/port-cli/src/lib.rs:155:    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'`
+crates/port-cli/src/lib.rs:2121:            machine_name: String::from("cloud-aws"),
+crates/port-cli/src/lib.rs:2125:            runtime_dir: PathBuf::from("/tmp/runtime/cloud-aws"),
+crates/port-cli/src/lib.rs:2126:            config_path: PathBuf::from("/tmp/runtime/cloud-aws/firecracker-config.json"),
+crates/port-cli/src/lib.rs:2127:            manifest_path: PathBuf::from("/tmp/runtime/cloud-aws/manifest.json"),
+crates/port-cli/src/lib.rs:2128:            pid_path: PathBuf::from("/tmp/runtime/cloud-aws/firecracker.pid"),
+crates/port-cli/src/lib.rs:2129:            firecracker_log: PathBuf::from("/tmp/runtime/cloud-aws/firecracker.log"),
+crates/port-cli/src/lib.rs:2130:            stdout_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stdout.log"),
+crates/port-cli/src/lib.rs:2131:            stderr_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stderr.log"),
+crates/port-cli/src/lib.rs:2332:            "control plane 'demo' could not inspect hosted fleet state for machine 'cloud-aws'",
+crates/port-cli/src/lib.rs:2341:            "detail: control plane 'demo' could not inspect hosted fleet state for machine 'cloud-aws'",
+crates/port-cli/src/lib.rs:2580:            "cloud-aws",
+crates/port-cli/src/lib.rs:2605:                assert_eq!(machine, "cloud-aws");
+crates/port-cli/src/lib.rs:2622:            "cloud-aws",
+crates/port-cli/src/lib.rs:2636:                assert_eq!(machine, "cloud-aws");
+README.md:308:| `gcp` | `cloud-gcp` | Hosted / partial | `port doctor` reports GCP readiness details; with `port control-plane serve`, a registered `gcp-linux-node`, and standard artifacts, `port machine launch --machine cloud-gcp` routes through the hosted control plane and selected node |
+README.md:312:the sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines:
+README.md:324:`cloud-gcp` with `gcp-linux-node`. The repo-local automated proof for that lane
+README.md:367:  `cloud-gcp`) and for prepared x86_64 PVM machines.
+README.md:406:  `cloud-gcp`; only the node name and provider identity change.
+docs/cloud.md:35:| `gcp` | `gcp-linux` | `cloud-gcp` | Hosted standard lane / partial implementation | `port doctor` reports GCP readiness detail; with `port control-plane serve`, a registered `gcp-linux-node`, and standard artifacts, `port machine launch --machine cloud-gcp` routes through the hosted control plane and selected node |
+docs/cloud.md:60:5. Use the same hosted flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
+docs/hosted.md:15:  sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines when a
+docs/hosted.md:299:  `cloud-gcp` when their matching hosted nodes are registered and standard
+docs/hosted.md:354:- `cloud-gcp` launches through `gcp-linux-node`
+crates/port-cli/src/lib.rs:128:  Repeat the same hosted control-plane flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
+crates/port-cli/src/lib.rs:156:  `cloud-generic` and `cloud-gcp` use that same hosted surface with `generic-linux-node` and `gcp-linux-node`.
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

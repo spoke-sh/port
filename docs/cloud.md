@@ -12,8 +12,8 @@ The dedicated Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
 The dedicated AVF macOS contract lives in [`avf.md`](avf.md).
 
 `port doctor` reports both provider-aware and lane-aware support boundaries, and
-`port machine launch` still fails fast when you target a lane that Port does not
-yet execute.
+`port machine launch` fails fast only when you target a lane that Port still
+models but does not execute yet.
 
 ## Execution Lane Matrix
 
@@ -30,31 +30,48 @@ yet execute.
 | Provider token | Example host | Example machine | MVP status | Current CLI behavior |
 |----------------|--------------|-----------------|------------|----------------------|
 | `local` | `local` | `demo` | Supported | `port doctor` runs full local preflight and `port machine launch --machine demo` can boot Firecracker on Linux |
-| `generic-linux` | `generic-linux` | `cloud-generic` | Designed, partial implementation | `port doctor` reports the future remote Linux lane; `port machine launch` tells you to run Port on that Linux host directly |
-| `aws` | `aws-linux` | `cloud-aws` | Designed, partial implementation | `port doctor` reports AWS as a justified future lane; `port machine launch --machine cloud-aws` returns AWS-specific not-yet-implemented guidance |
-| `gcp` | `gcp-linux` | `cloud-gcp` | Designed, partial implementation | `port doctor` reports GCP as a justified future lane; `port machine launch` returns GCP-specific not-yet-implemented guidance |
+| `generic-linux` | `generic-linux` | `cloud-generic` | Hosted standard lane / partial implementation | `port doctor` reports provider and lane detail; with `port control-plane serve`, a registered `generic-linux-node`, and standard artifacts, `port machine launch --machine cloud-generic` routes through the hosted control plane and selected node |
+| `aws` | `aws-linux` | `cloud-aws` | Hosted standard lane / partial implementation | `port doctor` reports AWS readiness detail; with `port control-plane serve`, a registered `aws-linux-node`, and standard artifacts, `port machine launch --machine cloud-aws` routes through the hosted control plane and selected node |
+| `gcp` | `gcp-linux` | `cloud-gcp` | Hosted standard lane / partial implementation | `port doctor` reports GCP readiness detail; with `port control-plane serve`, a registered `gcp-linux-node`, and standard artifacts, `port machine launch --machine cloud-gcp` routes through the hosted control plane and selected node |
 | `azure` | `azure-linux` | `cloud-azure` | Unsupported for MVP | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
 
 ## Remote Linux Workflow
 
-Use the cloud lane to model intent and inspect support boundaries, not to
-perform remote launch yet.
+Use the hosted control-plane lane to run the shipped standard cloud workflow.
 
-1. Keep the canonical config explicit about provider identity, for example `provider = "aws"` on `hosts.aws-linux`.
-   Remote/cloud hosts now also point at a named hosted control plane, for
-   example `mode = "hosted-control-plane"` plus `control_plane = "demo"`.
-2. Run `port doctor --config examples/port.toml` on the Linux environment you plan to use for Firecracker execution.
-3. Read the provider-aware checks to confirm whether the target lane is `local`, a future remote lane (`generic-linux`, `aws`, `gcp`), or explicitly unsupported (`azure`).
-4. For the current MVP, run `port machine launch --machine demo` only on a Linux host that passes `port doctor`.
-5. If you try `port machine launch --machine cloud-aws` or another remote machine, Port intentionally fails fast with guidance about the current boundary plus the modeled hosted control-plane endpoint and token source.
-6. `port machine list`, `port machine status`, and `port machine stop` currently inspect local runtime roots only; they are not yet a remote-cloud inventory surface.
-7. Artifact mobility already uses the future-hosted vocabulary: build or publish a selected variant with `port artifacts push ...`, then pull that same logical reference onto the Linux host that will eventually own execution.
+1. Keep the canonical config explicit about provider identity, for example `provider = "aws"` on `hosts.aws-linux`. Remote/cloud hosts point at the named hosted control plane with `mode = "hosted-control-plane"` plus `control_plane = "demo"`.
+2. Run `port doctor --config examples/port.toml` on the Linux environment that will host the node agent and Firecracker execution.
+3. Start the demo control plane and one node agent that owns a real runtime root:
+
+   ```bash
+   export PORT_DEMO_TOKEN=demo-token
+   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+   ```
+
+4. Launch, inspect, and stop the standard cloud machine through the canonical CLI:
+
+   ```bash
+   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+   ```
+
+5. Use the same hosted flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
+6. Use the repo-local proof to verify the shipped standard lane without hand-running the full server harness:
+
+   ```bash
+   cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
+   cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
+   ```
+
+7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist.
 
 ## Operator Mapping
 
 - Linux operators can use `port doctor` to inspect both local prerequisites and remote-provider intent from the same config.
-- macOS operators should treat a Linux host as the execution environment and use the same canonical `port doctor` and `port machine launch` commands there.
-- Windows operators should use WSL or a remote Linux host for the same workflow, then rely on `port doctor` to distinguish a usable Linux launch environment from a documentation-only remote lane.
+- macOS operators should treat a Linux host as the execution environment for the Firecracker hosted lane and use the same canonical `port doctor`, `control-plane serve`, `node-agent serve`, and `port machine launch` commands there.
+- Windows operators should use WSL or a remote Linux host for that same hosted workflow, then rely on `port doctor` to distinguish a usable Linux execution environment from an unsupported provider lane.
 
 ## Hosted Mapping
 

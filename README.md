@@ -303,23 +303,35 @@ hosts. The current provider matrix for that lane is:
 | Provider | Example machine | MVP status | Current command behavior |
 |----------|-----------------|------------|--------------------------|
 | `local` | `demo` | Supported | `port doctor` performs local preflight; `port machine launch --machine demo` can launch Firecracker on Linux |
-| `generic-linux` | `cloud-generic` | Partial | `port doctor` reports the future remote Linux lane; `port machine launch` tells you to run Port on that Linux host directly |
-| `aws` | `cloud-aws` | Prepared-node / partial | `port doctor` reports AWS readiness details; `port machine launch --machine cloud-aws` launches through the hosted control plane when the machine is switched to `pvm` and the prepared node host kit plus PVM artifact paths exist |
-| `gcp` | `cloud-gcp` | Partial | `port doctor` reports GCP as a justified future lane; `port machine launch` fails with GCP-specific guidance |
+| `generic-linux` | `cloud-generic` | Hosted / partial | `port doctor` reports provider and lane detail; with `port control-plane serve`, a registered `generic-linux-node`, and standard artifacts, `port machine launch --machine cloud-generic` routes through the hosted control plane and selected node |
+| `aws` | `cloud-aws` | Hosted / partial | `port doctor` reports AWS readiness details; with `port control-plane serve`, a registered `aws-linux-node`, and standard artifacts, `port machine launch --machine cloud-aws` routes through the hosted control plane and selected node |
+| `gcp` | `cloud-gcp` | Hosted / partial | `port doctor` reports GCP readiness details; with `port control-plane serve`, a registered `gcp-linux-node`, and standard artifacts, `port machine launch --machine cloud-gcp` routes through the hosted control plane and selected node |
 | `azure` | `cloud-azure` | Unsupported | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
 
-The remote Linux workflow is intentionally limited today outside the prepared
-hosted PVM lane:
+The shipped standard cloud workflow is now the hosted control-plane lane for
+the sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines:
 
 ```bash
-port --config examples/port.toml doctor
-port --config examples/port.toml machine launch --machine cloud-aws
+export PORT_DEMO_TOKEN=demo-token
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
 ```
 
-The first command surfaces the provider-aware support matrix through the CLI.
-The second command is still expected to fail with an AWS-specific message until
-you switch `cloud-aws` to `protection_mode = "pvm"` and provide the prepared
-node host kit plus PVM artifact paths described in [`docs/pvm.md`](docs/pvm.md).
+Use the same hosted flow for `cloud-generic` with `generic-linux-node` or for
+`cloud-gcp` with `gcp-linux-node`. The repo-local automated proof for that lane
+is:
+
+```bash
+cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
+cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
+```
+
+Prepared-node PVM remains a second hosted lane for `cloud-aws` when you switch
+that machine to `protection_mode = "pvm"` and provide the prepared host kit
+plus PVM artifact paths described in [`docs/pvm.md`](docs/pvm.md).
 
 The explicit cloud design, remote workflow, and substrate guidance live in
 [`docs/cloud.md`](docs/cloud.md).
@@ -351,16 +363,18 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   `port control-plane serve`, which routes to `port node-agent serve` for the
   demo lane without introducing hosted-only verbs.
 - Hosted `machine launch` now uses that same control-plane plus node-agent path
-  for prepared x86_64 PVM machines. Other hosted launch paths still return
-  provider-aware guidance instead of pretending they are live.
+  for the shipped standard cloud demo lane (`cloud-generic`, `cloud-aws`,
+  `cloud-gcp`) and for prepared x86_64 PVM machines.
 - Registered hosted node workflow and durable fleet inspection for the current
   demo lane:
 
 ```bash
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
 ```
 
 - `port node-agent serve` refreshes live node registration and heartbeat state
@@ -388,6 +402,8 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --mac
 - Hosted `guest copy` now transfers bytes through the control-plane and
   node-agent path using the shared guest copy protocol, so the demo lane no
   longer assumes the client host paths are visible on the selected node.
+- The same hosted standard launch contract applies to `cloud-generic` and
+  `cloud-gcp`; only the node name and provider identity change.
 - Hosted `guest forward` now supports foreground and detached lifecycle modes
   through the hosted control-plane and node-agent path. `--list`, `--stop`,
   and `--name` now manage node-owned detached forward state under the selected

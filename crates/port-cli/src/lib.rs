@@ -119,7 +119,16 @@ Standard lane preservation:
   The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
 Cloud Linux:
   generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
-  hosted `port machine launch` now supports admission-ready x86_64 PVM machines through the live control-plane and node-agent path; other remote launch paths still return provider-aware guidance.
+Hosted standard cloud workflow:
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+  Repeat the same hosted control-plane flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
+Repository-local hosted standard proof:
+  cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
+  cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
 Artifact Mobility:
   `port artifacts build` and `validate` materialize one canonical local variant selected by architecture, substrate, and protection mode.
   `port artifacts push` and `pull` use the selected artifact variant's configured mobility backend.
@@ -133,15 +142,18 @@ Hosted artifact workflow:
   Hosted pushes land in `.port/hosted/<control-plane>/artifacts/...` under the control-plane owner, and hosted auth uses the configured bearer token from `PORT_DEMO_TOKEN`.
   OCI remains follow-on work.
 Hosted Control:
-  Local Port still owns the shipped standard-lane launch path directly, and hosted prepared-node PVM launch now routes through the control plane and node agent.
+  Local Port still owns the shipped direct Linux launch path, and hosted standard-cloud plus prepared-node PVM launch now route through the control plane and node agent.
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes and reloads durable fleet state from `.port/hosted/<control-plane>/registered-nodes.json` plus `.port/hosted/<control-plane>/imported-inventory.json`.
   `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root and refreshes durable node registration plus heartbeat ownership to the configured control plane.
   Hosted demo flow:
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'`
+  `cloud-generic` and `cloud-gcp` use that same hosted surface with `generic-linux-node` and `gcp-linux-node`.
   Imported inventory is currently a control-plane-owned state-file contract, not a first-class `port inventory import` command: seed or sync `.port/hosted/<control-plane>/imported-inventory.json`, then inspect it through `port machine list|status`.
   Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
@@ -2146,6 +2158,8 @@ mod tests {
             "Cloud Hypervisor",
             "Apple Virtualization Framework",
             "Hosted Control",
+            "Hosted standard cloud workflow",
+            "Repository-local hosted standard proof",
             "push",
             "pull",
             "service",
