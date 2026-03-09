@@ -2,11 +2,12 @@
 id: 1vzY51000
 title: Define Pvm Host Kit Package Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-09T03:43:19
-updated_at: 2026-03-09T03:46:35
+updated_at: 2026-03-09T03:52:25
 scope: 1vz3ck000/1vzY3z000
 started_at: 2026-03-09T03:46:35
+completed_at: 2026-03-09T03:52:25
 ---
 
 # Define Pvm Host Kit Package Contract

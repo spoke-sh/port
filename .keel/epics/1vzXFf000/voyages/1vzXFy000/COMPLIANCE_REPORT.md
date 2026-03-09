@@ -1,0 +1,10 @@
+# COMPLIANCE REPORT: Enable Hosted Standard Cloud Launch
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [1vzXG2000](../../../../stories/1vzXG2000/README.md), [1vzXG2000](../../../../stories/1vzXG2000/README.md), [1vzXG2000](../../../../stories/1vzXG2000/README.md) | [ac-1.log](../../../../stories/1vzXG2000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXG2000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzXG2000/EVIDENCE/ac-3.log)<br>[ac-1.log](../../../../stories/1vzXG2000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXG2000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzXG2000/EVIDENCE/ac-3.log)<br>[ac-1.log](../../../../stories/1vzXG2000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXG2000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzXG2000/EVIDENCE/ac-3.log) |
+| SRS-02 | ✓ VERIFIED | [1vzXIF000](../../../../stories/1vzXIF000/README.md), [1vzXIF000](../../../../stories/1vzXIF000/README.md) | [ac-1.log](../../../../stories/1vzXIF000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXIF000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzXIF000/EVIDENCE/ac-3.log)<br>[ac-1.log](../../../../stories/1vzXIF000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXIF000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzXIF000/EVIDENCE/ac-3.log) |
+| SRS-03 | ✓ VERIFIED | [1vzXIF000](../../../../stories/1vzXIF000/README.md) | [ac-1.log](../../../../stories/1vzXIF000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXIF000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzXIF000/EVIDENCE/ac-3.log) |
+| SRS-04 | ✓ VERIFIED | [1vzXIG000](../../../../stories/1vzXIG000/README.md), [1vzXIG000](../../../../stories/1vzXIG000/README.md) | [ac-1.log](../../../../stories/1vzXIG000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXIG000/EVIDENCE/ac-2.log)<br>[ac-1.log](../../../../stories/1vzXIG000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzXIG000/EVIDENCE/ac-2.log) |

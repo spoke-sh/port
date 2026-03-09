@@ -1,11 +1,12 @@
 ---
 id: 1vzY3z000
 title: PVM Host Kit And Artifact Delivery
-status: planned
+status: in-progress
 epic: 1vz3ck000
 created_at: 2026-03-09T03:42:15
 index: 5
 updated_at: 2026-03-09T03:45:44
+started_at: 2026-03-09T03:46:18
 ---
 
 # PVM Host Kit And Artifact Delivery
@@ -24,11 +25,11 @@ updated_at: 2026-03-09T03:45:44
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Pvm Host Kit Package Contract](../../../../stories/1vzY51000/README.md) | feat | backlog |
+| [Define Pvm Host Kit Package Contract](../../../../stories/1vzY51000/README.md) | feat | done |
 | [Add Pvm Artifact Mobility Workflow](../../../../stories/1vzY52000/README.md) | feat | backlog |
 | [Implement Hosted Pvm Node Preparation](../../../../stories/1vzY6F000/README.md) | feat | backlog |
 | [Publish Pvm Host Kit Operator Workflow](../../../../stories/1vzY6J000/README.md) | feat | backlog |

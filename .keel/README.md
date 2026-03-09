@@ -62,11 +62,11 @@
 |--------|--------|
 | [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | done |
 
-### [Hosted Standard Cloud Launch](epics/1vzXFf000/) (active)
+### [Hosted Standard Cloud Launch](epics/1vzXFf000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | in-progress |
+| [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
@@ -82,7 +82,7 @@
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
 | [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | done |
 | [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | done |
-| [PVM Host Kit And Artifact Delivery](epics/1vz3ck000/voyages/1vzY3z000/) | planned |
+| [PVM Host Kit And Artifact Delivery](epics/1vz3ck000/voyages/1vzY3z000/) | in-progress |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 
