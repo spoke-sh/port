@@ -44,11 +44,17 @@
 |--------|--------|
 | [Host Groups And Service Placement](epics/1vzSbL000/voyages/1vzSc3000/) | done |
 
-### [Hosted Fleet Registration And Machine Placement](epics/1vzTQB000/) (active)
+### [Hosted Fleet Registration And Machine Placement](epics/1vzTQB000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Registered Nodes And Machine Launch Placement](epics/1vzTQB000/voyages/1vzTR9000/) | in-progress |
+| [Registered Nodes And Machine Launch Placement](epics/1vzTQB000/voyages/1vzTR9000/) | done |
+
+### [Durable Hosted Fleet Control](epics/1vzUnI000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | planned |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
