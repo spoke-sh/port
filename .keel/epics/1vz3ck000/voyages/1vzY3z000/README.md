@@ -1,12 +1,13 @@
 ---
 id: 1vzY3z000
 title: PVM Host Kit And Artifact Delivery
-status: in-progress
+status: done
 epic: 1vz3ck000
 created_at: 2026-03-09T03:42:15
 index: 5
 updated_at: 2026-03-09T03:45:44
 started_at: 2026-03-09T03:46:18
+completed_at: 2026-03-09T09:05:46
 ---
 
 # PVM Host Kit And Artifact Delivery
@@ -20,19 +21,21 @@ started_at: 2026-03-09T03:46:18
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 4/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Pvm Host Kit Package Contract](../../../../stories/1vzY51000/README.md) | feat | done |
 | [Add Pvm Artifact Mobility Workflow](../../../../stories/1vzY52000/README.md) | feat | done |
-| [Implement Hosted Pvm Node Preparation](../../../../stories/1vzY6F000/README.md) | feat | backlog |
-| [Publish Pvm Host Kit Operator Workflow](../../../../stories/1vzY6J000/README.md) | feat | backlog |
+| [Implement Hosted Pvm Node Preparation](../../../../stories/1vzY6F000/README.md) | feat | done |
+| [Publish Pvm Host Kit Operator Workflow](../../../../stories/1vzY6J000/README.md) | feat | done |
 <!-- END GENERATED -->
 
 ## Scope Summary

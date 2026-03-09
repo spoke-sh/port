@@ -68,13 +68,19 @@
 |--------|--------|
 | [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | done |
 
+### [Cloud Hypervisor Execution Lane](epics/1vzdKB000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | planned |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 
-### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (active)
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (done)
 
 | Voyage | Status |
 |--------|--------|
@@ -82,7 +88,7 @@
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
 | [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | done |
 | [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | done |
-| [PVM Host Kit And Artifact Delivery](epics/1vz3ck000/voyages/1vzY3z000/) | in-progress |
+| [PVM Host Kit And Artifact Delivery](epics/1vz3ck000/voyages/1vzY3z000/) | done |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 
