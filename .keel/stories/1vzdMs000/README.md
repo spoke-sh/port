@@ -2,11 +2,12 @@
 id: 1vzdMs000
 title: Bridge Cloud Hypervisor Guest Sessions
 type: feat
-status: in-progress
+status: done
 scope: 1vzdKB000/1vzdKx000
 created_at: 2026-03-09T09:22:06
-updated_at: 2026-03-09T10:05:30
+updated_at: 2026-03-09T10:05:52
 started_at: 2026-03-09T09:55:11
+completed_at: 2026-03-09T10:05:52
 ---
 
 # Bridge Cloud Hypervisor Guest Sessions
