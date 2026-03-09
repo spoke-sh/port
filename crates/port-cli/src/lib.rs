@@ -92,7 +92,7 @@ Native macOS AVF workflow:
 Execution Lanes:
   Firecracker + standard on Linux is the current shipped lane.
   Firecracker + pvm on x86_64 now launches through the hosted control-plane and node-agent path on prepared Linux nodes and still depends on a dedicated host kit plus pvm artifact variants.
-  Firecracker + pvm on aarch64 remains research only until Port has a supportable Firecracker runtime path.
+  Firecracker + pvm on aarch64 remains research-only until Port has a supportable Firecracker runtime path.
 PVM foundation workflow:
   port --config examples/port.toml doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
@@ -100,18 +100,23 @@ PVM foundation workflow:
   port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts push --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+  port --config examples/port.toml artifacts pull --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
   Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for a prepared Linux node.
   Local PVM launch still requires a prepared x86_64 Linux host with the patched `firecracker-pvm` binary and the required host boot state.
 Hosted prepared-node PVM workflow:
-  Copy `examples/port.toml` to a temp config, switch `machines.cloud-aws` to `protection_mode = \"pvm\"`, and point the `x86_64/firecracker/pvm` kernel and guest variants at prepared artifact paths.
+  Copy `examples/port.toml` to `/tmp/port-pvm.toml`, point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`, switch `machines.cloud-generic` to `protection_mode = \"pvm\"`, and point the `x86_64/firecracker/pvm` kernel and guest variants at prepared artifact paths.
   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
-  Switch `cloud-generic` to `protection_mode = \"pvm\"` to see an explicit hosted placement denial against `generic-linux-node state = planned`.
+  PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-generic
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-generic
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
+  Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because `generic-linux-node` stays `planned`.
+  `prepare-pvm-node` writes the imported ready record under `.port/hosted/<control-plane>/imported-inventory.json`, which is the canonical repo-local proof that the node moved from planned to ready.
   Missing `firecracker-pvm`, missing host boot prerequisites, or missing PVM artifact paths fail explicitly; Port does not fall back to the standard Firecracker lane.
+  Firecracker + pvm on aarch64 stays research-only; there is no supported `prepare-pvm-node` or launch proof for that architecture.
   Other hosted launch paths still return provider-aware guidance until their runtime lanes ship.
 Standard lane preservation:
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode standard
@@ -2229,8 +2234,10 @@ mod tests {
             "pull",
             "service",
             "control-plane",
+            "prepare-pvm-node",
             "node-agent",
             "Artifact Mobility",
+            "research-only",
             "detached lifecycle modes",
             "node-owned listener",
             "--list",
@@ -2242,6 +2249,8 @@ mod tests {
             "Hosted artifact workflow",
             "OCI remains follow-on work",
             "first-class `port inventory import` command",
+            "artifacts push --artifact demo-guest",
+            "artifacts pull --artifact demo-guest",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }
@@ -2284,6 +2293,11 @@ mod tests {
                 "missing artifact help keyword: {keyword}"
             );
         }
+    }
+
+    #[test]
+    fn help_includes_machine_commands_examples() {
+        help_includes_primary_surfaces();
     }
 
     #[test]

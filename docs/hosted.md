@@ -105,11 +105,36 @@ waits for node registration, then runs canonical hosted `port machine list`,
 `port machine status`, `port guest exec`, `port guest copy`, and `port guest
 logs` commands through the live hosted HTTP path.
 
-The prepared-node PVM workflow reuses that same hosted split. The only extra
-requirements are a copied config that switches `cloud-aws` to `pvm`, PVM
-artifact paths that exist on the prepared node, and `PORT_PVM_FIRECRACKER_BINARY`
-pointing at the patched `firecracker-pvm` binary before `port machine launch
---machine cloud-aws` runs through the control plane.
+The prepared-node PVM workflow reuses that same hosted split. It consumes the
+same `port artifacts build|validate|push|pull` proof published in
+[`pvm.md`](pvm.md), then upgrades a hosted node from `planned` to `ready`
+through `port control-plane prepare-pvm-node`.
+
+Repository-local hosted PVM proof:
+
+1. Copy `examples/port.toml` to `/tmp/port-pvm.toml`.
+2. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
+3. Switch `machines.cloud-generic.protection_mode` to `pvm`.
+4. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at
+   prepared artifact paths visible to `generic-linux-node`.
+5. Export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm`
+   binary on the prepared node host.
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
+```
+
+Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because
+`generic-linux-node` is only `planned`. `prepare-pvm-node` writes the imported
+ready record under `.port/hosted/<control-plane>/imported-inventory.json`;
+that imported record is the canonical repo-local proof that the node moved from
+planned to ready. `aarch64/firecracker/pvm` remains research-only and is not a
+supported hosted preparation or launch lane.
 
 ## Hosted API Identity Contract
 
