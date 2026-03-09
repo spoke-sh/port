@@ -25,12 +25,12 @@ started_at: 2026-03-08T19:27:42
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Hosted Detached Forward Contract](../../../../stories/1vzQIq000/README.md) | feat | done |
 | [Publish Hosted Detached Forward Workflow](../../../../stories/1vzQIy000/README.md) | feat | backlog |
 | [Implement Hosted Detached Forward Inventory](../../../../stories/1vzQJ6000/README.md) | feat | done |
-| [Route Hosted Detached Forward Lifecycle](../../../../stories/1vzQJB000/README.md) | feat | backlog |
+| [Route Hosted Detached Forward Lifecycle](../../../../stories/1vzQJB000/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -2,11 +2,12 @@
 id: 1vzQJB000
 title: Route Hosted Detached Forward Lifecycle
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T19:25:25
-updated_at: 2026-03-08T19:42:45
+updated_at: 2026-03-08T19:47:28
 scope: 1vzETR000/1vzQEj000
 started_at: 2026-03-08T19:42:45
+completed_at: 2026-03-08T19:47:28
 ---
 
 # Route Hosted Detached Forward Lifecycle
