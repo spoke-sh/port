@@ -25,12 +25,12 @@ started_at: 2026-03-09T10:44:20
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Implement OCI Artifact Push Transport](../../../../stories/1vzeY9000/README.md) | feat | backlog |
+| [Implement OCI Artifact Push Transport](../../../../stories/1vzeY9000/README.md) | feat | done |
 | [Publish OCI Artifact Operator Workflow](../../../../stories/1vzeYA000/README.md) | feat | backlog |
-| [Define OCI Registry Artifact Contract](../../../../stories/1vzeYV000/README.md) | feat | backlog |
-| [Implement OCI Artifact Pull Transport](../../../../stories/1vzeYW000/README.md) | feat | backlog |
+| [Define OCI Registry Artifact Contract](../../../../stories/1vzeYV000/README.md) | feat | done |
+| [Implement OCI Artifact Pull Transport](../../../../stories/1vzeYW000/README.md) | feat | done |
 <!-- END GENERATED -->

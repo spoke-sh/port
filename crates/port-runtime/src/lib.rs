@@ -830,15 +830,18 @@ pub fn pull_artifact(
             })
         }
         ArtifactStoreContract::OciRegistry {
+            oras_binary,
+            store_path,
             remote_reference,
             transport,
             auth,
-            ..
-        } => bail!(
-            "OCI artifact pull transport is not implemented yet for '{}' over {} with {} auth",
+        } => pull_artifact_from_oci_registry_backend(
+            artifact,
+            oras_binary,
+            store_path,
             remote_reference,
-            transport.describe(),
-            auth.describe()
+            transport,
+            auth,
         ),
         ArtifactStoreContract::HostedApi { identity, transfer } => {
             pull_artifact_from_hosted_backend(config, artifact, identity, transfer)
@@ -1021,6 +1024,154 @@ fn pull_artifact_from_hosted_backend(
         backend_detail: format!(
             "hosted-api {} (control-plane {})",
             identity.endpoint, identity.control_plane
+        ),
+        bytes_copied,
+    })
+}
+
+fn pull_artifact_from_oci_registry_backend(
+    artifact: ArtifactMetadata,
+    oras_binary: PathBuf,
+    store_path: PathBuf,
+    remote_reference: String,
+    transport: OciRegistryTransport,
+    auth: OciRegistryAuth,
+) -> Result<ArtifactTransfer> {
+    let scratch_dir = oci_pull_scratch_dir(&artifact);
+    fs::create_dir_all(&scratch_dir).with_context(|| {
+        format!(
+            "failed to create OCI pull staging directory '{}'",
+            scratch_dir.display()
+        )
+    })?;
+
+    let mut command = Command::new(&oras_binary);
+    command.arg("pull");
+    if transport == OciRegistryTransport::PlainHttp {
+        command.arg("--plain-http");
+    }
+    let password = match &auth {
+        OciRegistryAuth::Anonymous => None,
+        OciRegistryAuth::BasicEnv {
+            username_variable,
+            password_variable,
+        } => {
+            let username = env::var(username_variable).with_context(|| {
+                format!(
+                    "OCI registry backend for artifact '{}' requires env:{} before pulling '{}'",
+                    artifact.name, username_variable, remote_reference
+                )
+            })?;
+            let password = env::var(password_variable).with_context(|| {
+                format!(
+                    "OCI registry backend for artifact '{}' requires env:{} before pulling '{}'",
+                    artifact.name, password_variable, remote_reference
+                )
+            })?;
+            command
+                .arg("--username")
+                .arg(username)
+                .arg("--password-stdin");
+            Some(password)
+        }
+    };
+    command
+        .arg("--output")
+        .arg(&scratch_dir)
+        .arg(&remote_reference);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if password.is_some() {
+        command.stdin(Stdio::piped());
+    }
+
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start OCI artifact pull for '{}' ({}) into '{}' from '{}' via {} with {} auth",
+            artifact.reference,
+            format_artifact_selector(artifact.selector),
+            artifact.path.display(),
+            remote_reference,
+            transport.describe(),
+            auth.describe()
+        )
+    })?;
+    if let Some(password) = password {
+        let mut stdin = child
+            .stdin
+            .take()
+            .context("failed to open oras stdin for OCI password input")?;
+        stdin
+            .write_all(password.as_bytes())
+            .context("failed to write OCI registry password to oras stdin")?;
+        stdin
+            .write_all(b"\n")
+            .context("failed to terminate OCI registry password input")?;
+    }
+    let output = child.wait_with_output().with_context(|| {
+        format!(
+            "failed to wait for OCI artifact pull of '{}' from '{}'",
+            artifact.reference, remote_reference
+        )
+    })?;
+    if !output.status.success() {
+        bail!(
+            "OCI artifact pull failed for '{}' ({}) into cache '{}' and local path '{}' via {} with {} auth and remote '{}' using '{}'; status {}; stderr: {}; stdout: {}",
+            artifact.reference,
+            format_artifact_selector(artifact.selector),
+            artifact.cache_path.display(),
+            artifact.path.display(),
+            transport.describe(),
+            auth.describe(),
+            remote_reference,
+            oras_binary.display(),
+            output.status,
+            summarize_process_output(&output.stderr),
+            summarize_process_output(&output.stdout)
+        );
+    }
+
+    let staged_name = artifact
+        .path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("artifact"));
+    let staged_path = scratch_dir.join(staged_name);
+    if !staged_path.is_file() {
+        bail!(
+            "OCI artifact pull for '{}' ({}) expected '{}' in staging directory '{}' after pulling '{}' via {} with {} auth",
+            artifact.reference,
+            format_artifact_selector(artifact.selector),
+            staged_name.to_string_lossy(),
+            scratch_dir.display(),
+            remote_reference,
+            transport.describe(),
+            auth.describe()
+        );
+    }
+
+    let bytes_copied = copy_file(&staged_path, &artifact.cache_path).with_context(|| {
+        format!(
+            "failed to materialize cache '{}' from OCI pull staging '{}'",
+            artifact.cache_path.display(),
+            staged_path.display()
+        )
+    })?;
+    copy_file(&artifact.cache_path, &artifact.path).with_context(|| {
+        format!(
+            "failed to restore local artifact '{}' from cache '{}'",
+            artifact.path.display(),
+            artifact.cache_path.display()
+        )
+    })?;
+    let _ = fs::remove_dir_all(&scratch_dir);
+
+    Ok(ArtifactTransfer {
+        artifact,
+        store_path,
+        backend_detail: format!(
+            "oci-registry {} {} via {}",
+            transport.describe(),
+            auth.describe(),
+            oras_binary.display()
         ),
         bytes_copied,
     })
@@ -6514,6 +6665,18 @@ fn artifact_oci_layer_media_type(kind: ArtifactKind) -> &'static str {
     }
 }
 
+fn oci_pull_scratch_dir(artifact: &ArtifactMetadata) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    artifact
+        .cache_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!(".port-oci-pull-{}-{stamp}", std::process::id()))
+}
+
 fn format_artifact_selector(selector: ArtifactSelector) -> String {
     format!(
         "{}/{}/{}",
@@ -8986,6 +9149,236 @@ exit 19
             rendered.contains("simulated oras push failure"),
             "unexpected error: {rendered}"
         );
+    }
+
+    #[test]
+    fn oci_registry_pull_fetches_into_cache_and_local_paths() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let args_log = tempdir.path().join("oras-args.log");
+        install_fake_oras_script(
+            tempdir.path(),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${PORT_TEST_ORAS_ARGS:?}"
+output_dir=""
+while (($#)); do
+  case "$1" in
+    --output)
+      output_dir="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+mkdir -p "${output_dir:?}"
+printf '%s' "demo-oci-kernel-bytes" > "${output_dir}/vmlinux"
+"#,
+        );
+        let _path = ScopedPathEnv::prepend(tempdir.path());
+        unsafe {
+            std::env::set_var("PORT_TEST_ORAS_ARGS", &args_log);
+        }
+
+        let local_root = tempdir.path().join("local-artifacts");
+        let cache_root = tempdir.path().join("artifact-cache");
+        let mut config = PortConfig::sample();
+        let kernel = config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        kernel.distribution.cache_root = cache_root.clone();
+        kernel.distribution.pull = ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::Anonymous,
+        };
+        for variant in &mut kernel.variants {
+            variant.path = local_root
+                .join(match variant.selector.architecture {
+                    MachineArchitecture::Native => "native",
+                    MachineArchitecture::X86_64 => "x86_64",
+                    MachineArchitecture::Aarch64 => "aarch64",
+                })
+                .join("firecracker")
+                .join(match variant.selector.protection_mode {
+                    ProtectionMode::Standard => "standard",
+                    ProtectionMode::Pvm => "pvm",
+                })
+                .join("vmlinux");
+        }
+
+        let transfer = pull_artifact(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("OCI pull should succeed");
+
+        assert_eq!(
+            transfer.store_path,
+            PathBuf::from("demo-fs/port/demo-kernel:v1-x86_64-firecracker-standard")
+        );
+        assert_eq!(transfer.bytes_copied, 21);
+        assert!(
+            transfer
+                .backend_detail
+                .contains("oci-registry plain-http anonymous"),
+            "unexpected backend detail: {}",
+            transfer.backend_detail
+        );
+        assert_eq!(
+            fs::read(&transfer.artifact.path).expect("local path should exist"),
+            b"demo-oci-kernel-bytes"
+        );
+        assert_eq!(
+            fs::read(&transfer.artifact.cache_path).expect("cache path should exist"),
+            b"demo-oci-kernel-bytes"
+        );
+
+        let args = fs::read_to_string(&args_log).expect("args log should exist");
+        assert!(args.contains("pull"), "unexpected args: {args}");
+        assert!(args.contains("--plain-http"), "unexpected args: {args}");
+        assert!(args.contains("--output"), "unexpected args: {args}");
+        assert!(
+            args.contains("demo-fs/port/demo-kernel:v1-x86_64-firecracker-standard"),
+            "unexpected args: {args}"
+        );
+    }
+
+    #[test]
+    fn oci_registry_pull_failure_surfaces_remote_and_path_context() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        install_fake_oras_script(
+            tempdir.path(),
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+echo "simulated oras pull failure" >&2
+exit 23
+"#,
+        );
+        let _path = ScopedPathEnv::prepend(tempdir.path());
+
+        let local_root = tempdir.path().join("local-artifacts");
+        let cache_root = tempdir.path().join("artifact-cache");
+        let mut config = PortConfig::sample();
+        let kernel = config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        kernel.distribution.cache_root = cache_root.clone();
+        kernel.distribution.pull = ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::Anonymous,
+        };
+        for variant in &mut kernel.variants {
+            variant.path = local_root
+                .join(match variant.selector.architecture {
+                    MachineArchitecture::Native => "native",
+                    MachineArchitecture::X86_64 => "x86_64",
+                    MachineArchitecture::Aarch64 => "aarch64",
+                })
+                .join("firecracker")
+                .join(match variant.selector.protection_mode {
+                    ProtectionMode::Standard => "standard",
+                    ProtectionMode::Pvm => "pvm",
+                })
+                .join("vmlinux");
+        }
+
+        let error = pull_artifact(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect_err("OCI pull should fail");
+
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("demo-fs/port/demo-kernel:v1"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("x86_64/firecracker/standard"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("plain-http"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("anonymous auth"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("artifact-cache"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("local-artifacts"),
+            "unexpected error: {rendered}"
+        );
+        assert!(
+            rendered.contains("simulated oras pull failure"),
+            "unexpected error: {rendered}"
+        );
+    }
+
+    #[test]
+    fn oci_registry_cache_path_is_deterministic_across_pull_backends() {
+        let cache_root = tempdir().expect("tempdir should exist");
+        let mut filesystem = PortConfig::sample();
+        let filesystem_kernel = filesystem
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        filesystem_kernel.distribution.cache_root = cache_root.path().to_path_buf();
+
+        let mut oci = filesystem.clone();
+        let oci_kernel = oci
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        oci_kernel.distribution.pull = ArtifactStore::OciRegistry {
+            transport: OciRegistryTransport::PlainHttp,
+            auth: OciRegistryAuth::Anonymous,
+        };
+
+        let filesystem_artifact = resolve_artifact_metadata(
+            &filesystem,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Pvm,
+            },
+        )
+        .expect("filesystem metadata should resolve");
+        let oci_artifact = resolve_artifact_metadata(
+            &oci,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Pvm,
+            },
+        )
+        .expect("OCI metadata should resolve");
+
+        assert_eq!(oci_artifact.path, filesystem_artifact.path);
+        assert_eq!(oci_artifact.cache_path, filesystem_artifact.cache_path);
     }
 
     #[test]

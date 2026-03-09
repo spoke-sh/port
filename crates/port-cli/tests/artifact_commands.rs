@@ -276,6 +276,10 @@ fn configure_oci_kernel_paths(
         transport: OciRegistryTransport::PlainHttp,
         auth: OciRegistryAuth::Anonymous,
     };
+    kernel.distribution.pull = ArtifactStore::OciRegistry {
+        transport: OciRegistryTransport::PlainHttp,
+        auth: OciRegistryAuth::Anonymous,
+    };
     kernel.distribution.cache_root = cache_root.to_path_buf();
 
     for variant in &mut kernel.variants {
@@ -674,6 +678,116 @@ printf '%s\n' "$@" > "${PORT_TEST_ORAS_ARGS:?}"
     );
     assert!(
         args.contains("vmlinux:application/vnd.port.kernel.v1+binary"),
+        "unexpected args: {args}"
+    );
+}
+
+#[test]
+fn cli_artifact_pull_oci_registry_reports_variant_and_backend_detail() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let local_root = temp.path().join("local-artifacts");
+    let cache_root = temp.path().join("artifact-cache");
+    let fake_bin = temp.path().join("fake-bin");
+    let args_log = temp.path().join("oras-args.log");
+    install_fake_oras_script(
+        &fake_bin,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "${PORT_TEST_ORAS_ARGS:?}"
+output_dir=""
+while (($#)); do
+  case "$1" in
+    --output)
+      output_dir="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+mkdir -p "${output_dir:?}"
+printf '%s' "demo-oci-pvm-kernel-bytes" > "${output_dir}/vmlinux"
+"#,
+    );
+
+    let mut config = PortConfig::sample();
+    let (local_path, cache_path, store_path) =
+        configure_oci_kernel_paths(&mut config, &local_root, &cache_root, ProtectionMode::Pvm);
+    write_config(&config_path, &config);
+
+    let pull = Command::new(port_bin())
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .env("PORT_TEST_ORAS_ARGS", &args_log)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("pull")
+        .arg("--artifact")
+        .arg("demo-kernel")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--substrate")
+        .arg("firecracker")
+        .arg("--protection-mode")
+        .arg("pvm")
+        .output()
+        .expect("pull command");
+    assert!(
+        pull.status.success(),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&pull.stdout),
+        String::from_utf8_lossy(&pull.stderr)
+    );
+
+    let pull_stdout = String::from_utf8_lossy(&pull.stdout);
+    assert!(
+        pull_stdout.contains("demo-fs/port/demo-kernel:v1"),
+        "{pull_stdout}"
+    );
+    assert!(
+        pull_stdout.contains("for x86_64/firecracker/pvm"),
+        "{pull_stdout}"
+    );
+    assert!(
+        pull_stdout.contains("backend: oci-registry plain-http anonymous"),
+        "{pull_stdout}"
+    );
+    assert!(
+        pull_stdout.contains(&local_path.display().to_string()),
+        "{pull_stdout}"
+    );
+    assert!(
+        pull_stdout.contains(&store_path.display().to_string()),
+        "{pull_stdout}"
+    );
+    assert!(
+        pull_stdout.contains(&cache_path.display().to_string()),
+        "{pull_stdout}"
+    );
+    assert_eq!(
+        fs::read_to_string(&local_path).expect("local path should exist"),
+        "demo-oci-pvm-kernel-bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(&cache_path).expect("cache path should exist"),
+        "demo-oci-pvm-kernel-bytes"
+    );
+
+    let args = fs::read_to_string(&args_log).expect("args log should exist");
+    assert!(args.contains("pull"), "unexpected args: {args}");
+    assert!(args.contains("--plain-http"), "unexpected args: {args}");
+    assert!(args.contains("--output"), "unexpected args: {args}");
+    assert!(
+        args.contains("demo-fs/port/demo-kernel:v1-x86_64-firecracker-pvm"),
         "unexpected args: {args}"
     );
 }
