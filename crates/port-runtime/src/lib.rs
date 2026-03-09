@@ -305,6 +305,7 @@ pub struct ServiceApplyRequest<'a> {
     pub runtime_root: &'a Path,
     pub name: &'a str,
     pub kind: ServiceKind,
+    pub host_group: Option<&'a str>,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
 }
@@ -335,6 +336,8 @@ pub struct ServiceDefinitionStatus {
     pub node_name: Option<String>,
     pub host_groups: Vec<String>,
     pub host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
+    pub target_host_group: Option<String>,
+    pub scheduler: Option<HostedSchedulerPolicy>,
     pub manifest_path: PathBuf,
     pub detail: String,
 }
@@ -1454,7 +1457,7 @@ pub(crate) fn put_machine_secret_local(
     request: SecretPutRequest<'_>,
 ) -> Result<MachineSecretSummary> {
     let context =
-        resolve_service_runtime_context(config, request.runtime_root, request.machine_name)?;
+        resolve_service_runtime_context(config, request.runtime_root, request.machine_name, None)?;
     validate_identifier(request.name, "secret name")?;
     let dir = service_secret_dir(&context.status.runtime_dir);
     fs::create_dir_all(&dir)
@@ -1495,7 +1498,7 @@ pub(crate) fn list_machine_secrets_local(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<Vec<MachineSecretSummary>> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
     let dir = service_secret_dir(&context.status.runtime_dir);
     if !dir.exists() {
         return Ok(Vec::new());
@@ -1546,7 +1549,7 @@ pub(crate) fn delete_machine_secret_local(
     machine_name: &str,
     secret_name: &str,
 ) -> Result<MachineSecretSummary> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
     validate_identifier(secret_name, "secret name")?;
     let references = service_references_secret(&context.status.runtime_dir, secret_name)?;
     if !references.is_empty() {
@@ -1586,8 +1589,12 @@ pub(crate) fn apply_machine_service_local(
     config: &PortConfig,
     request: ServiceApplyRequest<'_>,
 ) -> Result<ServiceDefinitionStatus> {
-    let context =
-        resolve_service_runtime_context(config, request.runtime_root, request.machine_name)?;
+    let context = resolve_service_runtime_context(
+        config,
+        request.runtime_root,
+        request.machine_name,
+        request.host_group,
+    )?;
     validate_identifier(request.name, "service name")?;
     if request.command.is_empty() {
         bail!("service apply requires a command");
@@ -1622,6 +1629,8 @@ pub(crate) fn apply_machine_service_local(
         node_name: context.node_name.clone(),
         host_groups: context.host_groups.clone(),
         host_group_policies: context.host_group_policies.clone(),
+        target_host_group: context.target_host_group.clone(),
+        scheduler: context.scheduler,
         created_at_unix_s: unix_timestamp_now()?,
         detail: String::from(
             "service definition is stored under the resolved runtime owner; guest execution remains a follow-on control-plane and node-agent slice",
@@ -1647,7 +1656,7 @@ pub(crate) fn list_machine_services_local(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<Vec<ServiceDefinitionStatus>> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
     let dir = service_definition_dir(&context.status.runtime_dir);
     if !dir.exists() {
         return Ok(Vec::new());
@@ -1690,7 +1699,7 @@ pub(crate) fn machine_service_status_local(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
     validate_identifier(service_name, "service name")?;
     let path =
         service_definition_dir(&context.status.runtime_dir).join(format!("{service_name}.json"));
@@ -1716,7 +1725,7 @@ pub(crate) fn stop_machine_service_local(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
+    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
     validate_identifier(service_name, "service name")?;
     let path =
         service_definition_dir(&context.status.runtime_dir).join(format!("{service_name}.json"));
@@ -1787,6 +1796,7 @@ pub(crate) fn apply_hosted_machine_service_live(
         metadata_config,
         request.runtime_root,
         request.machine_name,
+        request.host_group,
     )?;
     let env = load_service_secret_env(&context.status.runtime_dir, &stored.secret_bindings)?;
     let managed = managed_service_result_status(execute_guest_operation(
@@ -1828,7 +1838,8 @@ pub(crate) fn refresh_hosted_machine_service_runtime(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let context = resolve_service_runtime_context(metadata_config, runtime_root, machine_name)?;
+    let context =
+        resolve_service_runtime_context(metadata_config, runtime_root, machine_name, None)?;
     match managed_service_result_status(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -1860,7 +1871,8 @@ pub(crate) fn refresh_hosted_machine_service_list(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<Vec<ServiceDefinitionStatus>> {
-    let context = resolve_service_runtime_context(metadata_config, runtime_root, machine_name)?;
+    let context =
+        resolve_service_runtime_context(metadata_config, runtime_root, machine_name, None)?;
     let statuses = managed_service_result_list(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -1889,7 +1901,8 @@ pub(crate) fn stop_hosted_machine_service_live(
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
     let _ = stop_machine_service_local(metadata_config, runtime_root, machine_name, service_name)?;
-    let context = resolve_service_runtime_context(metadata_config, runtime_root, machine_name)?;
+    let context =
+        resolve_service_runtime_context(metadata_config, runtime_root, machine_name, None)?;
     match managed_service_result_status(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -2888,6 +2901,8 @@ struct ServiceDefinitionRecord {
     node_name: Option<String>,
     host_groups: Vec<String>,
     host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
+    target_host_group: Option<String>,
+    scheduler: Option<HostedSchedulerPolicy>,
     created_at_unix_s: u64,
     detail: String,
 }
@@ -2909,6 +2924,8 @@ struct ResolvedMachineRuntime {
     node_name: Option<String>,
     host_groups: Vec<String>,
     host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
+    target_host_group: Option<String>,
+    scheduler: Option<HostedSchedulerPolicy>,
 }
 
 fn service_state_dir(runtime_dir: &Path) -> PathBuf {
@@ -2978,6 +2995,7 @@ fn resolve_machine_runtime(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
+    host_group: Option<&str>,
 ) -> Result<ResolvedMachineRuntime> {
     if config.machines.contains_key(machine_name) {
         let machine = config
@@ -2995,8 +3013,18 @@ fn resolve_machine_runtime(
                 node_name: None,
                 host_groups: Vec::new(),
                 host_group_policies: BTreeMap::new(),
+                target_host_group: None,
+                scheduler: None,
             }),
             HostConnection::HostedControlPlane { .. } => {
+                if let Some(host_group) = host_group {
+                    return resolve_targeted_hosted_service_runtime(
+                        config,
+                        runtime_root,
+                        machine_name,
+                        host_group,
+                    );
+                }
                 let resolution = hosted_machine_resolution(config, machine_name)?;
                 Ok(ResolvedMachineRuntime {
                     status: resolution.status,
@@ -3004,6 +3032,8 @@ fn resolve_machine_runtime(
                     node_name: resolution.node_name,
                     host_groups: resolution.host_groups,
                     host_group_policies: resolution.host_group_policies,
+                    target_host_group: None,
+                    scheduler: None,
                 })
             }
         };
@@ -3015,6 +3045,8 @@ fn resolve_machine_runtime(
         node_name: None,
         host_groups: Vec::new(),
         host_group_policies: BTreeMap::new(),
+        target_host_group: None,
+        scheduler: None,
     })
 }
 
@@ -3022,8 +3054,9 @@ fn resolve_service_runtime_context(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
+    host_group: Option<&str>,
 ) -> Result<ResolvedMachineRuntime> {
-    let context = resolve_machine_runtime(config, runtime_root, machine_name)?;
+    let context = resolve_machine_runtime(config, runtime_root, machine_name, host_group)?;
     if context.status.state == MachineRuntimeState::Malformed {
         bail!(
             "service operations require well-formed runtime state for machine '{}': {}",
@@ -3142,6 +3175,8 @@ fn service_status_from_record(
         node_name: record.node_name,
         host_groups: record.host_groups,
         host_group_policies: record.host_group_policies,
+        target_host_group: record.target_host_group,
+        scheduler: record.scheduler,
         manifest_path,
         detail: runtime_record
             .map(|runtime| runtime.detail)
@@ -3327,6 +3362,98 @@ fn hosted_machine_resolution(
             ),
         ),
     }))
+}
+
+fn resolve_targeted_hosted_service_runtime(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    host_group: &str,
+) -> Result<ResolvedMachineRuntime> {
+    let control = config.machine_control_contract(machine_name)?;
+    let hosted_identity = config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
+    let summary = config
+        .hosted_machine_summary_contract(machine_name)?
+        .ok_or_else(|| anyhow!("machine '{machine_name}' does not resolve to hosted inventory"))?;
+    let inventory = config.hosted_inventory_contract()?;
+    let group = inventory.host_groups.get(host_group).ok_or_else(|| {
+        anyhow!(
+            "host group '{}' is not declared for hosted service placement on machine '{}'",
+            host_group,
+            machine_name
+        )
+    })?;
+    if group.control_plane != hosted_identity.control_plane {
+        bail!(
+            "host group '{}' belongs to control plane '{}', not '{}'",
+            host_group,
+            group.control_plane,
+            hosted_identity.control_plane
+        );
+    }
+
+    let (node_name, _node) = inventory
+        .nodes
+        .iter()
+        .find(|(_, node)| node.runtime_root == runtime_root)
+        .ok_or_else(|| {
+            anyhow!(
+                "runtime root '{}' does not map to a hosted node for machine '{}'",
+                runtime_root.display(),
+                machine_name
+            )
+        })?;
+    if !group.nodes.iter().any(|candidate| candidate == node_name) {
+        bail!(
+            "host group '{}' does not include selected node '{}' for machine '{}'",
+            host_group,
+            node_name,
+            machine_name
+        );
+    }
+    if let Some(reason) = summary.rejected_nodes.get(node_name) {
+        bail!(
+            "host group '{}' cannot place machine '{}' on node '{}': {}",
+            host_group,
+            machine_name,
+            node_name,
+            reason
+        );
+    }
+    if !summary
+        .candidate_nodes
+        .iter()
+        .any(|candidate| candidate == node_name)
+    {
+        bail!(
+            "host group '{}' cannot place machine '{}' on node '{}'. {}",
+            host_group,
+            machine_name,
+            node_name,
+            summary.placement_detail
+        );
+    }
+
+    let mut status = firecracker_local_machine_status(runtime_root, machine_name)?;
+    status.control = control;
+    status.detail = format!(
+        "{} Routed through control plane '{}' and node '{}'.",
+        status.detail, hosted_identity.control_plane, node_name
+    );
+
+    Ok(ResolvedMachineRuntime {
+        status,
+        control_plane: Some(hosted_identity.control_plane),
+        node_name: Some(node_name.clone()),
+        host_groups: summary.host_groups,
+        host_group_policies: summary.host_group_policies,
+        target_host_group: Some(host_group.to_string()),
+        scheduler: Some(group.scheduler),
+    })
 }
 
 fn machine_is_hosted(config: &PortConfig, machine_name: &str) -> Result<bool> {
@@ -3618,6 +3745,7 @@ fn hosted_control_plane_apply_machine_service(
                     HostedServiceApplyRequest {
                         name: request.name.to_string(),
                         kind: hosted_service_kind(request.kind),
+                        host_group: request.host_group.map(str::to_string),
                         command: request.command.clone(),
                         secret_bindings: hosted_service_bindings(&request.secret_bindings),
                     },
@@ -4412,7 +4540,9 @@ fn launch_preflight_checks(
         ),
     ];
 
-    if machine.protection_mode == ProtectionMode::Standard {
+    if machine.substrate == ExecutionSubstrate::Firecracker
+        && machine.protection_mode == ProtectionMode::Standard
+    {
         checks.push(binary_check("firecracker-binary", "firecracker", true));
     }
 
@@ -6383,8 +6513,8 @@ mod tests {
         machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
         prepare_runtime_state, put_machine_secret, read_json_file, read_pid_file, repo_root,
         resolve_artifact_metadata, resolve_machine_architecture, select_firecracker_binary,
-        serve_control_plane, serve_node_agent, service_runtime_dir, service_status_from_record,
-        stop_machine, stop_machine_service,
+        serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
+        service_status_from_record, stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -6420,6 +6550,39 @@ mod tests {
             .get_mut("gcp-linux-node")
             .expect("gcp-linux-node should exist")
             .runtime_root = root.join("hosted/gcp-linux-node");
+        config
+    }
+
+    fn sample_multi_node_service_config(root: &Path) -> PortConfig {
+        let mut config = sample_config_with_hosted_runtime_roots(root);
+        let mut alternate = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .clone();
+        alternate.runtime_root = root.join("hosted/aws-linux-node-b");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-b"), alternate);
+        config
+            .host_groups
+            .get_mut("aws-builders")
+            .expect("aws-builders should exist")
+            .nodes = vec![
+            String::from("aws-linux-node-b"),
+            String::from("aws-linux-node"),
+        ];
+        config.host_groups.insert(
+            String::from("aws-secondary"),
+            port_model::HostedHostGroupSpec {
+                placement: port_model::HostedPlacementPolicy::ExplicitMembership,
+                scheduler: HostedSchedulerPolicy::DeterministicFirstFit,
+                nodes: vec![String::from("aws-linux-node-b")],
+                notes: vec![String::from(
+                    "Secondary AWS builders group used for deterministic service placement tests.",
+                )],
+            },
+        );
         config
     }
 
@@ -6615,6 +6778,37 @@ exec sleep 30
         Ok(client_config)
     }
 
+    fn start_named_live_hosted_servers(
+        config: &PortConfig,
+        node_names: &[&str],
+    ) -> anyhow::Result<PortConfig> {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let mut client_config = config.clone();
+        let mut node_bindings = Vec::new();
+        for node_name in node_names {
+            let endpoint = start_live_named_node_agent(&client_config, node_name)?;
+            node_bindings.push(HostedNodeBinding {
+                node_name: (*node_name).to_string(),
+                endpoint: format!("http://{endpoint}"),
+                token: String::from("node-secret"),
+            });
+        }
+
+        let control_plane_addr =
+            start_live_control_plane_with_bindings(&client_config, node_bindings)?;
+        client_config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{control_plane_addr}");
+
+        Ok(client_config)
+    }
+
     fn start_live_node_agent(config: &PortConfig) -> anyhow::Result<String> {
         for _ in 0..10 {
             let node_addr = reserve_addr();
@@ -6652,6 +6846,45 @@ exec sleep 30
         ))
     }
 
+    fn start_live_named_node_agent(config: &PortConfig, node_name: &str) -> anyhow::Result<String> {
+        for _ in 0..10 {
+            let node_addr = reserve_addr();
+            let node_config = config.clone();
+            let bind = node_addr.clone();
+            let node_name = node_name.to_string();
+            let probe_name = node_name.clone();
+            let (node_tx, node_rx) = mpsc::channel();
+            thread::spawn(move || {
+                let result = serve_node_agent(
+                    node_config,
+                    NodeAgentServeRequest {
+                        node_name,
+                        bind,
+                        token: String::from("node-secret"),
+                    },
+                )
+                .map(|_| ());
+                let _ = node_tx.send(result);
+            });
+            let url = format!("http://{node_addr}/v1/node/machines/cloud-aws");
+            match wait_for_http_or_server_error(
+                &url,
+                &[("x-port-node-agent-token", "node-secret")],
+                None,
+                &node_rx,
+                &format!("node-agent-{probe_name}"),
+            ) {
+                Ok(()) => return Ok(node_addr),
+                Err(error) if error.to_string().contains("failed to bind") => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "failed to bind a node-agent test server for '{node_name}' after repeated attempts"
+        ))
+    }
+
     fn start_live_control_plane(
         config: &PortConfig,
         node_addr: Option<&str>,
@@ -6674,6 +6907,52 @@ exec sleep 30
             } else {
                 Vec::new()
             };
+            let (control_tx, control_rx) = mpsc::channel();
+            thread::spawn(move || {
+                let result = serve_control_plane(
+                    control_config,
+                    ControlPlaneServeRequest {
+                        control_plane: String::from("demo"),
+                        bind,
+                        node_bindings,
+                    },
+                )
+                .map(|_| ());
+                let _ = control_tx.send(result);
+            });
+            let url = format!("http://{control_plane_addr}/v1/machines");
+            match wait_for_http_or_server_error(
+                &url,
+                &[("authorization", "Bearer demo-token")],
+                Some(200),
+                &control_rx,
+                "control plane",
+            ) {
+                Ok(()) => return Ok(control_plane_addr),
+                Err(error) if error.to_string().contains("failed to bind") => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "failed to bind a control-plane test server after repeated attempts"
+        ))
+    }
+
+    fn start_live_control_plane_with_bindings(
+        config: &PortConfig,
+        node_bindings: Vec<HostedNodeBinding>,
+    ) -> anyhow::Result<String> {
+        for _ in 0..10 {
+            let control_plane_addr = reserve_addr();
+            let mut control_config = config.clone();
+            control_config
+                .control_planes
+                .get_mut("demo")
+                .expect("demo control plane should exist")
+                .endpoint = format!("http://{control_plane_addr}");
+            let bind = control_plane_addr.clone();
+            let node_bindings = node_bindings.clone();
             let (control_tx, control_rx) = mpsc::channel();
             thread::spawn(move || {
                 let result = serve_control_plane(
@@ -9459,6 +9738,8 @@ exec sleep 30
                 String::from("aws-builders"),
                 HostedSchedulerPolicy::DeterministicFirstFit,
             )]),
+            target_host_group: Some(String::from("aws-builders")),
+            scheduler: Some(HostedSchedulerPolicy::DeterministicFirstFit),
             created_at_unix_s: 1,
             detail: String::from("stored definition"),
         };
@@ -9476,6 +9757,11 @@ exec sleep 30
         assert_eq!(
             status.host_group_policies["aws-builders"],
             HostedSchedulerPolicy::DeterministicFirstFit
+        );
+        assert_eq!(status.target_host_group.as_deref(), Some("aws-builders"));
+        assert_eq!(
+            status.scheduler,
+            Some(HostedSchedulerPolicy::DeterministicFirstFit)
         );
         assert_eq!(status.manifest_path, manifest_path);
     }
@@ -9528,6 +9814,7 @@ exec sleep 30
                 runtime_root: tempdir.path(),
                 name: "buildbox",
                 kind: ServiceKind::Sandbox,
+                host_group: Some("aws-builders"),
                 command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
@@ -9546,6 +9833,7 @@ exec sleep 30
         assert_eq!(applied.control_plane.as_deref(), Some("demo"));
         assert_eq!(applied.node_name.as_deref(), Some("aws-linux-node"));
         assert_eq!(applied.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(applied.target_host_group.as_deref(), Some("aws-builders"));
         assert_eq!(
             applied.host_group_policies["aws-builders"],
             HostedSchedulerPolicy::DeterministicFirstFit
@@ -9604,5 +9892,164 @@ exec sleep 30
             fs::read_to_string(&runtime_record).expect("runtime record should read");
         assert!(runtime_record_contents.contains("\"state\": \"stopped\""));
         assert!(!runtime_record_contents.contains("s3cr3t"));
+    }
+
+    #[test]
+    fn hosted_service_apply_targets_requested_host_group_and_uses_deterministic_first_fit() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_service_config(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let primary_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let primary_paths = RuntimePaths::for_machine(&primary_runtime_root, "cloud-aws");
+        write_manifest(&primary_paths, "cloud-aws", 1);
+
+        let secondary_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let secondary_paths = RuntimePaths::for_machine(&secondary_runtime_root, "cloud-aws");
+        write_manifest(&secondary_paths, "cloud-aws", 2);
+
+        for guest_socket in [
+            primary_paths.guest_agent_socket.clone(),
+            secondary_paths.guest_agent_socket.clone(),
+        ] {
+            let guest_root = tempdir.path().join(format!(
+                "guest-{}",
+                guest_socket.display().to_string().replace('/', "_")
+            ));
+            fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+            thread::spawn(move || {
+                serve_guest_agent(&guest_socket, guest_root).expect("guest agent should serve")
+            });
+        }
+        for _ in 0..100 {
+            if primary_paths.guest_agent_socket.exists()
+                && secondary_paths.guest_agent_socket.exists()
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let config =
+            start_named_live_hosted_servers(&config, &["aws-linux-node", "aws-linux-node-b"])
+                .expect("hosted servers should start");
+
+        let service_one = apply_machine_service(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "svc-one",
+                kind: ServiceKind::Service,
+                host_group: Some("aws-builders"),
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+            },
+        )
+        .expect("first hosted service apply should succeed");
+        let service_two = apply_machine_service(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "svc-two",
+                kind: ServiceKind::Sandbox,
+                host_group: Some("aws-builders"),
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+            },
+        )
+        .expect("second hosted service apply should succeed");
+
+        assert_eq!(service_one.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(service_two.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            service_one.target_host_group.as_deref(),
+            Some("aws-builders")
+        );
+        assert_eq!(
+            service_two.target_host_group.as_deref(),
+            Some("aws-builders")
+        );
+        assert_eq!(
+            service_one.scheduler,
+            Some(HostedSchedulerPolicy::DeterministicFirstFit)
+        );
+        assert_eq!(
+            service_two.scheduler,
+            Some(HostedSchedulerPolicy::DeterministicFirstFit)
+        );
+
+        assert!(
+            service_definition_dir(&primary_paths.runtime_dir)
+                .join("svc-one.json")
+                .exists()
+        );
+        assert!(
+            service_definition_dir(&primary_paths.runtime_dir)
+                .join("svc-two.json")
+                .exists()
+        );
+        assert!(
+            !service_definition_dir(&secondary_paths.runtime_dir)
+                .join("svc-one.json")
+                .exists()
+        );
+        assert!(
+            !service_definition_dir(&secondary_paths.runtime_dir)
+                .join("svc-two.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn hosted_service_apply_reports_requested_host_group_rejection_detail() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_service_config(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+        config
+            .nodes
+            .get_mut("aws-linux-node-b")
+            .expect("aws-linux-node-b should exist")
+            .capabilities
+            .architectures = vec![MachineArchitecture::Aarch64];
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let config = start_named_live_hosted_servers(&config, &["aws-linux-node"])
+            .expect("control plane should start");
+        let error = apply_machine_service(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "svc-fail",
+                kind: ServiceKind::Service,
+                host_group: Some("aws-secondary"),
+                command: vec![String::from("/bin/true")],
+                secret_bindings: Vec::new(),
+            },
+        )
+        .expect_err("requested host group should reject ineligible placement");
+
+        let message = error.to_string();
+        assert!(message.contains("aws-secondary"), "{message}");
+        assert!(message.contains("aws-linux-node-b"), "{message}");
+        assert!(
+            message.contains("architecture 'x86_64' is required"),
+            "{message}"
+        );
     }
 }

@@ -611,15 +611,47 @@ async fn service_apply(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    proxy_machine_route(
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+    let request: ServiceApplyRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' received invalid service JSON for machine '{}': {error}",
+                    state.inner.control_plane, machine
+                ),
+                Some(HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    machine_name: Some(machine),
+                    ..HostedRouteContext::default()
+                }),
+            );
+        }
+    };
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let (binding, route_context) =
+        match resolve_service_apply_binding(&state, &summary, request.host_group.as_deref()) {
+            Ok(result) => result,
+            Err((route_context, message)) => {
+                return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
+            }
+        };
+
+    proxy_raw(
         &state,
-        &headers,
-        &machine,
+        &binding,
         HostedNodeRoute::Service(HostedServiceRoute::Apply {
-            machine_name: machine.clone(),
+            machine_name: machine,
         }),
         Method::POST,
         Some(body),
+        route_context.with_service_name(request.name),
     )
     .await
 }
@@ -908,6 +940,130 @@ fn resolve_node_binding(
             summary.placement_detail
         ),
     ))
+}
+
+fn resolve_service_apply_binding(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+    host_group: Option<&str>,
+) -> Result<(HostedNodeBinding, HostedRouteContext), (HostedRouteContext, String)> {
+    let route_context = HostedRouteContext::from_machine_summary(summary);
+    let Some(host_group) = host_group else {
+        return Err((
+            route_context,
+            format!(
+                "control plane '{}' requires a host group for hosted service placement on machine '{}'; available groups: {}",
+                state.inner.control_plane,
+                summary.machine_name,
+                if summary.host_groups.is_empty() {
+                    String::from("(none)")
+                } else {
+                    summary.host_groups.join(", ")
+                }
+            ),
+        ));
+    };
+    if !summary.host_groups.iter().any(|group| group == host_group) {
+        return Err((
+            route_context,
+            format!(
+                "control plane '{}' cannot place service for machine '{}' in host group '{}'; available groups: {}. {}",
+                state.inner.control_plane,
+                summary.machine_name,
+                host_group,
+                if summary.host_groups.is_empty() {
+                    String::from("(none)")
+                } else {
+                    summary.host_groups.join(", ")
+                },
+                summary.placement_detail
+            ),
+        ));
+    }
+    let inventory = state
+        .inner
+        .config
+        .hosted_inventory_contract()
+        .map_err(|error| {
+            (
+                route_context.clone(),
+                format!(
+                    "control plane '{}' could not inspect hosted inventory for machine '{}': {error}",
+                    state.inner.control_plane, summary.machine_name
+                ),
+            )
+        })?;
+    let Some(group) = inventory.host_groups.get(host_group) else {
+        return Err((
+            route_context,
+            format!(
+                "control plane '{}' does not declare host group '{}' for machine '{}'",
+                state.inner.control_plane, host_group, summary.machine_name
+            ),
+        ));
+    };
+
+    let mut eligible = Vec::new();
+    let mut missing_bindings = Vec::new();
+    for node_name in &group.nodes {
+        if !summary
+            .candidate_nodes
+            .iter()
+            .any(|candidate| candidate == node_name)
+        {
+            continue;
+        }
+        if let Some(binding) = state.inner.node_bindings.get(node_name) {
+            eligible.push((node_name.clone(), binding.clone()));
+        } else {
+            missing_bindings.push(node_name.clone());
+        }
+    }
+    eligible.sort_by(|left, right| left.0.cmp(&right.0));
+    if let Some((node_name, binding)) = eligible.into_iter().next() {
+        let runtime_root = state
+            .inner
+            .config
+            .nodes
+            .get(&node_name)
+            .map(|node| node.runtime_root.clone())
+            .unwrap_or_else(|| hosted_placeholder_runtime_root(&summary.control_plane));
+        return Ok((
+            binding,
+            route_context
+                .clone()
+                .with_selected_node(node_name, runtime_root),
+        ));
+    }
+
+    let rejected = group
+        .nodes
+        .iter()
+        .filter_map(|node_name| {
+            summary
+                .rejected_nodes
+                .get(node_name)
+                .map(|reason| format!("{node_name} ({reason})"))
+        })
+        .collect::<Vec<_>>();
+    let mut detail = format!(
+        "control plane '{}' cannot place service for machine '{}' in host group '{}' with scheduler '{:?}'",
+        state.inner.control_plane, summary.machine_name, host_group, group.scheduler
+    );
+    if !rejected.is_empty() {
+        detail.push_str(&format!("; rejected nodes: {}", rejected.join(", ")));
+    }
+    if !missing_bindings.is_empty() {
+        detail.push_str(&format!(
+            "; eligible nodes without node-agent bindings: {}",
+            missing_bindings.join(", ")
+        ));
+    }
+    if rejected.is_empty() && missing_bindings.is_empty() {
+        detail.push_str("; no candidate nodes in the requested host group are eligible");
+    }
+    detail.push_str(&format!("; {}", summary.placement_detail));
+    Err((route_context, detail))
 }
 
 async fn proxy_raw(
@@ -1586,6 +1742,7 @@ async fn node_service_apply(
         Ok((localized, route)) => (localized, route.with_service_name(request.name.clone())),
         Err(response) => return response,
     };
+    let host_group = request.host_group.clone();
     let runtime_request = RuntimeServiceApplyRequest {
         machine_name: &machine,
         runtime_root: &state.inner.runtime_root,
@@ -1594,6 +1751,7 @@ async fn node_service_apply(
             port_sdk::ServiceKind::Service => crate::ServiceKind::Service,
             port_sdk::ServiceKind::Sandbox => crate::ServiceKind::Sandbox,
         },
+        host_group: host_group.as_deref(),
         command: request.command,
         secret_bindings: request
             .secret_bindings

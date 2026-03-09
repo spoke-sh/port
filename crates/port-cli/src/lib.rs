@@ -49,8 +49,8 @@ Guest workflow examples:
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
 Service workflow examples:
   port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-  port --config examples/port.toml service apply --machine cloud-aws --name web --kind service --secret API_TOKEN=demo-token -- /app/web --listen :8080
-  port --config examples/port.toml service apply --machine cloud-aws --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
+  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --secret API_TOKEN=demo-token -- /app/web --listen :8080
+  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
   port --config examples/port.toml service list --machine cloud-aws
   port --config examples/port.toml service status --machine cloud-aws --name web
   port --config examples/port.toml service stop --machine cloud-aws --name web
@@ -407,6 +407,8 @@ pub enum ServiceCommand {
         name: String,
         #[arg(long, value_enum, default_value_t = ServiceKindArg::Service)]
         kind: ServiceKindArg,
+        #[arg(long)]
+        host_group: Option<String>,
         #[arg(long = "secret")]
         secret: Vec<String>,
         #[arg(last = true, required = true)]
@@ -1038,6 +1040,7 @@ fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
             runtime_root,
             name,
             kind,
+            host_group,
             secret,
             command,
         } => {
@@ -1049,6 +1052,7 @@ fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
                     runtime_root: &runtime_root,
                     name: &name,
                     kind: kind.into(),
+                    host_group: host_group.as_deref(),
                     command,
                     secret_bindings: parse_secret_bindings(secret)?,
                 },
@@ -2229,6 +2233,8 @@ mod tests {
             "apply",
             "--machine",
             "cloud-aws",
+            "--host-group",
+            "aws-builders",
             "--name",
             "api",
             "--kind",
@@ -2247,6 +2253,7 @@ mod tests {
                 runtime_root,
                 name,
                 kind,
+                host_group,
                 secret,
                 command,
             }) => {
@@ -2254,6 +2261,7 @@ mod tests {
                 assert_eq!(runtime_root, std::path::Path::new("runtime"));
                 assert_eq!(name, "api");
                 assert_eq!(kind, ServiceKindArg::Service);
+                assert_eq!(host_group.as_deref(), Some("aws-builders"));
                 assert_eq!(secret, vec![String::from("API_TOKEN=demo-token")]);
                 assert_eq!(command, vec!["/app/api", "--listen", ":8080"]);
             }

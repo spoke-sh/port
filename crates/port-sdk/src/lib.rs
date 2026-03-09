@@ -294,6 +294,8 @@ pub struct ServiceSecretBinding {
 pub struct ServiceApplyRequest {
     pub name: String,
     pub kind: ServiceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_group: Option<String>,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
 }
@@ -757,6 +759,7 @@ mod tests {
                 ServiceApplyRequest {
                     name: String::from("buildbox"),
                     kind: ServiceKind::Sandbox,
+                    host_group: Some(String::from("aws-builders")),
                     command: vec![
                         String::from("/bin/sh"),
                         String::from("-lc"),
@@ -776,6 +779,7 @@ mod tests {
         );
         let body = apply.body.expect("body should exist");
         assert_eq!(body["kind"], "sandbox");
+        assert_eq!(body["host_group"], "aws-builders");
         assert_eq!(body["secret_bindings"][0]["secret"], "demo-token");
 
         let status = services.status("cloud-aws", "buildbox");

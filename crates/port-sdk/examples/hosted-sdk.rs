@@ -20,6 +20,7 @@ fn main() -> anyhow::Result<()> {
         ServiceApplyRequest {
             name: String::from("buildbox"),
             kind: ServiceKind::Sandbox,
+            host_group: Some(String::from("aws-builders")),
             command: vec![
                 String::from("/bin/sh"),
                 String::from("-lc"),
