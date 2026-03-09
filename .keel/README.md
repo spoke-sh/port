@@ -56,12 +56,12 @@
 |--------|--------|
 | [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | done |
 
-### [Artifact Mobility And Hosted Distribution](epics/1vzW8e000/) (active)
+### [Artifact Mobility And Hosted Distribution](epics/1vzW8e000/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | done |
-| [OCI Artifact Registry Mobility](epics/1vzW8e000/voyages/1vzeWr000/) | in-progress |
+| [OCI Artifact Registry Mobility](epics/1vzW8e000/voyages/1vzeWr000/) | done |
 
 ### [Hosted Standard Cloud Launch](epics/1vzXFf000/) (done)
 
@@ -74,6 +74,12 @@
 | Voyage | Status |
 |--------|--------|
 | [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | done |
+
+### [Hosted Service Reliability And Secret Hardening](epics/1vzfT4000/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Service Policy And Secret Runtime Foundations](epics/1vzfT4000/voyages/1vzfTm000/) | draft |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
