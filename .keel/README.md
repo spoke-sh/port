@@ -30,7 +30,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Implement Hosted Control Plane Demo Lane](epics/1vzETR000/voyages/1vzETX000/) | done |
-| [Hosted Detached Forward Lifecycle](epics/1vzETR000/voyages/1vzQEj000/) | planned |
+| [Hosted Detached Forward Lifecycle](epics/1vzETR000/voyages/1vzQEj000/) | in-progress |
 
 ### [Streamed Guest Sessions And Hosted Transfer](epics/1vzMVF000/) (done)
 

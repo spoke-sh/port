@@ -23,5 +23,5 @@ created_at: 2026-03-08T06:47:13
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Implement Hosted Control Plane Demo Lane](voyages/1vzETX000/) | done | 5/5 |
-| [Hosted Detached Forward Lifecycle](voyages/1vzQEj000/) | planned | 0/4 |
+| [Hosted Detached Forward Lifecycle](voyages/1vzQEj000/) | in-progress | 0/4 |
 <!-- END GENERATED -->

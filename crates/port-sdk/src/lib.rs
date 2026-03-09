@@ -6,7 +6,8 @@ use port_agent_protocol::{
     CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, PtyRequest,
 };
 use port_hosted_protocol::{
-    HostedClientHeaders, HostedControlPlaneRoute, HostedError, HostedGuestRoute,
+    HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
+    HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute,
     HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
     HostedRouteContext, HostedServiceRoute,
 };
@@ -440,6 +441,49 @@ impl<'a> GuestClient<'a> {
         )
     }
 
+    pub fn forward_detached_start(
+        &self,
+        machine_name: &str,
+        request: HostedDetachedForwardStartRequest,
+    ) -> Result<HostedApiRequest> {
+        let body = serde_json::to_value(&request)
+            .context("failed to encode detached forward request")?;
+        Ok(self.client.request(
+            HttpMethod::Post,
+            HostedControlPlaneRoute::DetachedForward(HostedDetachedForwardRoute::Start {
+                machine_name: machine_name.to_string(),
+            }),
+            Some(body),
+        ))
+    }
+
+    #[must_use]
+    pub fn forward_detached_list(&self, machine_name: &str) -> HostedApiRequest {
+        self.client.request(
+            HttpMethod::Get,
+            HostedControlPlaneRoute::DetachedForward(HostedDetachedForwardRoute::List {
+                machine_name: machine_name.to_string(),
+            }),
+            None,
+        )
+    }
+
+    #[must_use]
+    pub fn forward_detached_stop(
+        &self,
+        machine_name: &str,
+        forward_name: &str,
+    ) -> HostedApiRequest {
+        self.client.request(
+            HttpMethod::Post,
+            HostedControlPlaneRoute::DetachedForward(HostedDetachedForwardRoute::Stop {
+                machine_name: machine_name.to_string(),
+                forward_name: forward_name.to_string(),
+            }),
+            None,
+        )
+    }
+
     fn operation(
         &self,
         machine_name: &str,
@@ -598,7 +642,8 @@ mod tests {
     use axum::{Json, Router};
     use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest, LogsRequest, PtyRequest};
     use port_hosted_protocol::{
-        HostedError, HostedGuestStreamProtocol, HostedRouteContext, HostedSuccess,
+        HostedDetachedForwardStartRequest, HostedError, HostedGuestStreamProtocol,
+        HostedRouteContext, HostedSuccess,
         PORT_AUDIENCE_HEADER,
     };
     use serde_json::json;
@@ -816,6 +861,50 @@ mod tests {
             logs.request.url,
             "https://port.example.internal/v1/machines/cloud-aws/guest:logs:stream"
         );
+    }
+
+    #[test]
+    fn detached_forward_requests_use_canonical_hosted_paths() {
+        let client = HostedClient::new(
+            "https://port.example.internal",
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let start = client
+            .guest()
+            .forward_detached_start(
+                "cloud-aws",
+                HostedDetachedForwardStartRequest {
+                    listen: String::from("127.0.0.1:8081"),
+                    target: String::from("127.0.0.1:80"),
+                    name: Some(String::from("demo-web")),
+                },
+            )
+            .expect("detached start request should encode");
+        assert_eq!(start.method, HttpMethod::Post);
+        assert_eq!(
+            start.url,
+            "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached"
+        );
+        let body = start.body.expect("body should exist");
+        assert_eq!(body["name"], "demo-web");
+        assert_eq!(body["listen"], "127.0.0.1:8081");
+
+        let list = client.guest().forward_detached_list("cloud-aws");
+        assert_eq!(list.method, HttpMethod::Get);
+        assert_eq!(
+            list.url,
+            "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached"
+        );
+
+        let stop = client.guest().forward_detached_stop("cloud-aws", "demo-web");
+        assert_eq!(stop.method, HttpMethod::Post);
+        assert_eq!(
+            stop.url,
+            "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached/demo-web:stop"
+        );
+        assert!(stop.body.is_none());
     }
 
     #[test]

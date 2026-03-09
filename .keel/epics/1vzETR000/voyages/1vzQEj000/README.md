@@ -1,11 +1,12 @@
 ---
 id: 1vzQEj000
 title: Hosted Detached Forward Lifecycle
-status: planned
+status: in-progress
 epic: 1vzETR000
 created_at: 2026-03-08T19:20:49
 index: 2
 updated_at: 2026-03-08T19:27:01
+started_at: 2026-03-08T19:27:42
 ---
 
 # Hosted Detached Forward Lifecycle

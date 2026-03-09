@@ -110,6 +110,52 @@ pub struct HostedGuestStreamRoute {
     pub verb: HostedGuestVerb,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HostedDetachedForwardRoute {
+    Start { machine_name: String },
+    List { machine_name: String },
+    Stop {
+        machine_name: String,
+        forward_name: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedDetachedForwardStartRequest {
+    pub listen: String,
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedDetachedForwardState {
+    Running,
+    Stale,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedDetachedForwardStatus {
+    pub name: String,
+    pub state: HostedDetachedForwardState,
+    pub pid: Option<u32>,
+    pub listen: String,
+    pub target: String,
+    pub manifest_path: PathBuf,
+    pub stdout_log: PathBuf,
+    pub stderr_log: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedDetachedForwardStopResult {
+    pub name: String,
+    pub state: HostedDetachedForwardState,
+    pub pid: Option<u32>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostedGuestStreamProtocol {
@@ -150,6 +196,7 @@ pub enum HostedControlPlaneRoute {
     Machine(HostedMachineRoute),
     Guest(HostedGuestRoute),
     GuestStream(HostedGuestStreamRoute),
+    DetachedForward(HostedDetachedForwardRoute),
     Service(HostedServiceRoute),
 }
 
@@ -160,6 +207,7 @@ impl HostedControlPlaneRoute {
             Self::Machine(route) => machine_route_path(route),
             Self::Guest(route) => guest_route_path(route),
             Self::GuestStream(route) => guest_stream_route_path(route),
+            Self::DetachedForward(route) => detached_forward_route_path(route),
             Self::Service(route) => service_route_path(route),
         }
     }
@@ -170,6 +218,7 @@ pub enum HostedNodeRoute {
     Machine(HostedMachineRoute),
     Guest(HostedGuestRoute),
     GuestStream(HostedGuestStreamRoute),
+    DetachedForward(HostedDetachedForwardRoute),
     Service(HostedServiceRoute),
 }
 
@@ -180,6 +229,7 @@ impl HostedNodeRoute {
             Self::Machine(route) => machine_node_route_suffix(route),
             Self::Guest(route) => guest_node_route_suffix(route),
             Self::GuestStream(route) => guest_stream_node_route_suffix(route),
+            Self::DetachedForward(route) => detached_forward_node_route_suffix(route),
             Self::Service(route) => service_node_route_suffix(route),
         };
         format!("/v1/node{suffix}")
@@ -190,6 +240,8 @@ impl HostedNodeRoute {
 pub struct HostedRouteContext {
     pub control_plane: Option<String>,
     pub machine_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_name: Option<String>,
     pub node_name: Option<String>,
     pub candidate_nodes: Vec<String>,
     pub host_groups: Vec<String>,
@@ -209,6 +261,7 @@ impl HostedRouteContext {
         Self {
             control_plane: Some(summary.control_plane.clone()),
             machine_name: Some(summary.machine_name.clone()),
+            forward_name: None,
             node_name: None,
             candidate_nodes: summary.candidate_nodes.clone(),
             host_groups: summary.host_groups.clone(),
@@ -237,6 +290,12 @@ impl HostedRouteContext {
     ) -> Self {
         self.node_name = Some(node_name.into());
         self.runtime_root = Some(runtime_root.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_forward_name(mut self, forward_name: impl Into<String>) -> Self {
+        self.forward_name = Some(forward_name.into());
         self
     }
 }
@@ -288,6 +347,21 @@ fn guest_stream_route_path(route: &HostedGuestStreamRoute) -> String {
         route.machine_name,
         route.verb.as_str()
     )
+}
+
+fn detached_forward_route_path(route: &HostedDetachedForwardRoute) -> String {
+    match route {
+        HostedDetachedForwardRoute::Start { machine_name }
+        | HostedDetachedForwardRoute::List { machine_name } => {
+            format!("/v1/machines/{machine_name}/guest:forward:detached")
+        }
+        HostedDetachedForwardRoute::Stop {
+            machine_name,
+            forward_name,
+        } => {
+            format!("/v1/machines/{machine_name}/guest:forward:detached/{forward_name}:stop")
+        }
+    }
 }
 
 fn service_route_path(route: &HostedServiceRoute) -> String {
@@ -357,6 +431,21 @@ fn guest_stream_node_route_suffix(route: &HostedGuestStreamRoute) -> String {
     )
 }
 
+fn detached_forward_node_route_suffix(route: &HostedDetachedForwardRoute) -> String {
+    match route {
+        HostedDetachedForwardRoute::Start { machine_name }
+        | HostedDetachedForwardRoute::List { machine_name } => {
+            format!("/machines/{machine_name}/guest:forward:detached")
+        }
+        HostedDetachedForwardRoute::Stop {
+            machine_name,
+            forward_name,
+        } => {
+            format!("/machines/{machine_name}/guest:forward:detached/{forward_name}:stop")
+        }
+    }
+}
+
 fn service_node_route_suffix(route: &HostedServiceRoute) -> String {
     match route {
         HostedServiceRoute::SecretPut {
@@ -411,10 +500,10 @@ mod tests {
     };
 
     use super::{
-        HostedClientHeaders, HostedControlPlaneRoute, HostedGuestRoute, HostedGuestStreamProtocol,
-        HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
-        HostedNodeRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
-        PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
+        HostedGuestRoute, HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb,
+        HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext,
+        HostedServiceRoute, HostedSuccess, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -474,6 +563,21 @@ mod tests {
             "/v1/machines/cloud-aws/guest:pty:stream"
         );
         assert_eq!(
+            HostedControlPlaneRoute::DetachedForward(HostedDetachedForwardRoute::Start {
+                machine_name: String::from("cloud-aws"),
+            })
+            .path(),
+            "/v1/machines/cloud-aws/guest:forward:detached"
+        );
+        assert_eq!(
+            HostedControlPlaneRoute::DetachedForward(HostedDetachedForwardRoute::Stop {
+                machine_name: String::from("cloud-aws"),
+                forward_name: String::from("demo-web"),
+            })
+            .path(),
+            "/v1/machines/cloud-aws/guest:forward:detached/demo-web:stop"
+        );
+        assert_eq!(
             HostedControlPlaneRoute::Service(HostedServiceRoute::Status {
                 machine_name: String::from("cloud-aws"),
                 service_name: String::from("buildbox"),
@@ -514,6 +618,13 @@ mod tests {
             })
             .path(),
             "/v1/node/machines/cloud-aws/guest:logs:stream"
+        );
+        assert_eq!(
+            HostedNodeRoute::DetachedForward(HostedDetachedForwardRoute::List {
+                machine_name: String::from("cloud-aws"),
+            })
+            .path(),
+            "/v1/node/machines/cloud-aws/guest:forward:detached"
         );
     }
 
@@ -561,6 +672,8 @@ mod tests {
             selected.runtime_root,
             Some(PathBuf::from("runtime/hosted/aws-linux-node"))
         );
+        let forwarded = selected.with_forward_name("demo-web");
+        assert_eq!(forwarded.forward_name.as_deref(), Some("demo-web"));
     }
 
     #[test]
@@ -608,5 +721,18 @@ mod tests {
                 .expect("placement detail should exist")
                 .contains("planned")
         );
+    }
+
+    #[test]
+    fn route_context_serializes_detached_forward_identity() {
+        let body = to_value(
+            HostedRouteContext::default()
+                .with_selected_node("aws-linux-node", "runtime/hosted/aws-linux-node")
+                .with_forward_name("demo-web"),
+        )
+        .expect("route context should serialize");
+
+        assert_eq!(body["node_name"], "aws-linux-node");
+        assert_eq!(body["forward_name"], "demo-web");
     }
 }
