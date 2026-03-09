@@ -25,13 +25,13 @@ started_at: 2026-03-09T09:27:03
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/5 stories complete
+**Progress:** 4/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Cloud Hypervisor Contract And Doctor Checks](../../../../stories/1vzdMW000/README.md) | feat | done |
 | [Implement Local Cloud Hypervisor Machine Driver](../../../../stories/1vzdMZ000/README.md) | feat | done |
-| [Route Hosted Cloud Hypervisor Lifecycle](../../../../stories/1vzdMa000/README.md) | feat | backlog |
+| [Route Hosted Cloud Hypervisor Lifecycle](../../../../stories/1vzdMa000/README.md) | feat | done |
 | [Publish Cloud Hypervisor Operator Workflow](../../../../stories/1vzdMb000/README.md) | feat | backlog |
 | [Bridge Cloud Hypervisor Guest Sessions](../../../../stories/1vzdMs000/README.md) | feat | done |
 <!-- END GENERATED -->
