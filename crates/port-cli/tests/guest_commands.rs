@@ -4,6 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -64,6 +65,15 @@ fn wait_for_tcp(addr: &str) {
     panic!("timed out waiting for tcp listener at '{addr}'");
 }
 
+fn hosted_server_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn cleanup_hosted_registration_state() {
+    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
+}
+
 #[derive(Debug)]
 struct ChildGuard {
     child: Child,
@@ -82,6 +92,65 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+struct HostedServerHarness {
+    _lock: MutexGuard<'static, ()>,
+    _control_plane: ChildGuard,
+    _node: ChildGuard,
+}
+
+fn spawn_hosted_server_harness(
+    server_config_path: &Path,
+    node_addr: &str,
+    control_plane_addr: &str,
+) -> HostedServerHarness {
+    let lock = hosted_server_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cleanup_hosted_registration_state();
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(control_plane_addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(control_plane_addr);
+
+    let mut node_command = Command::new(port_bin());
+    node_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(node_addr);
+
+    HostedServerHarness {
+        _lock: lock,
+        _control_plane: control_plane,
+        _node: node,
     }
 }
 
@@ -484,42 +553,8 @@ fn cli_guest_commands_cover_hosted_control_plane_runtime() {
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr);
 
     run_guest_capability_suite_without_forward(
         &client_config_path,
@@ -613,42 +648,8 @@ fn cli_guest_forward_supports_hosted_unix_socket_mode() {
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr);
 
     let target_path = temp.path().join("target.sock");
     let listen_path = temp.path().join("listen.sock");
@@ -730,42 +731,8 @@ fn cli_guest_forward_supports_hosted_detached_lifecycle() {
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr);
 
     let target = TcpListener::bind("127.0.0.1:0").expect("target listener");
     let target_addr = target.local_addr().expect("target addr");
@@ -853,42 +820,8 @@ fn cli_guest_forward_lists_and_stops_hosted_detached_forwards() {
     let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
     spawn_agent(&socket_path, &guest_root);
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr);
 
     let listen_path = temp.path().join("hosted-detached.sock");
     let target_path = temp.path().join("target.sock");
@@ -948,7 +881,13 @@ fn cli_guest_forward_lists_and_stops_hosted_detached_forwards() {
         .expect("stop command");
     assert!(stop.status.success());
     let stop_stdout = String::from_utf8_lossy(&stop.stdout);
-    assert!(stop_stdout.contains("forward name: demo-sock"), "{stop_stdout}");
-    assert!(stop_stdout.contains("forward state: stopped"), "{stop_stdout}");
+    assert!(
+        stop_stdout.contains("forward name: demo-sock"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("forward state: stopped"),
+        "{stop_stdout}"
+    );
     assert!(!listen_path.exists());
 }

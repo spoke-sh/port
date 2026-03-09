@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +37,15 @@ fn wait_for_tcp(addr: &str) {
     panic!("timed out waiting for tcp listener at '{addr}'");
 }
 
+fn hosted_server_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn cleanup_hosted_registration_state() {
+    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
+}
+
 #[derive(Debug)]
 struct ChildGuard {
     child: Child,
@@ -54,6 +64,69 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+struct HostedServerHarness {
+    _lock: MutexGuard<'static, ()>,
+    _control_plane: ChildGuard,
+    _node: ChildGuard,
+}
+
+fn spawn_hosted_server_harness(
+    server_config_path: &Path,
+    node_addr: &str,
+    control_plane_addr: &str,
+    extra_node_env: &[(&str, &Path)],
+) -> HostedServerHarness {
+    let lock = hosted_server_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cleanup_hosted_registration_state();
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(control_plane_addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(control_plane_addr);
+
+    let mut node_command = Command::new(port_bin());
+    node_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--bind")
+        .arg(node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    for (name, value) in extra_node_env {
+        node_command.env(name, value);
+    }
+    let node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(node_addr);
+
+    HostedServerHarness {
+        _lock: lock,
+        _control_plane: control_plane,
+        _node: node,
     }
 }
 
@@ -237,42 +310,8 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
         "127.0.0.1:80",
     );
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
 
     let output = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")
@@ -304,6 +343,10 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
 
 #[test]
 fn cli_machine_status_surfaces_hosted_pvm_placement_denial() {
+    let _lock = hosted_server_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let config_path = temp.path().join("client-port.toml");
     let control_plane_addr = reserve_addr();
@@ -465,43 +508,12 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
         .runtime_root = bogus_runtime_root;
     write_config(&client_config_path, &client_config);
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .env("PORT_TEST_CLI_PVM_FIRECRACKER", &fake_binary)
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers = spawn_hosted_server_harness(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[("PORT_TEST_CLI_PVM_FIRECRACKER", fake_binary.as_path())],
+    );
 
     let output = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")
@@ -597,42 +609,8 @@ fn cli_machine_top_reports_hypervisor_and_forward_entries() {
         "127.0.0.1:80",
     );
 
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node")
-        .arg("--bind")
-        .arg(&node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
 
     let output = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")

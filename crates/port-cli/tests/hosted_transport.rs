@@ -124,6 +124,7 @@ fn cli_routes_hosted_machine_and_guest_commands_through_live_http_transport() {
 
     let node_addr = reserve_addr();
     let control_plane_addr = reserve_addr();
+    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
 
     let mut server_config = PortConfig::sample();
     server_config
@@ -150,8 +151,26 @@ fn cli_routes_hosted_machine_and_guest_commands_through_live_http_transport() {
     spawn_agent(&socket_path, &guest_root);
     write_machine_manifest(&good_runtime_root, "cloud-aws", 424242);
 
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(&control_plane_addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(&control_plane_addr);
+
     let mut node_command = Command::new(port_bin());
     node_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
         .arg("--config")
         .arg(&server_config_path)
         .arg("node-agent")
@@ -167,25 +186,6 @@ fn cli_routes_hosted_machine_and_guest_commands_through_live_http_transport() {
         .stderr(Stdio::null());
     let _node = ChildGuard::spawn("node-agent", node_command);
     wait_for_tcp(&node_addr);
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(&control_plane_addr)
-        .arg("--node-binding")
-        .arg(format!("aws-linux-node=http://{node_addr},node-secret"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(&control_plane_addr);
 
     let status = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")

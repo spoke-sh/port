@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use axum::Router;
@@ -14,9 +14,11 @@ use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post, put};
 use port_hosted_protocol::{
-    HostedDetachedForwardRoute, HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute,
-    HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
-    HostedNodeRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
+    HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
+    HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute, HostedGuestStreamRoute,
+    HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRegistrationRequest,
+    HostedNodeRoute, HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute,
+    HostedSuccess,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
@@ -71,7 +73,10 @@ struct ControlPlaneStateInner {
     control_plane: String,
     auth_header: String,
     auth_value: String,
-    node_bindings: BTreeMap<String, HostedNodeBinding>,
+    static_node_bindings: BTreeMap<String, HostedNodeBinding>,
+    registered_state_path: PathBuf,
+    registered_state: RwLock<RegisteredNodeStateFile>,
+    registered_nodes: RwLock<BTreeMap<String, RegisteredNodeRecord>>,
     client: Client,
 }
 
@@ -99,8 +104,33 @@ struct NodeAgentStateInner {
     config: PortConfig,
     node_name: String,
     runtime_root: std::path::PathBuf,
+    bind: String,
     token: String,
 }
+
+#[derive(Debug, Clone)]
+struct RegisteredNodeRecord {
+    binding: HostedNodeBinding,
+    contract: HostedRegisteredNodeContract,
+}
+
+#[derive(Debug, Clone)]
+struct NodeAgentRegistrationTarget {
+    control_plane: String,
+    endpoint: String,
+    node_endpoint: String,
+    auth_headers: HostedClientHeaders,
+}
+
+#[cfg(test)]
+const NODE_AGENT_REGISTRATION_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+#[cfg(not(test))]
+const NODE_AGENT_REGISTRATION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+#[cfg(test)]
+const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
+#[cfg(not(test))]
+const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
 
 trait HostedMachineProjection {
     fn apply_hosted_route(self, route: &HostedRouteContext) -> Self;
@@ -165,6 +195,53 @@ fn registered_node_state_path(control_plane: &str) -> PathBuf {
     hosted_placeholder_runtime_root(control_plane).join("registered-nodes.json")
 }
 
+fn load_registered_node_state(
+    path: &PathBuf,
+    control_plane: &str,
+) -> Result<RegisteredNodeStateFile> {
+    if !path.exists() {
+        return Ok(RegisteredNodeStateFile {
+            control_plane: control_plane.to_string(),
+            ..RegisteredNodeStateFile::default()
+        });
+    }
+
+    let bytes = std::fs::read(path).with_context(|| {
+        format!(
+            "failed to read registered node state at '{}'",
+            path.display()
+        )
+    })?;
+    let state: RegisteredNodeStateFile = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "failed to decode registered node state at '{}'",
+            path.display()
+        )
+    })?;
+    Ok(state)
+}
+
+fn persist_registered_node_state(path: &PathBuf, state: &RegisteredNodeStateFile) -> Result<()> {
+    let parent = path.parent().with_context(|| {
+        format!(
+            "registered node state path '{}' has no parent directory",
+            path.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create registered node state directory '{}'",
+            parent.display()
+        )
+    })?;
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(state).context("failed to encode registered node state")?,
+    )
+    .with_context(|| format!("failed to write registered node state '{}'", path.display()))?;
+    Ok(())
+}
+
 #[allow(dead_code)]
 fn validate_registered_node_state(
     config: &PortConfig,
@@ -197,6 +274,38 @@ fn validate_registered_node_state(
         contracts.insert(node_name.clone(), contract);
     }
     Ok(contracts)
+}
+
+fn registered_node_records(
+    config: &PortConfig,
+    state: &RegisteredNodeStateFile,
+) -> Result<BTreeMap<String, RegisteredNodeRecord>> {
+    let contracts = validate_registered_node_state(config, state)?;
+    let mut records = BTreeMap::new();
+    for (node_name, contract) in contracts {
+        let registration = state.nodes.get(&node_name).with_context(|| {
+            format!("registered node '{}' is missing persisted state", node_name)
+        })?;
+        records.insert(
+            node_name.clone(),
+            RegisteredNodeRecord {
+                binding: HostedNodeBinding {
+                    node_name: node_name.clone(),
+                    endpoint: registration.endpoint.clone(),
+                    token: registration.token.clone(),
+                },
+                contract,
+            },
+        );
+    }
+    Ok(records)
+}
+
+fn current_unix_timestamp_seconds() -> Result<u64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before the unix epoch")?
+        .as_secs())
 }
 
 pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest) -> Result<()> {
@@ -238,11 +347,29 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
     };
 
     let auth_value = format!("Bearer {token}");
-    let node_bindings = request
+    let static_node_bindings = request
         .node_bindings
         .into_iter()
         .map(|binding| (binding.node_name.clone(), binding))
         .collect();
+
+    let registered_state_path = registered_node_state_path(&request.control_plane);
+    let registered_state =
+        load_registered_node_state(&registered_state_path, &request.control_plane).with_context(
+            || {
+                format!(
+                    "control plane '{}' could not load registered node state",
+                    request.control_plane
+                )
+            },
+        )?;
+    let registered_nodes =
+        registered_node_records(&config, &registered_state).with_context(|| {
+            format!(
+                "control plane '{}' could not validate registered node state",
+                request.control_plane
+            )
+        })?;
 
     let auth_header = control_plane.auth.header.clone();
 
@@ -252,7 +379,10 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             control_plane: request.control_plane,
             auth_header,
             auth_value,
-            node_bindings,
+            static_node_bindings,
+            registered_state_path,
+            registered_state: RwLock::new(registered_state),
+            registered_nodes: RwLock::new(registered_nodes),
             client: Client::new(),
         }),
     })
@@ -260,6 +390,10 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
 
 fn control_plane_router(state: ControlPlaneState) -> Router {
     Router::new()
+        .route(
+            "/v1/nodes/{node}/registration",
+            post(node_registration_refresh),
+        )
         .route("/v1/machines", get(list_machines))
         .route(
             "/v1/machines/{machine}",
@@ -298,6 +432,74 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
             get(service_status).post(service_command),
         )
         .with_state(state)
+}
+
+async fn node_registration_refresh(
+    State(state): State<ControlPlaneState>,
+    Path(node_name): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let route = HostedRouteContext {
+        control_plane: Some(state.inner.control_plane.clone()),
+        node_name: Some(node_name.clone()),
+        runtime_root: state
+            .inner
+            .config
+            .nodes
+            .get(&node_name)
+            .map(|node| node.runtime_root.clone()),
+        ..HostedRouteContext::default()
+    };
+    let request: HostedNodeRegistrationRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' received invalid registration JSON for node '{}': {error}",
+                    state.inner.control_plane, node_name
+                ),
+                Some(route),
+            );
+        }
+    };
+    if request.control_plane != state.inner.control_plane {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "control plane '{}' rejected registration for control plane '{}'",
+                state.inner.control_plane, request.control_plane
+            ),
+            Some(route),
+        );
+    }
+    if request.node_name != node_name {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "control plane '{}' rejected registration for node '{}' on route '{}'",
+                state.inner.control_plane, request.node_name, node_name
+            ),
+            Some(route),
+        );
+    }
+
+    match store_registered_node_refresh(&state, &node_name, request.registration) {
+        Ok(record) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: route
+                    .with_selected_node(node_name, record.contract.node.runtime_root.clone()),
+                result: record.contract,
+            },
+        ),
+        Err(error) => error_response(StatusCode::BAD_REQUEST, error, Some(route)),
+    }
 }
 
 async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMap) -> Response {
@@ -877,10 +1079,13 @@ async fn service_command(
                 },
             );
         };
-        let Some(binding) = state.inner.node_bindings.get(&node_name) else {
+        let Some((binding, _)) = resolve_known_node_binding(&state, &node_name)
+            .ok()
+            .flatten()
+        else {
             let mut status = placement.status;
             status.detail = format!(
-                "{} Stop request could not reach node '{}' because the control plane has no bound node-agent endpoint for it.",
+                "{} Stop request could not reach node '{}' because the control plane has no live registered node-agent endpoint for it.",
                 status.detail, node_name
             );
             return json_response(
@@ -895,7 +1100,7 @@ async fn service_command(
         let route_context = stored_service_route_context(&placement.status);
         return match proxy_json::<HostedSuccess<crate::ServiceDefinitionStatus>>(
             &state,
-            binding,
+            &binding,
             HostedNodeRoute::Service(HostedServiceRoute::Stop {
                 machine_name: machine.clone(),
                 service_name: service_name.to_string(),
@@ -972,10 +1177,10 @@ async fn refresh_or_stored_service_status(
     let Some(node_name) = placement.status.node_name.clone() else {
         return placement.status;
     };
-    let Some(binding) = state.inner.node_bindings.get(&node_name) else {
+    let Some((binding, _)) = resolve_known_node_binding(state, &node_name).ok().flatten() else {
         let mut status = placement.status;
         status.detail = format!(
-            "{} Stored placement points at node '{}' but the control plane has no bound node-agent endpoint for it.",
+            "{} Stored placement points at node '{}' but the control plane has no live registered node-agent endpoint for it.",
             status.detail, node_name
         );
         return status;
@@ -983,7 +1188,7 @@ async fn refresh_or_stored_service_status(
 
     match proxy_json::<HostedSuccess<crate::ServiceDefinitionStatus>>(
         state,
-        binding,
+        &binding,
         HostedNodeRoute::Service(HostedServiceRoute::Status {
             machine_name: machine_name.to_string(),
             service_name: placement.status.name.clone(),
@@ -1102,6 +1307,110 @@ async fn proxy_machine_route(
     proxy_raw(state, &binding, route, method, body, route_context).await
 }
 
+fn store_registered_node_refresh(
+    state: &ControlPlaneState,
+    node_name: &str,
+    registration: HostedNodeRegistration,
+) -> Result<RegisteredNodeRecord, String> {
+    let current_state = state
+        .inner
+        .registered_state
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect registered node state",
+                state.inner.control_plane
+            )
+        })?
+        .clone();
+    if let Some(existing) = current_state.nodes.get(node_name)
+        && registration.refreshed_at < existing.refreshed_at
+    {
+        return Err(format!(
+            "control plane '{}' rejected stale registration refresh for node '{}': refreshed_at {} is older than current {}",
+            state.inner.control_plane, node_name, registration.refreshed_at, existing.refreshed_at
+        ));
+    }
+
+    let mut next_state = current_state;
+    next_state.control_plane = state.inner.control_plane.clone();
+    next_state.nodes.insert(node_name.to_string(), registration);
+    let next_records = registered_node_records(&state.inner.config, &next_state)
+        .map_err(|error| error.to_string())?;
+    let record = next_records.get(node_name).cloned().ok_or_else(|| {
+        format!(
+            "control plane '{}' could not derive a registered-node record for '{}'",
+            state.inner.control_plane, node_name
+        )
+    })?;
+    persist_registered_node_state(&state.inner.registered_state_path, &next_state)
+        .map_err(|error| error.to_string())?;
+
+    *state.inner.registered_state.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update registered node state",
+            state.inner.control_plane
+        )
+    })? = next_state;
+    *state.inner.registered_nodes.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update registered node records",
+            state.inner.control_plane
+        )
+    })? = next_records;
+    Ok(record)
+}
+
+fn resolve_known_node_binding(
+    state: &ControlPlaneState,
+    node_name: &str,
+) -> Result<Option<(HostedNodeBinding, PathBuf)>, String> {
+    let now = current_unix_timestamp_seconds().map_err(|error| {
+        format!(
+            "control plane '{}' could not inspect node registration freshness: {error}",
+            state.inner.control_plane
+        )
+    })?;
+    if let Some(record) = state
+        .inner
+        .registered_nodes
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect registered nodes",
+                state.inner.control_plane
+            )
+        })?
+        .get(node_name)
+        .cloned()
+    {
+        if record.contract.freshness.fresh_until < now {
+            return Err(format!(
+                "node '{}' is registered but stale; last refresh {} with ttl {}s expired at {}",
+                node_name,
+                record.contract.freshness.refreshed_at,
+                record.contract.freshness.ttl_seconds,
+                record.contract.freshness.fresh_until
+            ));
+        }
+        return Ok(Some((
+            record.binding,
+            record.contract.node.runtime_root.clone(),
+        )));
+    }
+    if let Some(binding) = state.inner.static_node_bindings.get(node_name).cloned() {
+        let runtime_root = state
+            .inner
+            .config
+            .nodes
+            .get(node_name)
+            .map(|node| node.runtime_root.clone())
+            .unwrap_or_else(|| hosted_placeholder_runtime_root(&state.inner.control_plane));
+        return Ok(Some((binding, runtime_root)));
+    }
+    Ok(None)
+}
+
 fn authorize(state: &ControlPlaneState, headers: &HeaderMap) -> Option<Response> {
     match headers
         .get(&state.inner.auth_header)
@@ -1188,34 +1497,34 @@ fn resolve_node_binding(
         ));
     }
 
+    let mut stale_registrations = Vec::new();
     for node_name in &summary.candidate_nodes {
-        if let Some(binding) = state.inner.node_bindings.get(node_name) {
-            let runtime_root = state
-                .inner
-                .config
-                .nodes
-                .get(node_name)
-                .map(|node| node.runtime_root.clone())
-                .unwrap_or_else(|| hosted_placeholder_runtime_root(&summary.control_plane));
-            return Ok((
-                binding.clone(),
-                route_context
-                    .clone()
-                    .with_selected_node(node_name.clone(), runtime_root),
-            ));
+        match resolve_known_node_binding(state, node_name) {
+            Ok(Some((binding, runtime_root))) => {
+                return Ok((
+                    binding,
+                    route_context
+                        .clone()
+                        .with_selected_node(node_name.clone(), runtime_root),
+                ));
+            }
+            Ok(None) => {}
+            Err(detail) => stale_registrations.push(detail),
         }
     }
 
-    Err((
-        route_context,
-        format!(
-            "control plane '{}' could not route machine '{}' because none of the candidate nodes {:?} have a bound node-agent endpoint. {}",
-            state.inner.control_plane,
-            summary.machine_name,
-            summary.candidate_nodes,
-            summary.placement_detail
-        ),
-    ))
+    let mut detail = format!(
+        "control plane '{}' could not route machine '{}' because none of the candidate nodes {:?} have a live registered node-agent endpoint.",
+        state.inner.control_plane, summary.machine_name, summary.candidate_nodes
+    );
+    if !stale_registrations.is_empty() {
+        detail.push_str(&format!(
+            " Stale registrations: {}.",
+            stale_registrations.join(", ")
+        ));
+    }
+    detail.push_str(&format!(" {}", summary.placement_detail));
+    Err((route_context, detail))
 }
 
 fn resolve_service_apply_binding(
@@ -1281,6 +1590,7 @@ fn resolve_service_apply_binding(
 
     let mut eligible = Vec::new();
     let mut missing_bindings = Vec::new();
+    let mut stale_bindings = Vec::new();
     for node_name in &group.nodes {
         if !summary
             .candidate_nodes
@@ -1289,21 +1599,16 @@ fn resolve_service_apply_binding(
         {
             continue;
         }
-        if let Some(binding) = state.inner.node_bindings.get(node_name) {
-            eligible.push((node_name.clone(), binding.clone()));
-        } else {
-            missing_bindings.push(node_name.clone());
+        match resolve_known_node_binding(state, node_name) {
+            Ok(Some((binding, runtime_root))) => {
+                eligible.push((node_name.clone(), binding, runtime_root));
+            }
+            Ok(None) => missing_bindings.push(node_name.clone()),
+            Err(detail) => stale_bindings.push(detail),
         }
     }
     eligible.sort_by(|left, right| left.0.cmp(&right.0));
-    if let Some((node_name, binding)) = eligible.into_iter().next() {
-        let runtime_root = state
-            .inner
-            .config
-            .nodes
-            .get(&node_name)
-            .map(|node| node.runtime_root.clone())
-            .unwrap_or_else(|| hosted_placeholder_runtime_root(&summary.control_plane));
+    if let Some((node_name, binding, runtime_root)) = eligible.into_iter().next() {
         return Ok((
             binding,
             route_context
@@ -1331,8 +1636,14 @@ fn resolve_service_apply_binding(
     }
     if !missing_bindings.is_empty() {
         detail.push_str(&format!(
-            "; eligible nodes without node-agent bindings: {}",
+            "; eligible nodes without live registrations: {}",
             missing_bindings.join(", ")
+        ));
+    }
+    if !stale_bindings.is_empty() {
+        detail.push_str(&format!(
+            "; stale registrations: {}",
+            stale_bindings.join(", ")
         ));
     }
     if rejected.is_empty() && missing_bindings.is_empty() {
@@ -1522,6 +1833,37 @@ pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> R
             .await
             .with_context(|| format!("failed to bind node agent on '{bind}'"))?;
         let state = build_node_agent_state(config, request)?;
+        let registration_target = build_node_agent_registration_target(&state)?;
+        let registered_at = register_node_agent_once(&state, &registration_target, None)
+            .await
+            .map_err(|error| {
+                anyhow!(
+                    "{}: {error}",
+                    format!(
+                        "node agent '{}' registration failed against control plane '{}'",
+                        state.inner.node_name, registration_target.control_plane
+                    )
+                )
+            })?;
+        let refresh_state = state.clone();
+        let refresh_target = registration_target.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(NODE_AGENT_REGISTRATION_REFRESH_INTERVAL).await;
+                if let Err(error) = register_node_agent_once(
+                    &refresh_state,
+                    &refresh_target,
+                    Some(registered_at),
+                )
+                .await
+                {
+                    eprintln!(
+                        "node agent '{}' registration refresh against control plane '{}' failed: {}",
+                        refresh_state.inner.node_name, refresh_target.control_plane, error
+                    );
+                }
+            }
+        });
         axum::serve(listener, node_agent_router(state))
             .await
             .context("node-agent server exited unexpectedly")
@@ -1549,9 +1891,141 @@ fn build_node_agent_state(
             config,
             node_name: request.node_name,
             runtime_root,
+            bind: request.bind,
             token: request.token,
         }),
     })
+}
+
+fn build_node_agent_registration_target(
+    state: &NodeAgentState,
+) -> Result<NodeAgentRegistrationTarget> {
+    let node = state
+        .inner
+        .config
+        .nodes
+        .get(&state.inner.node_name)
+        .with_context(|| {
+            format!(
+                "unknown hosted node '{}' for node-agent registration",
+                state.inner.node_name
+            )
+        })?;
+    let host = state.inner.config.hosts.get(&node.host).with_context(|| {
+        format!(
+            "node '{}' references unknown host '{}'",
+            state.inner.node_name, node.host
+        )
+    })?;
+    let control_plane = match &host.connection {
+        HostConnection::HostedControlPlane { control_plane } => control_plane.clone(),
+        HostConnection::Local => {
+            bail!(
+                "node '{}' does not target a hosted control plane",
+                state.inner.node_name
+            )
+        }
+    };
+    let spec = state
+        .inner
+        .config
+        .control_planes
+        .get(&control_plane)
+        .with_context(|| {
+            format!(
+                "node '{}' references unknown control plane '{}'",
+                state.inner.node_name, control_plane
+            )
+        })?;
+    let token = match &spec.auth.source {
+        HostedAuthTokenSource::Env { variable } => std::env::var(variable).with_context(|| {
+            format!(
+                "control plane '{}' expects token in environment variable '{}'",
+                control_plane, variable
+            )
+        })?,
+    };
+
+    Ok(NodeAgentRegistrationTarget {
+        control_plane,
+        endpoint: spec.endpoint.clone(),
+        node_endpoint: normalize_node_agent_endpoint(&state.inner.bind),
+        auth_headers: HostedClientHeaders::new(
+            spec.auth.header.clone(),
+            format!("Bearer {token}"),
+            spec.audience.clone(),
+        ),
+    })
+}
+
+fn normalize_node_agent_endpoint(bind: &str) -> String {
+    if bind.starts_with("http://") || bind.starts_with("https://") {
+        bind.to_string()
+    } else {
+        format!("http://{bind}")
+    }
+}
+
+async fn register_node_agent_once(
+    state: &NodeAgentState,
+    target: &NodeAgentRegistrationTarget,
+    registered_at: Option<u64>,
+) -> Result<u64> {
+    let refreshed_at = current_unix_timestamp_seconds()?;
+    let registered_at = registered_at.unwrap_or(refreshed_at);
+    let route = HostedControlPlaneRoute::Registration(HostedRegistrationRoute::Refresh {
+        node_name: state.inner.node_name.clone(),
+    });
+    let request_body = HostedNodeRegistrationRequest {
+        control_plane: target.control_plane.clone(),
+        node_name: state.inner.node_name.clone(),
+        registration: HostedNodeRegistration {
+            endpoint: target.node_endpoint.clone(),
+            token: state.inner.token.clone(),
+            registered_at,
+            refreshed_at,
+            ttl_seconds: NODE_AGENT_REGISTRATION_TTL_SECONDS,
+        },
+    };
+    let mut request = Client::new().post(format!(
+        "{}{}",
+        target.endpoint.trim_end_matches('/'),
+        route.path()
+    ));
+    for (name, value) in target.auth_headers.to_header_map() {
+        request = request.header(name, value);
+    }
+    let response = request
+        .header(CONTENT_TYPE.as_str(), "application/json")
+        .body(serde_json::to_vec(&request_body).context("failed to encode registration request")?)
+        .send()
+        .await
+        .with_context(|| {
+            format!(
+                "could not reach control plane '{}' at '{}'",
+                target.control_plane, target.endpoint
+            )
+        })?;
+    let status =
+        StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let bytes = response
+        .bytes()
+        .await
+        .context("failed to read control-plane registration response")?;
+    if !status.is_success() {
+        if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
+            bail!("{}", error.message);
+        }
+        bail!(
+            "control plane '{}' rejected node '{}' registration with status {}",
+            target.control_plane,
+            state.inner.node_name,
+            status
+        );
+    }
+    let _: HostedSuccess<HostedRegisteredNodeContract> = serde_json::from_slice(&bytes)
+        .context("control plane returned invalid registration JSON")?;
+    Ok(registered_at)
 }
 
 fn node_agent_router(state: NodeAgentState) -> Router {
@@ -2591,12 +3065,14 @@ mod tests {
         CopyDirection, CopyRequest, ExecRequest, ExecResult, GuestOperation, OperationResult,
         RequestEnvelope, ResponseEnvelope, StreamKind, read_frame, write_frame,
     };
+    use port_hosted_protocol::HostedNodeRegistrationRequest;
     use std::io::{BufReader, Cursor, Read, Write};
     use std::net::SocketAddr;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
+    use std::time::SystemTime;
     use tempfile::TempDir;
 
     #[derive(Clone)]
@@ -2666,6 +3142,375 @@ mod tests {
             "{}",
             error
         );
+    }
+
+    #[tokio::test]
+    async fn control_plane_registration_route_persists_and_refreshes_state() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("registration-route");
+        let token_var = unique_test_env("PORT_TEST_CP_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let client = Client::new();
+        let path = registered_node_state_path(&control_plane);
+        let url = format!("http://{control_addr}/v1/nodes/aws-linux-node/registration");
+
+        let initial = HostedNodeRegistrationRequest {
+            control_plane: control_plane.clone(),
+            node_name: String::from("aws-linux-node"),
+            registration: HostedNodeRegistration {
+                endpoint: String::from("http://127.0.0.1:9234"),
+                token: String::from("node-secret"),
+                registered_at: 10,
+                refreshed_at: 10,
+                ttl_seconds: 30,
+            },
+        };
+        let response = client
+            .post(&url)
+            .header("authorization", "Bearer demo-token")
+            .header("x-port-audience", "port-hosted-demo")
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&initial).expect("registration request should encode"))
+            .send()
+            .await
+            .expect("registration request should complete");
+        let status = response.status();
+        let body = response.text().await.expect("response body should decode");
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let success: HostedSuccess<HostedRegisteredNodeContract> =
+            serde_json::from_str(&body).expect("registration success should decode");
+        assert_eq!(success.result.endpoint, "http://127.0.0.1:9234");
+        assert!(path.exists(), "registered node state should persist");
+
+        let state_after_initial: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&path).expect("registered node state should read"),
+        )
+        .expect("registered node state should decode");
+        assert_eq!(state_after_initial.nodes["aws-linux-node"].refreshed_at, 10);
+
+        let refresh = HostedNodeRegistrationRequest {
+            control_plane: control_plane.clone(),
+            node_name: String::from("aws-linux-node"),
+            registration: HostedNodeRegistration {
+                endpoint: String::from("http://127.0.0.1:9234"),
+                token: String::from("node-secret"),
+                registered_at: 10,
+                refreshed_at: 25,
+                ttl_seconds: 30,
+            },
+        };
+        let response = client
+            .post(&url)
+            .header("authorization", "Bearer demo-token")
+            .header("x-port-audience", "port-hosted-demo")
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&refresh).expect("refresh request should encode"))
+            .send()
+            .await
+            .expect("refresh request should complete");
+        let status = response.status();
+        let body = response.text().await.expect("refresh body should decode");
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let state_after_refresh: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&path).expect("registered node state should read"),
+        )
+        .expect("registered node state should decode");
+        assert_eq!(state_after_refresh.nodes["aws-linux-node"].refreshed_at, 25);
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn node_agent_registers_and_refreshes_against_control_plane() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("node-refresh");
+        let token_var = unique_test_env("PORT_TEST_NODE_REFRESH_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        let control_bind = reserve_test_addr();
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .endpoint = format!("http://{control_bind}");
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let control_config = config.clone();
+        let control_plane_name = control_plane.clone();
+        let control_bind_for_thread = control_bind.clone();
+        std::thread::spawn(move || {
+            let _ = serve_control_plane(
+                control_config,
+                ControlPlaneServeRequest {
+                    control_plane: control_plane_name,
+                    bind: control_bind_for_thread,
+                    node_bindings: Vec::new(),
+                },
+            );
+        });
+
+        wait_for(Duration::from_secs(5), Duration::from_millis(50), || {
+            let response = reqwest::blocking::Client::new()
+                .get(format!("http://{control_bind}/v1/machines"))
+                .header("authorization", "Bearer demo-token")
+                .send();
+            matches!(response, Ok(response) if response.status() == StatusCode::OK)
+        });
+
+        let node_bind = reserve_test_addr();
+        let node_config = config.clone();
+        std::thread::spawn(move || {
+            let _ = serve_node_agent(
+                node_config,
+                NodeAgentServeRequest {
+                    node_name: String::from("aws-linux-node"),
+                    bind: node_bind,
+                    token: String::from("node-secret"),
+                },
+            );
+        });
+
+        let state_path = registered_node_state_path(&control_plane);
+        wait_for(Duration::from_secs(5), Duration::from_millis(100), || {
+            std::fs::read(&state_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RegisteredNodeStateFile>(&bytes).ok())
+                .and_then(|state| state.nodes.get("aws-linux-node").cloned())
+                .is_some()
+        });
+        let first: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&state_path).expect("registered state should read"),
+        )
+        .expect("registered state should decode");
+        let first_seen = first.nodes["aws-linux-node"].refreshed_at;
+
+        wait_for(Duration::from_secs(4), Duration::from_millis(250), || {
+            std::fs::read(&state_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RegisteredNodeStateFile>(&bytes).ok())
+                .and_then(|state| {
+                    state
+                        .nodes
+                        .get("aws-linux-node")
+                        .map(|registration| registration.refreshed_at > first_seen)
+                })
+                .unwrap_or(false)
+        });
+
+        let refreshed: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&state_path).expect("registered state should read"),
+        )
+        .expect("registered state should decode");
+        assert!(
+            refreshed.nodes["aws-linux-node"].refreshed_at > first_seen,
+            "expected a later refresh than {first_seen}, got {}",
+            refreshed.nodes["aws-linux-node"].refreshed_at
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn node_agent_surfaces_explicit_registration_failures() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+
+        {
+            let mut config = sample_control_plane_config(tempdir.path());
+            let control_plane = unique_test_control_plane("auth-mismatch");
+            let token_var = unique_test_env("PORT_TEST_NODE_AUTH_MISMATCH");
+            retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+            cleanup_registered_state(&control_plane);
+            let control_bind = reserve_test_addr();
+            config
+                .control_planes
+                .get_mut(&control_plane)
+                .expect("control plane should exist")
+                .endpoint = format!("http://{control_bind}");
+            unsafe {
+                std::env::set_var(&token_var, "demo-token");
+            }
+
+            let control_config = config.clone();
+            let control_plane_name = control_plane.clone();
+            let control_bind_for_thread = control_bind.clone();
+            std::thread::spawn(move || {
+                let _ = serve_control_plane(
+                    control_config,
+                    ControlPlaneServeRequest {
+                        control_plane: control_plane_name,
+                        bind: control_bind_for_thread,
+                        node_bindings: Vec::new(),
+                    },
+                );
+            });
+
+            wait_for(Duration::from_secs(5), Duration::from_millis(50), || {
+                let response = reqwest::blocking::Client::new()
+                    .get(format!("http://{control_bind}/v1/machines"))
+                    .header("authorization", "Bearer demo-token")
+                    .send();
+                matches!(response, Ok(response) if response.status() == StatusCode::OK)
+            });
+
+            unsafe {
+                std::env::set_var(&token_var, "wrong-token");
+            }
+            let error = serve_node_agent(
+                config,
+                NodeAgentServeRequest {
+                    node_name: String::from("aws-linux-node"),
+                    bind: reserve_test_addr(),
+                    token: String::from("node-secret"),
+                },
+            )
+            .expect_err("auth mismatch should fail registration");
+            let error_text = error.to_string();
+            assert!(error_text.contains("registration"));
+            assert!(
+                error_text.contains("authorization")
+                    || error_text.contains("status 401")
+                    || error_text.contains("expects a bearer token"),
+                "{error_text}"
+            );
+            cleanup_registered_state(&control_plane);
+            unsafe {
+                std::env::remove_var(&token_var);
+            }
+        }
+
+        {
+            let mut config = sample_control_plane_config(tempdir.path());
+            let control_plane = unique_test_control_plane("unreachable");
+            let token_var = unique_test_env("PORT_TEST_NODE_UNREACHABLE");
+            retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+            cleanup_registered_state(&control_plane);
+            config
+                .control_planes
+                .get_mut(&control_plane)
+                .expect("control plane should exist")
+                .endpoint = String::from("http://127.0.0.1:9");
+            unsafe {
+                std::env::set_var(&token_var, "demo-token");
+            }
+            let error = serve_node_agent(
+                config,
+                NodeAgentServeRequest {
+                    node_name: String::from("aws-linux-node"),
+                    bind: reserve_test_addr(),
+                    token: String::from("node-secret"),
+                },
+            )
+            .expect_err("unreachable control plane should fail registration");
+            let error_text = error.to_string();
+            assert!(error_text.contains("registration"));
+            assert!(error_text.contains("could not reach"), "{error_text}");
+            cleanup_registered_state(&control_plane);
+            unsafe {
+                std::env::remove_var(&token_var);
+            }
+        }
+
+        {
+            let mut config = sample_control_plane_config(tempdir.path());
+            let control_plane = unique_test_control_plane("stale");
+            let token_var = unique_test_env("PORT_TEST_NODE_STALE");
+            retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+            cleanup_registered_state(&control_plane);
+            let control_bind = reserve_test_addr();
+            config
+                .control_planes
+                .get_mut(&control_plane)
+                .expect("control plane should exist")
+                .endpoint = format!("http://{control_bind}");
+            let now = SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("unix time should exist")
+                .as_secs();
+            let stale_path = registered_node_state_path(&control_plane);
+            std::fs::create_dir_all(
+                stale_path
+                    .parent()
+                    .expect("registered state path should have a parent"),
+            )
+            .expect("registered state dir should exist");
+            std::fs::write(
+                &stale_path,
+                serde_json::to_vec_pretty(&RegisteredNodeStateFile {
+                    control_plane: control_plane.clone(),
+                    nodes: BTreeMap::from([(
+                        String::from("aws-linux-node"),
+                        HostedNodeRegistration {
+                            endpoint: String::from("http://127.0.0.1:9234"),
+                            token: String::from("node-secret"),
+                            registered_at: now + 60,
+                            refreshed_at: now + 60,
+                            ttl_seconds: 30,
+                        },
+                    )]),
+                })
+                .expect("stale registered state should encode"),
+            )
+            .expect("stale registered state should write");
+            unsafe {
+                std::env::set_var(&token_var, "demo-token");
+            }
+
+            let control_config = config.clone();
+            let control_plane_name = control_plane.clone();
+            let control_bind_for_thread = control_bind.clone();
+            std::thread::spawn(move || {
+                let _ = serve_control_plane(
+                    control_config,
+                    ControlPlaneServeRequest {
+                        control_plane: control_plane_name,
+                        bind: control_bind_for_thread,
+                        node_bindings: Vec::new(),
+                    },
+                );
+            });
+
+            wait_for(Duration::from_secs(5), Duration::from_millis(50), || {
+                let response = reqwest::blocking::Client::new()
+                    .get(format!("http://{control_bind}/v1/machines"))
+                    .header("authorization", "Bearer demo-token")
+                    .send();
+                matches!(response, Ok(response) if response.status() == StatusCode::OK)
+            });
+
+            let error = serve_node_agent(
+                config,
+                NodeAgentServeRequest {
+                    node_name: String::from("aws-linux-node"),
+                    bind: reserve_test_addr(),
+                    token: String::from("node-secret"),
+                },
+            )
+            .expect_err("stale registration should fail");
+            assert!(error.to_string().contains("stale"));
+            assert!(error.to_string().contains("aws-linux-node"));
+            cleanup_registered_state(&control_plane);
+            unsafe {
+                std::env::remove_var(&token_var);
+            }
+        }
     }
 
     #[tokio::test]
@@ -3278,14 +4123,22 @@ mod tests {
         config: PortConfig,
         node_bindings: Vec<HostedNodeBinding>,
     ) -> SocketAddr {
+        serve_test_control_plane_named(&config, "demo", node_bindings).await
+    }
+
+    async fn serve_test_control_plane_named(
+        config: &PortConfig,
+        control_plane: &str,
+        node_bindings: Vec<HostedNodeBinding>,
+    ) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("listener should bind");
         let addr = listener.local_addr().expect("addr should exist");
         let state = build_state(
-            config,
+            config.clone(),
             ControlPlaneServeRequest {
-                control_plane: String::from("demo"),
+                control_plane: control_plane.to_string(),
                 bind: addr.to_string(),
                 node_bindings,
             },
@@ -3443,6 +4296,61 @@ mod tests {
             let _ = axum::serve(listener, router).await;
         });
         addr
+    }
+
+    fn retarget_demo_control_plane(config: &mut PortConfig, control_plane: &str, token_var: &str) {
+        let mut spec = config
+            .control_planes
+            .remove("demo")
+            .expect("demo control plane should exist");
+        spec.auth.source = port_model::HostedAuthTokenSource::Env {
+            variable: token_var.to_string(),
+        };
+        config
+            .control_planes
+            .insert(control_plane.to_string(), spec);
+        for host in config.hosts.values_mut() {
+            if let HostConnection::HostedControlPlane {
+                control_plane: current,
+            } = &mut host.connection
+            {
+                *current = control_plane.to_string();
+            }
+        }
+    }
+
+    fn unique_test_control_plane(label: &str) -> String {
+        format!("demo-{label}-{}", std::process::id())
+    }
+
+    fn unique_test_env(prefix: &str) -> String {
+        format!("{prefix}_{}", std::process::id())
+    }
+
+    fn reserve_test_addr() -> String {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("temporary listener should bind")
+            .local_addr()
+            .expect("temporary listener should have an addr")
+            .to_string()
+    }
+
+    fn wait_for(timeout: Duration, poll: Duration, mut predicate: impl FnMut() -> bool) {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if predicate() {
+                return;
+            }
+            std::thread::sleep(poll);
+        }
+        panic!("timed out after {:?}", timeout);
+    }
+
+    fn cleanup_registered_state(control_plane: &str) {
+        let path = registered_node_state_path(control_plane);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
     }
 
     async fn serve_test_node_agent(config: PortConfig, node_name: &str, token: &str) -> SocketAddr {

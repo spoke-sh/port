@@ -1273,17 +1273,13 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
     );
     println!(
         "target host group: {}",
-        service
-            .target_host_group
-            .as_deref()
-            .unwrap_or("(none)")
+        service.target_host_group.as_deref().unwrap_or("(none)")
     );
     println!(
         "scheduler: {}",
-        service.scheduler.map_or_else(
-            || String::from("(none)"),
-            render_scheduler_policy
-        )
+        service
+            .scheduler
+            .map_or_else(|| String::from("(none)"), render_scheduler_policy)
     );
     println!("manifest: {}", service.manifest_path.display());
     println!("runtime record: {}", service.runtime.record_path.display());

@@ -1,0 +1,12 @@
+---
+recorded_at: 2026-03-08T23:27:51.546626773-07:00
+command: nix develop -c cargo test -q -p port-runtime node_agent_surfaces_explicit_registration_failures
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 71 filtered out; finished in 0.01s
+
+
+--- stderr ---
+path '/home/alex/workspace/spoke-sh/port/.keel' does not contain a 'flake.nix', searching up

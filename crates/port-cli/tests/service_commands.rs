@@ -9,8 +9,7 @@ use std::time::Duration;
 use port_guest_agent::serve as serve_guest_agent;
 use port_model::PortConfig;
 use port_runtime::{
-    ControlPlaneServeRequest, HostedNodeBinding, NodeAgentServeRequest, serve_control_plane,
-    serve_node_agent,
+    ControlPlaneServeRequest, NodeAgentServeRequest, serve_control_plane, serve_node_agent,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -99,6 +98,7 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let control_plane_addr = reserve_addr();
     let control_plane_endpoint = format!("http://{control_plane_addr}");
+    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
     unsafe {
         std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
     }
@@ -122,6 +122,23 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
         thread::sleep(Duration::from_millis(20));
     }
 
+    let (control_tx, control_rx) = mpsc::channel();
+    let control_config = config.clone();
+    let control_bind = control_plane_addr.clone();
+    thread::spawn(move || {
+        let result = serve_control_plane(
+            control_config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: control_bind,
+                node_bindings: Vec::new(),
+            },
+        )
+        .map(|_| ());
+        let _ = control_tx.send(result);
+    });
+    wait_for_port(&control_plane_addr, &control_rx, "control-plane");
+
     let node_addr = reserve_addr();
     let (node_tx, node_rx) = mpsc::channel();
     let node_config = config.clone();
@@ -139,28 +156,6 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
         let _ = node_tx.send(result);
     });
     wait_for_port(&node_addr, &node_rx, "node-agent");
-
-    let (control_tx, control_rx) = mpsc::channel();
-    let control_config = config.clone();
-    let control_bind = control_plane_addr.clone();
-    let control_node_addr = node_addr.clone();
-    thread::spawn(move || {
-        let result = serve_control_plane(
-            control_config,
-            ControlPlaneServeRequest {
-                control_plane: String::from("demo"),
-                bind: control_bind,
-                node_bindings: vec![HostedNodeBinding {
-                    node_name: String::from("aws-linux-node"),
-                    endpoint: format!("http://{control_node_addr}"),
-                    token: String::from("node-secret"),
-                }],
-            },
-        )
-        .map(|_| ());
-        let _ = control_tx.send(result);
-    });
-    wait_for_port(&control_plane_addr, &control_rx, "control-plane");
 
     let secret_put = port_command(&config_path)
         .arg("service")

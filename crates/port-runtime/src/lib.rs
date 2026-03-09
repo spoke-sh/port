@@ -1814,7 +1814,8 @@ pub(crate) fn apply_hosted_machine_service_live(
     request: ServiceApplyRequest<'_>,
 ) -> Result<ServiceDefinitionStatus> {
     let stored = apply_machine_service_local(metadata_config, request.clone())?;
-    let runtime_dir = RuntimePaths::for_machine(request.runtime_root, request.machine_name).runtime_dir;
+    let runtime_dir =
+        RuntimePaths::for_machine(request.runtime_root, request.machine_name).runtime_dir;
     let env = load_service_secret_env(&runtime_dir, &stored.secret_bindings)?;
     let managed = managed_service_result_status(execute_guest_operation(
         guest_config,
@@ -3220,11 +3221,9 @@ pub(crate) fn hosted_stored_service_placements(
         .iter()
         .filter(|(_, node)| node.host == machine.host)
     {
-        let definitions = service_definition_dir(&RuntimePaths::for_machine(
-            &node.runtime_root,
-            machine_name,
-        )
-        .runtime_dir);
+        let definitions = service_definition_dir(
+            &RuntimePaths::for_machine(&node.runtime_root, machine_name).runtime_dir,
+        );
         if !definitions.exists() {
             continue;
         }
@@ -6603,12 +6602,13 @@ mod tests {
         apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
         build_firecracker_config, collect_doctor_report, collect_doctor_report_with_facts,
         copy_guest_file, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        launch_local_machine, list_machine_services, list_machines, machine_monitor,
-        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, put_machine_secret, read_json_file, read_pid_file, repo_root,
-        resolve_artifact_metadata, resolve_machine_architecture, select_firecracker_binary,
-        serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
-        service_status_from_record, stop_machine, stop_machine_service,
+        hosted_placeholder_runtime_root, launch_local_machine, list_machine_services,
+        list_machines, machine_monitor, machine_service_status, machine_status, machine_top,
+        path_check, prepare_guest_forward, prepare_runtime_state, put_machine_secret,
+        read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
+        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
+        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
+        stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -6854,20 +6854,18 @@ exec sleep 30
         unsafe {
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
         }
+        let _ = std::fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
 
         let mut client_config = config.clone();
-        let node_addr = if bind_node {
-            Some(start_live_node_agent(&client_config)?)
-        } else {
-            None
-        };
-
-        let control_plane_addr = start_live_control_plane(&client_config, node_addr.as_deref())?;
+        let control_plane_addr = start_live_control_plane(&client_config, None)?;
         client_config
             .control_planes
             .get_mut("demo")
             .expect("demo control plane should exist")
             .endpoint = format!("http://{control_plane_addr}");
+        if bind_node {
+            start_live_node_agent(&client_config)?;
+        }
 
         Ok(client_config)
     }
@@ -6880,25 +6878,19 @@ exec sleep 30
         unsafe {
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
         }
+        let _ = std::fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
 
         let mut client_config = config.clone();
-        let mut node_bindings = Vec::new();
-        for node_name in node_names {
-            let endpoint = start_live_named_node_agent(&client_config, node_name)?;
-            node_bindings.push(HostedNodeBinding {
-                node_name: (*node_name).to_string(),
-                endpoint: format!("http://{endpoint}"),
-                token: String::from("node-secret"),
-            });
-        }
-
         let control_plane_addr =
-            start_live_control_plane_with_bindings(&client_config, node_bindings)?;
+            start_live_control_plane_with_bindings(&client_config, Vec::new())?;
         client_config
             .control_planes
             .get_mut("demo")
             .expect("demo control plane should exist")
             .endpoint = format!("http://{control_plane_addr}");
+        for node_name in node_names {
+            start_live_named_node_agent(&client_config, node_name)?;
+        }
 
         Ok(client_config)
     }
@@ -10213,7 +10205,10 @@ exec sleep 30
             .expect("service list should succeed");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].node_name.as_deref(), Some("aws-linux-node-b"));
-        assert_eq!(listed[0].target_host_group.as_deref(), Some("aws-secondary"));
+        assert_eq!(
+            listed[0].target_host_group.as_deref(),
+            Some("aws-secondary")
+        );
 
         let status = machine_service_status(&config, tempdir.path(), "cloud-aws", "svc-secondary")
             .expect("service status should succeed");
@@ -10290,9 +10285,9 @@ exec sleep 30
         )
         .expect("secondary placement should succeed");
 
-        let stale_control_plane =
-            start_live_control_plane_with_bindings(&config, Vec::new())
-                .expect("stale control plane should start");
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let stale_control_plane = start_live_control_plane_with_bindings(&config, Vec::new())
+            .expect("stale control plane should start");
         let mut stale_config = config.clone();
         stale_config
             .control_planes
@@ -10304,11 +10299,14 @@ exec sleep 30
             .expect("service list should still succeed");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].node_name.as_deref(), Some("aws-linux-node-b"));
-        assert_eq!(listed[0].target_host_group.as_deref(), Some("aws-secondary"));
+        assert_eq!(
+            listed[0].target_host_group.as_deref(),
+            Some("aws-secondary")
+        );
         assert!(
             listed[0]
                 .detail
-                .contains("no bound node-agent endpoint for it"),
+                .contains("no live registered node-agent endpoint for it"),
             "{}",
             listed[0].detail
         );
@@ -10319,7 +10317,9 @@ exec sleep 30
         assert_eq!(status.node_name.as_deref(), Some("aws-linux-node-b"));
         assert_eq!(status.target_host_group.as_deref(), Some("aws-secondary"));
         assert!(
-            status.detail.contains("no bound node-agent endpoint for it"),
+            status
+                .detail
+                .contains("no live registered node-agent endpoint for it"),
             "{}",
             status.detail
         );
