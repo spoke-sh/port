@@ -2,11 +2,12 @@
 id: 1vzQIq000
 title: Define Hosted Detached Forward Contract
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T19:25:04
-updated_at: 2026-03-08T19:27:50
+updated_at: 2026-03-08T19:32:41
 scope: 1vzETR000/1vzQEj000
 started_at: 2026-03-08T19:27:50
+completed_at: 2026-03-08T19:32:41
 ---
 
 # Define Hosted Detached Forward Contract
