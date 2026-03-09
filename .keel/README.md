@@ -62,6 +62,12 @@
 |--------|--------|
 | [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | done |
 
+### [Hosted Standard Cloud Launch](epics/1vzXFf000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | planned |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
