@@ -56,19 +56,20 @@ Service workflow examples:
   port --config examples/port.toml service status --machine cloud-aws --name web
   port --config examples/port.toml service stop --machine cloud-aws --name web
 Multi-node hosted service workflow:
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
+  Registered nodes publish inventory to the configured control plane before service placement starts.
   `port service list|status|stop` surface the selected node, target host group, scheduler, and runtime state for the stored placement.
 Current hosted service limits:
   No autoscaling or rescheduling yet.
   Deterministic-first-fit is the only shipped scheduler policy.
-  No fleet manager, durable node registration, or broader service orchestration yet.
+  No broader fleet policy or external inventory yet.
   `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
   `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
   Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
@@ -99,8 +100,8 @@ PVM foundation workflow:
   Local PVM launch still requires a prepared x86_64 Linux host with the patched `firecracker-pvm` binary and the required host boot state.
 Hosted prepared-node PVM workflow:
   Copy `examples/port.toml` to a temp config, switch `machines.cloud-aws` to `protection_mode = \"pvm\"`, and point the `x86_64/firecracker/pvm` kernel and guest variants at prepared artifact paths.
-  PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+  PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
@@ -123,17 +124,17 @@ Artifact Mobility:
 Hosted Control:
   Local Port still owns the shipped standard-lane launch path directly, and hosted prepared-node PVM launch now routes through the control plane and node agent.
   `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes.
-  Example: `port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
-  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root.
+  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root and registers that ownership with the configured control plane.
   Hosted demo flow:
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret`
+    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
     `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'`
   Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
   The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
   Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
-  Demo control-plane servers bind explicit node-agent endpoints with `--node-binding <node>=<endpoint>,<token>`.
+  `--node-binding <node>=<endpoint>,<token>` remains a bootstrap or debug override when a node cannot self-register yet.
   Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
   `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted entries resolve through node inventory and surface unresolved hosted inventory as `malformed` instead of hiding it.
   Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
@@ -141,6 +142,7 @@ Hosted Control:
   Hosted `guest forward` now supports foreground and detached lifecycle modes plus `--list`, `--stop`, and `--name` through the live control-plane and node-agent path.
   Hosted detached forward returns a node-owned listener address and keeps detached lifecycle state under the node runtime root.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
+  Current hosted fleet limits: no autoscaling, no broader fleet policy, and no external inventory yet.
   Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
 Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
@@ -1989,6 +1991,9 @@ mod tests {
             "--stop",
             "--name",
             "node-binding",
+            "bootstrap or debug",
+            "machine list",
+            "external inventory yet",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

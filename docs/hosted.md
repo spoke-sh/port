@@ -15,7 +15,7 @@ What is shipped today:
   when a hosted machine resolves to a ready node with a real PVM host kit and
   PVM artifact variants
 - `port control-plane serve` as the first live hosted HTTP server for canonical
-  machine and guest routes, forwarding to explicitly bound node-agent endpoints
+  machine and guest routes, accepting registered node agents for the demo lane
 - `port node-agent serve` as the first live hosted node-runtime server for one
   configured hosted node and runtime root
 
@@ -69,23 +69,24 @@ The central control plane is the system of record for hosted Port.
 The control plane does not execute guest commands inside the VM directly. It
 coordinates and authorizes them.
 
-For the first live demo lane, the control plane binds node-agent endpoints
-explicitly at startup:
+For the first live demo lane, registered node agents publish their endpoint and
+runtime ownership to the configured control plane:
 
 ```bash
-port --config examples/port.toml node-agent serve \
+port --config examples/port.toml control-plane serve \
+  --control-plane demo \
+  --bind 127.0.0.1:7040
+
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve \
   --node aws-linux-node \
   --bind 127.0.0.1:9234 \
   --token node-secret
-
-port --config examples/port.toml control-plane serve \
-  --control-plane demo \
-  --bind 127.0.0.1:7040 \
-  --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
 ```
 
-That keeps the control-plane transport real without pretending Port already has
-durable node registration or scheduler policy.
+`port control-plane serve --node-binding <node>=<endpoint>,<token>` remains
+available only as a bootstrap or debug override when a node cannot
+self-register yet. The default operator path is control plane first, then node
+registration through `port node-agent serve`.
 
 The repository-local end-to-end demo workflow is:
 
@@ -96,9 +97,9 @@ bash scripts/hosted-demo.sh
 
 That script prepares temporary hosted server and client configs, starts
 `port-guest-agent`, `port node-agent serve`, and `port control-plane serve`,
-then runs canonical hosted `port machine status`, `port guest exec`,
-`port guest copy`, and `port guest logs` commands through the live hosted HTTP
-path.
+waits for node registration, then runs canonical hosted `port machine list`,
+`port machine status`, `port guest exec`, `port guest copy`, and `port guest
+logs` commands through the live hosted HTTP path.
 
 The prepared-node PVM workflow reuses that same hosted split. The only extra
 requirements are a copied config that switches `cloud-aws` to `pvm`, PVM
@@ -331,9 +332,9 @@ full hosted fleet management.
 Repository-local workflow:
 
 ```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
@@ -347,6 +348,9 @@ Why this is the canonical workflow:
   inventory model instead of inventing a second scheduler command family.
 - The selected node remains visible through `service list`, `status`, and
   `stop`, together with the target host group, scheduler, and runtime state.
+- Both node agents register with the control plane before placement starts, so
+  the service workflow now matches the same registered-node story as `machine
+  list` and `machine status`.
 - If the selected node binding goes stale, the stored placement remains
   operator-visible through the same service commands so routing drift is not
   hidden behind a generic hosted control-plane failure.
@@ -355,8 +359,7 @@ Current hosted service limits:
 
 - No autoscaling or rescheduling yet.
 - Deterministic-first-fit is the only shipped scheduler policy.
-- No fleet manager, durable node registration, or broader service orchestration
-  yet.
+- No broader fleet policy or external inventory yet.
 
 ## Canonical Machine Control Contract
 

@@ -135,8 +135,8 @@ Start from a copy of `examples/port.toml` and make these temporary changes:
   on the prepared node host
 
 ```bash
-PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
@@ -332,7 +332,8 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - The `port` CLI remains the canonical operator surface in both local and
   hosted modes.
 - `port node-agent serve` now ships the first live hosted node-runtime server
-  for one execution node and runtime root.
+  for one execution node and runtime root, and it registers that ownership with
+  the configured control plane.
 - `port control-plane serve` now ships the matching hosted control-plane
   server for the single-node demo lane.
 - The sample config now names that hosted API identity explicitly under
@@ -352,6 +353,18 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted `machine launch` now uses that same control-plane plus node-agent path
   for prepared x86_64 PVM machines. Other hosted launch paths still return
   provider-aware guidance instead of pretending they are live.
+- Registered hosted node workflow for the current demo lane:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+```
+
+- `port control-plane serve --node-binding <node>=<endpoint>,<token>` remains
+  available only as a bootstrap or debug override when a node cannot
+  self-register yet.
 - Hosted guest `exec`, `copy`, `pty`, `logs`, and `forward` are now modeled as
   a control-plane-authorized attach followed by node-agent guest brokerage to
   the in-guest `port-guest-agent`. The canonical `guest` verbs and guest
@@ -373,6 +386,8 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
 - Hosted inventory that lacks a matching node runtime binding currently
   fails with explicit control-plane and route context instead of being silently
   dropped.
+- Current hosted fleet limits remain explicit: no autoscaling, no broader fleet
+  policy, and no external inventory yet.
 - `port machine monitor` and `port machine top` now make the hosted monitoring
   boundary explicit: they inspect node-agent-owned runtime state, detached
   forwards, and live processes, but they are not yet a full metrics,
@@ -402,11 +417,11 @@ bash scripts/hosted-demo.sh
 
 That demo script prepares temporary hosted server and client configs, starts
 `port-guest-agent`, `port node-agent serve`, and `port control-plane serve`,
-then runs canonical hosted `port machine status`, `port guest exec`,
-`port guest copy`, `port guest logs`, and hosted detached `port guest forward`
-start, list, and stop commands end-to-end. Detached forward lifecycle now
-stays on the same control-plane and node-agent path as the foreground hosted
-guest bridge.
+waits for node registration, then runs canonical hosted `port machine list`,
+`port machine status`, `port guest exec`, `port guest copy`, `port guest
+logs`, and hosted detached `port guest forward` start, list, and stop
+commands end-to-end. Detached forward lifecycle now stays on the same
+control-plane and node-agent path as the foreground hosted guest bridge.
 
 ## Multi-Node Hosted Service Workflow
 
@@ -416,9 +431,9 @@ surface instead of introducing a scheduler-only command family.
 Repository-local workflow:
 
 ```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040 --node-binding aws-linux-node=http://127.0.0.1:9234,node-secret --node-binding aws-linux-node-b=http://127.0.0.1:9235,node-secret-b
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
@@ -431,6 +446,8 @@ What operators should expect:
 - `service apply --host-group aws-secondary` selects one eligible member of
   that explicit host group and stores the placement under the selected node
   runtime root.
+- Both node agents register themselves with the control plane before placement
+  starts; manual `--node-binding` is not the default operator path anymore.
 - `service list`, `status`, and `stop` surface the selected node, target host
   group, scheduler, and runtime state through the same canonical service
   output.

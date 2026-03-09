@@ -65,6 +65,19 @@ wait_for_tcp() {
   return 1
 }
 
+wait_for_machine_list() {
+  local config="$1"
+  local machine="$2"
+  for _ in $(seq 1 100); do
+    if "$PORT_BIN" --config "$config" machine list | grep -q "$machine"; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "timed out waiting for hosted machine '$machine' to appear in machine list" >&2
+  return 1
+}
+
 mkdir -p "$GUEST_ROOT/var/log" "$MACHINE_DIR" "$BOGUS_RUNTIME_ROOT"
 printf 'first\nsecond\n' >"$GUEST_ROOT/var/log/app.log"
 printf 'copy-ok' >"$HOST_SOURCE"
@@ -104,19 +117,23 @@ EOF
 GUEST_AGENT_PID=$!
 wait_for_path "$SOCKET_PATH"
 
-("$PORT_BIN" --config "$SERVER_CONFIG" node-agent serve --node aws-linux-node --bind "$NODE_ADDR" --token "$NODE_TOKEN") \
-  >"$WORKDIR/node-agent.stdout.log" 2>"$WORKDIR/node-agent.stderr.log" &
-NODE_AGENT_PID=$!
-wait_for_tcp "$NODE_ADDR"
-
-("$PORT_BIN" --config "$SERVER_CONFIG" control-plane serve --control-plane demo --bind "$CONTROL_ADDR" --node-binding "aws-linux-node=http://$NODE_ADDR,$NODE_TOKEN") \
+("$PORT_BIN" --config "$SERVER_CONFIG" control-plane serve --control-plane demo --bind "$CONTROL_ADDR") \
   >"$WORKDIR/control-plane.stdout.log" 2>"$WORKDIR/control-plane.stderr.log" &
 CONTROL_PLANE_PID=$!
 wait_for_tcp "$CONTROL_ADDR"
 
+("$PORT_BIN" --config "$SERVER_CONFIG" node-agent serve --node aws-linux-node --bind "$NODE_ADDR" --token "$NODE_TOKEN") \
+  >"$WORKDIR/node-agent.stdout.log" 2>"$WORKDIR/node-agent.stderr.log" &
+NODE_AGENT_PID=$!
+wait_for_tcp "$NODE_ADDR"
+wait_for_machine_list "$CLIENT_CONFIG" "cloud-aws"
+
 echo "workdir: $WORKDIR"
 echo "server config: $SERVER_CONFIG"
 echo "client config: $CLIENT_CONFIG"
+echo
+echo "machine list:"
+("$PORT_BIN" --config "$CLIENT_CONFIG" machine list)
 echo
 echo "machine status:"
 ("$PORT_BIN" --config "$CLIENT_CONFIG" machine status --machine cloud-aws)
@@ -147,4 +164,5 @@ cat "$ROUNDTRIP_PATH"
 echo
 echo "current hosted demo limits:"
 echo "- hosted guest forward detached lifecycle now ships through start/list/stop/name on the live control-plane path"
+echo "- no autoscaling, no broader fleet policy, and no external inventory yet"
 echo "- retries, richer client policies, and advanced auth/tenancy remain follow-on work"
