@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-03-08T21:50:27.979337223-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzRpI000/verify-ac-1.sh
+---
+129:  Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
+400:    #[command(about = "Apply a service or sandbox definition through the resolved runtime owner")]
+415:    #[command(about = "List service and sandbox definitions plus runtime state for a machine")]
+422:    #[command(about = "Inspect one service or sandbox definition and runtime state")]
+431:    #[command(about = "Stop one service or sandbox through the resolved runtime owner")]
+291:  the resolved runtime owner, and the hosted demo lane executes them through
+467:  executes the resulting managed process through the live control-plane and
+471:  contract, including the node-owned runtime record path.
+319:  managed process through that same hosted route while surfacing runtime state
+32:- those service calls execute through the same live hosted control-plane and

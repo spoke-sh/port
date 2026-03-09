@@ -288,10 +288,10 @@ Current behavior:
   rendered as human-readable CLI output.
 - `port service secret` and `port service apply|list|status|stop` now persist
   machine-scoped secret references plus service or sandbox definitions under
-  the resolved runtime owner. This first slice is spec-backed: it stores
-  desired state, guest command, secret bindings, hosted routing context, and a
-  canonical service runtime record path, while real hosted execution remains
-  follow-on work.
+  the resolved runtime owner, and the hosted demo lane executes them through
+  the live control-plane and node-agent path. Status still surfaces desired
+  state, guest command, secret bindings, hosted routing context, and a
+  canonical service runtime record path.
 
 ## Cloud Linux Support
 
@@ -463,17 +463,17 @@ The first service/sandbox surface builds on that same runtime ownership model:
 - `port service secret put|list|remove` stores machine-scoped secret references
   under the resolved runtime owner.
 - `port service apply --kind service|sandbox` stores a guest command plus
-  secret bindings under the same runtime owner, so hosted service and sandbox
-  workflows reuse the canonical machine/guest routing instead of inventing a
-  second hosted surface.
-- `port service list|status|stop` lets operators inspect or change the stored
-  desired state for those definitions and exposes the canonical runtime-state
-  contract that later live execution will fill in.
+  secret bindings under the same runtime owner and, for hosted machines,
+  executes the resulting managed process through the live control-plane and
+  node-agent path instead of inventing a second hosted surface.
+- `port service list|status|stop` lets operators inspect or change the desired
+  state for those definitions and surfaces the canonical runtime-state
+  contract, including the node-owned runtime record path.
 - Managed guest-process `start|list|status|stop` is an internal runtime
   contract, not a second hosted-only CLI surface.
-- This slice is intentionally spec-backed. Service definitions are persisted and
-  routed correctly today, but real hosted execution, teardown, and secure
-  secret backends remain follow-on work.
+- Secret values are still stored as runtime-owned JSON for the demo lane, and
+  restart policy, health checks, scheduler policy, and hardened secret
+  backends remain follow-on work.
 
 ## SDK And API Clients
 

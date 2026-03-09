@@ -126,12 +126,12 @@ Hosted Control:
   Hosted `guest forward` now supports foreground and detached lifecycle modes plus `--list`, `--stop`, and `--name` through the live control-plane and node-agent path.
   Hosted detached forward returns a node-owned listener address and keeps detached lifecycle state under the node runtime root.
   `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
-  `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
+  Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
 Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
   Managed guest-process `start|list|status|stop` is an internal contract beneath that same surface, not a second hosted-only CLI family.
   Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
-  `port service apply|list|status|stop` now also exposes a canonical runtime-state contract and record path while real hosted execution and teardown remain explicit follow-on work.
+  `port service apply|list|status|stop` now also exposes a canonical runtime-state contract and record path; restart policy, health checks, scheduler policy, and hardened secret backends remain explicit follow-on work.
   `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service request construction.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
@@ -397,7 +397,7 @@ pub enum MachineCommand {
 pub enum ServiceCommand {
     #[command(subcommand, about = "Manage machine-bound secret references")]
     Secret(ServiceSecretCommand),
-    #[command(about = "Store a service or sandbox definition under the resolved runtime owner")]
+    #[command(about = "Apply a service or sandbox definition through the resolved runtime owner")]
     Apply {
         #[arg(long)]
         machine: String,
@@ -412,14 +412,14 @@ pub enum ServiceCommand {
         #[arg(last = true, required = true)]
         command: Vec<String>,
     },
-    #[command(about = "List stored service and sandbox definitions for a machine")]
+    #[command(about = "List service and sandbox definitions plus runtime state for a machine")]
     List {
         #[arg(long)]
         machine: String,
         #[arg(long, default_value = "runtime")]
         runtime_root: PathBuf,
     },
-    #[command(about = "Inspect one stored service or sandbox definition")]
+    #[command(about = "Inspect one service or sandbox definition and runtime state")]
     Status {
         #[arg(long)]
         machine: String,
@@ -428,7 +428,7 @@ pub enum ServiceCommand {
         #[arg(long)]
         name: String,
     },
-    #[command(about = "Set a stored service or sandbox definition to the stopped desired state")]
+    #[command(about = "Stop one service or sandbox through the resolved runtime owner")]
     Stop {
         #[arg(long)]
         machine: String,

@@ -1,0 +1,10 @@
+---
+recorded_at: 2026-03-08T21:50:28.027573285-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzRpI000/verify-ac-2.sh
+---
+134:  `port service apply|list|status|stop` now also exposes a canonical runtime-state contract and record path; restart policy, health checks, scheduler policy, and hardened secret backends remain explicit follow-on work.
+474:- Secret values are still stored as runtime-owned JSON for the demo lane, and
+475:  restart policy, health checks, scheduler policy, and hardened secret
+227:- no restart-policy, scheduler-policy, or hardened secret-backend product
+487:  single-node demo rather than a hardened multi-node hosted product.
+48:- restart policy, scheduler policy, health checks, and hardened secret

@@ -29,6 +29,9 @@ Shipped today:
   route family
 - `services()` mirrors `port service secret put|list|remove` plus
   `port service apply|list|status|stop`
+- those service calls execute through the same live hosted control-plane and
+  node-agent path as the CLI demo lane; they do not define a second hosted-only
+  service surface
 - managed guest-process `start|list|status|stop` stays internal to the shared
   guest/runtime contract, so the SDK does not add a second hosted-only service
   client family
@@ -42,6 +45,8 @@ Still planned:
 - retries and richer client policies on top of the shipped transport
 - generated or versioned external API packages beyond the in-repo Rust crate
 - advanced auth, RBAC, and multi-tenant concerns
+- restart policy, scheduler policy, health checks, and hardened secret
+  backends for hosted services and sandboxes
 
 ## Example
 

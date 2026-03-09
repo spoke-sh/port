@@ -2,10 +2,11 @@
 id: 1vzRpI000
 title: Publish Hosted Service And Sandbox Workflow
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T21:02:40
-updated_at: 2026-03-08T21:04:26
+updated_at: 2026-03-08T21:45:08
 scope: 1vz4Yn000/1vzRnO000
+started_at: 2026-03-08T21:45:08
 ---
 
 # Publish Hosted Service And Sandbox Workflow

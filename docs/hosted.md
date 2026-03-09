@@ -224,7 +224,8 @@ What this does not claim:
 
 - no scheduler policy exists yet beyond explicit membership
 - no hosted remote-launch implementation ships yet
-- no hosted secrets/services/sandboxes execution product exists yet
+- no restart-policy, scheduler-policy, or hardened secret-backend product
+  exists yet for hosted services and sandboxes
 - hosted `machine monitor` and `top` are runtime-inspection surfaces, not a
   full metrics or fleet-observability product yet
 
@@ -312,9 +313,11 @@ What is runnable today:
   hosted secret store
 - hosted `service apply --kind service|sandbox` now stores service and sandbox
   definitions under that same runtime owner, including desired state, guest
-  command, secret bindings, and hosted routing context
-- hosted `service list|status|stop` now inspects or updates those stored
-  definitions, but real hosted execution and teardown remain follow-on work
+  command, secret bindings, hosted routing context, and the node-owned runtime
+  record path
+- hosted `service list|status|stop` now inspects, updates, and stops the live
+  managed process through that same hosted route while surfacing runtime state
+  back through the canonical `port service` surface
 
 ## Canonical Machine Control Contract
 
@@ -467,16 +470,16 @@ the shared route and auth contract from `port-hosted-protocol`.
   lane: `port control-plane serve` and `port node-agent serve`.
 - hosted `service secret` and `service apply|list|status|stop` are also
   config-backed and in-process; they persist spec state under the selected node
-  `runtime_root` and now expose the canonical runtime-state record path rather
-  than materializing real hosted execution yet.
+  `runtime_root`, execute managed guest processes through the live hosted
+  route, and expose the canonical runtime-state record path.
 - managed guest-process `start|list|status|stop` remains an internal guest and
   node runtime contract beneath the same canonical `port service` surface; it
   is not a hosted-only CLI family.
 - `port-sdk` now ships the supported typed client entry points plus live JSON
   execution for machine, guest, and service operations.
 - Those commands already report the control-contract fields above so the
-  operator-visible lifecycle vocabulary does not need to change when the real
-  hosted routing lands.
+  operator-visible lifecycle vocabulary does not need to change when the demo
+  lane grows into a broader hosted product.
 - Remote Linux providers are modeled and diagnosed, but remote launch remains a
   designed boundary rather than a shipped orchestration path.
 - The hosted contract is executable through the canonical CLI and mirrored by
