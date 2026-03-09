@@ -227,6 +227,14 @@ fn generic_hosted_config() -> PortConfig {
     PortConfig::sample()
 }
 
+fn prepend_path_env(path: &Path) -> PathBuf {
+    let mut entries = vec![path.to_path_buf()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        entries.extend(std::env::split_paths(&existing));
+    }
+    PathBuf::from(std::env::join_paths(entries).expect("PATH should join"))
+}
+
 fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) -> PathBuf {
     let runtime_dir = runtime_root.join(machine);
     fs::create_dir_all(&runtime_dir).expect("runtime dir should exist");
@@ -386,6 +394,42 @@ fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
     path
 }
 
+fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
+    let kernel_path = root.join("standard-vmlinux");
+    let guest_path = root.join("standard-rootfs.ext4");
+    fs::write(&kernel_path, b"fake-standard-kernel").expect("standard kernel should write");
+    fs::write(&guest_path, b"fake-standard-rootfs").expect("standard guest should write");
+
+    config
+        .artifacts
+        .kernels
+        .get_mut("demo-kernel")
+        .expect("demo-kernel should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Standard
+        })
+        .expect("standard kernel variant should exist")
+        .path = kernel_path;
+    config
+        .artifacts
+        .guest_images
+        .get_mut("demo-guest")
+        .expect("demo-guest should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Standard
+        })
+        .expect("standard guest variant should exist")
+        .path = guest_path;
+}
+
 #[test]
 fn cli_help_mentions_native_avf_workflow_and_boundaries() {
     let output = Command::new(port_bin())
@@ -454,6 +498,7 @@ fn cli_machine_monitor_reports_hosted_runtime_context() {
         .get_mut("demo")
         .expect("demo control plane should exist")
         .endpoint = format!("http://{control_plane_addr}");
+    write_fake_standard_firecracker_artifacts(&mut server_config, temp.path());
     write_config(&server_config_path, &server_config);
     let mut client_config = server_config.clone();
     client_config
@@ -915,6 +960,167 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
     );
 
     let _ = Command::new("kill").arg(pid.to_string()).status();
+}
+
+#[test]
+fn cli_hosted_standard_cloud_launch_round_trip() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_fake_standard_firecracker_artifacts(&mut server_config, temp.path());
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
+    let joined_path = prepend_path_env(temp.path());
+    let _servers = spawn_hosted_server_harness(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[("PATH", joined_path.as_path())],
+    );
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("launched machine: cloud-aws"));
+    assert!(stdout.contains(fake_binary.to_string_lossy().as_ref()));
+
+    let pid_path = hosted_runtime_root.join("cloud-aws/firecracker.pid");
+    let pid = fs::read_to_string(&pid_path)
+        .expect("pid file should exist")
+        .trim()
+        .parse::<u32>()
+        .expect("pid should parse");
+    assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
+
+    let placement_state: serde_json::Value = serde_json::from_slice(
+        &fs::read(".port/hosted/demo/machine-placements.json")
+            .expect("machine placement state should exist"),
+    )
+    .expect("machine placement state should decode");
+    assert_eq!(
+        placement_state["machines"]["cloud-aws"]["node_name"].as_str(),
+        Some("aws-linux-node")
+    );
+    assert_eq!(
+        placement_state["machines"]["cloud-aws"]["runtime_root"].as_str(),
+        Some(hosted_runtime_root.to_string_lossy().as_ref())
+    );
+
+    let _ = Command::new("kill").arg(pid.to_string()).status();
+}
+
+#[test]
+fn cli_hosted_standard_status_and_stop_round_trip() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_fake_standard_firecracker_artifacts(&mut server_config, temp.path());
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let _fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
+    let joined_path = prepend_path_env(temp.path());
+    let _servers = spawn_hosted_server_harness(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[("PATH", joined_path.as_path())],
+    );
+
+    let launch = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+
+    let status = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("machine: cloud-aws"));
+    assert!(status_stdout.contains("detail:"));
+    assert!(status_stdout.contains("control plane 'demo'"));
+    assert!(status_stdout.contains("node 'aws-linux-node'"));
+    assert!(status_stdout.contains("provider 'aws'"));
+
+    let stop = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop_stdout.contains("machine: cloud-aws"));
+    assert!(stop_stdout.contains("detail:"));
+    assert!(stop_stdout.contains("control plane 'demo'"));
+    assert!(stop_stdout.contains("node 'aws-linux-node'"));
+    assert!(stop_stdout.contains("provider 'aws'"));
 }
 
 #[test]

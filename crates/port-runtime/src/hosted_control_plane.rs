@@ -234,7 +234,15 @@ fn append_route_detail(detail: String, route: &HostedRouteContext) -> String {
     let Some(node_name) = route.node_name.as_deref() else {
         return detail;
     };
-    format!("{detail} Routed through control plane '{control_plane}' and node '{node_name}'.")
+    let mut output =
+        format!("{detail} Routed through control plane '{control_plane}' and node '{node_name}'.");
+    if let Some(placement_detail) = route.placement_detail.as_deref() {
+        if !placement_detail.is_empty() {
+            output.push(' ');
+            output.push_str(placement_detail);
+        }
+    }
+    output
 }
 
 #[allow(dead_code)]

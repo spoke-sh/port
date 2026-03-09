@@ -3882,11 +3882,11 @@ fn hosted_control_plane_launch_machine(
         .machines
         .get(request.machine_name)
         .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
-    let host = config
+    config
         .hosts
         .get(&machine.host)
         .with_context(|| format!("unknown host '{}'", machine.host))?;
-    let hosted_identity = config
+    config
         .hosted_api_identity_contract(request.machine_name)?
         .ok_or_else(|| {
             anyhow!(
@@ -3894,18 +3894,6 @@ fn hosted_control_plane_launch_machine(
                 request.machine_name
             )
         })?;
-    if machine.protection_mode != ProtectionMode::Pvm {
-        bail!(
-            "{}",
-            remote_launch_guidance(
-                request.machine_name,
-                &machine.host,
-                host.provider,
-                Some(&hosted_identity),
-            )
-        );
-    }
-
     if let Some(summary) = config.hosted_machine_summary_contract(request.machine_name)? {
         if summary.candidate_nodes.is_empty() {
             bail!(
@@ -7393,6 +7381,76 @@ mod tests {
         path
     }
 
+    fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
+        let kernel_path = root.join("standard-vmlinux");
+        let guest_path = root.join("standard-rootfs.ext4");
+        fs::write(&kernel_path, b"fake-standard-kernel")
+            .expect("standard kernel variant should write");
+        fs::write(&guest_path, b"fake-standard-rootfs")
+            .expect("standard guest variant should write");
+
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("standard kernel variant should exist")
+            .path = kernel_path;
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("standard guest variant should exist")
+            .path = guest_path;
+    }
+
+    struct ScopedPathEnv {
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl ScopedPathEnv {
+        fn prepend(path: &Path) -> Self {
+            let original = std::env::var_os("PATH");
+            let mut entries = vec![path.to_path_buf()];
+            if let Some(existing) = &original {
+                entries.extend(std::env::split_paths(existing));
+            }
+            let joined = std::env::join_paths(entries).expect("PATH should join");
+            unsafe {
+                std::env::set_var("PATH", joined);
+            }
+            Self { original }
+        }
+    }
+
+    impl Drop for ScopedPathEnv {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => unsafe {
+                    std::env::set_var("PATH", value);
+                },
+                None => unsafe {
+                    std::env::remove_var("PATH");
+                },
+            }
+        }
+    }
+
     fn write_fake_avf_launcher_binary(root: &Path, name: &str) -> PathBuf {
         let path = root.join(name);
         fs::write(
@@ -9530,6 +9588,182 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_standard_launch_routes_through_live_control_plane_for_each_provider() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+        let config = start_named_live_hosted_servers_inner(
+            &config,
+            &["generic-linux-node", "aws-linux-node", "gcp-linux-node"],
+        )
+        .expect("hosted servers should start");
+        let placement_state_path =
+            hosted_placeholder_runtime_root("demo").join("machine-placements.json");
+
+        for (machine_name, node_name) in [
+            ("cloud-generic", "generic-linux-node"),
+            ("cloud-aws", "aws-linux-node"),
+            ("cloud-gcp", "gcp-linux-node"),
+        ] {
+            let metadata = launch_local_machine(
+                &config,
+                &LaunchRequest {
+                    machine_name,
+                    runtime_root: tempdir.path(),
+                    boot_wait: Duration::from_secs(0),
+                },
+            )
+            .unwrap_or_else(|error| {
+                panic!("standard hosted launch for {machine_name} should succeed: {error}")
+            });
+
+            let expected_runtime_root = config.nodes[node_name].runtime_root.clone();
+            let expected_paths = RuntimePaths::for_machine(&expected_runtime_root, machine_name);
+            assert_eq!(metadata.machine_name, machine_name);
+            assert_eq!(metadata.firecracker_binary, fake_binary);
+            assert_eq!(metadata.runtime_dir, expected_paths.runtime_dir);
+            assert_eq!(metadata.manifest_path, expected_paths.manifest_path);
+
+            let placement_state: serde_json::Value = serde_json::from_slice(
+                &fs::read(&placement_state_path).expect("machine placement state should exist"),
+            )
+            .expect("machine placement state should decode");
+            assert_eq!(
+                placement_state["machines"][machine_name]["node_name"].as_str(),
+                Some(node_name)
+            );
+            assert_eq!(
+                placement_state["machines"][machine_name]["runtime_root"].as_str(),
+                Some(expected_runtime_root.to_string_lossy().as_ref())
+            );
+
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+    }
+
+    #[test]
+    fn hosted_standard_launch_errors_surface_provider_and_selected_node_context() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+
+        let error = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect_err("standard hosted launch should fail when firecracker is missing");
+
+        let message = error.to_string();
+        assert!(message.contains("cloud-aws"), "{message}");
+        assert!(message.contains("control-plane=demo"), "{message}");
+        assert!(message.contains("node=aws-linux-node"), "{message}");
+        assert!(message.contains("placement="), "{message}");
+        assert!(message.contains("provider 'aws'"), "{message}");
+        assert!(message.contains("host 'aws-linux'"), "{message}");
+        assert!(
+            !message.contains("Run Port on the AWS Linux host itself."),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn hosted_standard_status_stop_include_provider_and_hosted_node_detail() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+
+        let metadata = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect("standard hosted launch should succeed");
+        assert_eq!(metadata.firecracker_binary, fake_binary);
+        let placement_detail = config
+            .hosted_machine_summary_contract("cloud-aws")
+            .expect("summary should resolve")
+            .expect("summary should exist")
+            .placement_detail;
+        let stored_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        write_machine_placement_state(
+            "demo",
+            "cloud-aws",
+            "aws-linux-node",
+            &stored_runtime_root,
+            &placement_detail,
+        );
+
+        let status = machine_status(&config, tempdir.path(), "cloud-aws")
+            .expect("hosted standard status should load");
+        assert_eq!(status.machine_name, "cloud-aws");
+        assert_eq!(
+            status.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            status.detail.contains("control plane 'demo'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("provider 'aws'"),
+            "{}",
+            status.detail
+        );
+
+        let stop = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(1))
+            .expect("hosted standard stop should succeed");
+        assert_eq!(stop.machine_name, "cloud-aws");
+        assert_eq!(
+            stop.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            stop.detail.contains("control plane 'demo'"),
+            "{}",
+            stop.detail
+        );
+        assert!(
+            stop.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            stop.detail
+        );
+        assert!(stop.detail.contains("provider 'aws'"), "{}", stop.detail);
+    }
+
+    #[test]
     fn avf_launch_fails_fast_on_non_macos_hosts() {
         let config = sample_avf_config();
         let tempdir = tempdir().expect("tempdir should exist");
@@ -10127,7 +10361,7 @@ exec sleep 30
     }
 
     #[test]
-    fn remote_launch_rejects_aws_hosts_with_provider_guidance() {
+    fn hosted_standard_aws_launch_uses_hosted_route_context_instead_of_provider_guidance() {
         let tempdir = tempdir().expect("tempdir should exist");
         let error = launch_local_machine(
             &PortConfig::sample(),
@@ -10137,13 +10371,12 @@ exec sleep 30
                 boot_wait: Duration::from_secs(0),
             },
         )
-        .expect_err("remote AWS launch should fail fast");
+        .expect_err("hosted AWS launch should fail through the hosted route");
 
         let message = error.to_string();
         assert!(message.contains("cloud-aws"));
-        assert!(message.contains("AWS"));
-        assert!(message.contains("not implemented"));
-        assert!(message.contains("Run Port on the AWS Linux host itself"));
+        assert!(message.contains("live hosted control-plane route"));
+        assert!(!message.contains("Run Port on the AWS Linux host itself"));
     }
 
     #[test]
