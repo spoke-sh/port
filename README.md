@@ -289,8 +289,9 @@ Current behavior:
 - `port service secret` and `port service apply|list|status|stop` now persist
   machine-scoped secret references plus service or sandbox definitions under
   the resolved runtime owner. This first slice is spec-backed: it stores
-  desired state, guest command, secret bindings, and hosted routing context,
-  while real hosted execution remains follow-on work.
+  desired state, guest command, secret bindings, hosted routing context, and a
+  canonical service runtime record path, while real hosted execution remains
+  follow-on work.
 
 ## Cloud Linux Support
 
@@ -466,7 +467,10 @@ The first service/sandbox surface builds on that same runtime ownership model:
   workflows reuse the canonical machine/guest routing instead of inventing a
   second hosted surface.
 - `port service list|status|stop` lets operators inspect or change the stored
-  desired state for those definitions.
+  desired state for those definitions and exposes the canonical runtime-state
+  contract that later live execution will fill in.
+- Managed guest-process `start|list|status|stop` is an internal runtime
+  contract, not a second hosted-only CLI surface.
 - This slice is intentionally spec-backed. Service definitions are persisted and
   routed correctly today, but real hosted execution, teardown, and secure
   secret backends remain follow-on work.

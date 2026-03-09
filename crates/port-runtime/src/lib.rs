@@ -256,6 +256,30 @@ impl std::fmt::Display for ServiceDesiredState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceRuntimeState {
+    Stored,
+    Starting,
+    Running,
+    Exited,
+    Stopped,
+    Failed,
+}
+
+impl std::fmt::Display for ServiceRuntimeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stored => f.write_str("stored"),
+            Self::Starting => f.write_str("starting"),
+            Self::Running => f.write_str("running"),
+            Self::Exited => f.write_str("exited"),
+            Self::Stopped => f.write_str("stopped"),
+            Self::Failed => f.write_str("failed"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceSecretBinding {
     pub env: String,
@@ -298,6 +322,7 @@ pub struct ServiceDefinitionStatus {
     pub name: String,
     pub kind: ServiceKind,
     pub desired_state: ServiceDesiredState,
+    pub runtime: ServiceRuntimeObservation,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
     pub control: MachineControlContract,
@@ -306,6 +331,16 @@ pub struct ServiceDefinitionStatus {
     pub host_groups: Vec<String>,
     pub manifest_path: PathBuf,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServiceRuntimeObservation {
+    pub state: ServiceRuntimeState,
+    pub record_path: PathBuf,
+    pub pid: Option<u32>,
+    pub exit_code: Option<i32>,
+    pub stdout_path: Option<PathBuf>,
+    pub stderr_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2469,8 +2504,8 @@ fn wait_for_detached_forward_manifest(
         if manifest_path.exists() {
             let bytes = fs::read(manifest_path)
                 .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
-            let manifest: DetachedForwardManifestRecord =
-                serde_json::from_slice(&bytes).with_context(|| {
+            let manifest: DetachedForwardManifestRecord = serde_json::from_slice(&bytes)
+                .with_context(|| {
                     format!(
                         "failed to parse detached forward manifest '{}'",
                         manifest_path.display()
@@ -2517,9 +2552,7 @@ fn hosted_detached_forward_status_from_manifest(
     })
 }
 
-fn hosted_detached_forward_state(
-    state: MachineRuntimeState,
-) -> Result<HostedDetachedForwardState> {
+fn hosted_detached_forward_state(state: MachineRuntimeState) -> Result<HostedDetachedForwardState> {
     match state {
         MachineRuntimeState::Running => Ok(HostedDetachedForwardState::Running),
         MachineRuntimeState::Stale => Ok(HostedDetachedForwardState::Stale),
@@ -2601,6 +2634,10 @@ fn service_state_dir(runtime_dir: &Path) -> PathBuf {
 
 fn service_secret_dir(runtime_dir: &Path) -> PathBuf {
     service_state_dir(runtime_dir).join("secrets")
+}
+
+fn service_runtime_dir(runtime_dir: &Path) -> PathBuf {
+    service_state_dir(runtime_dir).join("runtime")
 }
 
 fn service_definition_dir(runtime_dir: &Path) -> PathBuf {
@@ -2739,11 +2776,26 @@ fn service_status_from_record(
     record: ServiceDefinitionRecord,
     manifest_path: PathBuf,
 ) -> ServiceDefinitionStatus {
+    let runtime_root = manifest_path
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let runtime = ServiceRuntimeObservation {
+        state: ServiceRuntimeState::Stored,
+        record_path: service_runtime_dir(&runtime_root).join(format!("{}.json", record.name)),
+        pid: None,
+        exit_code: None,
+        stdout_path: None,
+        stderr_path: None,
+    };
     ServiceDefinitionStatus {
         machine_name: record.machine_name,
         name: record.name,
         kind: record.kind,
         desired_state: record.desired_state,
+        runtime,
         command: record.command,
         secret_bindings: record.secret_bindings,
         control: record.control,
@@ -4201,9 +4253,10 @@ pub fn execute_guest_operation(
 ) -> Result<OperationResult> {
     let hosted = machine_is_hosted(config, request.machine_name)?;
     if matches!(&request.operation, GuestOperation::Copy(_))
+        || matches!(&request.operation, GuestOperation::ManagedService(_))
         || (matches!(&request.operation, GuestOperation::Forward(_)) && !hosted)
     {
-        bail!("copy and forward use dedicated runtime flows");
+        bail!("copy, managed service, and some forward operations use dedicated runtime flows");
     }
 
     if hosted {
@@ -4574,6 +4627,9 @@ fn hosted_control_plane_guest_operation(
                 .forward(request.machine_name, forward)
                 .context("failed to encode hosted guest forward request")?,
         ),
+        GuestOperation::ManagedService(_) => {
+            bail!("managed service uses the canonical service control path")
+        }
         GuestOperation::Copy(_) => bail!("copy uses a dedicated runtime flow"),
     }
     .map_err(|error| {
@@ -4984,6 +5040,9 @@ fn render_hosted_route_context(route: Option<&HostedRouteContext>) -> String {
     }
     if let Some(forward_name) = &route.forward_name {
         parts.push(format!("forward={forward_name}"));
+    }
+    if let Some(service_name) = &route.service_name {
+        parts.push(format!("service={service_name}"));
     }
     if let Some(node_name) = &route.node_name {
         parts.push(format!("node={node_name}"));
@@ -5806,14 +5865,15 @@ mod tests {
         ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, ControlPlaneServeRequest, DoctorCheck,
         DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding,
         LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
-        NodeAgentServeRequest, RuntimePaths, StopResult, artifact_script,
-        avf_local_launch_machine_with_host_os, build_firecracker_config, collect_doctor_report,
-        collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
-        ensure_native_build_lane, execute_guest_operation, launch_local_machine, list_machines,
-        machine_monitor, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
-        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
-        serve_node_agent, stop_machine,
+        NodeAgentServeRequest, RuntimePaths, ServiceDefinitionRecord, ServiceDesiredState,
+        ServiceKind, StopResult, artifact_script, avf_local_launch_machine_with_host_os,
+        build_firecracker_config, collect_doctor_report, collect_doctor_report_with_facts,
+        copy_guest_file, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
+        launch_local_machine, list_machines, machine_monitor, machine_status, machine_top,
+        path_check, prepare_guest_forward, prepare_runtime_state, read_json_file, read_pid_file,
+        repo_root, resolve_artifact_metadata, resolve_machine_architecture,
+        select_firecracker_binary, serve_control_plane, serve_node_agent, service_runtime_dir,
+        service_status_from_record, stop_machine,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -7504,7 +7564,10 @@ exec sleep 30
         );
 
         let status = Command::new("kill")
-            .args(["-TERM", &response.result.pid.expect("pid should exist").to_string()])
+            .args([
+                "-TERM",
+                &response.result.pid.expect("pid should exist").to_string(),
+            ])
             .status()
             .expect("detached forward should stop");
         assert!(status.success());
@@ -7551,7 +7614,11 @@ exec sleep 30
         assert!(listen_socket.exists());
 
         let stopped: HostedSuccess<HostedDetachedForwardStopResult> = client
-            .execute_json(client.guest().forward_detached_stop("cloud-aws", "demo-sock"))
+            .execute_json(
+                client
+                    .guest()
+                    .forward_detached_stop("cloud-aws", "demo-sock"),
+            )
             .expect("hosted detached forward stop should succeed");
         assert_eq!(stopped.route.forward_name.as_deref(), Some("demo-sock"));
         assert_eq!(stopped.result.name, "demo-sock");
@@ -8855,5 +8922,40 @@ exec sleep 30
         server
             .join()
             .expect("forward server thread should complete");
+    }
+
+    #[test]
+    fn service_status_exposes_runtime_contract_even_before_execution() {
+        let manifest_path = PathBuf::from("/tmp/runtime/demo/services/definitions/buildbox.json");
+        let record = ServiceDefinitionRecord {
+            machine_name: String::from("demo"),
+            name: String::from("buildbox"),
+            kind: ServiceKind::Sandbox,
+            desired_state: ServiceDesiredState::Active,
+            command: vec![
+                String::from("/bin/sh"),
+                String::from("-lc"),
+                String::from("make test"),
+            ],
+            secret_bindings: Vec::new(),
+            control: port_model::MachineControlContract::local_runtime_root(),
+            control_plane: None,
+            node_name: None,
+            host_groups: Vec::new(),
+            created_at_unix_s: 1,
+            detail: String::from("stored definition"),
+        };
+
+        let status = service_status_from_record(record, manifest_path.clone());
+        assert_eq!(status.runtime.state, super::ServiceRuntimeState::Stored);
+        assert_eq!(
+            status.runtime.record_path,
+            service_runtime_dir(Path::new("/tmp/runtime/demo")).join("buildbox.json")
+        );
+        assert_eq!(status.runtime.pid, None);
+        assert_eq!(status.runtime.exit_code, None);
+        assert_eq!(status.runtime.stdout_path, None);
+        assert_eq!(status.runtime.stderr_path, None);
+        assert_eq!(status.manifest_path, manifest_path);
     }
 }

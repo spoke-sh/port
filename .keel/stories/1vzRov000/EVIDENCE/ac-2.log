@@ -1,0 +1,20 @@
+---
+recorded_at: 2026-03-08T21:20:32.174869026-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzRov000/verify-ac-2.sh
+---
+197:Service Control:
+198:  `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox
+200:  Managed guest-process `start|list|status|stop` is an internal contract beneath that same surface,
+201:  not a second hosted-only CLI family.
+6:  secret  Manage machine-bound secret references
+7:  apply   Store a service or sandbox definition under the resolved runtime owner
+8:  list    List stored service and sandbox definitions for a machine
+9:  status  Inspect one stored service or sandbox definition
+10:  stop    Set a stored service or sandbox definition to the stopped desired state
+472:- Managed guest-process `start|list|status|stop` is an internal runtime
+473:  contract, not a second hosted-only CLI surface.
+472:- managed guest-process `start|list|status|stop` remains an internal guest and
+474:  is not a hosted-only CLI family.
+32:- managed guest-process `start|list|status|stop` stays internal to the shared
+33:  guest/runtime contract, so the SDK does not add a second hosted-only service
+34:  client family

@@ -2,10 +2,11 @@
 id: 1vzRov000
 title: Define Managed Service Execution Contract
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T21:02:17
-updated_at: 2026-03-08T21:04:26
+updated_at: 2026-03-08T21:06:19
 scope: 1vz4Yn000/1vzRnO000
+started_at: 2026-03-08T21:06:19
 ---
 
 # Define Managed Service Execution Contract

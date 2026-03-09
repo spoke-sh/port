@@ -467,7 +467,11 @@ the shared route and auth contract from `port-hosted-protocol`.
   lane: `port control-plane serve` and `port node-agent serve`.
 - hosted `service secret` and `service apply|list|status|stop` are also
   config-backed and in-process; they persist spec state under the selected node
-  `runtime_root` rather than materializing real hosted execution yet.
+  `runtime_root` and now expose the canonical runtime-state record path rather
+  than materializing real hosted execution yet.
+- managed guest-process `start|list|status|stop` remains an internal guest and
+  node runtime contract beneath the same canonical `port service` surface; it
+  is not a hosted-only CLI family.
 - `port-sdk` now ships the supported typed client entry points plus live JSON
   execution for machine, guest, and service operations.
 - Those commands already report the control-contract fields above so the

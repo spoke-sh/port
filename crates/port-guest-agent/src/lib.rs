@@ -51,6 +51,9 @@ impl AgentService {
             GuestOperation::Exec(request) => self.exec(request),
             GuestOperation::Pty(request) => self.pty(request),
             GuestOperation::Logs(request) => self.logs(request),
+            GuestOperation::ManagedService(_) => {
+                bail!("managed service operations are not implemented yet")
+            }
             GuestOperation::Copy(_) | GuestOperation::Forward(_) => {
                 bail!("operation requires a streaming guest-agent connection")
             }

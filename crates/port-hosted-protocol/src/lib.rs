@@ -112,8 +112,12 @@ pub struct HostedGuestStreamRoute {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostedDetachedForwardRoute {
-    Start { machine_name: String },
-    List { machine_name: String },
+    Start {
+        machine_name: String,
+    },
+    List {
+        machine_name: String,
+    },
     Stop {
         machine_name: String,
         forward_name: String,
@@ -242,6 +246,8 @@ pub struct HostedRouteContext {
     pub machine_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forward_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_name: Option<String>,
     pub node_name: Option<String>,
     pub candidate_nodes: Vec<String>,
     pub host_groups: Vec<String>,
@@ -262,6 +268,7 @@ impl HostedRouteContext {
             control_plane: Some(summary.control_plane.clone()),
             machine_name: Some(summary.machine_name.clone()),
             forward_name: None,
+            service_name: None,
             node_name: None,
             candidate_nodes: summary.candidate_nodes.clone(),
             host_groups: summary.host_groups.clone(),
@@ -296,6 +303,12 @@ impl HostedRouteContext {
     #[must_use]
     pub fn with_forward_name(mut self, forward_name: impl Into<String>) -> Self {
         self.forward_name = Some(forward_name.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_service_name(mut self, service_name: impl Into<String>) -> Self {
+        self.service_name = Some(service_name.into());
         self
     }
 }
@@ -500,10 +513,10 @@ mod tests {
     };
 
     use super::{
-        HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
-        HostedGuestRoute, HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb,
-        HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext,
-        HostedServiceRoute, HostedSuccess, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
+        HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
+        HostedNodeAgentHeaders, HostedNodeRoute, HostedRouteContext, HostedServiceRoute,
+        HostedSuccess, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -734,5 +747,18 @@ mod tests {
 
         assert_eq!(body["node_name"], "aws-linux-node");
         assert_eq!(body["forward_name"], "demo-web");
+    }
+
+    #[test]
+    fn route_context_serializes_service_identity() {
+        let body = to_value(
+            HostedRouteContext::default()
+                .with_selected_node("aws-linux-node", "runtime/hosted/aws-linux-node")
+                .with_service_name("buildbox"),
+        )
+        .expect("route context should serialize");
+
+        assert_eq!(body["node_name"], "aws-linux-node");
+        assert_eq!(body["service_name"], "buildbox");
     }
 }

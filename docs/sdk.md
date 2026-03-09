@@ -29,6 +29,9 @@ Shipped today:
   route family
 - `services()` mirrors `port service secret put|list|remove` plus
   `port service apply|list|status|stop`
+- managed guest-process `start|list|status|stop` stays internal to the shared
+  guest/runtime contract, so the SDK does not add a second hosted-only service
+  client family
 - `HostedClient::execute_json` performs the live HTTP request and decodes
   structured success or hosted route errors
 - `port-hosted-protocol` publishes the shared hosted HTTP route, auth-header,

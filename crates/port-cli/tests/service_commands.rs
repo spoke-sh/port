@@ -104,6 +104,11 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(service_stdout.contains("name: api"));
     assert!(service_stdout.contains("kind: service"));
     assert!(service_stdout.contains("desired state: active"));
+    assert!(service_stdout.contains("runtime state: stored"));
+    assert!(
+        service_stdout.contains("runtime record: ")
+            && service_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
+    );
     assert!(service_stdout.contains("secret bindings: API_TOKEN=demo-token"));
 
     let apply_sandbox = Command::new(port_bin())
@@ -159,6 +164,11 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let status_stdout = String::from_utf8_lossy(&status.stdout);
     assert!(status_stdout.contains("guest broker: control-plane-node-agent-tunnel"));
     assert!(status_stdout.contains("service route: hosted-control-plane"));
+    assert!(status_stdout.contains("runtime state: stored"));
+    assert!(
+        status_stdout.contains("runtime record: ")
+            && status_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
+    );
     assert!(status_stdout.contains("command: /app/api --listen :8080"));
 
     let stop = Command::new(port_bin())
@@ -175,4 +185,5 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(stop.status.success());
     let stop_stdout = String::from_utf8_lossy(&stop.stdout);
     assert!(stop_stdout.contains("desired state: stopped"));
+    assert!(stop_stdout.contains("runtime state: stored"));
 }

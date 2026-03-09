@@ -19,6 +19,7 @@ pub enum GuestOperation {
     Pty(PtyRequest),
     Logs(LogsRequest),
     Forward(ForwardRequest),
+    ManagedService(ManagedServiceRequest),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +64,60 @@ pub struct ForwardRequest {
     pub target: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagedServiceKind {
+    Service,
+    Sandbox,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedServiceRequest {
+    pub operation: ManagedServiceOperation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "verb", rename_all = "kebab-case")]
+pub enum ManagedServiceOperation {
+    Start {
+        name: String,
+        kind: ManagedServiceKind,
+        command: Vec<String>,
+        env: BTreeMap<String, String>,
+        cwd: Option<String>,
+    },
+    List,
+    Status {
+        name: String,
+    },
+    Stop {
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ManagedServiceRuntimeState {
+    Stored,
+    Starting,
+    Running,
+    Exited,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedServiceStatus {
+    pub name: String,
+    pub kind: ManagedServiceKind,
+    pub state: ManagedServiceRuntimeState,
+    pub pid: Option<u32>,
+    pub exit_code: Option<i32>,
+    pub stdout_path: Option<String>,
+    pub stderr_path: Option<String>,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForwardEndpoint {
     Tcp(String),
@@ -96,6 +151,7 @@ pub enum OperationResult {
     Pty(PtyResult),
     Logs(LogsResult),
     Forward(ForwardResult),
+    ManagedService(ManagedServiceResult),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +181,13 @@ pub struct LogsResult {
 pub struct ForwardResult {
     pub listen: String,
     pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub enum ManagedServiceResult {
+    Status(ManagedServiceStatus),
+    List { services: Vec<ManagedServiceStatus> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,10 +376,11 @@ pub fn read_frame<R: BufRead, T: DeserializeOwned>(reader: &mut R) -> Result<T, 
 mod tests {
     use super::{
         CopyDirection, CopyRequest, ExecRequest, ExecResult, ForwardEndpoint, ForwardResult,
-        GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, StreamInputMode,
-        StreamKind, StreamOutputChannel, StreamRequestFrame, StreamResponseFrame,
-        StreamSessionContract, StreamTerminationMode, parse_forward_endpoint, read_frame,
-        render_forward_endpoint, write_frame,
+        GuestOperation, ManagedServiceKind, ManagedServiceOperation, ManagedServiceRequest,
+        ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult,
+        RequestEnvelope, ResponseEnvelope, StreamInputMode, StreamKind, StreamOutputChannel,
+        StreamRequestFrame, StreamResponseFrame, StreamSessionContract, StreamTerminationMode,
+        parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
     };
     use std::collections::BTreeMap;
     use std::io::Cursor;
@@ -499,5 +563,51 @@ mod tests {
         let decoded_response: StreamResponseFrame =
             serde_json::from_str(&response_encoded).expect("response should decode");
         assert_eq!(decoded_response, response);
+    }
+
+    #[test]
+    fn managed_service_operations_round_trip_through_json() {
+        let request = RequestEnvelope {
+            id: 34,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("buildbox"),
+                    kind: ManagedServiceKind::Sandbox,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("make test"),
+                    ],
+                    env: BTreeMap::from([(String::from("API_TOKEN"), String::from("demo"))]),
+                    cwd: Some(String::from("/workspace")),
+                },
+            }),
+        };
+        let result = ResponseEnvelope::Completed {
+            id: 34,
+            exit_code: 0,
+            result: OperationResult::ManagedService(ManagedServiceResult::Status(
+                ManagedServiceStatus {
+                    name: String::from("buildbox"),
+                    kind: ManagedServiceKind::Sandbox,
+                    state: ManagedServiceRuntimeState::Running,
+                    pid: Some(4242),
+                    exit_code: None,
+                    stdout_path: Some(String::from("/run/port/services/buildbox.stdout.log")),
+                    stderr_path: Some(String::from("/run/port/services/buildbox.stderr.log")),
+                    detail: String::from("managed sandbox is running"),
+                },
+            )),
+        };
+
+        let encoded_request = serde_json::to_string(&request).expect("request should encode");
+        let decoded_request: RequestEnvelope =
+            serde_json::from_str(&encoded_request).expect("request should decode");
+        assert_eq!(decoded_request, request);
+
+        let encoded_result = serde_json::to_string(&result).expect("result should encode");
+        let decoded_result: ResponseEnvelope =
+            serde_json::from_str(&encoded_result).expect("result should decode");
+        assert_eq!(decoded_result, result);
     }
 }

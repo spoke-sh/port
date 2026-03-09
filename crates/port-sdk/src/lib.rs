@@ -7,9 +7,9 @@ use port_agent_protocol::{
 };
 use port_hosted_protocol::{
     HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
-    HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute,
-    HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
-    HostedRouteContext, HostedServiceRoute,
+    HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute, HostedGuestStreamProtocol,
+    HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedRouteContext,
+    HostedServiceRoute,
 };
 use port_model::{
     HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
@@ -258,6 +258,9 @@ fn render_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(forward_name) = &route.forward_name {
         parts.push(format!("forward={forward_name}"));
     }
+    if let Some(service_name) = &route.service_name {
+        parts.push(format!("service={service_name}"));
+    }
     if let Some(node_name) = &route.node_name {
         parts.push(format!("node={node_name}"));
     }
@@ -449,8 +452,8 @@ impl<'a> GuestClient<'a> {
         machine_name: &str,
         request: HostedDetachedForwardStartRequest,
     ) -> Result<HostedApiRequest> {
-        let body = serde_json::to_value(&request)
-            .context("failed to encode detached forward request")?;
+        let body =
+            serde_json::to_value(&request).context("failed to encode detached forward request")?;
         Ok(self.client.request(
             HttpMethod::Post,
             HostedControlPlaneRoute::DetachedForward(HostedDetachedForwardRoute::Start {
@@ -646,8 +649,7 @@ mod tests {
     use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest, LogsRequest, PtyRequest};
     use port_hosted_protocol::{
         HostedDetachedForwardStartRequest, HostedError, HostedGuestStreamProtocol,
-        HostedRouteContext, HostedSuccess,
-        PORT_AUDIENCE_HEADER,
+        HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
     };
     use serde_json::json;
 
@@ -901,7 +903,9 @@ mod tests {
             "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached"
         );
 
-        let stop = client.guest().forward_detached_stop("cloud-aws", "demo-web");
+        let stop = client
+            .guest()
+            .forward_detached_stop("cloud-aws", "demo-web");
         assert_eq!(stop.method, HttpMethod::Post);
         assert_eq!(
             stop.url,
@@ -1046,5 +1050,46 @@ mod tests {
         assert!(message.contains("machine=cloud-generic"));
         assert!(message.contains("placement=machine 'cloud-generic' requires PVM"));
         assert!(message.contains("planned"));
+    }
+
+    #[test]
+    fn hosted_client_surfaces_service_identity_from_live_errors() {
+        async fn error_handler() -> (StatusCode, Json<HostedError>) {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(HostedError {
+                    route: Some(HostedRouteContext {
+                        control_plane: Some(String::from("demo")),
+                        machine_name: Some(String::from("cloud-aws")),
+                        service_name: Some(String::from("buildbox")),
+                        node_name: Some(String::from("aws-linux-node")),
+                        ..HostedRouteContext::default()
+                    }),
+                    message: String::from("service runtime state is unavailable"),
+                }),
+            )
+        }
+
+        let endpoint = serve_router(Router::new().route(
+            "/v1/machines/cloud-aws/services/buildbox",
+            get(error_handler),
+        ));
+
+        let client = HostedClient::new(
+            endpoint,
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let error = client
+            .execute_json::<HostedSuccess<serde_json::Value>>(
+                client.services().status("cloud-aws", "buildbox"),
+            )
+            .expect_err("request should fail");
+        let message = error.to_string();
+        assert!(message.contains("service runtime state is unavailable"));
+        assert!(message.contains("machine=cloud-aws"));
+        assert!(message.contains("service=buildbox"));
+        assert!(message.contains("node=aws-linux-node"));
     }
 }

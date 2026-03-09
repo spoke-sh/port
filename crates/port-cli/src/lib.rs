@@ -129,8 +129,9 @@ Hosted Control:
   `port service secret` and `port service apply|list|status|stop` now store service and sandbox specs under that same resolved runtime owner while keeping real hosted execution as follow-on work.
 Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
+  Managed guest-process `start|list|status|stop` is an internal contract beneath that same surface, not a second hosted-only CLI family.
   Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
-  `port service apply` persists desired state, guest command, secret bindings, and hosted routing context; real guest execution and teardown remain explicit follow-on work.
+  `port service apply|list|status|stop` now also exposes a canonical runtime-state contract and record path while real hosted execution and teardown remain explicit follow-on work.
   `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service request construction.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
@@ -1230,6 +1231,7 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
     println!("name: {}", service.name);
     println!("kind: {}", service.kind);
     println!("desired state: {}", service.desired_state);
+    println!("runtime state: {}", service.runtime.state);
     println!("inventory scope: {}", service.control.inventory_scope);
     println!("lifecycle owner: {}", service.control.lifecycle_owner);
     println!("guest broker: {}", service.control.guest_broker);
@@ -1251,6 +1253,37 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
         }
     );
     println!("manifest: {}", service.manifest_path.display());
+    println!("runtime record: {}", service.runtime.record_path.display());
+    println!(
+        "runtime pid: {}",
+        service
+            .runtime
+            .pid
+            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+    );
+    println!(
+        "runtime exit code: {}",
+        service
+            .runtime
+            .exit_code
+            .map_or_else(|| String::from("(none)"), |code| code.to_string())
+    );
+    println!(
+        "stdout log: {}",
+        service
+            .runtime
+            .stdout_path
+            .as_ref()
+            .map_or_else(|| String::from("(none)"), |path| path.display().to_string())
+    );
+    println!(
+        "stderr log: {}",
+        service
+            .runtime
+            .stderr_path
+            .as_ref()
+            .map_or_else(|| String::from("(none)"), |path| path.display().to_string())
+    );
     println!(
         "command: {}",
         if service.command.is_empty() {
