@@ -2,11 +2,12 @@
 id: 1vzMVY000
 index: 1
 title: Streamed Guest Control Transport
-status: in-progress
+status: done
 epic: 1vzMVF000
 created_at: 2026-03-08T15:21:56
 updated_at: 2026-03-08T15:25:58
 started_at: 2026-03-08T15:26:05
+completed_at: 2026-03-08T19:27:01
 ---
 
 # Streamed Guest Control Transport
@@ -20,6 +21,8 @@ started_at: 2026-03-08T15:26:05
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories

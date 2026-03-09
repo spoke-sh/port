@@ -1,0 +1,12 @@
+# COMPLIANCE REPORT: Streamed Guest Control Transport
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [1vzMXN000](../../../../stories/1vzMXN000/README.md), [1vzMXN000](../../../../stories/1vzMXN000/README.md) | [ac-1.log](../../../../stories/1vzMXN000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXN000/EVIDENCE/ac-2.log)<br>[ac-1.log](../../../../stories/1vzMXN000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXN000/EVIDENCE/ac-2.log) |
+| SRS-02 | ✓ VERIFIED | [1vzMXo000](../../../../stories/1vzMXo000/README.md), [1vzMXo000](../../../../stories/1vzMXo000/README.md) | [ac-1.log](../../../../stories/1vzMXo000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXo000/EVIDENCE/ac-2.log)<br>[ac-1.log](../../../../stories/1vzMXo000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXo000/EVIDENCE/ac-2.log) |
+| SRS-03 | ✓ VERIFIED | [1vzMXy000](../../../../stories/1vzMXy000/README.md), [1vzMXy000](../../../../stories/1vzMXy000/README.md) | [ac-1.log](../../../../stories/1vzMXy000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXy000/EVIDENCE/ac-2.log)<br>[ac-1.log](../../../../stories/1vzMXy000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXy000/EVIDENCE/ac-2.log) |
+| SRS-04 | ✓ VERIFIED | [1vzMY2000](../../../../stories/1vzMY2000/README.md), [1vzMY2000](../../../../stories/1vzMY2000/README.md) | [ac-1.log](../../../../stories/1vzMY2000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMY2000/EVIDENCE/ac-2.log)<br>[ac-1.log](../../../../stories/1vzMY2000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMY2000/EVIDENCE/ac-2.log) |
+| SRS-05 | ✓ VERIFIED | [1vzMXM000](../../../../stories/1vzMXM000/README.md), [1vzMXM000](../../../../stories/1vzMXM000/README.md) | [ac-1.log](../../../../stories/1vzMXM000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXM000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzMXM000/EVIDENCE/ac-3.log)<br>[ac-1.log](../../../../stories/1vzMXM000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXM000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzMXM000/EVIDENCE/ac-3.log) |
+| SRS-06 | ✓ VERIFIED | [1vzMXM000](../../../../stories/1vzMXM000/README.md) | [ac-1.log](../../../../stories/1vzMXM000/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/1vzMXM000/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/1vzMXM000/EVIDENCE/ac-3.log) |
