@@ -5,21 +5,13 @@
 
 ## Bearings
 
-| Bearing | Status | Survey | Assessment |
-|---------|--------|--------|------------|
-| [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ |
-
-<details>
-<summary>Completed Bearings</summary>
-
-| Bearing | Status |
-|---------|--------|
-| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid |
-| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid |
-| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid |
-| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid |
-
-</details>
+| Bearing | Status | Survey | Assessment | Laid |
+|---------|--------|--------|------------|------|
+| [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ | - |
+| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid | ✓ | ✓ | ✓ |
+| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid | ✓ | ✓ | ✓ |
+| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | ✓ |
+| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | ✓ |
 
 ## Epics
 

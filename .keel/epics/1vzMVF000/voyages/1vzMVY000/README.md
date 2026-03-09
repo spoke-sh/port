@@ -25,7 +25,7 @@ started_at: 2026-03-08T15:26:05
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/5 stories complete
+**Progress:** 4/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -33,5 +33,5 @@ started_at: 2026-03-08T15:26:05
 | [Define Streamed Guest Session Contract](../../../../stories/1vzMXN000/README.md) | feat | done |
 | [Implement Streamed Pty And Log Follow](../../../../stories/1vzMXo000/README.md) | feat | done |
 | [Implement Hosted Streamed Copy Transport](../../../../stories/1vzMXy000/README.md) | feat | done |
-| [Implement Hosted Streamed Forward Transport](../../../../stories/1vzMY2000/README.md) | feat | backlog |
+| [Implement Hosted Streamed Forward Transport](../../../../stories/1vzMY2000/README.md) | feat | done |
 <!-- END GENERATED -->

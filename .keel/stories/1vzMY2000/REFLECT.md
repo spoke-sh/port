@@ -6,19 +6,7 @@ created_at: 2026-03-08T19:10:55
 
 ## Knowledge
 
-### 1vzMY2000: Hosted forward ownership can hide behind local listener setup
-| Field | Value |
-|-------|-------|
-| **Category** | architecture |
-| **Context** | When a hosted guest capability has a working node-agent route but the CLI/runtime still reuses a local helper such as `prepare_guest_forward`. |
-| **Insight** | The hosted control-plane path can be functionally live while the canonical CLI still bypasses it and silently falls back to local runtime assumptions. Forward ownership broke specifically because the CLI kept constructing a local session instead of entering the hosted `guest:forward` route. |
-| **Suggested Action** | Add hosted-path tests that use a bogus client-side runtime root and require the control-plane/node-agent route to succeed or fail with hosted route context. |
-| **Applies To** | `crates/port-runtime/src/lib.rs`, `crates/port-cli/src/lib.rs`, hosted guest capability tests |
-| **Linked Knowledge IDs** | |
-| **Observed At** | 2026-03-08T19:11:00Z |
-| **Score** | 0.86 |
-| **Confidence** | 0.96 |
-| **Applied** | yes |
+- [1vzMY2000](../../knowledge/1vzMY2000.md) Hosted forward ownership can hide behind local listener setup
 
 ## Observations
 
