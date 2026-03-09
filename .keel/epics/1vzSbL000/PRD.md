@@ -65,8 +65,8 @@ control plane and guest transport now exist.
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
 | FR-01 | Port must define host-group and scheduler-policy contracts that can be carried in the shared model, hosted inventory, and placement evidence. | GOAL-01, GOAL-03 | must | Multi-node service placement needs an explicit contract before runtime behavior can stay coherent. |
-| FR-02 | Port must implement the first hosted scheduler slice for `port service apply --kind service|sandbox`, selecting an eligible prepared node from a target host group and returning explicit failure detail when no node qualifies. | GOAL-01, GOAL-02, GOAL-03 | must | Service placement is the core missing capability between the current single-node demo and a credible hosted lane. |
-| FR-03 | Port must keep `port service list|status|stop` as the canonical operator surface while surfacing selected node, host group, and placement/runtime state through those existing verbs. | GOAL-02, GOAL-03 | must | Operators should not have to learn a second hosted-only service vocabulary. |
+| FR-02 | Port must implement the first hosted scheduler slice for `port service apply --kind service` and `--kind sandbox`, selecting an eligible prepared node from a target host group and returning explicit failure detail when no node qualifies. | GOAL-01, GOAL-02, GOAL-03 | must | Service placement is the core missing capability between the current single-node demo and a credible hosted lane. |
+| FR-03 | Port must keep `port service list`, `status`, and `stop` as the canonical operator surface while surfacing selected node, host group, and placement/runtime state through those existing verbs. | GOAL-02, GOAL-03 | must | Operators should not have to learn a second hosted-only service vocabulary. |
 | FR-04 | Port must publish an operator workflow and proof for multi-node hosted placement, including the explicit limits that remain after this slice. | GOAL-02, GOAL-03 | should | Product credibility depends on discoverable and verifiable behavior, not runtime code alone. |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 

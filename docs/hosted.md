@@ -201,6 +201,7 @@ protection_modes = ["standard"]
 
 [host_groups.aws-builders]
 placement = "explicit-membership"
+scheduler = "deterministic-first-fit"
 nodes = ["aws-linux-node"]
 notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
 ```
@@ -216,13 +217,15 @@ Node contract:
 Host-group contract:
 
 - is an explicit membership list, not a hidden scheduler rule
+- carries the first scheduler-policy contract explicitly with
+  `scheduler = "deterministic-first-fit"`
 - stays within one hosted control plane
 - becomes the first placement boundary for later lifecycle, scheduler,
   monitoring, and services work
 
 What this does not claim:
 
-- no scheduler policy exists yet beyond explicit membership
+- no scheduler behavior exists yet beyond the deterministic-first-fit contract
 - no hosted remote-launch implementation ships yet
 - no restart-policy, scheduler-policy, or hardened secret-backend product
   exists yet for hosted services and sandboxes

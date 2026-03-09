@@ -297,6 +297,7 @@ impl PortConfig {
                 String::from("remote-linux"),
                 HostedHostGroupSpec {
                     placement: HostedPlacementPolicy::ExplicitMembership,
+                    scheduler: HostedSchedulerPolicy::DeterministicFirstFit,
                     nodes: vec![
                         String::from("generic-linux-node"),
                         String::from("aws-linux-node"),
@@ -311,6 +312,7 @@ impl PortConfig {
                 String::from("aws-builders"),
                 HostedHostGroupSpec {
                     placement: HostedPlacementPolicy::ExplicitMembership,
+                    scheduler: HostedSchedulerPolicy::DeterministicFirstFit,
                     nodes: vec![String::from("aws-linux-node")],
                     notes: vec![String::from(
                         "Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy.",
@@ -497,6 +499,7 @@ impl PortConfig {
                     })?,
                     inventory_owner: MachineInventoryOwner::HostedControlPlane,
                     placement: group.placement,
+                    scheduler: group.scheduler,
                     nodes: members,
                     notes: group.notes.clone(),
                 },
@@ -541,6 +544,10 @@ impl PortConfig {
         }
         let mut candidate_nodes = Vec::new();
         let mut rejected_nodes = BTreeMap::new();
+        let host_node_names = host_nodes
+            .iter()
+            .map(|(node_name, _)| (*node_name).clone())
+            .collect::<Vec<_>>();
         for (node_name, node) in host_nodes {
             if let Some(reason) = hosted_node_rejection_reason(machine_name, machine, node)? {
                 rejected_nodes.insert(node_name.clone(), reason);
@@ -556,10 +563,16 @@ impl PortConfig {
                 group
                     .nodes
                     .iter()
-                    .any(|node| candidate_nodes.contains(node))
+                    .any(|node| host_node_names.contains(node))
             })
             .map(|(group_name, _)| group_name.clone())
             .collect::<Vec<_>>();
+        let host_group_policies = inventory
+            .host_groups
+            .iter()
+            .filter(|(group_name, _)| host_groups.contains(group_name))
+            .map(|(group_name, group)| (group_name.clone(), group.scheduler))
+            .collect::<BTreeMap<_, _>>();
         let placement_detail =
             hosted_placement_detail(machine_name, machine, &candidate_nodes, &rejected_nodes)?;
 
@@ -569,6 +582,7 @@ impl PortConfig {
             candidate_nodes,
             rejected_nodes: rejected_nodes.clone(),
             host_groups,
+            host_group_policies,
             placement_detail,
             control,
         }))
@@ -1192,6 +1206,7 @@ pub enum PvmCapabilityState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedHostGroupSpec {
     pub placement: HostedPlacementPolicy,
+    pub scheduler: HostedSchedulerPolicy,
     pub nodes: Vec<String>,
     pub notes: Vec<String>,
 }
@@ -1200,6 +1215,12 @@ pub struct HostedHostGroupSpec {
 #[serde(rename_all = "kebab-case")]
 pub enum HostedPlacementPolicy {
     ExplicitMembership,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedSchedulerPolicy {
+    DeterministicFirstFit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1224,6 +1245,7 @@ pub struct HostedHostGroupContract {
     pub control_plane: String,
     pub inventory_owner: MachineInventoryOwner,
     pub placement: HostedPlacementPolicy,
+    pub scheduler: HostedSchedulerPolicy,
     pub nodes: Vec<String>,
     pub notes: Vec<String>,
 }
@@ -1235,6 +1257,7 @@ pub struct HostedMachineSummaryContract {
     pub candidate_nodes: Vec<String>,
     pub rejected_nodes: BTreeMap<String, String>,
     pub host_groups: Vec<String>,
+    pub host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
     pub placement_detail: String,
     pub control: MachineControlContract,
 }
@@ -2336,9 +2359,9 @@ mod tests {
     use super::{
         ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
         AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
-        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource,
-        HostedGuestAttachActor, HostedGuestAttachHop, HostedGuestProtocolContract,
-        HostedPlacementPolicy, MachineArchitecture, MachineCommandRoute, MachineControlContract,
+        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
+        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
+        HostedSchedulerPolicy, MachineArchitecture, MachineCommandRoute, MachineControlContract,
         MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner,
         MachineStatusSource, PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
     };
@@ -2382,6 +2405,7 @@ mod tests {
         assert!(encoded.contains("[control_planes.demo]"));
         assert!(encoded.contains("[nodes.aws-linux-node]"));
         assert!(encoded.contains("[host_groups.remote-linux]"));
+        assert!(encoded.contains("scheduler = \"deterministic-first-fit\""));
         assert!(encoded.contains("mode = \"hosted-control-plane\""));
         assert!(encoded.contains("substrate = \"firecracker\""));
         assert!(encoded.contains("protection_mode = \"standard\""));
@@ -2628,6 +2652,10 @@ mod tests {
             remote_group.placement,
             HostedPlacementPolicy::ExplicitMembership
         );
+        assert_eq!(
+            remote_group.scheduler,
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
         assert!(
             remote_group
                 .nodes
@@ -2650,6 +2678,14 @@ mod tests {
         );
         assert!(summary.host_groups.contains(&String::from("remote-linux")));
         assert!(summary.host_groups.contains(&String::from("aws-builders")));
+        assert_eq!(
+            summary.host_group_policies["remote-linux"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
+        assert_eq!(
+            summary.host_group_policies["aws-builders"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
         assert_eq!(
             summary.control.status_route,
             MachineCommandRoute::HostedControlPlane
@@ -3145,6 +3181,10 @@ mod tests {
             String::from("firecracker-pvm")
         );
         assert_eq!(
+            config.host_groups["aws-builders"].scheduler,
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
+        assert_eq!(
             config.nodes["generic-linux-node"].capabilities.pvm_lanes[0].state,
             PvmCapabilityState::Planned
         );
@@ -3216,6 +3256,36 @@ mod tests {
             ExecutionSubstrate::Avf,
             ProtectionMode::Standard
         ));
+    }
+
+    #[test]
+    fn hosted_host_group_scheduler_field_is_required() {
+        let encoded = PortConfig::sample()
+            .to_toml_string()
+            .expect("sample config should encode");
+        let invalid = encoded.replacen("scheduler = \"deterministic-first-fit\"\n", "", 1);
+
+        let error = PortConfig::from_toml_str(&invalid)
+            .expect_err("missing host-group scheduler should fail parsing");
+
+        assert!(error.to_string().contains("scheduler"));
+    }
+
+    #[test]
+    fn hosted_host_group_scheduler_value_must_be_known() {
+        let encoded = PortConfig::sample()
+            .to_toml_string()
+            .expect("sample config should encode");
+        let invalid = encoded.replacen(
+            "scheduler = \"deterministic-first-fit\"",
+            "scheduler = \"not-a-policy\"",
+            1,
+        );
+
+        let error = PortConfig::from_toml_str(&invalid)
+            .expect_err("invalid host-group scheduler should fail parsing");
+
+        assert!(error.to_string().contains("not-a-policy"));
     }
 
     #[test]

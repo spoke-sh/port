@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use port_model::{
     HostedApiIdentityContract, HostedAuthScheme, HostedGuestAttachContract,
-    HostedMachineSummaryContract, MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
+    HostedMachineSummaryContract, HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner,
+    MachineLifecycleOwner,
 };
 use serde::{Deserialize, Serialize};
 
@@ -252,6 +253,8 @@ pub struct HostedRouteContext {
     pub candidate_nodes: Vec<String>,
     pub host_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub rejected_nodes: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement_detail: Option<String>,
@@ -272,6 +275,7 @@ impl HostedRouteContext {
             node_name: None,
             candidate_nodes: summary.candidate_nodes.clone(),
             host_groups: summary.host_groups.clone(),
+            host_group_policies: summary.host_group_policies.clone(),
             rejected_nodes: summary.rejected_nodes.clone(),
             placement_detail: (!summary.placement_detail.trim().is_empty())
                 .then(|| summary.placement_detail.clone()),
@@ -509,7 +513,8 @@ mod tests {
     use serde_json::to_value;
 
     use port_model::{
-        MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner, PortConfig,
+        HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
+        PortConfig,
     };
 
     use super::{
@@ -675,6 +680,10 @@ mod tests {
             summary_context.guest_broker,
             Some(MachineGuestBroker::ControlPlaneNodeAgentTunnel)
         );
+        assert_eq!(
+            summary_context.host_group_policies["aws-builders"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
 
         let selected = HostedRouteContext::from_guest_attach(&guest_attach).with_selected_node(
             "aws-linux-node",
@@ -733,6 +742,10 @@ mod tests {
                 .as_str()
                 .expect("placement detail should exist")
                 .contains("planned")
+        );
+        assert_eq!(
+            body["host_group_policies"]["remote-linux"],
+            "deterministic-first-fit"
         );
     }
 

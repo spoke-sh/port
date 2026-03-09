@@ -24,8 +24,8 @@ use port_hosted_protocol::{
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
-    HostedApiIdentityContract, MachineArchitecture, MachineControlContract, PortConfig,
-    ProtectionMode, PvmHostKit,
+    HostedApiIdentityContract, HostedSchedulerPolicy, MachineArchitecture, MachineControlContract,
+    PortConfig, ProtectionMode, PvmHostKit,
 };
 use port_sdk::{
     HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest as HostedSecretPutRequest,
@@ -334,6 +334,7 @@ pub struct ServiceDefinitionStatus {
     pub control_plane: Option<String>,
     pub node_name: Option<String>,
     pub host_groups: Vec<String>,
+    pub host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
     pub manifest_path: PathBuf,
     pub detail: String,
 }
@@ -1620,6 +1621,7 @@ pub(crate) fn apply_machine_service_local(
         control_plane: context.control_plane.clone(),
         node_name: context.node_name.clone(),
         host_groups: context.host_groups.clone(),
+        host_group_policies: context.host_group_policies.clone(),
         created_at_unix_s: unix_timestamp_now()?,
         detail: String::from(
             "service definition is stored under the resolved runtime owner; guest execution remains a follow-on control-plane and node-agent slice",
@@ -2885,6 +2887,7 @@ struct ServiceDefinitionRecord {
     control_plane: Option<String>,
     node_name: Option<String>,
     host_groups: Vec<String>,
+    host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
     created_at_unix_s: u64,
     detail: String,
 }
@@ -2905,6 +2908,7 @@ struct ResolvedMachineRuntime {
     control_plane: Option<String>,
     node_name: Option<String>,
     host_groups: Vec<String>,
+    host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
 }
 
 fn service_state_dir(runtime_dir: &Path) -> PathBuf {
@@ -2990,6 +2994,7 @@ fn resolve_machine_runtime(
                 control_plane: None,
                 node_name: None,
                 host_groups: Vec::new(),
+                host_group_policies: BTreeMap::new(),
             }),
             HostConnection::HostedControlPlane { .. } => {
                 let resolution = hosted_machine_resolution(config, machine_name)?;
@@ -2998,6 +3003,7 @@ fn resolve_machine_runtime(
                     control_plane: Some(resolution.control_plane),
                     node_name: resolution.node_name,
                     host_groups: resolution.host_groups,
+                    host_group_policies: resolution.host_group_policies,
                 })
             }
         };
@@ -3008,6 +3014,7 @@ fn resolve_machine_runtime(
         control_plane: None,
         node_name: None,
         host_groups: Vec::new(),
+        host_group_policies: BTreeMap::new(),
     })
 }
 
@@ -3134,6 +3141,7 @@ fn service_status_from_record(
         control_plane: record.control_plane,
         node_name: record.node_name,
         host_groups: record.host_groups,
+        host_group_policies: record.host_group_policies,
         manifest_path,
         detail: runtime_record
             .map(|runtime| runtime.detail)
@@ -3165,6 +3173,7 @@ struct HostedMachineResolution {
     control_plane: String,
     node_name: Option<String>,
     host_groups: Vec<String>,
+    host_group_policies: BTreeMap<String, HostedSchedulerPolicy>,
     runtime_root: PathBuf,
     status: MachineStatus,
 }
@@ -3201,6 +3210,7 @@ fn hosted_machine_resolution(
                 control_plane: hosted_identity.control_plane.clone(),
                 node_name: None,
                 host_groups: Vec::new(),
+                host_group_policies: BTreeMap::new(),
                 runtime_root: placeholder_root.clone(),
                 status: synthetic_machine_status(
                     machine_name,
@@ -3219,6 +3229,7 @@ fn hosted_machine_resolution(
                 control_plane: hosted_identity.control_plane.clone(),
                 node_name: None,
                 host_groups: Vec::new(),
+                host_group_policies: BTreeMap::new(),
                 runtime_root: placeholder_root.clone(),
                 status: synthetic_machine_status(
                     machine_name,
@@ -3239,6 +3250,7 @@ fn hosted_machine_resolution(
             control_plane: summary.control_plane.clone(),
             node_name: None,
             host_groups: summary.host_groups.clone(),
+            host_group_policies: summary.host_group_policies.clone(),
             runtime_root: placeholder_root.clone(),
             status: synthetic_machine_status(
                 machine_name,
@@ -3286,6 +3298,7 @@ fn hosted_machine_resolution(
             control_plane: summary.control_plane.clone(),
             node_name: Some(node_name.clone()),
             host_groups: summary.host_groups.clone(),
+            host_group_policies: summary.host_group_policies.clone(),
             runtime_root: node.runtime_root.clone(),
             status,
         };
@@ -3301,6 +3314,7 @@ fn hosted_machine_resolution(
         control_plane: summary.control_plane.clone(),
         node_name: None,
         host_groups: summary.host_groups.clone(),
+        host_group_policies: summary.host_group_policies.clone(),
         runtime_root: placeholder_root.clone(),
         status: synthetic_machine_status(
             machine_name,
@@ -6338,6 +6352,7 @@ struct AvfRuntimeMetadata {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
     use std::net::{Shutdown, TcpListener as StdTcpListener, TcpStream};
@@ -6383,7 +6398,8 @@ mod tests {
         HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
     };
     use port_model::{
-        ArtifactKind, ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode,
+        ArtifactKind, ExecutionSubstrate, HostedSchedulerPolicy, MachineArchitecture, PortConfig,
+        ProtectionMode,
     };
     use tokio::net::TcpListener;
 
@@ -9439,6 +9455,10 @@ exec sleep 30
             control_plane: None,
             node_name: None,
             host_groups: Vec::new(),
+            host_group_policies: BTreeMap::from([(
+                String::from("aws-builders"),
+                HostedSchedulerPolicy::DeterministicFirstFit,
+            )]),
             created_at_unix_s: 1,
             detail: String::from("stored definition"),
         };
@@ -9453,6 +9473,10 @@ exec sleep 30
         assert_eq!(status.runtime.exit_code, None);
         assert_eq!(status.runtime.stdout_path, None);
         assert_eq!(status.runtime.stderr_path, None);
+        assert_eq!(
+            status.host_group_policies["aws-builders"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
         assert_eq!(status.manifest_path, manifest_path);
     }
 
@@ -9523,6 +9547,10 @@ exec sleep 30
         assert_eq!(applied.node_name.as_deref(), Some("aws-linux-node"));
         assert_eq!(applied.runtime.state, ServiceRuntimeState::Running);
         assert_eq!(
+            applied.host_group_policies["aws-builders"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
+        assert_eq!(
             applied
                 .runtime
                 .stderr_path
@@ -9553,10 +9581,18 @@ exec sleep 30
             .expect("service list should succeed");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(
+            listed[0].host_group_policies["aws-builders"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
 
         let status = machine_service_status(&config, tempdir.path(), "cloud-aws", "buildbox")
             .expect("service status should succeed");
         assert_eq!(status.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(
+            status.host_group_policies["aws-builders"],
+            HostedSchedulerPolicy::DeterministicFirstFit
+        );
         assert!(!status.detail.contains("s3cr3t"));
 
         let stopped = stop_machine_service(&config, tempdir.path(), "cloud-aws", "buildbox")

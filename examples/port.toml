@@ -286,7 +286,7 @@ notes = ["Azure is modeled explicitly through the demo hosted control plane so d
 #   fail placement because this node only advertises a planned PVM lane.
 host = "generic-linux"
 runtime_root = "runtime/hosted/generic-linux-node"
-notes = ["Generic Linux is the baseline hosted node contract before scheduler policy exists."]
+notes = ["Generic Linux is the baseline hosted node contract before multi-node scheduler execution lands."]
 
 [nodes.generic-linux-node.capabilities]
 providers = ["generic-linux"]
@@ -353,11 +353,13 @@ notes = ["GCP remains modeled as a planned PVM node until a prepared host kit is
 
 [host_groups.remote-linux]
 placement = "explicit-membership"
+scheduler = "deterministic-first-fit"
 nodes = ["generic-linux-node", "aws-linux-node", "gcp-linux-node"]
 notes = ["This group is the first hosted placement boundary; later scheduler, monitoring, and services work should reuse it instead of inventing another inventory axis."]
 
 [host_groups.aws-builders]
 placement = "explicit-membership"
+scheduler = "deterministic-first-fit"
 nodes = ["aws-linux-node"]
 notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
 

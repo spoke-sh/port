@@ -2,10 +2,11 @@
 id: 1vzSd6000
 title: Define Host Group And Scheduler Contracts
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T21:54:08
-updated_at: 2026-03-08T21:54:08
+updated_at: 2026-03-08T21:56:45
 scope: 1vzSbL000/1vzSc3000
+started_at: 2026-03-08T21:56:45
 ---
 
 # Define Host Group And Scheduler Contracts

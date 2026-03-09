@@ -59,13 +59,13 @@
 | [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | done |
 | [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | done |
 
-### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (active)
+### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [Hosted API And Inventory](epics/1vz4Yn000/voyages/1vz4cU000/) | done |
 | [Hosted Runtime And Service Expansion](epics/1vz4Yn000/voyages/1vz5mg000/) | done |
-| [Execute Hosted Services And Sandboxes](epics/1vz4Yn000/voyages/1vzRnO000/) | in-progress |
+| [Execute Hosted Services And Sandboxes](epics/1vz4Yn000/voyages/1vzRnO000/) | done |
 
 ### [Executable Pvm And Avf Lanes](epics/1vzJKE000/) (done)
 

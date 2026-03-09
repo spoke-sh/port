@@ -340,9 +340,9 @@ is now documented in [`docs/hosted.md`](docs/hosted.md).
   audience `port-hosted-demo`, and a bearer token sourced from
   `PORT_DEMO_TOKEN`.
 - Hosted inventory is now modeled explicitly through `[nodes.<name>]` and
-  `[host_groups.<name>]`, with capability, node-agent `runtime_root`, and
-  explicit-membership placement fields that later scheduler, monitoring, and
-  services work can reuse.
+  `[host_groups.<name>]`, with capability, node-agent `runtime_root`,
+  explicit-membership placement, and deterministic-first-fit scheduler fields
+  that later scheduler, monitoring, and services work can reuse.
 - Hosted `machine list`, `status`, `monitor`, `top`, and `stop` are also
   modeled explicitly as control-plane plus node-agent contracts so the
   canonical machine verbs stay stable as Port moves from the local runtime to
