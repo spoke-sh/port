@@ -66,7 +66,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | planned |
+| [Enable Hosted Standard Cloud Launch](epics/1vzXFf000/voyages/1vzXFy000/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

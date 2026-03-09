@@ -1,11 +1,12 @@
 ---
 id: 1vzXFy000
 title: Enable Hosted Standard Cloud Launch
-status: planned
+status: in-progress
 epic: 1vzXFf000
 created_at: 2026-03-09T02:50:34
 index: 1
 updated_at: 2026-03-09T02:56:09
+started_at: 2026-03-09T02:57:21
 ---
 
 # Enable Hosted Standard Cloud Launch

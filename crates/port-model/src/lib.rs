@@ -609,11 +609,25 @@ impl PortConfig {
             .filter(|(group_name, _)| host_groups.contains(group_name))
             .map(|(group_name, group)| (group_name.clone(), group.scheduler))
             .collect::<BTreeMap<_, _>>();
-        let placement_detail =
-            hosted_placement_detail(machine_name, machine, &candidate_nodes, &rejected_nodes)?;
+        let host = self.hosts.get(&machine.host).ok_or_else(|| {
+            ValidationError::new(format!(
+                "machine '{}' references unknown host '{}'",
+                machine_name, machine.host
+            ))
+        })?;
+        let placement_detail = hosted_placement_detail(
+            machine_name,
+            machine,
+            &machine.host,
+            host.provider,
+            &candidate_nodes,
+            &rejected_nodes,
+        )?;
 
         Ok(Some(HostedMachineSummaryContract {
             machine_name: machine_name.to_string(),
+            host_name: machine.host.clone(),
+            provider: host.provider,
             control_plane: hosted_identity.control_plane,
             candidate_nodes,
             rejected_nodes: rejected_nodes.clone(),
@@ -1450,6 +1464,8 @@ pub struct HostedHostGroupContract {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedMachineSummaryContract {
     pub machine_name: String,
+    pub host_name: String,
+    pub provider: HostProvider,
     pub control_plane: String,
     pub candidate_nodes: Vec<String>,
     pub rejected_nodes: BTreeMap<String, String>,
@@ -2494,10 +2510,12 @@ fn hosted_node_rejection_reason(
 fn hosted_placement_detail(
     machine_name: &str,
     machine: &MachineSpec,
+    host_name: &str,
+    provider: HostProvider,
     candidate_nodes: &[String],
     rejected_nodes: &BTreeMap<String, String>,
 ) -> Result<String, ValidationError> {
-    let requirement = hosted_machine_requirement(machine_name, machine)?;
+    let requirement = hosted_machine_requirement(machine_name, machine, host_name, provider)?;
 
     let mut detail = format!("machine '{machine_name}' requires {requirement}");
     if candidate_nodes.is_empty() {
@@ -2523,6 +2541,8 @@ fn hosted_placement_detail(
 fn hosted_machine_requirement(
     machine_name: &str,
     machine: &MachineSpec,
+    host_name: &str,
+    provider: HostProvider,
 ) -> Result<String, ValidationError> {
     let architecture = resolve_machine_architecture(machine.architecture).map_err(|error| {
         ValidationError::new(format!(
@@ -2531,11 +2551,23 @@ fn hosted_machine_requirement(
         ))
     })?;
     Ok(format!(
-        "{} on {} via {}",
+        "{} on {} via {} for host '{}' provider '{}'",
         protection_mode_requirement_label(machine.protection_mode),
         machine_architecture_label(architecture),
-        execution_substrate_label(machine.substrate)
+        execution_substrate_label(machine.substrate),
+        host_name,
+        host_provider_label(provider),
     ))
+}
+
+fn host_provider_label(provider: HostProvider) -> &'static str {
+    match provider {
+        HostProvider::Local => "local",
+        HostProvider::GenericLinux => "generic-linux",
+        HostProvider::Aws => "aws",
+        HostProvider::Gcp => "gcp",
+        HostProvider::Azure => "azure",
+    }
 }
 
 fn protection_mode_requirement_label(mode: ProtectionMode) -> &'static str {
@@ -3055,11 +3087,15 @@ mod tests {
             .hosted_machine_summary_contract("cloud-aws")
             .expect("hosted machine summary should resolve")
             .expect("cloud-aws should be hosted");
+        assert_eq!(summary.host_name, "aws-linux");
+        assert_eq!(summary.provider, HostProvider::Aws);
         assert_eq!(summary.control_plane, "demo");
         assert_eq!(
             summary.candidate_nodes,
             vec![String::from("aws-linux-node")]
         );
+        assert!(summary.placement_detail.contains("host 'aws-linux'"));
+        assert!(summary.placement_detail.contains("provider 'aws'"));
         assert!(summary.host_groups.contains(&String::from("remote-linux")));
         assert!(summary.host_groups.contains(&String::from("aws-builders")));
         assert_eq!(
@@ -3152,6 +3188,92 @@ mod tests {
         );
         assert!(summary.placement_detail.contains("generic-linux-node"));
         assert!(summary.placement_detail.contains("planned"));
+    }
+
+    #[test]
+    fn hosted_standard_summary_tracks_host_and_provider_for_each_demo_lane() {
+        let config = PortConfig::sample();
+
+        let generic = config
+            .hosted_machine_summary_contract("cloud-generic")
+            .expect("cloud-generic summary should resolve")
+            .expect("cloud-generic should be hosted");
+        assert_eq!(generic.host_name, "generic-linux");
+        assert_eq!(generic.provider, HostProvider::GenericLinux);
+        assert_eq!(
+            generic.candidate_nodes,
+            vec![String::from("generic-linux-node")]
+        );
+        assert!(generic.placement_detail.contains("host 'generic-linux'"));
+        assert!(
+            generic
+                .placement_detail
+                .contains("provider 'generic-linux'")
+        );
+
+        let gcp = config
+            .hosted_machine_summary_contract("cloud-gcp")
+            .expect("cloud-gcp summary should resolve")
+            .expect("cloud-gcp should be hosted");
+        assert_eq!(gcp.host_name, "gcp-linux");
+        assert_eq!(gcp.provider, HostProvider::Gcp);
+        assert_eq!(gcp.candidate_nodes, vec![String::from("gcp-linux-node")]);
+        assert!(gcp.placement_detail.contains("host 'gcp-linux'"));
+        assert!(gcp.placement_detail.contains("provider 'gcp'"));
+    }
+
+    #[test]
+    fn hosted_standard_summary_reports_explicit_rejection_context() {
+        let mut config = PortConfig::sample();
+        config
+            .nodes
+            .get_mut("generic-linux-node")
+            .expect("generic-linux-node should exist")
+            .capabilities
+            .protection_modes = vec![ProtectionMode::Pvm];
+
+        let summary = config
+            .hosted_machine_summary_contract("cloud-generic")
+            .expect("cloud-generic summary should resolve")
+            .expect("cloud-generic should be hosted");
+
+        assert!(summary.candidate_nodes.is_empty());
+        assert_eq!(
+            summary.rejected_nodes["generic-linux-node"],
+            "protection mode 'standard' is required but node advertises pvm"
+        );
+        assert!(summary.placement_detail.contains("generic-linux-node"));
+        assert!(
+            summary
+                .placement_detail
+                .contains("provider 'generic-linux'")
+        );
+        assert!(
+            !summary
+                .placement_detail
+                .contains("run Port on that host directly")
+        );
+    }
+
+    #[test]
+    fn hosted_standard_summary_reports_missing_host_inventory_explicitly() {
+        let mut config = PortConfig::sample();
+        config.nodes.remove("generic-linux-node");
+        config
+            .host_groups
+            .get_mut("remote-linux")
+            .expect("remote-linux host group should exist")
+            .nodes
+            .retain(|node| node != "generic-linux-node");
+
+        let error = config
+            .hosted_machine_summary_contract("cloud-generic")
+            .expect_err("missing hosted node inventory should fail resolution");
+
+        assert!(error.to_string().contains(
+            "machine 'cloud-generic' targets hosted host 'generic-linux' but no hosted node inventory record matches that host"
+        ));
+        assert!(!error.to_string().contains("run Port on that host directly"));
     }
 
     #[test]

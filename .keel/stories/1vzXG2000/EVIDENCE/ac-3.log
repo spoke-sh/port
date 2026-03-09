@@ -1,0 +1,147 @@
+---
+recorded_at: 2026-03-09T03:04:25.614299960-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-model && cargo test -q && keel verify run 1vzXG2000'
+---
+
+running 37 tests
+.....................................
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 10 tests
+..........
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 12 tests
+............
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.93s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.16s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+
+running 9 tests
+......i..
+test result: ok. 8 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.65s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s
+
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 13 tests
+.............
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 37 tests
+.....................................
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+running 88 tests
+....................................................................................... 87/88
+.
+test result: ok. 88 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.38s
+
+
+running 10 tests
+..........
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+[1m[94m1vzXG2000[39m[0m Define Hosted Standard Placement Contract [[1m[36m1vzXFf000[39m[0m/[1m[35m1vzXFy000[39m[0m]
+  [32m✓[39m 
+  [32m✓[39m Placement summary logic resolves candidate hosted nodes for `cloud-generic`, `cloud-aws`, and `cloud-gcp` while preserving machine, host, provider, and control-plane identity.
+  [32m✓[39m 
+  [32m✓[39m Ineligible, unregistered, or unresolved standard-lane nodes fail with explicit routing context instead of the current generic “run Port on that host directly” provider guidance.
+  [32m✓[39m 
+  [32m✓[39m The hosted placement contract serializes candidate-node and selected-node detail so later status or stop routes can follow the same provider-aware placement, satisfying `SRS-NFR-01`.
+  [32mVerification passed[39m
+
+Next step:
+  [1mkeel story submit 1vzXG2000[0m
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

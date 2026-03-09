@@ -22,5 +22,5 @@ index: 8
 **Progress:** 0/1 voyages complete, 0/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Enable Hosted Standard Cloud Launch](voyages/1vzXFy000/) | planned | 0/3 |
+| [Enable Hosted Standard Cloud Launch](voyages/1vzXFy000/) | in-progress | 0/3 |
 <!-- END GENERATED -->
