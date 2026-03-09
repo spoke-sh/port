@@ -33,4 +33,18 @@ Format:
 
 ## Observations
 
-TODO: What went well? What was difficult? What surprised you?
+Deterministic hosted artifact resolution fit cleanly once the control-plane
+identity lookup moved into `port-model` instead of being inferred ad hoc in
+runtime helpers. That kept the store-path contract reusable for later hosted
+push and pull route stories.
+
+The upgraded `keel` workflow is stricter than the earlier slices: acceptance
+criteria need inline verify annotations before `keel story record` works, and
+`keel story submit` now hard-fails on unchecked AC boxes and unresolved
+reflection scaffold text. Future story setup should add those verify stubs
+before implementation to avoid a second hygiene pass at the end.
+
+The full workspace verification also exposed a stale CLI help assertion outside
+the story scope. Fixing that immediately was the right move because it kept the
+repo-level `cargo test -q` proof meaningful instead of relying only on targeted
+crate tests.
