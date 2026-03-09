@@ -74,7 +74,7 @@
 |--------|--------|
 | [Hosted Control And Substrate Foundations](epics/1vz2eV000/voyages/1vz2ky000/) | done |
 
-### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (done)
+### [PVM And Multi-Substrate Execution](epics/1vz3ck000/) (active)
 
 | Voyage | Status |
 |--------|--------|
@@ -82,6 +82,7 @@
 | [Mac Operator Shell Compatibility](epics/1vz3ck000/voyages/1vz4qH000/) | done |
 | [X86 64 PVM Host Kit Foundation](epics/1vz3ck000/voyages/1vzGo0000/) | done |
 | [PVM Runtime Admission And Placement](epics/1vz3ck000/voyages/1vzHPo000/) | done |
+| [PVM Host Kit And Artifact Delivery](epics/1vz3ck000/voyages/1vzY3z000/) | planned |
 
 ### [Hosted Control Plane And Operator Surface](epics/1vz4Yn000/) (done)
 
