@@ -8,15 +8,15 @@
 
 ### In Scope
 
-- streamed PTY and `logs --follow` behavior over the shared guest protocol
-- hosted control-plane and node-agent transport for copy and forward
-- CLI, SDK, and docs updates for the streamed guest workflow
+- [SCOPE-01] Streamed PTY and `logs --follow` behavior over the shared guest protocol.
+- [SCOPE-02] Hosted control-plane and node-agent transport for copy and forward.
+- [SCOPE-03] CLI, SDK, and docs updates for the streamed guest workflow.
 
 ### Out of Scope
 
-- scheduler or host-group policy changes
-- service execution or teardown beyond guest transport
-- Cloud Hypervisor delivery or other new substrate programs
+- [SCOPE-90] Scheduler or host-group policy changes.
+- [SCOPE-91] Service execution or teardown beyond guest transport.
+- [SCOPE-92] Cloud Hypervisor delivery or other new substrate programs.
 
 ## Assumptions & Dependencies
 
