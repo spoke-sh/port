@@ -25,11 +25,11 @@ started_at: 2026-03-08T21:04:35
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Managed Service Execution Contract](../../../../stories/1vzRov000/README.md) | feat | backlog |
+| [Define Managed Service Execution Contract](../../../../stories/1vzRov000/README.md) | feat | done |
 | [Implement Guest-Agent Managed Process Supervisor](../../../../stories/1vzRpC000/README.md) | feat | backlog |
 | [Route Hosted Service Lifecycle Through Live Runtime](../../../../stories/1vzRpF000/README.md) | feat | backlog |
 | [Publish Hosted Service And Sandbox Workflow](../../../../stories/1vzRpI000/README.md) | feat | backlog |
