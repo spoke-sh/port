@@ -25,11 +25,11 @@ started_at: 2026-03-08T21:56:37
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Host Group And Scheduler Contracts](../../../../stories/1vzSd6000/README.md) | feat | in-progress |
+| [Define Host Group And Scheduler Contracts](../../../../stories/1vzSd6000/README.md) | feat | done |
 | [Publish Multi-Node Hosted Service Workflow](../../../../stories/1vzSdH000/README.md) | feat | backlog |
 | [Implement Hosted Service Placement Scheduler](../../../../stories/1vzSdV000/README.md) | feat | backlog |
 | [Surface Placement State Through Canonical Service Commands](../../../../stories/1vzSdb000/README.md) | feat | backlog |
