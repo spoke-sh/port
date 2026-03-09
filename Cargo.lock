@@ -906,6 +906,7 @@ dependencies = [
  "axum",
  "libc",
  "port-agent-protocol",
+ "port-guest-agent",
  "port-hosted-protocol",
  "port-model",
  "port-sdk",

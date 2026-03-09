@@ -1,8 +1,17 @@
 use std::fs;
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::Command;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
+use port_guest_agent::serve as serve_guest_agent;
 use port_model::PortConfig;
+use port_runtime::{
+    ControlPlaneServeRequest, HostedNodeBinding, NodeAgentServeRequest, serve_control_plane,
+    serve_node_agent,
+};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -15,13 +24,25 @@ fn port_bin() -> &'static str {
     env!("CARGO_BIN_EXE_port")
 }
 
-fn hosted_config(runtime_root: &Path) -> PortConfig {
+fn port_command(config_path: &Path) -> Command {
+    let mut command = Command::new(port_bin());
+    command.env("PORT_DEMO_TOKEN", "demo-token");
+    command.arg("--config").arg(config_path);
+    command
+}
+
+fn hosted_config(runtime_root: &Path, control_plane_endpoint: &str) -> PortConfig {
     let mut config = PortConfig::sample();
     config
         .nodes
         .get_mut("aws-linux-node")
         .expect("aws-linux-node should exist")
         .runtime_root = runtime_root.to_path_buf();
+    config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = control_plane_endpoint.to_string();
     config
 }
 
@@ -51,17 +72,97 @@ fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) {
     .expect("manifest should write");
 }
 
+fn reserve_addr() -> String {
+    TcpListener::bind("127.0.0.1:0")
+        .expect("listener should bind")
+        .local_addr()
+        .expect("addr should exist")
+        .to_string()
+}
+
+fn wait_for_port(addr: &str, rx: &mpsc::Receiver<anyhow::Result<()>>, label: &str) {
+    for _ in 0..100 {
+        if let Ok(result) = rx.try_recv() {
+            result.unwrap_or_else(|error| panic!("{label} failed: {error}"));
+        }
+        if TcpStream::connect(addr).is_ok() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("{label} did not become reachable in time");
+}
+
 #[test]
 fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let control_plane_addr = reserve_addr();
+    let control_plane_endpoint = format!("http://{control_plane_addr}");
+    unsafe {
+        std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+    }
     let config_path = temp.path().join("port.toml");
-    write_config(&config_path, &hosted_config(&hosted_runtime_root));
+    let config = hosted_config(&hosted_runtime_root, &control_plane_endpoint);
+    write_config(&config_path, &config);
     write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
+    let guest_root = temp.path().join("guest");
+    fs::create_dir_all(guest_root.join("workspace")).expect("guest workspace should exist");
+    let guest_socket = hosted_runtime_root.join("cloud-aws/guest-agent.sock");
+    let guest_socket_for_thread = guest_socket.clone();
+    let guest_root_for_thread = guest_root.clone();
+    thread::spawn(move || {
+        serve_guest_agent(&guest_socket_for_thread, guest_root_for_thread)
+            .expect("guest agent should serve");
+    });
+    for _ in 0..100 {
+        if guest_socket.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 
-    let secret_put = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let node_addr = reserve_addr();
+    let (node_tx, node_rx) = mpsc::channel();
+    let node_config = config.clone();
+    let node_bind = node_addr.clone();
+    thread::spawn(move || {
+        let result = serve_node_agent(
+            node_config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: node_bind,
+                token: String::from("node-secret"),
+            },
+        )
+        .map(|_| ());
+        let _ = node_tx.send(result);
+    });
+    wait_for_port(&node_addr, &node_rx, "node-agent");
+
+    let (control_tx, control_rx) = mpsc::channel();
+    let control_config = config.clone();
+    let control_bind = control_plane_addr.clone();
+    let control_node_addr = node_addr.clone();
+    thread::spawn(move || {
+        let result = serve_control_plane(
+            control_config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: control_bind,
+                node_bindings: vec![HostedNodeBinding {
+                    node_name: String::from("aws-linux-node"),
+                    endpoint: format!("http://{control_node_addr}"),
+                    token: String::from("node-secret"),
+                }],
+            },
+        )
+        .map(|_| ());
+        let _ = control_tx.send(result);
+    });
+    wait_for_port(&control_plane_addr, &control_rx, "control-plane");
+
+    let secret_put = port_command(&config_path)
         .arg("service")
         .arg("secret")
         .arg("put")
@@ -80,9 +181,7 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(secret_stdout.contains("control plane: demo"));
     assert!(secret_stdout.contains("node: aws-linux-node"));
 
-    let apply_service = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let apply_service = port_command(&config_path)
         .arg("service")
         .arg("apply")
         .arg("--machine")
@@ -94,9 +193,9 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
         .arg("--secret")
         .arg("API_TOKEN=demo-token")
         .arg("--")
-        .arg("/app/api")
-        .arg("--listen")
-        .arg(":8080")
+        .arg("/bin/sh")
+        .arg("-lc")
+        .arg("printf '%s\\n' \"$API_TOKEN\" >&2; trap 'exit 0' TERM; while :; do sleep 1; done")
         .output()
         .expect("service apply should run");
     assert!(apply_service.status.success());
@@ -104,16 +203,15 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(service_stdout.contains("name: api"));
     assert!(service_stdout.contains("kind: service"));
     assert!(service_stdout.contains("desired state: active"));
-    assert!(service_stdout.contains("runtime state: stored"));
+    assert!(service_stdout.contains("runtime state: running"));
     assert!(
         service_stdout.contains("runtime record: ")
             && service_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
     );
     assert!(service_stdout.contains("secret bindings: API_TOKEN=demo-token"));
+    assert!(service_stdout.contains("stderr log: /run/port/services/api.stderr.log"));
 
-    let apply_sandbox = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let apply_sandbox = port_command(&config_path)
         .arg("service")
         .arg("apply")
         .arg("--machine")
@@ -127,7 +225,7 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
         .arg("--")
         .arg("/bin/sh")
         .arg("-lc")
-        .arg("make test")
+        .arg("printf sandbox-ok; exit 0")
         .output()
         .expect("sandbox apply should run");
     assert!(apply_sandbox.status.success());
@@ -135,9 +233,7 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(sandbox_stdout.contains("name: buildbox"));
     assert!(sandbox_stdout.contains("kind: sandbox"));
 
-    let list = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let list = port_command(&config_path)
         .arg("service")
         .arg("list")
         .arg("--machine")
@@ -149,9 +245,7 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(list_stdout.contains("name: api"));
     assert!(list_stdout.contains("name: buildbox"));
 
-    let status = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let status = port_command(&config_path)
         .arg("service")
         .arg("status")
         .arg("--machine")
@@ -164,16 +258,14 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let status_stdout = String::from_utf8_lossy(&status.stdout);
     assert!(status_stdout.contains("guest broker: control-plane-node-agent-tunnel"));
     assert!(status_stdout.contains("service route: hosted-control-plane"));
-    assert!(status_stdout.contains("runtime state: stored"));
+    assert!(status_stdout.contains("runtime state: running"));
     assert!(
         status_stdout.contains("runtime record: ")
             && status_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
     );
-    assert!(status_stdout.contains("command: /app/api --listen :8080"));
+    assert!(status_stdout.contains("command: /bin/sh -lc"));
 
-    let stop = Command::new(port_bin())
-        .arg("--config")
-        .arg(&config_path)
+    let stop = port_command(&config_path)
         .arg("service")
         .arg("stop")
         .arg("--machine")
@@ -185,5 +277,11 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(stop.status.success());
     let stop_stdout = String::from_utf8_lossy(&stop.stdout);
     assert!(stop_stdout.contains("desired state: stopped"));
-    assert!(stop_stdout.contains("runtime state: stored"));
+    assert!(stop_stdout.contains("runtime state: stopped"));
+
+    let runtime_record = hosted_runtime_root.join("cloud-aws/services/runtime/api.json");
+    let runtime_record_text =
+        fs::read_to_string(runtime_record).expect("runtime record should read");
+    assert!(runtime_record_text.contains("\"state\": \"stopped\""));
+    assert!(!runtime_record_text.contains("s3cr3t"));
 }

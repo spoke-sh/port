@@ -15,8 +15,8 @@ use port_model::{
     HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
 };
 use reqwest::blocking::Client as BlockingClient;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -277,20 +277,20 @@ fn render_route_context(route: Option<&HostedRouteContext>) -> String {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ServiceKind {
     Service,
     Sandbox,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceSecretBinding {
     pub env: String,
     pub secret: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceApplyRequest {
     pub name: String,
     pub kind: ServiceKind,
@@ -298,7 +298,7 @@ pub struct ServiceApplyRequest {
     pub secret_bindings: Vec<ServiceSecretBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SecretPutRequest {
     pub name: String,
     pub value: String,

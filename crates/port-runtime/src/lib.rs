@@ -11,9 +11,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    ForwardEndpoint, GuestOperation, LogsResult, OperationResult, PtyResult, RequestEnvelope,
-    ResponseEnvelope, StreamRequestFrame, StreamResponseFrame, parse_forward_endpoint, read_frame,
-    render_forward_endpoint, write_frame,
+    ForwardEndpoint, GuestOperation, LogsResult, ManagedServiceOperation, ManagedServiceRequest,
+    ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult,
+    PtyResult, RequestEnvelope, ResponseEnvelope, StreamRequestFrame, StreamResponseFrame,
+    parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::{
     HostedDetachedForwardStartRequest, HostedDetachedForwardState,
@@ -26,7 +27,11 @@ use port_model::{
     HostedApiIdentityContract, MachineArchitecture, MachineControlContract, PortConfig,
     ProtectionMode, PvmHostKit,
 };
-use port_sdk::{HostedApiStreamRequest, HostedClient, HttpMethod};
+use port_sdk::{
+    HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest as HostedSecretPutRequest,
+    ServiceApplyRequest as HostedServiceApplyRequest, ServiceKind as HostedServiceKind,
+    ServiceSecretBinding as HostedServiceSecretBinding,
+};
 use serde::{Deserialize, Serialize};
 
 mod hosted_control_plane;
@@ -256,7 +261,7 @@ impl std::fmt::Display for ServiceDesiredState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ServiceRuntimeState {
     Stored,
@@ -304,7 +309,7 @@ pub struct ServiceApplyRequest<'a> {
     pub secret_bindings: Vec<ServiceSecretBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineSecretSummary {
     pub machine_name: String,
     pub name: String,
@@ -316,7 +321,7 @@ pub struct MachineSecretSummary {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceDefinitionStatus {
     pub machine_name: String,
     pub name: String,
@@ -333,7 +338,7 @@ pub struct ServiceDefinitionStatus {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceRuntimeObservation {
     pub state: ServiceRuntimeState,
     pub record_path: PathBuf,
@@ -1437,6 +1442,16 @@ pub fn put_machine_secret(
     config: &PortConfig,
     request: SecretPutRequest<'_>,
 ) -> Result<MachineSecretSummary> {
+    if machine_is_hosted(config, request.machine_name)? {
+        return hosted_control_plane_put_machine_secret(config, request);
+    }
+    put_machine_secret_local(config, request)
+}
+
+pub(crate) fn put_machine_secret_local(
+    config: &PortConfig,
+    request: SecretPutRequest<'_>,
+) -> Result<MachineSecretSummary> {
     let context =
         resolve_service_runtime_context(config, request.runtime_root, request.machine_name)?;
     validate_identifier(request.name, "secret name")?;
@@ -1464,6 +1479,17 @@ pub fn put_machine_secret(
 }
 
 pub fn list_machine_secrets(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<Vec<MachineSecretSummary>> {
+    if machine_is_hosted(config, machine_name)? {
+        return hosted_control_plane_list_machine_secrets(config, machine_name);
+    }
+    list_machine_secrets_local(config, runtime_root, machine_name)
+}
+
+pub(crate) fn list_machine_secrets_local(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
@@ -1507,6 +1533,18 @@ pub fn delete_machine_secret(
     machine_name: &str,
     secret_name: &str,
 ) -> Result<MachineSecretSummary> {
+    if machine_is_hosted(config, machine_name)? {
+        return hosted_control_plane_delete_machine_secret(config, machine_name, secret_name);
+    }
+    delete_machine_secret_local(config, runtime_root, machine_name, secret_name)
+}
+
+pub(crate) fn delete_machine_secret_local(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    secret_name: &str,
+) -> Result<MachineSecretSummary> {
     let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
     validate_identifier(secret_name, "secret name")?;
     let references = service_references_secret(&context.status.runtime_dir, secret_name)?;
@@ -1534,6 +1572,16 @@ pub fn delete_machine_secret(
 }
 
 pub fn apply_machine_service(
+    config: &PortConfig,
+    request: ServiceApplyRequest<'_>,
+) -> Result<ServiceDefinitionStatus> {
+    if machine_is_hosted(config, request.machine_name)? {
+        return hosted_control_plane_apply_machine_service(config, request);
+    }
+    apply_machine_service_local(config, request)
+}
+
+pub(crate) fn apply_machine_service_local(
     config: &PortConfig,
     request: ServiceApplyRequest<'_>,
 ) -> Result<ServiceDefinitionStatus> {
@@ -1586,6 +1634,17 @@ pub fn list_machine_services(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<Vec<ServiceDefinitionStatus>> {
+    if machine_is_hosted(config, machine_name)? {
+        return hosted_control_plane_list_machine_services(config, machine_name);
+    }
+    list_machine_services_local(config, runtime_root, machine_name)
+}
+
+pub(crate) fn list_machine_services_local(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<Vec<ServiceDefinitionStatus>> {
     let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
     let dir = service_definition_dir(&context.status.runtime_dir);
     if !dir.exists() {
@@ -1617,6 +1676,18 @@ pub fn machine_service_status(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
+    if machine_is_hosted(config, machine_name)? {
+        return hosted_control_plane_machine_service_status(config, machine_name, service_name);
+    }
+    machine_service_status_local(config, runtime_root, machine_name, service_name)
+}
+
+pub(crate) fn machine_service_status_local(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
     let context = resolve_service_runtime_context(config, runtime_root, machine_name)?;
     validate_identifier(service_name, "service name")?;
     let path =
@@ -1626,6 +1697,18 @@ pub fn machine_service_status(
 }
 
 pub fn stop_machine_service(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    if machine_is_hosted(config, machine_name)? {
+        return hosted_control_plane_stop_machine_service(config, machine_name, service_name);
+    }
+    stop_machine_service_local(config, runtime_root, machine_name, service_name)
+}
+
+pub(crate) fn stop_machine_service_local(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
@@ -1642,6 +1725,192 @@ pub fn stop_machine_service(
     );
     write_json_file(&path, &record)?;
     Ok(service_status_from_record(record, path))
+}
+
+fn load_service_secret_env(
+    runtime_dir: &Path,
+    bindings: &[ServiceSecretBinding],
+) -> Result<BTreeMap<String, String>> {
+    let mut env = BTreeMap::new();
+    for binding in bindings {
+        let path = service_secret_dir(runtime_dir).join(format!("{}.json", binding.secret));
+        let record: MachineSecretRecord = read_json_file(&path)?;
+        env.insert(binding.env.clone(), record.value);
+    }
+    Ok(env)
+}
+
+fn service_runtime_record_from_managed_status(
+    status: &ManagedServiceStatus,
+) -> ServiceRuntimeRecord {
+    let state = match status.state {
+        ManagedServiceRuntimeState::Stored => ServiceRuntimeState::Stored,
+        ManagedServiceRuntimeState::Starting => ServiceRuntimeState::Starting,
+        ManagedServiceRuntimeState::Running => ServiceRuntimeState::Running,
+        ManagedServiceRuntimeState::Exited => ServiceRuntimeState::Exited,
+        ManagedServiceRuntimeState::Stopped => ServiceRuntimeState::Stopped,
+        ManagedServiceRuntimeState::Failed => ServiceRuntimeState::Failed,
+    };
+    ServiceRuntimeRecord {
+        state,
+        pid: status.pid,
+        exit_code: status.exit_code,
+        stdout_path: status.stdout_path.as_ref().map(PathBuf::from),
+        stderr_path: status.stderr_path.as_ref().map(PathBuf::from),
+        detail: status.detail.clone(),
+    }
+}
+
+fn managed_service_result_status(result: OperationResult) -> Result<ManagedServiceStatus> {
+    let OperationResult::ManagedService(ManagedServiceResult::Status(status)) = result else {
+        bail!("guest agent returned an unexpected managed service result");
+    };
+    Ok(status)
+}
+
+fn managed_service_result_list(result: OperationResult) -> Result<Vec<ManagedServiceStatus>> {
+    let OperationResult::ManagedService(ManagedServiceResult::List { services }) = result else {
+        bail!("guest agent returned an unexpected managed service list result");
+    };
+    Ok(services)
+}
+
+pub(crate) fn apply_hosted_machine_service_live(
+    metadata_config: &PortConfig,
+    guest_config: &PortConfig,
+    request: ServiceApplyRequest<'_>,
+) -> Result<ServiceDefinitionStatus> {
+    let stored = apply_machine_service_local(metadata_config, request.clone())?;
+    let context = resolve_service_runtime_context(
+        metadata_config,
+        request.runtime_root,
+        request.machine_name,
+    )?;
+    let env = load_service_secret_env(&context.status.runtime_dir, &stored.secret_bindings)?;
+    let managed = managed_service_result_status(execute_guest_operation(
+        guest_config,
+        GuestRequest {
+            machine_name: request.machine_name,
+            runtime_root: request.runtime_root,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: request.name.to_string(),
+                    kind: match request.kind {
+                        ServiceKind::Service => port_agent_protocol::ManagedServiceKind::Service,
+                        ServiceKind::Sandbox => port_agent_protocol::ManagedServiceKind::Sandbox,
+                    },
+                    command: request.command.clone(),
+                    env,
+                    cwd: None,
+                },
+            }),
+        },
+    )?)?;
+    write_service_runtime_record(
+        &context.status.runtime_dir,
+        request.name,
+        &service_runtime_record_from_managed_status(&managed),
+    )?;
+    machine_service_status_local(
+        metadata_config,
+        request.runtime_root,
+        request.machine_name,
+        request.name,
+    )
+}
+
+pub(crate) fn refresh_hosted_machine_service_runtime(
+    metadata_config: &PortConfig,
+    guest_config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let context = resolve_service_runtime_context(metadata_config, runtime_root, machine_name)?;
+    match managed_service_result_status(execute_guest_operation(
+        guest_config,
+        GuestRequest {
+            machine_name,
+            runtime_root,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: service_name.to_string(),
+                },
+            }),
+        },
+    )?) {
+        Ok(status) => {
+            write_service_runtime_record(
+                &context.status.runtime_dir,
+                service_name,
+                &service_runtime_record_from_managed_status(&status),
+            )?;
+        }
+        Err(error) if error.to_string().contains("does not exist") => {}
+        Err(error) => return Err(error),
+    }
+    machine_service_status_local(metadata_config, runtime_root, machine_name, service_name)
+}
+
+pub(crate) fn refresh_hosted_machine_service_list(
+    metadata_config: &PortConfig,
+    guest_config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<Vec<ServiceDefinitionStatus>> {
+    let context = resolve_service_runtime_context(metadata_config, runtime_root, machine_name)?;
+    let statuses = managed_service_result_list(execute_guest_operation(
+        guest_config,
+        GuestRequest {
+            machine_name,
+            runtime_root,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::List,
+            }),
+        },
+    )?)?;
+    for status in statuses {
+        write_service_runtime_record(
+            &context.status.runtime_dir,
+            &status.name,
+            &service_runtime_record_from_managed_status(&status),
+        )?;
+    }
+    list_machine_services_local(metadata_config, runtime_root, machine_name)
+}
+
+pub(crate) fn stop_hosted_machine_service_live(
+    metadata_config: &PortConfig,
+    guest_config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let _ = stop_machine_service_local(metadata_config, runtime_root, machine_name, service_name)?;
+    let context = resolve_service_runtime_context(metadata_config, runtime_root, machine_name)?;
+    match managed_service_result_status(execute_guest_operation(
+        guest_config,
+        GuestRequest {
+            machine_name,
+            runtime_root,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Stop {
+                    name: service_name.to_string(),
+                },
+            }),
+        },
+    )?) {
+        Ok(status) => {
+            write_service_runtime_record(
+                &context.status.runtime_dir,
+                service_name,
+                &service_runtime_record_from_managed_status(&status),
+            )?;
+        }
+        Err(error) if error.to_string().contains("does not exist") => {}
+        Err(error) => return Err(error),
+    }
+    machine_service_status_local(metadata_config, runtime_root, machine_name, service_name)
 }
 
 pub fn stop_machine(
@@ -2620,6 +2889,16 @@ struct ServiceDefinitionRecord {
     detail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ServiceRuntimeRecord {
+    state: ServiceRuntimeState,
+    pid: Option<u32>,
+    exit_code: Option<i32>,
+    stdout_path: Option<PathBuf>,
+    stderr_path: Option<PathBuf>,
+    detail: String,
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedMachineRuntime {
     status: MachineStatus,
@@ -2642,6 +2921,53 @@ fn service_runtime_dir(runtime_dir: &Path) -> PathBuf {
 
 fn service_definition_dir(runtime_dir: &Path) -> PathBuf {
     service_state_dir(runtime_dir).join("definitions")
+}
+
+fn service_runtime_record_path(runtime_dir: &Path, service_name: &str) -> PathBuf {
+    service_runtime_dir(runtime_dir).join(format!("{service_name}.json"))
+}
+
+fn default_service_runtime_observation(
+    runtime_dir: &Path,
+    service_name: &str,
+) -> ServiceRuntimeObservation {
+    ServiceRuntimeObservation {
+        state: ServiceRuntimeState::Stored,
+        record_path: service_runtime_record_path(runtime_dir, service_name),
+        pid: None,
+        exit_code: None,
+        stdout_path: None,
+        stderr_path: None,
+    }
+}
+
+fn read_service_runtime_record(
+    runtime_dir: &Path,
+    service_name: &str,
+) -> Result<Option<ServiceRuntimeRecord>> {
+    let path = service_runtime_record_path(runtime_dir, service_name);
+    if !path.exists() {
+        return Ok(None);
+    }
+    read_json_file(&path).map(Some)
+}
+
+fn write_service_runtime_record(
+    runtime_dir: &Path,
+    service_name: &str,
+    record: &ServiceRuntimeRecord,
+) -> Result<()> {
+    let dir = service_runtime_dir(runtime_dir);
+    fs::create_dir_all(&dir).with_context(|| {
+        format!(
+            "failed to create service runtime directory '{}'",
+            dir.display()
+        )
+    })?;
+    write_json_file(
+        &service_runtime_record_path(runtime_dir, service_name),
+        record,
+    )
 }
 
 fn resolve_machine_runtime(
@@ -2782,14 +3108,20 @@ fn service_status_from_record(
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let runtime = ServiceRuntimeObservation {
-        state: ServiceRuntimeState::Stored,
-        record_path: service_runtime_dir(&runtime_root).join(format!("{}.json", record.name)),
-        pid: None,
-        exit_code: None,
-        stdout_path: None,
-        stderr_path: None,
-    };
+    let runtime_record = read_service_runtime_record(&runtime_root, &record.name)
+        .ok()
+        .flatten();
+    let runtime = runtime_record
+        .as_ref()
+        .map(|runtime| ServiceRuntimeObservation {
+            state: runtime.state,
+            record_path: service_runtime_record_path(&runtime_root, &record.name),
+            pid: runtime.pid,
+            exit_code: runtime.exit_code,
+            stdout_path: runtime.stdout_path.clone(),
+            stderr_path: runtime.stderr_path.clone(),
+        })
+        .unwrap_or_else(|| default_service_runtime_observation(&runtime_root, &record.name));
     ServiceDefinitionStatus {
         machine_name: record.machine_name,
         name: record.name,
@@ -2803,7 +3135,9 @@ fn service_status_from_record(
         node_name: record.node_name,
         host_groups: record.host_groups,
         manifest_path,
-        detail: record.detail,
+        detail: runtime_record
+            .map(|runtime| runtime.detail)
+            .unwrap_or(record.detail),
     }
 }
 
@@ -3171,6 +3505,167 @@ fn hosted_control_plane_stop_machine(
         .map_err(|error| {
             anyhow!(
                 "failed to stop machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_service_kind(kind: ServiceKind) -> HostedServiceKind {
+    match kind {
+        ServiceKind::Service => HostedServiceKind::Service,
+        ServiceKind::Sandbox => HostedServiceKind::Sandbox,
+    }
+}
+
+fn hosted_service_bindings(bindings: &[ServiceSecretBinding]) -> Vec<HostedServiceSecretBinding> {
+    bindings
+        .iter()
+        .map(|binding| HostedServiceSecretBinding {
+            env: binding.env.clone(),
+            secret: binding.secret.clone(),
+        })
+        .collect()
+}
+
+fn hosted_control_plane_put_machine_secret(
+    config: &PortConfig,
+    request: SecretPutRequest<'_>,
+) -> Result<MachineSecretSummary> {
+    let client = hosted_client_for_machine(config, request.machine_name)?;
+    let response: HostedSuccess<MachineSecretSummary> = client
+        .execute_json(
+            client
+                .services()
+                .secret_put(
+                    request.machine_name,
+                    HostedSecretPutRequest {
+                        name: request.name.to_string(),
+                        value: request.value.to_string(),
+                    },
+                )
+                .context("failed to encode hosted service secret put request")?,
+        )
+        .map_err(|error| {
+            anyhow!(
+                "failed to store secret '{}' for machine '{}' through the live hosted control-plane route: {error}",
+                request.name,
+                request.machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_list_machine_secrets(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Vec<MachineSecretSummary>> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<Vec<MachineSecretSummary>> = client
+        .execute_json(client.services().secret_list(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to list service secrets for machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_delete_machine_secret(
+    config: &PortConfig,
+    machine_name: &str,
+    secret_name: &str,
+) -> Result<MachineSecretSummary> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<MachineSecretSummary> = client
+        .execute_json(client.services().secret_remove(machine_name, secret_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to remove secret '{}' for machine '{}' through the live hosted control-plane route: {error}",
+                secret_name,
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_apply_machine_service(
+    config: &PortConfig,
+    request: ServiceApplyRequest<'_>,
+) -> Result<ServiceDefinitionStatus> {
+    let client = hosted_client_for_machine(config, request.machine_name)?;
+    let response: HostedSuccess<ServiceDefinitionStatus> = client
+        .execute_json(
+            client
+                .services()
+                .apply(
+                    request.machine_name,
+                    HostedServiceApplyRequest {
+                        name: request.name.to_string(),
+                        kind: hosted_service_kind(request.kind),
+                        command: request.command.clone(),
+                        secret_bindings: hosted_service_bindings(&request.secret_bindings),
+                    },
+                )
+                .context("failed to encode hosted service apply request")?,
+        )
+        .map_err(|error| {
+            anyhow!(
+                "failed to apply service '{}' for machine '{}' through the live hosted control-plane route: {error}",
+                request.name,
+                request.machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_list_machine_services(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Vec<ServiceDefinitionStatus>> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<Vec<ServiceDefinitionStatus>> = client
+        .execute_json(client.services().list(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to list services for machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_machine_service_status(
+    config: &PortConfig,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<ServiceDefinitionStatus> = client
+        .execute_json(client.services().status(machine_name, service_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to load service '{}' for machine '{}' through the live hosted control-plane route: {error}",
+                service_name,
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_stop_machine_service(
+    config: &PortConfig,
+    machine_name: &str,
+    service_name: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<ServiceDefinitionStatus> = client
+        .execute_json(client.services().stop(machine_name, service_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to stop service '{}' for machine '{}' through the live hosted control-plane route: {error}",
+                service_name,
                 machine_name
             )
         })?;
@@ -4253,10 +4748,9 @@ pub fn execute_guest_operation(
 ) -> Result<OperationResult> {
     let hosted = machine_is_hosted(config, request.machine_name)?;
     if matches!(&request.operation, GuestOperation::Copy(_))
-        || matches!(&request.operation, GuestOperation::ManagedService(_))
         || (matches!(&request.operation, GuestOperation::Forward(_)) && !hosted)
     {
-        bail!("copy, managed service, and some forward operations use dedicated runtime flows");
+        bail!("copy and some forward operations use dedicated runtime flows");
     }
 
     if hosted {
@@ -5865,21 +6359,24 @@ mod tests {
         ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, ControlPlaneServeRequest, DoctorCheck,
         DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding,
         LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
-        NodeAgentServeRequest, RuntimePaths, ServiceDefinitionRecord, ServiceDesiredState,
-        ServiceKind, StopResult, artifact_script, avf_local_launch_machine_with_host_os,
+        NodeAgentServeRequest, RuntimePaths, ServiceApplyRequest, ServiceDefinitionRecord,
+        ServiceDesiredState, ServiceKind, ServiceRuntimeState, ServiceSecretBinding, StopResult,
+        apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
         build_firecracker_config, collect_doctor_report, collect_doctor_report_with_facts,
         copy_guest_file, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        launch_local_machine, list_machines, machine_monitor, machine_status, machine_top,
-        path_check, prepare_guest_forward, prepare_runtime_state, read_json_file, read_pid_file,
-        repo_root, resolve_artifact_metadata, resolve_machine_architecture,
-        select_firecracker_binary, serve_control_plane, serve_node_agent, service_runtime_dir,
-        service_status_from_record, stop_machine,
+        launch_local_machine, list_machine_services, list_machines, machine_monitor,
+        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, put_machine_secret, read_json_file, read_pid_file, repo_root,
+        resolve_artifact_metadata, resolve_machine_architecture, select_firecracker_binary,
+        serve_control_plane, serve_node_agent, service_runtime_dir, service_status_from_record,
+        stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
         LogsResult, OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind,
         StreamResponseFrame, read_frame, write_frame,
     };
+    use port_guest_agent::serve as serve_guest_agent;
     use port_hosted_protocol::{
         HostedDetachedForwardStartRequest, HostedDetachedForwardState,
         HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
@@ -8957,5 +9454,119 @@ exec sleep 30
         assert_eq!(status.runtime.stdout_path, None);
         assert_eq!(status.runtime.stderr_path, None);
         assert_eq!(status.manifest_path, manifest_path);
+    }
+
+    #[test]
+    fn hosted_service_lifecycle_routes_through_live_runtime_and_persists_redacted_state() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        write_manifest(&paths, "cloud-aws", 1);
+
+        let guest_root = tempdir.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let guest_socket = paths.guest_agent_socket.clone();
+        let guest_root_for_thread = guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&guest_socket, guest_root_for_thread)
+                .expect("guest agent should serve")
+        });
+        for _ in 0..50 {
+            if paths.guest_agent_socket.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+
+        let _secret = put_machine_secret(
+            &config,
+            super::SecretPutRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "demo-token",
+                value: "s3cr3t",
+            },
+        )
+        .expect("secret put should succeed");
+
+        let applied = apply_machine_service(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "buildbox",
+                kind: ServiceKind::Sandbox,
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from(
+                        "printf '%s\\n' \"$API_TOKEN\" >&2; trap 'exit 0' TERM; while :; do sleep 1; done",
+                    ),
+                ],
+                secret_bindings: vec![ServiceSecretBinding {
+                    env: String::from("API_TOKEN"),
+                    secret: String::from("demo-token"),
+                }],
+            },
+        )
+        .expect("service apply should succeed");
+
+        assert_eq!(applied.control_plane.as_deref(), Some("demo"));
+        assert_eq!(applied.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(applied.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(
+            applied
+                .runtime
+                .stderr_path
+                .as_ref()
+                .map(|path| path.as_path()),
+            Some(Path::new("/run/port/services/buildbox.stderr.log"))
+        );
+
+        let runtime_record = service_runtime_dir(&paths.runtime_dir).join("buildbox.json");
+        for _ in 0..100 {
+            if runtime_record.exists()
+                && fs::read_to_string(&runtime_record)
+                    .unwrap_or_default()
+                    .contains("\"state\": \"running\"")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(runtime_record.exists());
+        assert!(
+            !fs::read_to_string(&runtime_record)
+                .expect("runtime record should read")
+                .contains("s3cr3t")
+        );
+
+        let listed = list_machine_services(&config, tempdir.path(), "cloud-aws")
+            .expect("service list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].runtime.state, ServiceRuntimeState::Running);
+
+        let status = machine_service_status(&config, tempdir.path(), "cloud-aws", "buildbox")
+            .expect("service status should succeed");
+        assert_eq!(status.runtime.state, ServiceRuntimeState::Running);
+        assert!(!status.detail.contains("s3cr3t"));
+
+        let stopped = stop_machine_service(&config, tempdir.path(), "cloud-aws", "buildbox")
+            .expect("service stop should succeed");
+        assert_eq!(stopped.runtime.state, ServiceRuntimeState::Stopped);
+        assert_eq!(stopped.runtime.exit_code, Some(0));
+
+        let runtime_record_contents =
+            fs::read_to_string(&runtime_record).expect("runtime record should read");
+        assert!(runtime_record_contents.contains("\"state\": \"stopped\""));
+        assert!(!runtime_record_contents.contains("s3cr3t"));
     }
 }

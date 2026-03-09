@@ -19,4 +19,5 @@ tokio.workspace = true
 port-model = { path = "../port-model" }
 
 [dev-dependencies]
+port-guest-agent = { path = "../port-guest-agent" }
 tempfile.workspace = true

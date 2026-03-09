@@ -11,16 +11,17 @@ use axum::extract::{Path, State};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use port_hosted_protocol::{
     HostedDetachedForwardRoute, HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute,
     HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
-    HostedNodeRoute, HostedRouteContext, HostedSuccess,
+    HostedNodeRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostedAuthTokenSource,
     HostedMachineSummaryContract, PortConfig, ProtectionMode,
 };
+use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -28,12 +29,15 @@ use tokio::net::TcpListener;
 
 use crate::{
     DetachedForwardLaunchRequest, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-    LaunchMetadata, LaunchRequest, MachineRuntimeState, MachineStatus, RuntimePaths, StopResult,
-    copy_guest_file, copy_guest_via_endpoint, execute_guest_operation,
-    hosted_placeholder_runtime_root, launch_local_machine, list_detached_forwards,
-    machine_monitor as runtime_machine_monitor,
-    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
-    prepare_guest_forward, start_detached_forward, stop_detached_forward,
+    LaunchMetadata, LaunchRequest, MachineRuntimeState, MachineStatus, RuntimePaths,
+    ServiceApplyRequest as RuntimeServiceApplyRequest, ServiceSecretBinding, StopResult,
+    apply_hosted_machine_service_live, copy_guest_file, copy_guest_via_endpoint,
+    delete_machine_secret_local, execute_guest_operation, hosted_placeholder_runtime_root,
+    launch_local_machine, list_detached_forwards, list_machine_secrets_local,
+    machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
+    machine_top as runtime_machine_top, prepare_guest_forward, put_machine_secret_local,
+    refresh_hosted_machine_service_list, refresh_hosted_machine_service_runtime,
+    start_detached_forward, stop_detached_forward, stop_hosted_machine_service_live,
     stop_machine as runtime_stop_machine,
 };
 use port_agent_protocol::{
@@ -230,6 +234,19 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
         .route(
             "/v1/machines/{machine}/guest:forward:detached/{forward}/stop",
             post(guest_forward_detached_stop),
+        )
+        .route("/v1/machines/{machine}/secrets", get(service_secret_list))
+        .route(
+            "/v1/machines/{machine}/secrets/{secret}",
+            put(service_secret_put).delete(service_secret_remove),
+        )
+        .route(
+            "/v1/machines/{machine}/services",
+            get(service_list).post(service_apply),
+        )
+        .route(
+            "/v1/machines/{machine}/services/{service}",
+            get(service_status).post(service_command),
         )
         .with_state(state)
 }
@@ -529,6 +546,156 @@ async fn guest_forward_detached_stop(
         None,
     )
     .await
+}
+
+async fn service_secret_put(
+    State(state): State<ControlPlaneState>,
+    Path((machine, secret)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Service(HostedServiceRoute::SecretPut {
+            machine_name: machine.clone(),
+            secret_name: secret,
+        }),
+        Method::PUT,
+        Some(body),
+    )
+    .await
+}
+
+async fn service_secret_list(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Service(HostedServiceRoute::SecretList {
+            machine_name: machine.clone(),
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn service_secret_remove(
+    State(state): State<ControlPlaneState>,
+    Path((machine, secret)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Service(HostedServiceRoute::SecretRemove {
+            machine_name: machine.clone(),
+            secret_name: secret,
+        }),
+        Method::DELETE,
+        None,
+    )
+    .await
+}
+
+async fn service_apply(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Service(HostedServiceRoute::Apply {
+            machine_name: machine.clone(),
+        }),
+        Method::POST,
+        Some(body),
+    )
+    .await
+}
+
+async fn service_list(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Service(HostedServiceRoute::List {
+            machine_name: machine.clone(),
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn service_status(
+    State(state): State<ControlPlaneState>,
+    Path((machine, service)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    proxy_machine_route(
+        &state,
+        &headers,
+        &machine,
+        HostedNodeRoute::Service(HostedServiceRoute::Status {
+            machine_name: machine.clone(),
+            service_name: service,
+        }),
+        Method::GET,
+        None,
+    )
+    .await
+}
+
+async fn service_command(
+    State(state): State<ControlPlaneState>,
+    Path((machine, service)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(service_name) = service.strip_suffix(":stop") {
+        return proxy_machine_route(
+            &state,
+            &headers,
+            &machine,
+            HostedNodeRoute::Service(HostedServiceRoute::Stop {
+                machine_name: machine.clone(),
+                service_name: service_name.to_string(),
+            }),
+            Method::POST,
+            None,
+        )
+        .await;
+    }
+
+    error_response(
+        StatusCode::NOT_FOUND,
+        format!(
+            "control plane '{}' only serves service stop through '/v1/machines/{{machine}}/services/{{service}}:stop'",
+            state.inner.control_plane
+        ),
+        Some(
+            HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                machine_name: Some(machine),
+                ..HostedRouteContext::default()
+            }
+            .with_service_name(service),
+        ),
+    )
 }
 
 async fn proxy_guest_route(
@@ -998,6 +1165,22 @@ fn node_agent_router(state: NodeAgentState) -> Router {
             "/v1/node/machines/{machine}/guest:forward:detached/{forward}/stop",
             post(node_guest_forward_detached_stop),
         )
+        .route(
+            "/v1/node/machines/{machine}/secrets",
+            get(node_service_secret_list),
+        )
+        .route(
+            "/v1/node/machines/{machine}/secrets/{secret}",
+            put(node_service_secret_put).delete(node_service_secret_remove),
+        )
+        .route(
+            "/v1/node/machines/{machine}/services",
+            get(node_service_list).post(node_service_apply),
+        )
+        .route(
+            "/v1/node/machines/{machine}/services/{service}",
+            get(node_service_status).post(node_service_command),
+        )
         .with_state(state)
 }
 
@@ -1262,6 +1445,281 @@ async fn node_guest_forward_detached_stop(
             Some(route),
         ),
     }
+}
+
+async fn node_service_secret_put(
+    State(state): State<NodeAgentState>,
+    Path((machine, secret)): Path<(String, String)>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+    let request: SecretPutRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' received invalid service secret JSON: {error}",
+                    state.inner.node_name
+                ),
+                Some(node_route_context(&state, Some(machine))),
+            );
+        }
+    };
+    if request.name != secret {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "node '{}' received mismatched secret name '{}' for path '{}'",
+                state.inner.node_name, request.name, secret
+            ),
+            Some(node_route_context(&state, Some(machine))),
+        );
+    }
+
+    let (_localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    match put_machine_secret_local(
+        &state.inner.config,
+        crate::SecretPutRequest {
+            machine_name: &machine,
+            runtime_root: &state.inner.runtime_root,
+            name: &request.name,
+            value: &request.value,
+        },
+    ) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to store secret '{}' for machine '{}': {error}",
+                state.inner.node_name, request.name, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_service_secret_list(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+    let (_localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    match list_machine_secrets_local(&state.inner.config, &state.inner.runtime_root, &machine) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to list secrets for machine '{}': {error}",
+                state.inner.node_name, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_service_secret_remove(
+    State(state): State<NodeAgentState>,
+    Path((machine, secret)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+    let (_localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    match delete_machine_secret_local(
+        &state.inner.config,
+        &state.inner.runtime_root,
+        &machine,
+        &secret,
+    ) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to remove secret '{}' for machine '{}': {error}",
+                state.inner.node_name, secret, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_service_apply(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+    let request: ServiceApplyRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "node '{}' received invalid service JSON: {error}",
+                    state.inner.node_name
+                ),
+                Some(node_route_context(&state, Some(machine))),
+            );
+        }
+    };
+    let (localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok((localized, route)) => (localized, route.with_service_name(request.name.clone())),
+        Err(response) => return response,
+    };
+    let runtime_request = RuntimeServiceApplyRequest {
+        machine_name: &machine,
+        runtime_root: &state.inner.runtime_root,
+        name: &request.name,
+        kind: match request.kind {
+            port_sdk::ServiceKind::Service => crate::ServiceKind::Service,
+            port_sdk::ServiceKind::Sandbox => crate::ServiceKind::Sandbox,
+        },
+        command: request.command,
+        secret_bindings: request
+            .secret_bindings
+            .into_iter()
+            .map(|binding| ServiceSecretBinding {
+                env: binding.env,
+                secret: binding.secret,
+            })
+            .collect(),
+    };
+    match apply_hosted_machine_service_live(&state.inner.config, &localized, runtime_request) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to apply service for machine '{}': {error}",
+                state.inner.node_name, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_service_list(
+    State(state): State<NodeAgentState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+    let (localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    match refresh_hosted_machine_service_list(
+        &state.inner.config,
+        &localized,
+        &state.inner.runtime_root,
+        &machine,
+    ) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to list services for machine '{}': {error}",
+                state.inner.node_name, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_service_status(
+    State(state): State<NodeAgentState>,
+    Path((machine, service)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = node_authorize(&state, &headers) {
+        return response;
+    }
+    let (localized, route) = match localize_machine_for_node(&state, &machine) {
+        Ok((localized, route)) => (localized, route.with_service_name(service.clone())),
+        Err(response) => return response,
+    };
+    match refresh_hosted_machine_service_runtime(
+        &state.inner.config,
+        &localized,
+        &state.inner.runtime_root,
+        &machine,
+        &service,
+    ) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' failed to load service '{}' for machine '{}': {error}",
+                state.inner.node_name, service, machine
+            ),
+            Some(route),
+        ),
+    }
+}
+
+async fn node_service_command(
+    State(state): State<NodeAgentState>,
+    Path((machine, service)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(service_name) = service.strip_suffix(":stop") {
+        if let Some(response) = node_authorize(&state, &headers) {
+            return response;
+        }
+        let (localized, route) = match localize_machine_for_node(&state, &machine) {
+            Ok((localized, route)) => {
+                (localized, route.with_service_name(service_name.to_string()))
+            }
+            Err(response) => return response,
+        };
+        return match stop_hosted_machine_service_live(
+            &state.inner.config,
+            &localized,
+            &state.inner.runtime_root,
+            &machine,
+            service_name,
+        ) {
+            Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+            Err(error) => error_response(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "node '{}' failed to stop service '{}' for machine '{}': {error}",
+                    state.inner.node_name, service_name, machine
+                ),
+                Some(route),
+            ),
+        };
+    }
+
+    node_agent_error(
+        &state,
+        Some(machine),
+        format!(
+            "node '{}' only serves service stop through '/v1/node/machines/{{machine}}/services/{{service}}:stop'",
+            state.inner.node_name
+        ),
+    )
 }
 
 fn node_authorize(state: &NodeAgentState, headers: &HeaderMap) -> Option<Response> {
