@@ -959,6 +959,12 @@ fn firecracker_pvm_lanes() -> Vec<FirecrackerPvmLaneContract> {
 
 fn x86_64_firecracker_pvm_host_kit() -> PvmHostKit {
     PvmHostKit {
+        package: PvmHostKitPackage {
+            name: String::from("firecracker-pvm-host-kit"),
+            version: String::from("2026.03"),
+            host_kernel_release: String::from("6.12.0-port-pvm"),
+            firecracker_build: String::from("v1.12.0-port-pvm"),
+        },
         host_platform: HostPlatform::Linux,
         host_architecture: MachineArchitecture::X86_64,
         requires_custom_host_kernel: true,
@@ -1877,7 +1883,16 @@ impl std::fmt::Display for PvmLaneDecision {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PvmHostKitPackage {
+    pub name: String,
+    pub version: String,
+    pub host_kernel_release: String,
+    pub firecracker_build: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PvmHostKit {
+    pub package: PvmHostKitPackage,
     pub host_platform: HostPlatform,
     pub host_architecture: MachineArchitecture,
     pub requires_custom_host_kernel: bool,
@@ -2359,6 +2374,26 @@ fn validate_pvm_host_kit(
     expected_architecture: MachineArchitecture,
     host_kit: &PvmHostKit,
 ) -> Result<(), ValidationError> {
+    if host_kit.package.name.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "{context} must declare a non-empty host-kit package name"
+        )));
+    }
+    if host_kit.package.version.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "{context} must declare a non-empty host-kit package version"
+        )));
+    }
+    if host_kit.package.host_kernel_release.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "{context} must declare a non-empty host-kernel release in the host-kit package"
+        )));
+    }
+    if host_kit.package.firecracker_build.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "{context} must declare a non-empty Firecracker build in the host-kit package"
+        )));
+    }
     if host_kit.host_platform != HostPlatform::Linux {
         return Err(ValidationError::new(format!(
             "{context} must target host platform 'linux' for Firecracker/PVM"
@@ -3535,6 +3570,26 @@ mod tests {
     }
 
     #[test]
+    fn sample_config_derives_hosted_node_pvm_host_kit_package_identity() {
+        let config = PortConfig::sample();
+
+        let inventory = config
+            .hosted_inventory_contract()
+            .expect("hosted inventory contract should resolve");
+
+        let aws_lane = &inventory.nodes["aws-linux-node"].capabilities.pvm_lanes[0];
+        let aws_host_kit = aws_lane
+            .host_kit
+            .as_ref()
+            .expect("ready hosted PVM lane should declare a host-kit contract");
+
+        assert_eq!(aws_host_kit.package.name, "firecracker-pvm-host-kit");
+        assert_eq!(aws_host_kit.package.version, "2026.03");
+        assert_eq!(aws_host_kit.package.host_kernel_release, "6.12.0-port-pvm");
+        assert_eq!(aws_host_kit.package.firecracker_build, "v1.12.0-port-pvm");
+    }
+
+    #[test]
     fn ready_hosted_pvm_lane_requires_an_explicit_host_kit_contract() {
         let mut config = PortConfig::sample();
         config
@@ -3554,6 +3609,27 @@ mod tests {
                 .to_string()
                 .contains("must declare a host-kit contract")
         );
+    }
+
+    #[test]
+    fn ready_hosted_pvm_lane_requires_host_kit_package_identity() {
+        let mut config = PortConfig::sample();
+        let host_kit = config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .host_kit
+            .as_mut()
+            .expect("ready hosted PVM lane should declare a host-kit contract");
+        host_kit.package.version.clear();
+
+        let error = config
+            .validate()
+            .expect_err("ready hosted PVM lane without a package version should fail validation");
+
+        assert!(error.to_string().contains("package"));
     }
 
     #[test]

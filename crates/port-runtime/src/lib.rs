@@ -4695,6 +4695,26 @@ fn pvm_host_kit_contract_issue(
     expected_architecture: MachineArchitecture,
     host_kit: &PvmHostKit,
 ) -> Option<String> {
+    if host_kit.package.name.trim().is_empty() {
+        return Some(String::from(
+            "host-kit package must declare a non-empty package name.",
+        ));
+    }
+    if host_kit.package.version.trim().is_empty() {
+        return Some(String::from(
+            "host-kit package must declare a non-empty package version.",
+        ));
+    }
+    if host_kit.package.host_kernel_release.trim().is_empty() {
+        return Some(String::from(
+            "host-kit package must declare a non-empty host-kernel release.",
+        ));
+    }
+    if host_kit.package.firecracker_build.trim().is_empty() {
+        return Some(String::from(
+            "host-kit package must declare a non-empty Firecracker build.",
+        ));
+    }
     if host_kit.host_platform != HostPlatform::Linux {
         return Some(String::from(
             "host-kit contract must target host platform 'linux' for Firecracker/PVM.",
@@ -4741,7 +4761,11 @@ fn pvm_host_kit_contract_issue(
 
 fn pvm_host_kit_contract_detail(host_kit: &PvmHostKit) -> String {
     format!(
-        "host-kit contract requires Linux/{}, boot args [{}], and the patched Firecracker binary {}.",
+        "host-kit package {}@{} requires host kernel {}, Firecracker build {}, Linux/{}, boot args [{}], and the patched Firecracker binary {}.",
+        host_kit.package.name,
+        host_kit.package.version,
+        host_kit.package.host_kernel_release,
+        host_kit.package.firecracker_build,
         architecture_dir(host_kit.host_architecture),
         host_kit.host_boot_args.join(", "),
         pvm_firecracker_lookup_detail(host_kit)
@@ -8287,6 +8311,9 @@ exec sleep 30
             .expect("generic hosted host-kit contract check should exist");
 
         assert!(aws.ok);
+        assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.03"));
+        assert!(aws.detail.contains("6.12.0-port-pvm"));
+        assert!(aws.detail.contains("v1.12.0-port-pvm"));
         assert!(aws.detail.contains("firecracker-pvm"));
         assert!(aws.detail.contains("PORT_PVM_FIRECRACKER_BINARY"));
         assert!(!generic.ok);

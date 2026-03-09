@@ -166,6 +166,7 @@ follow_on_work = [
 ]
 
 [hosts.local.firecracker.pvm_lanes.host_kit]
+package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
 host_platform = "linux"
 host_architecture = "x86_64"
 requires_custom_host_kernel = true
@@ -322,6 +323,7 @@ state = "ready"
 notes = ["AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit."]
 
 [nodes.aws-linux-node.capabilities.pvm_lanes.host_kit]
+package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
 host_platform = "linux"
 host_architecture = "x86_64"
 requires_custom_host_kernel = true
