@@ -60,7 +60,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | planned |
+| [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

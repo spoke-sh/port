@@ -2149,7 +2149,7 @@ mod tests {
             "node-binding",
             "bootstrap or debug",
             "machine list",
-            "external inventory yet",
+            "first-class `port inventory import` command",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

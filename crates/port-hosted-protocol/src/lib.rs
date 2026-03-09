@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use port_model::{
-    HostedApiIdentityContract, HostedAuthScheme, HostedGuestAttachContract,
-    HostedMachineSummaryContract, HostedNodeRegistration, HostedSchedulerPolicy,
-    MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
+    ArtifactReference, ArtifactSelector, HostedApiIdentityContract, HostedAuthScheme,
+    HostedGuestAttachContract, HostedMachineSummaryContract, HostedNodeRegistration,
+    HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
 };
 use serde::{Deserialize, Serialize};
 
@@ -77,6 +77,24 @@ impl HostedNodeAgentHeaders {
             self.token.clone(),
         )])
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedArtifactTransferRequest {
+    pub artifact_name: String,
+    pub reference: ArtifactReference,
+    pub selector: ArtifactSelector,
+    pub filename: String,
+    pub store_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedArtifactTransferResult {
+    pub artifact_name: String,
+    pub reference: ArtifactReference,
+    pub selector: ArtifactSelector,
+    pub store_path: PathBuf,
+    pub bytes_copied: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -535,12 +553,14 @@ mod tests {
     use serde_json::to_value;
 
     use port_model::{
-        HostedNodeRegistration, HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner,
-        MachineLifecycleOwner, PortConfig,
+        ArtifactReference, ArtifactSelector, ExecutionSubstrate, HostedNodeRegistration,
+        HostedSchedulerPolicy, MachineArchitecture, MachineGuestBroker, MachineInventoryOwner,
+        MachineLifecycleOwner, PortConfig, ProtectionMode,
     };
 
     use super::{
-        HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
+        HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedClientHeaders,
+        HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
         HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
         HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
         HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
@@ -633,6 +653,45 @@ mod tests {
             .path(),
             "/v1/nodes/aws-linux-node/registration"
         );
+    }
+
+    #[test]
+    fn hosted_artifact_transfer_contract_round_trips_selector_and_store_path() {
+        let request = HostedArtifactTransferRequest {
+            artifact_name: String::from("demo-kernel"),
+            reference: ArtifactReference {
+                registry: String::from("demo-fs"),
+                repository: String::from("port/demo-kernel"),
+                version: String::from("v1"),
+            },
+            selector: ArtifactSelector {
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+            filename: String::from("vmlinux"),
+            store_path: PathBuf::from(
+                ".port/hosted/demo/artifacts/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux",
+            ),
+        };
+        let result = HostedArtifactTransferResult {
+            artifact_name: request.artifact_name.clone(),
+            reference: request.reference.clone(),
+            selector: request.selector,
+            store_path: request.store_path.clone(),
+            bytes_copied: 17,
+        };
+
+        let request_value = to_value(&request).expect("request should serialize");
+        let result_value = to_value(&result).expect("result should serialize");
+
+        assert_eq!(request_value["artifact_name"], "demo-kernel");
+        assert_eq!(request_value["selector"]["architecture"], "x86_64");
+        assert_eq!(
+            request_value["store_path"],
+            ".port/hosted/demo/artifacts/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux"
+        );
+        assert_eq!(result_value["bytes_copied"], 17);
     }
 
     #[test]

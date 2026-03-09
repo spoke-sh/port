@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-09T01:54:34.379689594-07:00
+mode: manual
+---
+Validation now rejects duplicate hosted control-plane endpoints and runtime hosted artifact backends fail fast with explicit unsupported-transfer errors instead of silently falling back to file-system storage.

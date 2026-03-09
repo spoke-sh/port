@@ -17,15 +17,15 @@ use port_agent_protocol::{
     parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::{
-    HostedDetachedForwardStartRequest, HostedDetachedForwardState,
+    HostedArtifactTransferRequest, HostedDetachedForwardStartRequest, HostedDetachedForwardState,
     HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
     HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
-    HostedApiIdentityContract, HostedSchedulerPolicy, MachineArchitecture, MachineControlContract,
-    PortConfig, ProtectionMode, PvmHostKit,
+    HostedApiIdentityContract, HostedArtifactIdentityContract, HostedSchedulerPolicy,
+    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmHostKit,
 };
 use port_sdk::{
     HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest as HostedSecretPutRequest,
@@ -562,6 +562,17 @@ pub struct ArtifactTransfer {
     pub bytes_copied: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ArtifactStoreContract {
+    FileSystem {
+        store_path: PathBuf,
+    },
+    HostedApi {
+        identity: HostedArtifactIdentityContract,
+        transfer: HostedArtifactTransferRequest,
+    },
+}
+
 pub fn collect_doctor_report(config: Option<&PortConfig>) -> DoctorReport {
     collect_doctor_report_with_facts(config, &DoctorHostFacts::collect())
 }
@@ -717,14 +728,27 @@ pub fn push_artifact(
     request: ArtifactRequest<'_>,
 ) -> Result<ArtifactTransfer> {
     let artifact = resolve_artifact_metadata(config, request)?;
-    let store_path = push_store_path(config, &artifact)?;
-    let bytes_copied = copy_file(&artifact.path, &store_path)?;
-    let _ = copy_file(&artifact.path, &artifact.cache_path)?;
-    Ok(ArtifactTransfer {
-        artifact,
-        store_path,
-        bytes_copied,
-    })
+    let (_, spec) = config
+        .artifacts
+        .lookup_named(&artifact.name)
+        .with_context(|| format!("unknown artifact '{}'", artifact.name))?;
+    match resolve_artifact_store_contract(config, &spec.distribution.push, &artifact)? {
+        ArtifactStoreContract::FileSystem { store_path } => {
+            let bytes_copied = copy_file(&artifact.path, &store_path)?;
+            let _ = copy_file(&artifact.path, &artifact.cache_path)?;
+            Ok(ArtifactTransfer {
+                artifact,
+                store_path,
+                bytes_copied,
+            })
+        }
+        ArtifactStoreContract::HostedApi { identity, transfer } => bail!(
+            "Hosted API backend '{}' resolved to control plane '{}' and store path '{}' but artifact transfer routes are not implemented yet",
+            identity.endpoint,
+            identity.control_plane,
+            transfer.store_path.display()
+        ),
+    }
 }
 
 pub fn pull_artifact(
@@ -732,14 +756,27 @@ pub fn pull_artifact(
     request: ArtifactRequest<'_>,
 ) -> Result<ArtifactTransfer> {
     let artifact = resolve_artifact_metadata(config, request)?;
-    let store_path = pull_store_path(config, &artifact)?;
-    let bytes_copied = copy_file(&store_path, &artifact.cache_path)?;
-    let _ = copy_file(&artifact.cache_path, &artifact.path)?;
-    Ok(ArtifactTransfer {
-        artifact,
-        store_path,
-        bytes_copied,
-    })
+    let (_, spec) = config
+        .artifacts
+        .lookup_named(&artifact.name)
+        .with_context(|| format!("unknown artifact '{}'", artifact.name))?;
+    match resolve_artifact_store_contract(config, &spec.distribution.pull, &artifact)? {
+        ArtifactStoreContract::FileSystem { store_path } => {
+            let bytes_copied = copy_file(&store_path, &artifact.cache_path)?;
+            let _ = copy_file(&artifact.cache_path, &artifact.path)?;
+            Ok(ArtifactTransfer {
+                artifact,
+                store_path,
+                bytes_copied,
+            })
+        }
+        ArtifactStoreContract::HostedApi { identity, transfer } => bail!(
+            "Hosted API backend '{}' resolved to control plane '{}' and store path '{}' but artifact transfer routes are not implemented yet",
+            identity.endpoint,
+            identity.control_plane,
+            transfer.store_path.display()
+        ),
+    }
 }
 
 pub fn launch_local_machine(
@@ -5021,47 +5058,60 @@ fn cache_path_for(spec: &port_model::ArtifactSpec, variant: &ArtifactVariant) ->
         )
 }
 
-fn push_store_path(config: &PortConfig, artifact: &ArtifactMetadata) -> Result<PathBuf> {
-    let (_, spec) = config
-        .artifacts
-        .lookup_named(&artifact.name)
-        .with_context(|| format!("unknown artifact '{}'", artifact.name))?;
-    store_path(&spec.distribution.push, artifact)
-        .context("push backend does not support Port artifact publishing yet")
-}
-
-fn pull_store_path(config: &PortConfig, artifact: &ArtifactMetadata) -> Result<PathBuf> {
-    let (_, spec) = config
-        .artifacts
-        .lookup_named(&artifact.name)
-        .with_context(|| format!("unknown artifact '{}'", artifact.name))?;
-    store_path(&spec.distribution.pull, artifact)
-        .context("pull backend does not support Port artifact fetching yet")
-}
-
-fn store_path(store: &ArtifactStore, artifact: &ArtifactMetadata) -> Result<PathBuf> {
+fn resolve_artifact_store_contract(
+    config: &PortConfig,
+    store: &ArtifactStore,
+    artifact: &ArtifactMetadata,
+) -> Result<ArtifactStoreContract> {
     match store {
-        ArtifactStore::FileSystem { root } => Ok(root
-            .join(&artifact.reference.registry)
-            .join(&artifact.reference.repository)
-            .join(&artifact.reference.version)
-            .join(architecture_dir(artifact.selector.architecture))
-            .join(substrate_dir(artifact.selector.substrate))
-            .join(protection_mode_dir(artifact.selector.protection_mode))
-            .join(
-                artifact
-                    .path
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new("artifact")),
-            )),
+        ArtifactStore::FileSystem { root } => Ok(ArtifactStoreContract::FileSystem {
+            store_path: root
+                .join(&artifact.reference.registry)
+                .join(&artifact.reference.repository)
+                .join(&artifact.reference.version)
+                .join(architecture_dir(artifact.selector.architecture))
+                .join(substrate_dir(artifact.selector.substrate))
+                .join(protection_mode_dir(artifact.selector.protection_mode))
+                .join(
+                    artifact
+                        .path
+                        .file_name()
+                        .unwrap_or_else(|| std::ffi::OsStr::new("artifact")),
+                ),
+        }),
         ArtifactStore::OciRegistry { reference } => bail!(
             "OCI registry backend '{}' is reserved in the model but not implemented in the runtime yet",
             reference
         ),
-        ArtifactStore::HostedApi { endpoint } => bail!(
-            "Hosted API backend '{}' is reserved in the model but not implemented in the runtime yet",
-            endpoint
-        ),
+        ArtifactStore::HostedApi { endpoint } => {
+            let identity = config
+                .hosted_artifact_identity_contract(endpoint)
+                .map_err(|error| {
+                    anyhow!("invalid hosted artifact backend '{}': {error}", endpoint)
+                })?;
+            let filename = artifact
+                .path
+                .file_name()
+                .unwrap_or_else(|| std::ffi::OsStr::new("artifact"))
+                .to_string_lossy()
+                .into_owned();
+            let store_path = port_model::hosted_artifact_store_path(
+                &identity.control_plane,
+                &artifact.reference,
+                artifact.selector,
+                Path::new(&filename),
+            );
+            Ok(ArtifactStoreContract::HostedApi {
+                identity,
+                transfer: HostedArtifactTransferRequest {
+                    artifact_name: artifact.name.clone(),
+                    reference: artifact.reference.clone(),
+                    selector: artifact.selector,
+                    filename,
+                    store_path,
+                },
+            })
+        }
     }
 }
 
@@ -6758,9 +6808,9 @@ mod tests {
         list_machines, machine_monitor, machine_service_status, machine_status, machine_top,
         path_check, prepare_guest_forward, prepare_runtime_state, put_machine_secret,
         read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
-        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
-        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
-        stop_machine, stop_machine_service,
+        resolve_artifact_store_contract, resolve_machine_architecture, select_firecracker_binary,
+        serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
+        service_status_from_record, stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -6774,8 +6824,8 @@ mod tests {
         HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
     };
     use port_model::{
-        ArtifactKind, ExecutionSubstrate, HostedSchedulerPolicy, MachineArchitecture, PortConfig,
-        ProtectionMode,
+        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostedSchedulerPolicy,
+        MachineArchitecture, PortConfig, ProtectionMode,
     };
     use tokio::net::TcpListener;
 
@@ -6852,6 +6902,58 @@ mod tests {
             String::from("aws-linux-node"),
         ];
         config
+    }
+
+    #[test]
+    fn resolve_artifact_store_contract_returns_hosted_transfer_contract() {
+        let mut config = PortConfig::sample();
+        {
+            let kernel = config
+                .artifacts
+                .kernels
+                .get_mut("demo-kernel")
+                .expect("sample kernel should exist");
+            kernel.distribution.push = ArtifactStore::HostedApi {
+                endpoint: String::from("https://port.example.internal"),
+            };
+        }
+
+        let artifact = resolve_artifact_metadata(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("artifact should resolve");
+
+        let push_store = config
+            .artifacts
+            .kernels
+            .get("demo-kernel")
+            .expect("sample kernel should exist")
+            .distribution
+            .push
+            .clone();
+        let contract = resolve_artifact_store_contract(&config, &push_store, &artifact)
+            .expect("hosted artifact contract should resolve");
+
+        match contract {
+            super::ArtifactStoreContract::HostedApi { identity, transfer } => {
+                assert_eq!(identity.control_plane, "demo");
+                assert_eq!(identity.endpoint, "https://port.example.internal");
+                assert_eq!(transfer.artifact_name, "demo-kernel");
+                assert_eq!(
+                    transfer.store_path,
+                    PathBuf::from(
+                        ".port/hosted/demo/artifacts/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux"
+                    )
+                );
+            }
+            other => panic!("expected hosted artifact contract, got {other:?}"),
+        }
     }
 
     fn write_machine_placement_state(

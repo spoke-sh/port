@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -433,6 +433,42 @@ impl PortConfig {
         }
     }
 
+    pub fn hosted_artifact_identity_contract(
+        &self,
+        endpoint: &str,
+    ) -> Result<HostedArtifactIdentityContract, ValidationError> {
+        let endpoint = endpoint.trim();
+        if endpoint.is_empty() {
+            return Err(ValidationError::new(String::from(
+                "hosted artifact backend must declare a non-empty endpoint",
+            )));
+        }
+
+        let mut matches = self
+            .control_planes
+            .iter()
+            .filter_map(|(name, spec)| (spec.endpoint == endpoint).then_some((name, spec)));
+        let (control_plane, spec) = matches.next().ok_or_else(|| {
+            ValidationError::new(format!(
+                "no control plane is configured for hosted artifact endpoint '{}'",
+                endpoint
+            ))
+        })?;
+        if let Some((other, _)) = matches.next() {
+            return Err(ValidationError::new(format!(
+                "hosted artifact endpoint '{}' is ambiguous across control planes '{}' and '{}'",
+                endpoint, control_plane, other
+            )));
+        }
+
+        Ok(HostedArtifactIdentityContract {
+            control_plane: control_plane.clone(),
+            endpoint: spec.endpoint.clone(),
+            audience: spec.audience.clone(),
+            auth: spec.auth.clone(),
+        })
+    }
+
     pub fn hosted_inventory_contract(&self) -> Result<HostedInventoryContract, ValidationError> {
         let mut nodes = BTreeMap::new();
         for (node_name, node) in &self.nodes {
@@ -712,8 +748,23 @@ impl PortConfig {
     }
 
     pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut endpoint_owners = BTreeMap::new();
         for (control_plane_name, control_plane) in &self.control_planes {
             validate_hosted_control_plane(control_plane_name, control_plane)?;
+            let endpoint = control_plane.endpoint.trim().to_string();
+            match endpoint_owners.entry(endpoint) {
+                Entry::Vacant(slot) => {
+                    slot.insert(control_plane_name);
+                }
+                Entry::Occupied(existing) => {
+                    return Err(ValidationError::new(format!(
+                        "duplicate hosted control-plane endpoint '{}' is configured for '{}' and '{}'",
+                        existing.key(),
+                        existing.get(),
+                        control_plane_name
+                    )));
+                }
+            }
         }
         for (host_name, host) in &self.hosts {
             validate_host(host_name, host)?;
@@ -1095,6 +1146,25 @@ impl std::fmt::Display for ArtifactReference {
     }
 }
 
+pub fn hosted_artifact_store_path(
+    control_plane: &str,
+    reference: &ArtifactReference,
+    selector: ArtifactSelector,
+    filename: impl AsRef<Path>,
+) -> PathBuf {
+    PathBuf::from(".port")
+        .join("hosted")
+        .join(control_plane)
+        .join("artifacts")
+        .join(&reference.registry)
+        .join(&reference.repository)
+        .join(&reference.version)
+        .join(machine_architecture_label(selector.architecture))
+        .join(execution_substrate_label(selector.substrate))
+        .join(protection_mode_label(selector.protection_mode))
+        .join(filename.as_ref())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactDistribution {
     pub push: ArtifactStore,
@@ -1152,6 +1222,14 @@ pub struct HostedApiIdentityContract {
     pub audience: String,
     pub auth: HostedAuthTokenContract,
     pub route: MachineCommandRoute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedArtifactIdentityContract {
+    pub control_plane: String,
+    pub endpoint: String,
+    pub audience: String,
+    pub auth: HostedAuthTokenContract,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2512,13 +2590,15 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ArtifactStore, AvfConsoleTransport, AvfExecutionContract, AvfGuestTransport,
-        AvfLaunchOwner, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
-        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
-        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
-        HostedSchedulerPolicy, MachineArchitecture, MachineCommandRoute, MachineControlContract,
-        MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner,
-        MachineStatusSource, PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
+        ArtifactReference, ArtifactSelector, ArtifactStore, AvfConsoleTransport,
+        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ExecutionSubstrate,
+        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
+        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
+        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy,
+        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
+        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
+        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision,
+        hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
@@ -2746,6 +2826,79 @@ mod tests {
             HostConnection::HostedControlPlane {
                 control_plane: String::from("demo")
             }
+        );
+    }
+
+    #[test]
+    fn sample_config_derives_hosted_artifact_identity_contract() {
+        let config = PortConfig::sample();
+
+        let contract = config
+            .hosted_artifact_identity_contract("https://port.example.internal")
+            .expect("hosted artifact contract should resolve");
+
+        assert_eq!(contract.control_plane, "demo");
+        assert_eq!(contract.endpoint, "https://port.example.internal");
+        assert_eq!(contract.audience, "port-hosted-demo");
+        assert_eq!(contract.auth.header, "authorization");
+        assert!(matches!(
+            contract.auth.source,
+            HostedAuthTokenSource::Env { variable } if variable == "PORT_DEMO_TOKEN"
+        ));
+    }
+
+    #[test]
+    fn hosted_artifact_store_path_is_deterministic() {
+        let path = hosted_artifact_store_path(
+            "demo",
+            &ArtifactReference {
+                registry: String::from("demo-fs"),
+                repository: String::from("port/demo-kernel"),
+                version: String::from("v1"),
+            },
+            ArtifactSelector {
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+            PathBuf::from("vmlinux"),
+        );
+
+        assert_eq!(
+            path,
+            PathBuf::from(
+                ".port/hosted/demo/artifacts/demo-fs/port/demo-kernel/v1/x86_64/firecracker/standard/vmlinux"
+            )
+        );
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_control_plane_endpoints() {
+        let mut config = PortConfig::sample();
+        config.control_planes.insert(
+            String::from("shadow"),
+            super::HostedControlPlaneSpec {
+                endpoint: String::from("https://port.example.internal"),
+                audience: String::from("shadow-audience"),
+                auth: super::HostedAuthTokenContract {
+                    scheme: super::HostedAuthScheme::Bearer,
+                    header: String::from("authorization"),
+                    source: super::HostedAuthTokenSource::Env {
+                        variable: String::from("PORT_SHADOW_TOKEN"),
+                    },
+                },
+            },
+        );
+
+        let error = config
+            .validate()
+            .expect_err("duplicate control-plane endpoints should be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate hosted control-plane endpoint"),
+            "unexpected error: {error}"
         );
     }
 
