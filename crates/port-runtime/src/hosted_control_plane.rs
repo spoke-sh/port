@@ -15,11 +15,11 @@ use axum::response::Response;
 use axum::routing::{get, post, put};
 use port_hosted_protocol::{
     HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedClientHeaders,
-    HostedControlPlaneRoute, HostedDetachedForwardRoute,
-    HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute, HostedGuestStreamRoute,
-    HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders, HostedNodeRegistrationRequest,
-    HostedNodeRoute, HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute,
-    HostedSuccess, PORT_ARTIFACT_TRANSFER_HEADER,
+    HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedDetachedForwardStartRequest,
+    HostedError, HostedGuestRoute, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
+    HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
+    HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
+    PORT_ARTIFACT_TRANSFER_HEADER,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostProvider,
@@ -905,10 +905,7 @@ async fn artifact_pull(
         Ok(bytes) => raw_response(StatusCode::OK, bytes, "application/octet-stream"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => error_response(
             StatusCode::NOT_FOUND,
-            format!(
-                "{} was not found",
-                artifact_store_detail(&state, &request)
-            ),
+            format!("{} was not found", artifact_store_detail(&state, &request)),
             Some(route),
         ),
         Err(error) => error_response(
@@ -4435,7 +4432,8 @@ mod tests {
         let control_plane_addr =
             serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
 
-        let mut upload = Client::new().post(format!("http://{control_plane_addr}/v1/artifacts:push"));
+        let mut upload =
+            Client::new().post(format!("http://{control_plane_addr}/v1/artifacts:push"));
         for (name, value) in &headers {
             upload = upload.header(name, value);
         }
@@ -4449,10 +4447,8 @@ mod tests {
             .await
             .expect("artifact upload should complete");
         assert_eq!(upload.status(), StatusCode::OK);
-        let uploaded: HostedSuccess<HostedArtifactTransferResult> = upload
-            .json()
-            .await
-            .expect("upload response should decode");
+        let uploaded: HostedSuccess<HostedArtifactTransferResult> =
+            upload.json().await.expect("upload response should decode");
         assert_eq!(uploaded.result.store_path, request.store_path);
         assert_eq!(uploaded.result.bytes_copied, 17);
         assert_eq!(
@@ -4521,7 +4517,11 @@ mod tests {
         assert!(error.message.contains("hosted-api artifact 'demo-kernel'"));
         assert!(error.message.contains("demo-fs/port/demo-kernel:v1"));
         assert!(error.message.contains("x86_64/firecracker/standard"));
-        assert!(error.message.contains(&request.store_path.display().to_string()));
+        assert!(
+            error
+                .message
+                .contains(&request.store_path.display().to_string())
+        );
 
         cleanup_registered_state(&control_plane);
     }

@@ -815,6 +815,7 @@ fn run_artifacts(command: ArtifactCommand, config: &PortConfig) -> Result<()> {
                 transfer.artifact.reference,
                 render_selector(transfer.artifact.selector)
             );
+            println!("backend: {}", transfer.backend_detail);
             println!("local path: {}", transfer.artifact.path.display());
             println!("store path: {}", transfer.store_path.display());
             println!("cache path: {}", transfer.artifact.cache_path.display());
@@ -840,6 +841,7 @@ fn run_artifacts(command: ArtifactCommand, config: &PortConfig) -> Result<()> {
                 transfer.artifact.reference,
                 render_selector(transfer.artifact.selector)
             );
+            println!("backend: {}", transfer.backend_detail);
             println!("store path: {}", transfer.store_path.display());
             println!("cache path: {}", transfer.artifact.cache_path.display());
             println!("local path: {}", transfer.artifact.path.display());

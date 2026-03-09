@@ -6,10 +6,11 @@ use port_agent_protocol::{
     CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, PtyRequest,
 };
 use port_hosted_protocol::{
-    HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute,
-    HostedDetachedForwardStartRequest, HostedError, HostedGuestRoute, HostedGuestStreamProtocol,
-    HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedRouteContext,
-    HostedServiceRoute,
+    HostedArtifactRoute, HostedArtifactTransferRequest, HostedClientHeaders,
+    HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedDetachedForwardStartRequest,
+    HostedError, HostedGuestRoute, HostedGuestStreamProtocol, HostedGuestStreamRoute,
+    HostedGuestVerb, HostedMachineRoute, HostedRouteContext, HostedServiceRoute,
+    PORT_ARTIFACT_TRANSFER_HEADER,
 };
 use port_model::{
     HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
@@ -128,6 +129,11 @@ impl HostedClient {
     #[must_use]
     pub fn guest(&self) -> GuestClient<'_> {
         GuestClient { client: self }
+    }
+
+    #[must_use]
+    pub fn artifacts(&self) -> ArtifactClient<'_> {
+        ArtifactClient { client: self }
     }
 
     #[must_use]
@@ -380,6 +386,10 @@ pub struct GuestClient<'a> {
     client: &'a HostedClient,
 }
 
+pub struct ArtifactClient<'a> {
+    client: &'a HostedClient,
+}
+
 impl<'a> GuestClient<'a> {
     pub fn exec(&self, machine_name: &str, request: ExecRequest) -> Result<HostedApiRequest> {
         self.operation(machine_name, "exec", GuestOperation::Exec(request))
@@ -534,6 +544,43 @@ impl<'a> GuestClient<'a> {
             ),
             protocol: HostedGuestStreamProtocol::PortAgentStreamV1,
         })
+    }
+}
+
+impl<'a> ArtifactClient<'a> {
+    pub fn push(&self, request: HostedArtifactTransferRequest) -> Result<HostedApiStreamRequest> {
+        let mut headers = self.client.auth_headers.to_header_map();
+        headers.insert(
+            String::from(PORT_ARTIFACT_TRANSFER_HEADER),
+            serde_json::to_string(&request)
+                .context("failed to encode hosted artifact transfer request header")?,
+        );
+        Ok(HostedApiStreamRequest {
+            request: HostedApiRequest {
+                method: HttpMethod::Post,
+                url: format!(
+                    "{}/{}",
+                    self.client.base_url,
+                    HostedControlPlaneRoute::Artifact(HostedArtifactRoute::Push)
+                        .path()
+                        .trim_start_matches('/')
+                ),
+                headers,
+                body: None,
+            },
+            protocol: HostedGuestStreamProtocol::PortAgentStreamV1,
+        })
+    }
+
+    pub fn pull(&self, request: HostedArtifactTransferRequest) -> Result<HostedApiRequest> {
+        Ok(self.client.request(
+            HttpMethod::Post,
+            HostedControlPlaneRoute::Artifact(HostedArtifactRoute::Pull),
+            Some(
+                serde_json::to_value(request)
+                    .context("failed to encode hosted artifact transfer request body")?,
+            ),
+        ))
     }
 }
 

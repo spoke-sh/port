@@ -17,8 +17,8 @@ use port_agent_protocol::{
     parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::{
-    HostedArtifactTransferRequest, HostedDetachedForwardStartRequest, HostedDetachedForwardState,
-    HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
+    HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedDetachedForwardStartRequest,
+    HostedDetachedForwardState, HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
     HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
 };
 use port_model::{
@@ -28,9 +28,9 @@ use port_model::{
     MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmHostKit,
 };
 use port_sdk::{
-    HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest as HostedSecretPutRequest,
-    ServiceApplyRequest as HostedServiceApplyRequest, ServiceKind as HostedServiceKind,
-    ServiceSecretBinding as HostedServiceSecretBinding,
+    HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
+    SecretPutRequest as HostedSecretPutRequest, ServiceApplyRequest as HostedServiceApplyRequest,
+    ServiceKind as HostedServiceKind, ServiceSecretBinding as HostedServiceSecretBinding,
 };
 use serde::{Deserialize, Serialize};
 
@@ -559,6 +559,7 @@ pub struct ArtifactMetadata {
 pub struct ArtifactTransfer {
     pub artifact: ArtifactMetadata,
     pub store_path: PathBuf,
+    pub backend_detail: String,
     pub bytes_copied: u64,
 }
 
@@ -739,15 +740,18 @@ pub fn push_artifact(
             Ok(ArtifactTransfer {
                 artifact,
                 store_path,
+                backend_detail: match &spec.distribution.push {
+                    ArtifactStore::FileSystem { root } => {
+                        format!("filesystem {}", root.display())
+                    }
+                    other => format!("{other:?}"),
+                },
                 bytes_copied,
             })
         }
-        ArtifactStoreContract::HostedApi { identity, transfer } => bail!(
-            "Hosted API backend '{}' resolved to control plane '{}' and store path '{}' but artifact transfer routes are not implemented yet",
-            identity.endpoint,
-            identity.control_plane,
-            transfer.store_path.display()
-        ),
+        ArtifactStoreContract::HostedApi { identity, transfer } => {
+            push_artifact_to_hosted_backend(config, artifact, identity, transfer)
+        }
     }
 }
 
@@ -767,16 +771,75 @@ pub fn pull_artifact(
             Ok(ArtifactTransfer {
                 artifact,
                 store_path,
+                backend_detail: match &spec.distribution.pull {
+                    ArtifactStore::FileSystem { root } => {
+                        format!("filesystem {}", root.display())
+                    }
+                    other => format!("{other:?}"),
+                },
                 bytes_copied,
             })
         }
-        ArtifactStoreContract::HostedApi { identity, transfer } => bail!(
-            "Hosted API backend '{}' resolved to control plane '{}' and store path '{}' but artifact transfer routes are not implemented yet",
-            identity.endpoint,
-            identity.control_plane,
-            transfer.store_path.display()
-        ),
+        ArtifactStoreContract::HostedApi { identity, transfer } => {
+            pull_artifact_from_hosted_backend(config, artifact, identity, transfer)
+        }
     }
+}
+
+fn push_artifact_to_hosted_backend(
+    config: &PortConfig,
+    artifact: ArtifactMetadata,
+    identity: HostedArtifactIdentityContract,
+    transfer: HostedArtifactTransferRequest,
+) -> Result<ArtifactTransfer> {
+    let client = HostedClient::from_control_plane_env(config, &identity.control_plane)?;
+    let request = client.artifacts().push(transfer.clone())?;
+    let source = File::open(&artifact.path).with_context(|| {
+        format!(
+            "failed to open local artifact '{}' for hosted push",
+            artifact.path.display()
+        )
+    })?;
+    let response = execute_hosted_stream_request(request, reqwest::blocking::Body::new(source))?;
+    let uploaded: HostedSuccess<HostedArtifactTransferResult> =
+        response.json().with_context(|| {
+            format!(
+                "failed to decode hosted artifact push response for '{}'",
+                artifact.path.display()
+            )
+        })?;
+    let _ = copy_file(&artifact.path, &artifact.cache_path)?;
+    Ok(ArtifactTransfer {
+        artifact,
+        store_path: uploaded.result.store_path,
+        backend_detail: format!(
+            "hosted-api {} (control-plane {})",
+            identity.endpoint, identity.control_plane
+        ),
+        bytes_copied: uploaded.result.bytes_copied,
+    })
+}
+
+fn pull_artifact_from_hosted_backend(
+    config: &PortConfig,
+    artifact: ArtifactMetadata,
+    identity: HostedArtifactIdentityContract,
+    transfer: HostedArtifactTransferRequest,
+) -> Result<ArtifactTransfer> {
+    let client = HostedClient::from_control_plane_env(config, &identity.control_plane)?;
+    let request = client.artifacts().pull(transfer.clone())?;
+    let response = execute_hosted_request(request)?;
+    let bytes_copied = copy_reader_to_path(response, &artifact.cache_path)?;
+    let _ = copy_file(&artifact.cache_path, &artifact.path)?;
+    Ok(ArtifactTransfer {
+        artifact,
+        store_path: transfer.store_path,
+        backend_detail: format!(
+            "hosted-api {} (control-plane {})",
+            identity.endpoint, identity.control_plane
+        ),
+        bytes_copied,
+    })
 }
 
 pub fn launch_local_machine(
@@ -5132,6 +5195,17 @@ fn copy_file(source: &Path, destination: &Path) -> Result<u64> {
     })
 }
 
+fn copy_reader_to_path<R: Read>(mut reader: R, destination: &Path) -> Result<u64> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create '{}'", parent.display()))?;
+    }
+    let mut file = File::create(destination)
+        .with_context(|| format!("failed to create '{}'", destination.display()))?;
+    std::io::copy(&mut reader, &mut file)
+        .with_context(|| format!("failed to write '{}'", destination.display()))
+}
+
 fn architecture_dir(architecture: MachineArchitecture) -> &'static str {
     match architecture {
         MachineArchitecture::Native => "native",
@@ -5692,14 +5766,14 @@ fn hosted_control_plane_copy_guest_file(
             let source = File::open(request.source)
                 .with_context(|| format!("failed to open '{}'", request.source.display()))?;
             let prefix = encode_copy_request_envelope(&copy_request)?;
-            execute_hosted_copy_stream(
+            execute_hosted_stream_request(
                 stream_request,
                 reqwest::blocking::Body::new(PrefixedReader::new(prefix, source)),
             )
         }
         port_agent_protocol::CopyDirection::GuestToHost => {
             let prefix = encode_copy_request_envelope(&copy_request)?;
-            execute_hosted_copy_stream(
+            execute_hosted_stream_request(
                 stream_request,
                 reqwest::blocking::Body::new(Cursor::new(prefix)),
             )
@@ -5893,7 +5967,34 @@ fn encode_copy_request_envelope(request: &port_agent_protocol::CopyRequest) -> R
     Ok(encoded)
 }
 
-fn execute_hosted_copy_stream(
+fn execute_hosted_request(request: HostedApiRequest) -> Result<reqwest::blocking::Response> {
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .context("failed to build hosted HTTP client")?;
+    let method = match request.method {
+        HttpMethod::Get => reqwest::Method::GET,
+        HttpMethod::Post => reqwest::Method::POST,
+        HttpMethod::Put => reqwest::Method::PUT,
+        HttpMethod::Delete => reqwest::Method::DELETE,
+    };
+
+    let mut builder = client.request(method.clone(), &request.url);
+    for (name, value) in &request.headers {
+        builder = builder.header(name, value);
+    }
+    if let Some(body) = &request.body {
+        builder = builder.json(body);
+    }
+    let response = builder.send().with_context(|| {
+        format!(
+            "failed to send hosted request {} {}",
+            request.method, request.url
+        )
+    })?;
+    finalize_hosted_response(request.method, &request.url, response)
+}
+
+fn execute_hosted_stream_request(
     request: HostedApiStreamRequest,
     body: reqwest::blocking::Body,
 ) -> Result<reqwest::blocking::Response> {
@@ -5921,23 +6022,27 @@ fn execute_hosted_copy_stream(
             request.request.method, request.request.url
         )
     })?;
+    finalize_hosted_response(request.request.method, &request.request.url, response)
+}
 
+fn finalize_hosted_response(
+    method: HttpMethod,
+    url: &str,
+    response: reqwest::blocking::Response,
+) -> Result<reqwest::blocking::Response> {
     if response.status().is_success() {
         return Ok(response);
     }
 
     let status = response.status();
-    let bytes = response.bytes().with_context(|| {
-        format!(
-            "failed to read hosted error body for {}",
-            request.request.url
-        )
-    })?;
+    let bytes = response
+        .bytes()
+        .with_context(|| format!("failed to read hosted error body for {url}"))?;
     if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
         bail!(
             "hosted request {} {} failed with {}: {}{}",
-            request.request.method,
-            request.request.url,
+            method,
+            url,
             status,
             error.message,
             render_hosted_route_context(error.route.as_ref()),
@@ -5950,8 +6055,8 @@ fn execute_hosted_copy_stream(
         .to_string();
     bail!(
         "hosted request {} {} failed with {}: {}",
-        request.request.method,
-        request.request.url,
+        method,
+        url,
         status,
         fallback,
     );
@@ -6806,8 +6911,8 @@ mod tests {
         copy_guest_file, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
         hosted_placeholder_runtime_root, launch_local_machine, list_machine_services,
         list_machines, machine_monitor, machine_service_status, machine_status, machine_top,
-        path_check, prepare_guest_forward, prepare_runtime_state, put_machine_secret,
-        read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
+        path_check, prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
+        put_machine_secret, read_json_file, read_pid_file, repo_root, resolve_artifact_metadata,
         resolve_artifact_store_contract, resolve_machine_architecture, select_firecracker_binary,
         serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
         service_status_from_record, stop_machine, stop_machine_service,
@@ -6904,6 +7009,69 @@ mod tests {
         config
     }
 
+    fn configure_hosted_kernel_paths(
+        config: &mut PortConfig,
+        local_root: &Path,
+        cache_root: &Path,
+        endpoint: &str,
+    ) -> (PathBuf, PathBuf, PathBuf) {
+        let kernel = config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("sample kernel should exist");
+        kernel.distribution.push = ArtifactStore::HostedApi {
+            endpoint: endpoint.to_string(),
+        };
+        kernel.distribution.pull = ArtifactStore::HostedApi {
+            endpoint: endpoint.to_string(),
+        };
+        kernel.distribution.cache_root = cache_root.to_path_buf();
+
+        for variant in &mut kernel.variants {
+            let architecture = match variant.selector.architecture {
+                MachineArchitecture::Native => "native",
+                MachineArchitecture::X86_64 => "x86_64",
+                MachineArchitecture::Aarch64 => "aarch64",
+            };
+            let protection_mode = match variant.selector.protection_mode {
+                ProtectionMode::Standard => "standard",
+                ProtectionMode::Pvm => "pvm",
+            };
+            variant.path = local_root
+                .join(architecture)
+                .join("firecracker")
+                .join(protection_mode)
+                .join("vmlinux");
+        }
+
+        let local_path = local_root
+            .join("x86_64")
+            .join("firecracker")
+            .join("standard")
+            .join("vmlinux");
+        let cache_path = cache_root
+            .join("demo-fs")
+            .join("port")
+            .join("demo-kernel")
+            .join("v1")
+            .join("x86_64")
+            .join("firecracker")
+            .join("standard")
+            .join("vmlinux");
+        let store_path = PathBuf::from(".port/hosted/demo/artifacts")
+            .join("demo-fs")
+            .join("port")
+            .join("demo-kernel")
+            .join("v1")
+            .join("x86_64")
+            .join("firecracker")
+            .join("standard")
+            .join("vmlinux");
+
+        (local_path, cache_path, store_path)
+    }
+
     #[test]
     fn resolve_artifact_store_contract_returns_hosted_transfer_contract() {
         let mut config = PortConfig::sample();
@@ -6954,6 +7122,89 @@ mod tests {
             }
             other => panic!("expected hosted artifact contract, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn push_and_pull_artifact_round_trip_through_live_hosted_backend() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let _ = fs::remove_dir_all(".port/hosted/demo");
+
+        let tempdir = tempdir().expect("tempdir should exist");
+        let local_root = tempdir.path().join("local-artifacts");
+        let cache_root = tempdir.path().join("artifact-cache");
+        let mut config = PortConfig::sample();
+        let control_plane_addr =
+            start_live_control_plane(&config, None).expect("control plane should start");
+        let endpoint = format!("http://{control_plane_addr}");
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = endpoint.clone();
+        let (local_path, cache_path, store_path) =
+            configure_hosted_kernel_paths(&mut config, &local_root, &cache_root, &endpoint);
+
+        fs::create_dir_all(local_path.parent().expect("local parent"))
+            .expect("local parent should exist");
+        fs::write(&local_path, "demo-kernel-hosted-bytes").expect("local artifact should write");
+
+        let push = push_artifact(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("push should route through hosted backend");
+        assert_eq!(push.store_path, store_path);
+        assert_eq!(
+            fs::read_to_string(&store_path).expect("store path should exist"),
+            "demo-kernel-hosted-bytes"
+        );
+        assert_eq!(
+            fs::read_to_string(&cache_path).expect("cache path should exist"),
+            "demo-kernel-hosted-bytes"
+        );
+        assert!(
+            push.backend_detail.contains("hosted-api"),
+            "{}",
+            push.backend_detail
+        );
+
+        fs::remove_file(&local_path).expect("local artifact should be removable");
+        fs::remove_file(&cache_path).expect("cache artifact should be removable");
+
+        let pull = pull_artifact(
+            &config,
+            ArtifactRequest {
+                name: "demo-kernel",
+                architecture: MachineArchitecture::X86_64,
+                substrate: ExecutionSubstrate::Firecracker,
+                protection_mode: ProtectionMode::Standard,
+            },
+        )
+        .expect("pull should route through hosted backend");
+        assert_eq!(pull.store_path, store_path);
+        assert_eq!(
+            fs::read_to_string(&local_path).expect("local path should be restored"),
+            "demo-kernel-hosted-bytes"
+        );
+        assert_eq!(
+            fs::read_to_string(&cache_path).expect("cache path should be restored"),
+            "demo-kernel-hosted-bytes"
+        );
+        assert!(
+            pull.backend_detail.contains("hosted-api"),
+            "{}",
+            pull.backend_detail
+        );
+
+        let _ = fs::remove_dir_all(".port/hosted/demo");
     }
 
     fn write_machine_placement_state(
