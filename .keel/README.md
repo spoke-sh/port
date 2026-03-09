@@ -38,6 +38,12 @@
 |--------|--------|
 | [Streamed Guest Control Transport](epics/1vzMVF000/voyages/1vzMVY000/) | done |
 
+### [Hosted Scheduler And Multi-Node Services](epics/1vzSbL000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Host Groups And Service Placement](epics/1vzSbL000/voyages/1vzSc3000/) | in-progress |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
