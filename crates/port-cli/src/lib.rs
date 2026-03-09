@@ -123,7 +123,7 @@ Standard lane preservation:
   port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode standard
   port --config examples/port.toml machine launch --machine demo
   PVM admission failures must never silently fall back to the standard Firecracker lane.
-  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as planned lanes.
+  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as substrate lanes, and `port doctor` reports their lane-specific host contracts before launch.
   The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
 Cloud Linux:
   generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.

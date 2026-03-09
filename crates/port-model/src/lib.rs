@@ -59,6 +59,18 @@ impl PortConfig {
                             ProtectionMode::Standard,
                         ),
                         sample_artifact_variant(
+                            "artifacts/kernel/demo/x86_64/cloud-hypervisor/standard/vmlinux",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::CloudHypervisor,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/kernel/demo/aarch64/cloud-hypervisor/standard/vmlinux",
+                            MachineArchitecture::Aarch64,
+                            ExecutionSubstrate::CloudHypervisor,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
                             "artifacts/kernel/demo/x86_64/avf/standard/vmlinux",
                             MachineArchitecture::X86_64,
                             ExecutionSubstrate::Avf,
@@ -109,6 +121,18 @@ impl PortConfig {
                             "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4",
                             MachineArchitecture::Aarch64,
                             ExecutionSubstrate::Firecracker,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/x86_64/cloud-hypervisor/standard/rootfs.ext4",
+                            MachineArchitecture::X86_64,
+                            ExecutionSubstrate::CloudHypervisor,
+                            ProtectionMode::Standard,
+                        ),
+                        sample_artifact_variant(
+                            "artifacts/guest/demo/aarch64/cloud-hypervisor/standard/rootfs.ext4",
+                            MachineArchitecture::Aarch64,
+                            ExecutionSubstrate::CloudHypervisor,
                             ProtectionMode::Standard,
                         ),
                         sample_artifact_variant(
@@ -323,6 +347,10 @@ impl PortConfig {
 
         let machines = BTreeMap::from([
             (String::from("demo"), sample_machine("local", "demo", 52)),
+            (
+                String::from("demo-ch"),
+                sample_cloud_hypervisor_machine("local", "demo-ch", 54),
+            ),
             (
                 String::from("demo-avf"),
                 sample_avf_machine("mac-local", "demo-avf", 53),
@@ -1031,6 +1059,14 @@ fn sample_avf_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
     MachineSpec {
         host: host.to_string(),
         substrate: ExecutionSubstrate::Avf,
+        ..sample_machine(host, name, vsock_cid)
+    }
+}
+
+fn sample_cloud_hypervisor_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
+    MachineSpec {
+        host: host.to_string(),
+        substrate: ExecutionSubstrate::CloudHypervisor,
         ..sample_machine(host, name, vsock_cid)
     }
 }
@@ -2718,6 +2754,7 @@ mod tests {
         assert!(encoded.contains("scheduler = \"deterministic-first-fit\""));
         assert!(encoded.contains("mode = \"hosted-control-plane\""));
         assert!(encoded.contains("substrate = \"firecracker\""));
+        assert!(encoded.contains("substrate = \"cloud-hypervisor\""));
         assert!(encoded.contains("protection_mode = \"standard\""));
         assert!(encoded.contains("architecture = \"native\""));
         assert!(encoded.contains("[[hosts.local.firecracker.pvm_lanes]]"));
@@ -2765,9 +2802,14 @@ mod tests {
         assert_eq!(config.hosts["azure-linux"].provider, HostProvider::Azure);
         assert_eq!(config.machines["cloud-aws"].host, "aws-linux");
         assert_eq!(config.machines["demo-avf"].host, "mac-local");
+        assert_eq!(config.machines["demo-ch"].host, "local");
         assert_eq!(
             config.machines["demo"].substrate,
             ExecutionSubstrate::Firecracker
+        );
+        assert_eq!(
+            config.machines["demo-ch"].substrate,
+            ExecutionSubstrate::CloudHypervisor
         );
         assert_eq!(
             config.machines["demo-avf"].substrate,
@@ -2791,6 +2833,34 @@ mod tests {
                 .to_string(),
             "demo-fs/port/demo-kernel:v1"
         );
+    }
+
+    #[test]
+    fn sample_config_includes_cloud_hypervisor_standard_variants() {
+        let config = PortConfig::sample();
+        let kernel = &config.artifacts.kernels["demo-kernel"];
+        let guest = &config.artifacts.guest_images["demo-guest"];
+
+        assert!(kernel.supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::CloudHypervisor,
+            ProtectionMode::Standard
+        ));
+        assert!(kernel.supports(
+            MachineArchitecture::Aarch64,
+            ExecutionSubstrate::CloudHypervisor,
+            ProtectionMode::Standard
+        ));
+        assert!(guest.supports(
+            MachineArchitecture::X86_64,
+            ExecutionSubstrate::CloudHypervisor,
+            ProtectionMode::Standard
+        ));
+        assert!(guest.supports(
+            MachineArchitecture::Aarch64,
+            ExecutionSubstrate::CloudHypervisor,
+            ProtectionMode::Standard
+        ));
     }
 
     #[test]

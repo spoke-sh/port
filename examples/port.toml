@@ -43,6 +43,22 @@ substrate = "firecracker"
 protection_mode = "standard"
 
 [[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/x86_64/cloud-hypervisor/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "artifacts/kernel/demo/aarch64/cloud-hypervisor/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "aarch64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
 path = "artifacts/kernel/demo/x86_64/avf/standard/vmlinux"
 
 [artifacts.kernels.demo-kernel.variants.selector]
@@ -100,6 +116,22 @@ path = "artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4"
 [artifacts.guest_images.demo-guest.variants.selector]
 architecture = "aarch64"
 substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/x86_64/cloud-hypervisor/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "artifacts/guest/demo/aarch64/cloud-hypervisor/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "aarch64"
+substrate = "cloud-hypervisor"
 protection_mode = "standard"
 
 [[artifacts.guest_images.demo-guest.variants]]
@@ -384,6 +416,26 @@ rootfs_read_only = false
 vsock_cid = 52
 control_port = 7000
 console_log = "runtime/demo/console.log"
+
+[machines.demo-ch]
+# Local Cloud Hypervisor lane:
+#   `port doctor` validates the Linux host, supported architecture, and
+#   `cloud-hypervisor` binary for this machine without falling back to Firecracker.
+host = "local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.demo-ch.guest]
+vsock_cid = 54
+control_port = 7000
+console_log = "runtime/demo-ch/console.log"
 
 [machines.demo-avf]
 # macOS AVF lane:

@@ -1,11 +1,12 @@
 ---
 id: 1vzdKx000
 title: Foundation And Hosted Cloud Hypervisor Lane
-status: planned
+status: in-progress
 epic: 1vzdKB000
 created_at: 2026-03-09T09:20:07
 index: 1
 updated_at: 2026-03-09T09:25:33
+started_at: 2026-03-09T09:27:03
 ---
 
 # Foundation And Hosted Cloud Hypervisor Lane
@@ -24,11 +25,11 @@ updated_at: 2026-03-09T09:25:33
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/5 stories complete
+**Progress:** 1/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define Cloud Hypervisor Contract And Doctor Checks](../../../../stories/1vzdMW000/README.md) | feat | backlog |
+| [Define Cloud Hypervisor Contract And Doctor Checks](../../../../stories/1vzdMW000/README.md) | feat | done |
 | [Implement Local Cloud Hypervisor Machine Driver](../../../../stories/1vzdMZ000/README.md) | feat | backlog |
 | [Route Hosted Cloud Hypervisor Lifecycle](../../../../stories/1vzdMa000/README.md) | feat | backlog |
 | [Publish Cloud Hypervisor Operator Workflow](../../../../stories/1vzdMb000/README.md) | feat | backlog |

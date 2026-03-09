@@ -72,7 +72,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | planned |
+| [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

@@ -692,6 +692,7 @@ fn collect_doctor_report_with_facts(
                 kernel,
                 guest_image,
             ));
+            checks.extend(cloud_hypervisor_machine_checks(name, host, machine, facts));
             checks.extend(avf_machine_checks(name, host, machine, facts));
         }
     }
@@ -711,6 +712,9 @@ fn collect_doctor_report_with_facts(
         ));
         notes.push(String::from(
             "Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.",
+        ));
+        notes.push(String::from(
+            "Cloud Hypervisor readiness is reported through its own host-platform, architecture, protection-mode, and binary checks; Port does not silently fall back to Firecracker when that lane is selected.",
         ));
     }
 
@@ -4885,6 +4889,101 @@ fn avf_machine_checks(
     ]
 }
 
+fn cloud_hypervisor_machine_checks(
+    machine_name: &str,
+    host: &port_model::HostSpec,
+    machine: &port_model::MachineSpec,
+    facts: &DoctorHostFacts,
+) -> Vec<DoctorCheck> {
+    if machine.substrate != ExecutionSubstrate::CloudHypervisor {
+        return Vec::new();
+    }
+
+    let supported_architectures = [MachineArchitecture::X86_64, MachineArchitecture::Aarch64];
+    let supported_labels = supported_architectures
+        .iter()
+        .map(|architecture| architecture_dir(*architecture))
+        .collect::<Vec<_>>();
+    let platform_ok = host.platform == HostPlatform::Linux
+        && matches!(host.connection, HostConnection::Local)
+        && facts.host_os == "linux";
+    let architecture_ok = observed_host_architecture(facts)
+        .map(|architecture| supported_architectures.contains(&architecture))
+        .unwrap_or(false);
+    let protection_mode_ok = machine.protection_mode == ProtectionMode::Standard;
+    let binary = if platform_ok {
+        binary_check(
+            &format!("cloud-hypervisor:{machine_name}:binary"),
+            "cloud-hypervisor",
+            false,
+        )
+    } else {
+        DoctorCheck {
+            name: format!("cloud-hypervisor:{machine_name}:binary"),
+            ok: false,
+            required: false,
+            detail: String::from(
+                "Cloud Hypervisor binary readiness is only meaningful on a local Linux host; Port will not fall back to Firecracker for this machine.",
+            ),
+        }
+    };
+
+    vec![
+        DoctorCheck {
+            name: format!("cloud-hypervisor:{machine_name}:host-platform"),
+            ok: platform_ok,
+            required: false,
+            detail: if platform_ok {
+                String::from(
+                    "Host OS is Linux and matches the local Cloud Hypervisor lane requirement.",
+                )
+            } else if !matches!(host.connection, HostConnection::Local) {
+                String::from(
+                    "Cloud Hypervisor machine targets a non-local host connection. This lane currently expects a local Linux host, and Port will not fall back to Firecracker.",
+                )
+            } else {
+                format!(
+                    "Cloud Hypervisor machine requires a local Linux host. Detected host OS '{}'; Port will not fall back to Firecracker for this machine.",
+                    facts.host_os
+                )
+            },
+        },
+        DoctorCheck {
+            name: format!("cloud-hypervisor:{machine_name}:host-architecture"),
+            ok: architecture_ok,
+            required: false,
+            detail: if architecture_ok {
+                format!(
+                    "Detected host architecture '{}' is supported by the Cloud Hypervisor lane (supported: {}).",
+                    facts.host_architecture,
+                    supported_labels.join(", ")
+                )
+            } else {
+                format!(
+                    "Detected host architecture '{}' is not in the Cloud Hypervisor support set (supported: {}).",
+                    facts.host_architecture,
+                    supported_labels.join(", ")
+                )
+            },
+        },
+        DoctorCheck {
+            name: format!("cloud-hypervisor:{machine_name}:protection-mode"),
+            ok: protection_mode_ok,
+            required: false,
+            detail: if protection_mode_ok {
+                String::from(
+                    "Cloud Hypervisor currently defines the standard protection lane only.",
+                )
+            } else {
+                String::from(
+                    "Port does not currently define a Cloud Hypervisor PVM lane; the selected machine must stay on protection_mode = \"standard\".",
+                )
+            },
+        },
+        binary,
+    ]
+}
+
 fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
 
@@ -8358,6 +8457,57 @@ exec sleep 30
     }
 
     #[test]
+    fn resolve_artifact_metadata_reports_missing_selected_cloud_hypervisor_variant_without_fallback()
+     {
+        for artifact_name in ["demo-kernel", "demo-guest"] {
+            let mut config = PortConfig::sample();
+            match artifact_name {
+                "demo-kernel" => config
+                    .artifacts
+                    .kernels
+                    .get_mut(artifact_name)
+                    .expect("sample kernel should exist")
+                    .variants
+                    .retain(|variant| {
+                        variant.selector.substrate != ExecutionSubstrate::CloudHypervisor
+                    }),
+                "demo-guest" => config
+                    .artifacts
+                    .guest_images
+                    .get_mut(artifact_name)
+                    .expect("sample guest image should exist")
+                    .variants
+                    .retain(|variant| {
+                        variant.selector.substrate != ExecutionSubstrate::CloudHypervisor
+                    }),
+                _ => unreachable!("unexpected artifact"),
+            }
+
+            let error = resolve_artifact_metadata(
+                &config,
+                ArtifactRequest {
+                    name: artifact_name,
+                    architecture: MachineArchitecture::X86_64,
+                    substrate: ExecutionSubstrate::CloudHypervisor,
+                    protection_mode: port_model::ProtectionMode::Standard,
+                },
+            )
+            .expect_err("missing cloud hypervisor variant should fail");
+
+            let message = error.to_string();
+            assert!(
+                message.contains(&format!("artifact '{artifact_name}' has no variant")),
+                "{message}"
+            );
+            assert!(
+                message.contains("X86_64/CloudHypervisor/Standard"),
+                "{message}"
+            );
+            assert!(!message.contains("Firecracker"), "{message}");
+        }
+    }
+
+    #[test]
     fn resolve_artifact_metadata_accepts_the_native_alias() {
         let config = PortConfig::sample();
 
@@ -8570,6 +8720,113 @@ exec sleep 30
         assert!(availability.ok);
         assert!(availability.detail.contains("Virtualization framework"));
         assert!(availability.detail.contains("entitlement"));
+    }
+
+    #[test]
+    fn doctor_report_surfaces_cloud_hypervisor_platform_and_binary_checks() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "cloud-hypervisor");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let report = collect_doctor_report_with_facts(
+            Some(&PortConfig::sample()),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: String::from("x86_64"),
+                proc_cmdline: None,
+                pvm_firecracker_binary: None,
+            },
+        );
+
+        let platform = report
+            .checks
+            .iter()
+            .find(|check| check.name == "cloud-hypervisor:demo-ch:host-platform")
+            .expect("cloud hypervisor platform check should exist");
+        let architecture = report
+            .checks
+            .iter()
+            .find(|check| check.name == "cloud-hypervisor:demo-ch:host-architecture")
+            .expect("cloud hypervisor architecture check should exist");
+        let protection_mode = report
+            .checks
+            .iter()
+            .find(|check| check.name == "cloud-hypervisor:demo-ch:protection-mode")
+            .expect("cloud hypervisor protection-mode check should exist");
+        let binary = report
+            .checks
+            .iter()
+            .find(|check| check.name == "cloud-hypervisor:demo-ch:binary")
+            .expect("cloud hypervisor binary check should exist");
+
+        assert!(platform.ok);
+        assert!(platform.detail.contains("local Cloud Hypervisor lane"));
+        assert!(architecture.ok);
+        assert!(architecture.detail.contains("x86_64"));
+        assert!(protection_mode.ok);
+        assert!(protection_mode.detail.contains("standard protection lane"));
+        assert!(binary.ok);
+        assert!(binary.detail.contains("cloud-hypervisor"));
+    }
+
+    #[test]
+    fn doctor_report_fails_fast_for_unsupported_cloud_hypervisor_platform_and_protection_mode() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "cloud-hypervisor");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+        let mut config = PortConfig::sample();
+        let machine = config
+            .machines
+            .get_mut("demo-ch")
+            .expect("demo-ch should exist");
+        machine.host = String::from("mac-local");
+        machine.protection_mode = ProtectionMode::Pvm;
+
+        let report = collect_doctor_report_with_facts(
+            Some(&config),
+            &DoctorHostFacts {
+                host_os: String::from("macos"),
+                host_architecture: String::from("x86_64"),
+                proc_cmdline: None,
+                pvm_firecracker_binary: None,
+            },
+        );
+
+        let machine_contract = report
+            .checks
+            .iter()
+            .find(|check| check.name == "machine:demo-ch")
+            .expect("cloud hypervisor machine contract should exist");
+        let platform = report
+            .checks
+            .iter()
+            .find(|check| check.name == "cloud-hypervisor:demo-ch:host-platform")
+            .expect("cloud hypervisor platform check should exist");
+        let protection_mode = report
+            .checks
+            .iter()
+            .find(|check| check.name == "cloud-hypervisor:demo-ch:protection-mode")
+            .expect("cloud hypervisor protection-mode check should exist");
+
+        assert!(!machine_contract.ok);
+        assert!(
+            machine_contract
+                .detail
+                .contains("Cloud Hypervisor execution currently expects a Linux host platform.")
+        );
+        assert!(
+            machine_contract
+                .detail
+                .contains("Port does not currently define a Cloud Hypervisor PVM lane.")
+        );
+        assert!(!platform.ok);
+        assert!(platform.detail.contains("requires a local Linux host"));
+        assert!(!protection_mode.ok);
+        assert!(
+            protection_mode
+                .detail
+                .contains("does not currently define a Cloud Hypervisor PVM lane")
+        );
     }
 
     #[test]
