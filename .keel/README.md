@@ -56,6 +56,12 @@
 |--------|--------|
 | [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | done |
 
+### [Artifact Mobility And Hosted Distribution](epics/1vzW8e000/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted Artifact Push And Pull](epics/1vzW8e000/voyages/1vzW9Q000/) | planned |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
