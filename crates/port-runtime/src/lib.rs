@@ -3204,6 +3204,22 @@ pub(crate) struct HostedStoredServicePlacement {
     pub status: ServiceDefinitionStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct HostedMachinePlacementStateFile {
+    control_plane: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    machines: BTreeMap<String, HostedMachinePlacementRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct HostedMachinePlacementRecord {
+    node_name: String,
+    runtime_root: PathBuf,
+    placed_at_unix_s: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placement_detail: Option<String>,
+}
+
 pub(crate) fn hosted_stored_service_placements(
     config: &PortConfig,
     machine_name: &str,
@@ -3275,6 +3291,25 @@ pub(crate) fn hosted_stored_service_placements(
             .then(left.status.node_name.cmp(&right.status.node_name))
     });
     Ok(placements)
+}
+
+fn hosted_stored_machine_placement(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Option<HostedMachinePlacementRecord>> {
+    let hosted_identity = config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
+    let path = hosted_placeholder_runtime_root(&hosted_identity.control_plane)
+        .join("machine-placements.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let placements: HostedMachinePlacementStateFile = read_json_file(&path)?;
+    Ok(placements.machines.get(machine_name).cloned())
 }
 
 fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
@@ -3394,6 +3429,56 @@ fn hosted_machine_resolution(
     }
 
     let inventory = config.hosted_inventory_contract()?;
+    if let Some(placement) = hosted_stored_machine_placement(config, machine_name)? {
+        let paths = RuntimePaths::for_machine(&placement.runtime_root, machine_name);
+        let placement_detail = placement
+            .placement_detail
+            .clone()
+            .unwrap_or_else(|| summary.placement_detail.clone());
+        let mut status = if inventory.nodes.contains_key(&placement.node_name) {
+            if paths.runtime_dir.exists() {
+                inspect_machine(&placement.runtime_root, machine_name, control.clone())?
+            } else {
+                synthetic_machine_status(
+                    machine_name,
+                    &paths,
+                    control.clone(),
+                    MachineRuntimeState::Stopped,
+                    format!(
+                        "control plane '{}' resolved stored placement on node '{}' but the node-agent runtime root '{}' does not contain machine state",
+                        summary.control_plane,
+                        placement.node_name,
+                        placement.runtime_root.display()
+                    ),
+                )
+            }
+        } else {
+            synthetic_machine_status(
+                machine_name,
+                &paths,
+                control.clone(),
+                MachineRuntimeState::Malformed,
+                format!(
+                    "control plane '{}' resolved stored placement on unknown node '{}'",
+                    summary.control_plane, placement.node_name
+                ),
+            )
+        };
+        status.detail = format!(
+            "{} Routed through control plane '{}' and stored node '{}'. {}",
+            status.detail, summary.control_plane, placement.node_name, placement_detail
+        );
+
+        return Ok(HostedMachineResolution {
+            control_plane: summary.control_plane.clone(),
+            node_name: Some(placement.node_name),
+            host_groups: summary.host_groups.clone(),
+            host_group_policies: summary.host_group_policies.clone(),
+            runtime_root: placement.runtime_root,
+            status,
+        });
+    }
+
     let mut selected = None::<HostedMachineResolution>;
     for node_name in &summary.candidate_nodes {
         let Some(node) = inventory.nodes.get(node_name) else {
@@ -6591,6 +6676,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum::routing::post;
     use axum::{Json, Router};
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::{
@@ -6678,6 +6764,64 @@ mod tests {
             },
         );
         config
+    }
+
+    fn sample_multi_node_machine_config(root: &Path) -> PortConfig {
+        let mut config = sample_config_with_hosted_runtime_roots(root);
+        let mut alternate = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .clone();
+        alternate.runtime_root = root.join("hosted/aws-linux-node-b");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-b"), alternate);
+        config
+            .host_groups
+            .get_mut("aws-builders")
+            .expect("aws-builders should exist")
+            .nodes = vec![
+            String::from("aws-linux-node-b"),
+            String::from("aws-linux-node"),
+        ];
+        config
+    }
+
+    fn write_machine_placement_state(
+        control_plane: &str,
+        machine_name: &str,
+        node_name: &str,
+        runtime_root: &Path,
+        placement_detail: &str,
+    ) {
+        let state_path =
+            hosted_placeholder_runtime_root(control_plane).join("machine-placements.json");
+        fs::create_dir_all(
+            state_path
+                .parent()
+                .expect("machine placement state path should have parent"),
+        )
+        .expect("machine placement state dir should exist");
+        fs::write(
+            &state_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&json!({
+                    "control_plane": control_plane,
+                    "machines": {
+                        machine_name: {
+                            "node_name": node_name,
+                            "runtime_root": runtime_root,
+                            "placed_at_unix_s": 1,
+                            "placement_detail": placement_detail,
+                        }
+                    }
+                }))
+                .expect("machine placement state should encode")
+            ),
+        )
+        .expect("machine placement state should write");
     }
 
     fn sample_avf_config() -> PortConfig {
@@ -6846,11 +6990,10 @@ exec sleep 30
         ))
     }
 
-    fn start_live_hosted_servers(
+    fn start_live_hosted_servers_inner(
         config: &PortConfig,
         bind_node: bool,
     ) -> anyhow::Result<PortConfig> {
-        let _guard = hosted_server_lock().lock().expect("lock should work");
         unsafe {
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
         }
@@ -6870,11 +7013,18 @@ exec sleep 30
         Ok(client_config)
     }
 
-    fn start_named_live_hosted_servers(
+    fn start_live_hosted_servers(
+        config: &PortConfig,
+        bind_node: bool,
+    ) -> anyhow::Result<PortConfig> {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        start_live_hosted_servers_inner(config, bind_node)
+    }
+
+    fn start_named_live_hosted_servers_inner(
         config: &PortConfig,
         node_names: &[&str],
     ) -> anyhow::Result<PortConfig> {
-        let _guard = hosted_server_lock().lock().expect("lock should work");
         unsafe {
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
         }
@@ -6893,6 +7043,14 @@ exec sleep 30
         }
 
         Ok(client_config)
+    }
+
+    fn start_named_live_hosted_servers(
+        config: &PortConfig,
+        node_names: &[&str],
+    ) -> anyhow::Result<PortConfig> {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        start_named_live_hosted_servers_inner(config, node_names)
     }
 
     fn start_live_node_agent(config: &PortConfig) -> anyhow::Result<String> {
@@ -7829,6 +7987,96 @@ exec sleep 30
         assert_eq!(status.runtime_dir, paths.runtime_dir);
         assert!(status.detail.contains("control plane 'demo'"));
         assert!(status.detail.contains("node 'aws-linux-node'"));
+    }
+
+    #[test]
+    fn hosted_machine_status_prefers_stored_placement_over_live_candidate_selection() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let stored_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let live_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let stored_paths = RuntimePaths::for_machine(&stored_runtime_root, "cloud-aws");
+        let live_paths = RuntimePaths::for_machine(&live_runtime_root, "cloud-aws");
+        write_manifest(&live_paths, "cloud-aws", 424242);
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+        write_machine_placement_state(
+            "demo",
+            "cloud-aws",
+            "aws-linux-node-b",
+            &stored_runtime_root,
+            "Stored on alternate AWS node.",
+        );
+
+        let status = machine_status(&config, tempdir.path(), "cloud-aws")
+            .expect("hosted status should load");
+        assert_eq!(status.machine_name, "cloud-aws");
+        assert_eq!(status.state, MachineRuntimeState::Malformed);
+        assert_eq!(status.runtime_dir, stored_paths.runtime_dir);
+        assert!(status.detail.contains("aws-linux-node-b"));
+        assert!(status.detail.contains("Stored on alternate AWS node."));
+        assert!(
+            !status.detail.contains("aws-linux-node'."),
+            "status should not silently reroute to the currently live candidate"
+        );
+    }
+
+    #[test]
+    fn hosted_machine_list_monitor_and_stop_prefer_stored_placement_over_live_candidate_selection()
+    {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let stored_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let live_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let stored_paths = RuntimePaths::for_machine(&stored_runtime_root, "cloud-aws");
+        let live_paths = RuntimePaths::for_machine(&live_runtime_root, "cloud-aws");
+        write_manifest(&live_paths, "cloud-aws", 424242);
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+        write_machine_placement_state(
+            "demo",
+            "cloud-aws",
+            "aws-linux-node-b",
+            &stored_runtime_root,
+            "Stored on alternate AWS node.",
+        );
+
+        let machines = list_machines(&config, tempdir.path()).expect("machine list should load");
+        let hosted = machines
+            .iter()
+            .find(|machine| machine.machine_name == "cloud-aws")
+            .expect("hosted machine should appear in machine list");
+        assert_eq!(hosted.state, MachineRuntimeState::Malformed);
+        assert_eq!(hosted.runtime_dir, stored_paths.runtime_dir);
+        assert!(hosted.detail.contains("aws-linux-node-b"));
+        assert!(hosted.detail.contains("Stored on alternate AWS node."));
+
+        let monitor =
+            machine_monitor(&config, tempdir.path(), "cloud-aws").expect("monitor should load");
+        assert_eq!(monitor.state, MachineRuntimeState::Malformed);
+        assert_eq!(monitor.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(monitor.runtime_dir, stored_paths.runtime_dir);
+        assert!(monitor.detail.contains("Stored on alternate AWS node."));
+
+        let stop = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(1))
+            .expect("stop should load");
+        assert_eq!(stop.previous_state, MachineRuntimeState::Malformed);
+        assert_eq!(stop.current_state, MachineRuntimeState::Malformed);
+        assert_eq!(stop.runtime_dir, stored_paths.runtime_dir);
+        assert!(stop.detail.contains("aws-linux-node-b"));
+        assert!(stop.detail.contains("Stored on alternate AWS node."));
     }
 
     #[test]

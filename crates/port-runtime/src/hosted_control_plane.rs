@@ -39,8 +39,9 @@ use crate::{
     copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
     hosted_placeholder_runtime_root, hosted_stored_service_placements, launch_local_machine,
     list_detached_forwards, list_machine_secrets_local, machine_monitor as runtime_machine_monitor,
-    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
-    prepare_guest_forward, put_machine_secret_local, refresh_hosted_machine_service_list,
+    machine_monitor_report, machine_status as runtime_machine_status,
+    machine_top as runtime_machine_top, machine_top_report, prepare_guest_forward,
+    put_machine_secret_local, refresh_hosted_machine_service_list,
     refresh_hosted_machine_service_runtime, start_detached_forward, stop_detached_forward,
     stop_hosted_machine_service_live, stop_machine as runtime_stop_machine,
 };
@@ -685,8 +686,8 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
         if summary.control_plane != state.inner.control_plane {
             continue;
         }
-        match resolve_node_binding(&state, &summary) {
-            Ok((binding, route)) => {
+        match resolve_machine_binding(&state, &summary) {
+            Ok((Some(binding), route, None)) => {
                 let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
                     machine_name: machine_name.clone(),
                 });
@@ -706,8 +707,21 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
                     }
                 }
             }
-            Err((route, message)) => {
+            Ok((None, route, Some(message))) => {
                 machines.push(malformed_machine_status(&summary, route, message))
+            }
+            Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => {
+                machines.push(malformed_machine_status(
+                    &summary,
+                    HostedRouteContext::from_machine_summary(&summary),
+                    format!(
+                        "control plane '{}' resolved an inconsistent routing state for machine '{}'",
+                        state.inner.control_plane, machine_name
+                    ),
+                ));
+            }
+            Err(message) => {
+                return error_response(StatusCode::BAD_GATEWAY, message, None);
             }
         }
     }
@@ -791,8 +805,8 @@ async fn machine_status(
         Ok(summary) => summary,
         Err(response) => return response,
     };
-    match resolve_node_binding(&state, &summary) {
-        Ok((binding, route)) => {
+    match resolve_machine_binding(&state, &summary) {
+        Ok((Some(binding), route, None)) => {
             let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
                 machine_name: machine.clone(),
             });
@@ -816,13 +830,22 @@ async fn machine_status(
                 ),
             }
         }
-        Err((route, message)) => json_response(
+        Ok((None, route, Some(message))) => json_response(
             StatusCode::OK,
             &HostedSuccess {
                 route: route.clone(),
                 result: malformed_machine_status(&summary, route, message),
             },
         ),
+        Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' resolved an inconsistent routing state for machine '{}'",
+                state.inner.control_plane, machine
+            ),
+            Some(HostedRouteContext::from_machine_summary(&summary)),
+        ),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, None),
     }
 }
 
@@ -831,17 +854,45 @@ async fn machine_monitor(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
-        &state,
-        &headers,
-        &machine,
-        HostedNodeRoute::Machine(HostedMachineRoute::Monitor {
-            machine_name: machine.clone(),
-        }),
-        Method::GET,
-        None,
-    )
-    .await
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    match resolve_machine_binding(&state, &summary) {
+        Ok((Some(binding), route, None)) => {
+            match proxy_json::<HostedSuccess<crate::MachineMonitorReport>>(
+                &state,
+                &binding,
+                HostedNodeRoute::Machine(HostedMachineRoute::Monitor {
+                    machine_name: machine.clone(),
+                }),
+                Method::GET,
+                None,
+                route.clone(),
+            )
+            .await
+            {
+                Ok(report) => json_response(StatusCode::OK, &report),
+                Err(message) => render_unavailable_machine_monitor(&summary, route, message),
+            }
+        }
+        Ok((None, route, Some(message))) => {
+            render_unavailable_machine_monitor(&summary, route, message)
+        }
+        Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' resolved an inconsistent routing state for machine '{}'",
+                state.inner.control_plane, machine
+            ),
+            Some(HostedRouteContext::from_machine_summary(&summary)),
+        ),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, None),
+    }
 }
 
 async fn machine_top(
@@ -849,17 +900,45 @@ async fn machine_top(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
-        &state,
-        &headers,
-        &machine,
-        HostedNodeRoute::Machine(HostedMachineRoute::Top {
-            machine_name: machine.clone(),
-        }),
-        Method::GET,
-        None,
-    )
-    .await
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    match resolve_machine_binding(&state, &summary) {
+        Ok((Some(binding), route, None)) => {
+            match proxy_json::<HostedSuccess<crate::MachineTopReport>>(
+                &state,
+                &binding,
+                HostedNodeRoute::Machine(HostedMachineRoute::Top {
+                    machine_name: machine.clone(),
+                }),
+                Method::GET,
+                None,
+                route.clone(),
+            )
+            .await
+            {
+                Ok(report) => json_response(StatusCode::OK, &report),
+                Err(message) => render_unavailable_machine_top(&summary, route, message),
+            }
+        }
+        Ok((None, route, Some(message))) => {
+            render_unavailable_machine_top(&summary, route, message)
+        }
+        Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' resolved an inconsistent routing state for machine '{}'",
+                state.inner.control_plane, machine
+            ),
+            Some(HostedRouteContext::from_machine_summary(&summary)),
+        ),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, None),
+    }
 }
 
 async fn machine_command(
@@ -872,17 +951,52 @@ async fn machine_command(
     }
 
     if let Some(machine_name) = machine.strip_suffix(":stop") {
-        return proxy_machine_route(
-            &state,
-            &headers,
-            machine_name,
-            HostedNodeRoute::Machine(HostedMachineRoute::Stop {
-                machine_name: machine_name.to_string(),
-            }),
-            Method::POST,
-            None,
-        )
-        .await;
+        if let Some(response) = authorize(&state, &headers) {
+            return response;
+        }
+        let summary = match resolve_summary(&state, machine_name) {
+            Ok(summary) => summary,
+            Err(response) => return response,
+        };
+        return match resolve_machine_binding(&state, &summary) {
+            Ok((Some(binding), route, None)) => match proxy_json::<HostedSuccess<StopResult>>(
+                &state,
+                &binding,
+                HostedNodeRoute::Machine(HostedMachineRoute::Stop {
+                    machine_name: machine_name.to_string(),
+                }),
+                Method::POST,
+                None,
+                route.clone(),
+            )
+            .await
+            {
+                Ok(result) => json_response(StatusCode::OK, &result),
+                Err(message) => json_response(
+                    StatusCode::OK,
+                    &HostedSuccess {
+                        route: route.clone(),
+                        result: malformed_stop_result(&summary, route, message),
+                    },
+                ),
+            },
+            Ok((None, route, Some(message))) => json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: route.clone(),
+                    result: malformed_stop_result(&summary, route, message),
+                },
+            ),
+            Ok((Some(_), _, Some(_))) | Ok((None, _, None)) => error_response(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "control plane '{}' resolved an inconsistent routing state for machine '{}'",
+                    state.inner.control_plane, machine_name
+                ),
+                Some(HostedRouteContext::from_machine_summary(&summary)),
+            ),
+            Err(message) => error_response(StatusCode::BAD_GATEWAY, message, None),
+        };
     }
 
     error_response(
@@ -1682,6 +1796,103 @@ fn resolve_known_node_binding(
     Ok(None)
 }
 
+fn resolve_machine_binding(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+) -> Result<
+    (
+        Option<HostedNodeBinding>,
+        HostedRouteContext,
+        Option<String>,
+    ),
+    String,
+> {
+    if let Some(placement) = refresh_machine_placements(state)?
+        .get(&summary.machine_name)
+        .cloned()
+    {
+        let route_context = stored_machine_route_context(summary, &placement);
+        return match resolve_known_node_binding(state, &placement.node_name) {
+            Ok(Some((binding, _))) => Ok((Some(binding), route_context, None)),
+            Ok(None) => Ok((
+                None,
+                route_context.clone(),
+                Some(machine_placement_detail(
+                    &route_context,
+                    format!(
+                        "stored placement points at node '{}' but the control plane has no live registered node-agent endpoint for it.",
+                        placement.node_name
+                    ),
+                )),
+            )),
+            Err(message) => Ok((
+                None,
+                route_context.clone(),
+                Some(machine_placement_detail(
+                    &route_context,
+                    format!(
+                        "stored placement on node '{}' is not currently usable: {message}",
+                        placement.node_name
+                    ),
+                )),
+            )),
+        };
+    }
+
+    match resolve_node_binding(state, summary) {
+        Ok((binding, route)) => Ok((Some(binding), route, None)),
+        Err((route, message)) => Ok((None, route, Some(message))),
+    }
+}
+
+fn refresh_machine_placements(
+    state: &ControlPlaneState,
+) -> Result<BTreeMap<String, HostedMachinePlacementRecord>, String> {
+    let placement_state = load_machine_placement_state(
+        &state.inner.machine_placement_state_path,
+        &state.inner.control_plane,
+    )
+    .map_err(|error| {
+        format!(
+            "control plane '{}' could not refresh machine placement state: {error}",
+            state.inner.control_plane
+        )
+    })?;
+    let placements = placement_state.machines.clone();
+    *state.inner.machine_placement_state.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update machine placement state",
+            state.inner.control_plane
+        )
+    })? = placement_state;
+    *state.inner.machine_placements.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update machine placement records",
+            state.inner.control_plane
+        )
+    })? = placements.clone();
+    Ok(placements)
+}
+
+fn stored_machine_route_context(
+    summary: &HostedMachineSummaryContract,
+    placement: &HostedMachinePlacementRecord,
+) -> HostedRouteContext {
+    let mut route = HostedRouteContext::from_machine_summary(summary)
+        .with_selected_node(placement.node_name.clone(), placement.runtime_root.clone());
+    if placement.placement_detail.is_some() {
+        route.placement_detail = placement.placement_detail.clone();
+    }
+    route
+}
+
+fn machine_placement_detail(route_context: &HostedRouteContext, message: String) -> String {
+    match route_context.placement_detail.as_deref() {
+        Some(detail) if !detail.is_empty() => format!("{message} {detail}"),
+        _ => message,
+    }
+}
+
 fn authorize(state: &ControlPlaneState, headers: &HeaderMap) -> Option<Response> {
     match headers
         .get(&state.inner.auth_header)
@@ -2052,6 +2263,85 @@ fn malformed_machine_status(
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
         detail,
+    }
+}
+
+fn malformed_stop_result(
+    summary: &HostedMachineSummaryContract,
+    route_context: HostedRouteContext,
+    detail: String,
+) -> StopResult {
+    let status = malformed_machine_status(summary, route_context, detail);
+    StopResult {
+        machine_name: status.machine_name,
+        previous_state: status.state,
+        current_state: status.state,
+        pid: status.pid,
+        control: status.control,
+        runtime_dir: status.runtime_dir,
+        detail: status.detail,
+    }
+}
+
+fn render_unavailable_machine_monitor(
+    summary: &HostedMachineSummaryContract,
+    route: HostedRouteContext,
+    message: String,
+) -> Response {
+    let route_context = route.clone();
+    let status = malformed_machine_status(summary, route, message);
+    match machine_monitor_report(
+        status,
+        Some(summary.control_plane.clone()),
+        route_context.node_name.clone(),
+        route_context.host_groups.clone(),
+    ) {
+        Ok(result) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: route_context,
+                result,
+            },
+        ),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' could not synthesize monitor output for machine '{}': {error}",
+                summary.control_plane, summary.machine_name
+            ),
+            Some(route_context),
+        ),
+    }
+}
+
+fn render_unavailable_machine_top(
+    summary: &HostedMachineSummaryContract,
+    route: HostedRouteContext,
+    message: String,
+) -> Response {
+    let route_context = route.clone();
+    let status = malformed_machine_status(summary, route, message);
+    match machine_top_report(
+        status,
+        Some(summary.control_plane.clone()),
+        route_context.node_name.clone(),
+        route_context.host_groups.clone(),
+    ) {
+        Ok(result) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: route_context,
+                result,
+            },
+        ),
+        Err(error) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' could not synthesize top output for machine '{}': {error}",
+                summary.control_plane, summary.machine_name
+            ),
+            Some(route_context),
+        ),
     }
 }
 

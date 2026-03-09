@@ -140,6 +140,28 @@ fn hosted_config(runtime_root: &Path) -> PortConfig {
     config
 }
 
+fn hosted_multi_node_config(runtime_root: &Path, alternate_runtime_root: &Path) -> PortConfig {
+    let mut config = hosted_config(runtime_root);
+    let mut alternate = config
+        .nodes
+        .get("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .clone();
+    alternate.runtime_root = alternate_runtime_root.to_path_buf();
+    config
+        .nodes
+        .insert(String::from("aws-linux-node-b"), alternate);
+    config
+        .host_groups
+        .get_mut("aws-builders")
+        .expect("aws-builders should exist")
+        .nodes = vec![
+        String::from("aws-linux-node-b"),
+        String::from("aws-linux-node"),
+    ];
+    config
+}
+
 fn generic_hosted_config() -> PortConfig {
     PortConfig::sample()
 }
@@ -169,6 +191,43 @@ fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) -> PathB
     )
     .expect("manifest should write");
     manifest_path
+}
+
+fn write_machine_placement_state(
+    control_plane: &str,
+    machine_name: &str,
+    node_name: &str,
+    runtime_root: &Path,
+    placement_detail: &str,
+) {
+    let state_path = Path::new(".port/hosted")
+        .join(control_plane)
+        .join("machine-placements.json");
+    fs::create_dir_all(
+        state_path
+            .parent()
+            .expect("machine placement state path should have parent"),
+    )
+    .expect("machine placement state dir should exist");
+    fs::write(
+        &state_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&json!({
+                "control_plane": control_plane,
+                "machines": {
+                    machine_name: {
+                        "node_name": node_name,
+                        "runtime_root": runtime_root,
+                        "placed_at_unix_s": 1,
+                        "placement_detail": placement_detail,
+                    }
+                }
+            }))
+            .expect("machine placement state should encode")
+        ),
+    )
+    .expect("machine placement state should write");
 }
 
 fn write_forward_manifest(
@@ -397,6 +456,70 @@ fn cli_machine_status_surfaces_hosted_pvm_placement_denial() {
     assert!(stdout.contains("generic-linux-node"));
     assert!(stdout.contains("planned"));
     assert!(stdout.contains("PVM"));
+}
+
+#[test]
+fn cli_machine_status_prefers_stored_hosted_placement_over_live_candidate() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let alternate_runtime_root = temp.path().join("hosted/aws-linux-node-b");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_multi_node_config(&hosted_runtime_root, &alternate_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node");
+    client_config
+        .nodes
+        .get_mut("aws-linux-node-b")
+        .expect("aws-linux-node-b should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node-b");
+    write_config(&client_config_path, &client_config);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+    let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
+    write_machine_placement_state(
+        "demo",
+        "cloud-aws",
+        "aws-linux-node-b",
+        &alternate_runtime_root,
+        "Stored on alternate AWS node.",
+    );
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("status command should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("machine: cloud-aws"));
+    assert!(stdout.contains("state: malformed"));
+    assert!(stdout.contains("aws-linux-node-b"));
+    assert!(stdout.contains("Stored on alternate AWS node."));
+    assert!(
+        !stdout.contains("control plane 'demo' resolved node 'aws-linux-node'"),
+        "status output should not reroute to the currently live candidate"
+    );
 }
 
 #[test]
