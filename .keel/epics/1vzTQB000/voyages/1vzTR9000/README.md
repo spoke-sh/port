@@ -25,7 +25,7 @@ started_at: 2026-03-08T22:50:43
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/5 stories complete
+**Progress:** 4/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -33,5 +33,5 @@ started_at: 2026-03-08T22:50:43
 | [Define Registered Node Contract And State](../../../../stories/1vzTT1000/README.md) | feat | done |
 | [Implement Node Agent Registration Refresh](../../../../stories/1vzTTI000/README.md) | feat | done |
 | [Route Hosted Machine Launch Through Registered Nodes](../../../../stories/1vzTTJ000/README.md) | feat | done |
-| [Surface Registered Placement Through Machine Commands](../../../../stories/1vzTTK000/README.md) | feat | backlog |
+| [Surface Registered Placement Through Machine Commands](../../../../stories/1vzTTK000/README.md) | feat | done |
 <!-- END GENERATED -->
