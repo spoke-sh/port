@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use port_model::PortConfig;
+use port_model::{ExecutionSubstrate, PortConfig};
 use tempfile::tempdir;
 
 fn write_config(path: &Path, config: &PortConfig) {
@@ -479,6 +479,30 @@ fn cli_guest_commands_cover_all_capabilities() {
 }
 
 #[test]
+fn cli_cloud_hypervisor_guest_commands_cover_all_capabilities() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let runtime_root = temp.path().join("runtime");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
+
+    let config = PortConfig::sample();
+    write_config(&config_path, &config);
+
+    let socket_path = runtime_socket(&runtime_root, "demo-ch");
+    spawn_agent(&socket_path, &guest_root);
+
+    run_guest_capability_suite(
+        &config_path,
+        "demo-ch",
+        Some(&runtime_root),
+        &guest_root,
+        temp.path(),
+    );
+}
+
+#[test]
 fn cli_guest_logs_follow_streams_appended_output() {
     let temp = tempdir().expect("tempdir should exist");
     let guest_root = temp.path().join("guest-root");
@@ -615,6 +639,61 @@ fn cli_guest_commands_cover_hosted_control_plane_runtime() {
     let mut buf = [0_u8; 32];
     let len = forwarded.read(&mut buf).expect("read forwarded");
     assert_eq!(&buf[..len], b"hosted-forward-ok");
+}
+
+#[test]
+fn cli_guest_commands_cover_hosted_cloud_hypervisor_runtime() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+    fs::create_dir_all(guest_root.join("var/log")).expect("guest root");
+    fs::write(guest_root.join("var/log/app.log"), "first\nsecond\n").expect("log file");
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .substrate = ExecutionSubstrate::CloudHypervisor;
+    server_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .capabilities
+        .substrates = vec![ExecutionSubstrate::CloudHypervisor];
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root.clone();
+    write_config(&client_config_path, &client_config);
+
+    let socket_path = runtime_socket(&hosted_runtime_root, "cloud-aws");
+    spawn_agent(&socket_path, &guest_root);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr);
+
+    run_guest_capability_suite_without_forward(
+        &client_config_path,
+        "cloud-aws",
+        None,
+        &guest_root,
+        temp.path(),
+    );
 }
 
 #[test]

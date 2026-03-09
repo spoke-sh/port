@@ -1224,6 +1224,15 @@ fn cloud_hypervisor_local_launch_machine(
     let config_path = cloud_hypervisor_config_path(&paths);
     let log_path = cloud_hypervisor_log_path(&paths);
     let api_socket_path = cloud_hypervisor_api_socket_path(&paths);
+    let boot_args = format!(
+        "{} init=/init port.guest_control_port={}",
+        machine.kernel_args, machine.guest.control_port
+    );
+    let vsock_arg = format!(
+        "cid={},socket={}",
+        machine.guest.vsock_cid,
+        paths.vsock_path.display()
+    );
     let config_payload = CloudHypervisorLaunchConfig {
         machine_name: request.machine_name.to_string(),
         runtime_dir: paths.runtime_dir.clone(),
@@ -1231,8 +1240,11 @@ fn cloud_hypervisor_local_launch_machine(
         guest_image_path: guest_variant.path.clone(),
         vcpu_count: machine.vcpu_count,
         memory_mib: machine.memory_mib,
-        kernel_args: machine.kernel_args.clone(),
+        kernel_args: boot_args.clone(),
         rootfs_read_only: machine.rootfs_read_only,
+        guest_vsock_cid: machine.guest.vsock_cid,
+        guest_control_port: machine.guest.control_port,
+        vsock_path: paths.vsock_path.clone(),
         api_socket_path: api_socket_path.clone(),
         console_log: log_path.clone(),
     };
@@ -1265,11 +1277,13 @@ fn cloud_hypervisor_local_launch_machine(
         .arg("--disk")
         .arg(disk_arg)
         .arg("--cmdline")
-        .arg(&machine.kernel_args)
+        .arg(&boot_args)
         .arg("--cpus")
         .arg(cpu_arg)
         .arg("--memory")
         .arg(memory_arg)
+        .arg("--vsock")
+        .arg(vsock_arg)
         .arg("--console")
         .arg("off")
         .arg("--serial")
@@ -1319,6 +1333,9 @@ fn cloud_hypervisor_local_launch_machine(
         binary: cloud_hypervisor_binary,
         config_path,
         metadata_path: cloud_hypervisor_runtime_metadata_path(&paths),
+        vsock_path: paths.vsock_path.clone(),
+        guest_vsock_cid: machine.guest.vsock_cid,
+        guest_control_port: machine.guest.control_port,
         api_socket_path,
         console_log: log_path,
         launched_at_unix_s,
@@ -4998,12 +5015,29 @@ fn hosted_control_plane_guest_endpoint(
         operation: request.operation.clone(),
     };
 
-    resolve_firecracker_guest_endpoint(config, &routed_request).with_context(|| {
+    resolve_routed_guest_endpoint(config, &routed_request).with_context(|| {
         format!(
             "control plane '{}' authorized guest attach for machine '{}' and routed it to node '{}'. {}",
             resolution.control_plane, request.machine_name, node_name, attach_detail
         )
     })
+}
+
+fn resolve_routed_guest_endpoint(
+    config: &PortConfig,
+    request: &GuestRequest<'_>,
+) -> Result<GuestEndpoint> {
+    let machine = config
+        .machines
+        .get(request.machine_name)
+        .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
+    match machine.substrate {
+        ExecutionSubstrate::Firecracker => resolve_firecracker_guest_endpoint(config, request),
+        ExecutionSubstrate::CloudHypervisor => {
+            resolve_cloud_hypervisor_guest_endpoint(config, request)
+        }
+        ExecutionSubstrate::Avf => resolve_avf_guest_endpoint(config, request),
+    }
 }
 
 fn remove_stale_runtime_path(path: &Path, label: &str) -> Result<()> {
@@ -7368,7 +7402,8 @@ impl<R: Read> Read for PrefixedReader<R> {
 #[derive(Debug, Clone)]
 enum GuestEndpoint {
     RuntimeSocket(PathBuf),
-    FirecrackerVsock {
+    VsockTunnel {
+        backend_name: &'static str,
         host_socket_path: PathBuf,
         guest_port: u32,
     },
@@ -7388,7 +7423,8 @@ fn resolve_firecracker_guest_endpoint(
             .machines
             .get(request.machine_name)
             .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
-        return Ok(GuestEndpoint::FirecrackerVsock {
+        return Ok(GuestEndpoint::VsockTunnel {
+            backend_name: "Firecracker",
             host_socket_path: paths.vsock_path,
             guest_port: u32::from(machine.guest.control_port),
         });
@@ -7398,6 +7434,43 @@ fn resolve_firecracker_guest_endpoint(
         bail!(
             "launched machine '{}' does not expose a live guest transport socket at '{}'; inspect the runtime logs or relaunch the VM",
             request.machine_name,
+            paths.vsock_path.display()
+        );
+    }
+
+    bail!(
+        "guest agent socket '{}' does not exist for machine '{}'",
+        paths.guest_agent_socket.display(),
+        request.machine_name
+    );
+}
+
+fn resolve_cloud_hypervisor_guest_endpoint(
+    config: &PortConfig,
+    request: &GuestRequest<'_>,
+) -> Result<GuestEndpoint> {
+    let paths = RuntimePaths::for_machine(request.runtime_root, request.machine_name);
+    if paths.guest_agent_socket.exists() {
+        return Ok(GuestEndpoint::RuntimeSocket(paths.guest_agent_socket));
+    }
+
+    if paths.vsock_path.exists() {
+        let machine = config
+            .machines
+            .get(request.machine_name)
+            .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
+        return Ok(GuestEndpoint::VsockTunnel {
+            backend_name: "Cloud Hypervisor",
+            host_socket_path: paths.vsock_path,
+            guest_port: u32::from(machine.guest.control_port),
+        });
+    }
+
+    if paths.manifest_path.exists() {
+        bail!(
+            "launched Cloud Hypervisor machine '{}' does not expose a live guest transport socket at '{}' or '{}'; inspect the runtime logs or relaunch the VM",
+            request.machine_name,
+            paths.guest_agent_socket.display(),
             paths.vsock_path.display()
         );
     }
@@ -7447,10 +7520,11 @@ fn connect_guest_endpoint(endpoint: &GuestEndpoint) -> Result<UnixStream> {
                 )
             })
         }
-        GuestEndpoint::FirecrackerVsock {
+        GuestEndpoint::VsockTunnel {
+            backend_name,
             host_socket_path,
             guest_port,
-        } => connect_firecracker_vsock(host_socket_path, *guest_port),
+        } => connect_vsock_tunnel(backend_name, host_socket_path, *guest_port),
     }
 }
 
@@ -7604,13 +7678,10 @@ impl MachineDriver for CloudHypervisorLocalDriver {
 
     fn guest_endpoint(
         &self,
-        _config: &PortConfig,
+        config: &PortConfig,
         request: &GuestRequest<'_>,
     ) -> Result<GuestEndpoint> {
-        bail!(
-            "machine '{}' is running on Cloud Hypervisor, but Port has not implemented Cloud Hypervisor guest transport yet",
-            request.machine_name
-        )
+        resolve_cloud_hypervisor_guest_endpoint(config, request)
     }
 }
 
@@ -7795,42 +7866,46 @@ fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<Box<dyn
     }
 }
 
-fn connect_firecracker_vsock(host_socket_path: &Path, guest_port: u32) -> Result<UnixStream> {
+fn connect_vsock_tunnel(
+    backend_name: &str,
+    host_socket_path: &Path,
+    guest_port: u32,
+) -> Result<UnixStream> {
     let mut stream = UnixStream::connect(host_socket_path).with_context(|| {
         format!(
-            "failed to connect to Firecracker guest transport socket '{}'",
-            host_socket_path.display()
+            "failed to connect to {backend_name} guest transport socket '{}'",
+            host_socket_path.display(),
         )
     })?;
     stream
         .write_all(format!("CONNECT {guest_port}\n").as_bytes())
         .with_context(|| {
             format!(
-                "failed to request Firecracker guest transport port {} via '{}'",
+                "failed to request {backend_name} guest transport port {} via '{}'",
                 guest_port,
                 host_socket_path.display()
             )
         })?;
     stream
         .flush()
-        .context("failed to flush Firecracker handshake")?;
+        .with_context(|| format!("failed to flush {backend_name} handshake"))?;
 
     let reader_stream = stream
         .try_clone()
-        .context("failed to clone Firecracker guest transport socket")?;
+        .with_context(|| format!("failed to clone {backend_name} guest transport socket"))?;
     let mut reader = BufReader::new(reader_stream);
     let mut line = String::new();
     reader.read_line(&mut line).with_context(|| {
         format!(
-            "failed to read Firecracker response from '{}'",
-            host_socket_path.display()
+            "failed to read {backend_name} response from '{}'",
+            host_socket_path.display(),
         )
     })?;
 
     if !line.starts_with("OK") {
         let detail = line.trim();
         bail!(
-            "Firecracker refused to establish a guest transport tunnel to port {} via '{}': {}",
+            "{backend_name} refused to establish a guest transport tunnel to port {} via '{}': {}",
             guest_port,
             host_socket_path.display(),
             if detail.is_empty() {
@@ -7945,6 +8020,9 @@ struct CloudHypervisorLaunchConfig {
     memory_mib: u32,
     kernel_args: String,
     rootfs_read_only: bool,
+    guest_vsock_cid: u32,
+    guest_control_port: u16,
+    vsock_path: PathBuf,
     api_socket_path: PathBuf,
     console_log: PathBuf,
 }
@@ -7956,6 +8034,9 @@ struct CloudHypervisorRuntimeMetadata {
     binary: PathBuf,
     config_path: PathBuf,
     metadata_path: PathBuf,
+    vsock_path: PathBuf,
+    guest_vsock_cid: u32,
+    guest_control_port: u16,
     api_socket_path: PathBuf,
     console_log: PathBuf,
     launched_at_unix_s: u64,
@@ -10383,6 +10464,86 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_guest_exec_routes_cloud_hypervisor_machine_through_node_runtime_root() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .substrate = ExecutionSubstrate::CloudHypervisor;
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .substrates = vec![ExecutionSubstrate::CloudHypervisor];
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener
+                .accept()
+                .expect("should accept hosted guest transport");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => {
+                    assert_eq!(
+                        request.command,
+                        vec![String::from("/bin/echo"), String::from("hosted-ch-ok")]
+                    );
+                }
+                other => panic!("unexpected hosted guest operation: {other:?}"),
+            }
+
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("hosted-ch-ok\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        });
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+
+        let result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("hosted-ch-ok")],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
+        .expect("hosted cloud-hypervisor guest exec should succeed");
+
+        match result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "hosted-ch-ok\n"),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        server.join().expect("server thread should complete");
+    }
+
+    #[test]
     fn hosted_guest_exec_explains_unresolved_node_routing() {
         let config = start_live_hosted_servers(&PortConfig::sample(), false)
             .expect("hosted control plane should start");
@@ -12110,6 +12271,75 @@ exec sleep 30
 
         match result {
             OperationResult::Exec(result) => assert_eq!(result.stdout, "live-ok\n"),
+            other => panic!("unexpected result: {other:?}"),
+        }
+
+        server.join().expect("server thread should complete");
+    }
+
+    #[test]
+    fn guest_exec_uses_cloud_hypervisor_vsock_tunnel_when_runtime_socket_is_absent() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo-ch");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener = UnixListener::bind(&paths.vsock_path).expect("vsock listener should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("should accept guest transport");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+
+            let mut handshake = String::new();
+            reader
+                .read_line(&mut handshake)
+                .expect("handshake line should read");
+            assert_eq!(handshake, "CONNECT 7000\n");
+            stream
+                .write_all(b"OK\n")
+                .expect("should acknowledge handshake");
+            stream.flush().expect("should flush handshake response");
+
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => {
+                    assert_eq!(
+                        request.command,
+                        vec![String::from("/bin/echo"), String::from("live-ch-ok")]
+                    );
+                }
+                other => panic!("unexpected operation over live guest transport: {other:?}"),
+            }
+
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("live-ch-ok\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        });
+
+        let result = execute_guest_operation(
+            &PortConfig::sample(),
+            GuestRequest {
+                machine_name: "demo-ch",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Exec(ExecRequest {
+                    command: vec![String::from("/bin/echo"), String::from("live-ch-ok")],
+                    cwd: None,
+                    env: Default::default(),
+                }),
+            },
+        )
+        .expect("live cloud-hypervisor guest exec should succeed");
+
+        match result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "live-ch-ok\n"),
             other => panic!("unexpected result: {other:?}"),
         }
 
