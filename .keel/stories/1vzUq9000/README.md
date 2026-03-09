@@ -2,11 +2,12 @@
 id: 1vzUq9000
 title: Publish Durable Hosted Fleet Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-09T00:16:45
-updated_at: 2026-03-09T01:23:36
+updated_at: 2026-03-09T01:37:28
 scope: 1vzUnI000/1vzUoK000
 started_at: 2026-03-09T01:23:36
+completed_at: 2026-03-09T01:37:28
 ---
 
 # Publish Durable Hosted Fleet Workflow

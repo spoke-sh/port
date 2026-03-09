@@ -50,11 +50,11 @@
 |--------|--------|
 | [Registered Nodes And Machine Launch Placement](epics/1vzTQB000/voyages/1vzTR9000/) | done |
 
-### [Durable Hosted Fleet Control](epics/1vzUnI000/) (active)
+### [Durable Hosted Fleet Control](epics/1vzUnI000/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | in-progress |
+| [Persistent Registration And Inventory Sync](epics/1vzUnI000/voyages/1vzUoK000/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

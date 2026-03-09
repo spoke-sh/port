@@ -19,8 +19,8 @@ index: 6
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 4/5 stories done
+**Progress:** 1/1 voyages complete, 5/5 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Persistent Registration And Inventory Sync](voyages/1vzUoK000/) | in-progress | 4/5 |
+| [Persistent Registration And Inventory Sync](voyages/1vzUoK000/) | done | 5/5 |
 <!-- END GENERATED -->

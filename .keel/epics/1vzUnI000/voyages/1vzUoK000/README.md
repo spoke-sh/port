@@ -1,12 +1,13 @@
 ---
 id: 1vzUoK000
 title: Persistent Registration And Inventory Sync
-status: in-progress
+status: done
 epic: 1vzUnI000
 created_at: 2026-03-09T00:13:52
 index: 1
 updated_at: 2026-03-09T00:20:39
 started_at: 2026-03-09T00:21:26
+completed_at: 2026-03-09T01:37:45
 ---
 
 # Persistent Registration And Inventory Sync
@@ -20,12 +21,14 @@ started_at: 2026-03-09T00:21:26
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 4/5 stories complete
+**Progress:** 5/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
@@ -33,5 +36,5 @@ started_at: 2026-03-09T00:21:26
 | [Persist Hosted Registration And Freshness](../../../../stories/1vzUq6000/README.md) | feat | done |
 | [Materialize Imported Fleet Inventory](../../../../stories/1vzUq7000/README.md) | feat | done |
 | [Surface Durable Hosted Fleet State](../../../../stories/1vzUq8000/README.md) | feat | done |
-| [Publish Durable Hosted Fleet Workflow](../../../../stories/1vzUq9000/README.md) | feat | in-progress |
+| [Publish Durable Hosted Fleet Workflow](../../../../stories/1vzUq9000/README.md) | feat | done |
 <!-- END GENERATED -->
