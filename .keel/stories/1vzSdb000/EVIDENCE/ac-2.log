@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-03-08T22:35:26.764530234-07:00
+command: cargo test -q -p port-runtime hosted_service_
+---
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 61 filtered out; finished in 1.12s
+

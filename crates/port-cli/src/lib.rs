@@ -10,7 +10,8 @@ use port_agent_protocol::{
     PtyRequest,
 };
 use port_model::{
-    ExecutionSubstrate, HostConnection, MachineArchitecture, PortConfig, ProtectionMode,
+    ExecutionSubstrate, HostConnection, HostedSchedulerPolicy, MachineArchitecture, PortConfig,
+    ProtectionMode,
 };
 use port_runtime::{
     ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
@@ -1256,6 +1257,20 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
             service.host_groups.join(", ")
         }
     );
+    println!(
+        "target host group: {}",
+        service
+            .target_host_group
+            .as_deref()
+            .unwrap_or("(none)")
+    );
+    println!(
+        "scheduler: {}",
+        service.scheduler.map_or_else(
+            || String::from("(none)"),
+            render_scheduler_policy
+        )
+    );
     println!("manifest: {}", service.manifest_path.display());
     println!("runtime record: {}", service.runtime.record_path.display());
     println!(
@@ -1327,6 +1342,12 @@ fn parse_secret_bindings(values: Vec<String>) -> Result<Vec<port_runtime::Servic
         });
     }
     Ok(bindings)
+}
+
+fn render_scheduler_policy(policy: HostedSchedulerPolicy) -> String {
+    match policy {
+        HostedSchedulerPolicy::DeterministicFirstFit => String::from("deterministic-first-fit"),
+    }
 }
 
 fn run_guest(command: GuestCommand, config_path: Option<&Path>, config: &PortConfig) -> Result<()> {

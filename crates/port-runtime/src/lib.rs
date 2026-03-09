@@ -1656,8 +1656,16 @@ pub(crate) fn list_machine_services_local(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<Vec<ServiceDefinitionStatus>> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
-    let dir = service_definition_dir(&context.status.runtime_dir);
+    let _ = config;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
+    if !runtime_dir.exists() {
+        bail!(
+            "service operations require an existing Port runtime for machine '{}': runtime state does not exist under '{}'",
+            machine_name,
+            runtime_root.display()
+        );
+    }
+    let dir = service_definition_dir(&runtime_dir);
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -1699,10 +1707,17 @@ pub(crate) fn machine_service_status_local(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
+    let _ = config;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
+    if !runtime_dir.exists() {
+        bail!(
+            "service operations require an existing Port runtime for machine '{}': runtime state does not exist under '{}'",
+            machine_name,
+            runtime_root.display()
+        );
+    }
     validate_identifier(service_name, "service name")?;
-    let path =
-        service_definition_dir(&context.status.runtime_dir).join(format!("{service_name}.json"));
+    let path = service_definition_dir(&runtime_dir).join(format!("{service_name}.json"));
     let record: ServiceDefinitionRecord = read_json_file(&path)?;
     Ok(service_status_from_record(record, path))
 }
@@ -1725,10 +1740,17 @@ pub(crate) fn stop_machine_service_local(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let context = resolve_service_runtime_context(config, runtime_root, machine_name, None)?;
+    let _ = config;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
+    if !runtime_dir.exists() {
+        bail!(
+            "service operations require an existing Port runtime for machine '{}': runtime state does not exist under '{}'",
+            machine_name,
+            runtime_root.display()
+        );
+    }
     validate_identifier(service_name, "service name")?;
-    let path =
-        service_definition_dir(&context.status.runtime_dir).join(format!("{service_name}.json"));
+    let path = service_definition_dir(&runtime_dir).join(format!("{service_name}.json"));
     let mut record: ServiceDefinitionRecord = read_json_file(&path)?;
     record.desired_state = ServiceDesiredState::Stopped;
     record.detail = String::from(
@@ -1792,13 +1814,8 @@ pub(crate) fn apply_hosted_machine_service_live(
     request: ServiceApplyRequest<'_>,
 ) -> Result<ServiceDefinitionStatus> {
     let stored = apply_machine_service_local(metadata_config, request.clone())?;
-    let context = resolve_service_runtime_context(
-        metadata_config,
-        request.runtime_root,
-        request.machine_name,
-        request.host_group,
-    )?;
-    let env = load_service_secret_env(&context.status.runtime_dir, &stored.secret_bindings)?;
+    let runtime_dir = RuntimePaths::for_machine(request.runtime_root, request.machine_name).runtime_dir;
+    let env = load_service_secret_env(&runtime_dir, &stored.secret_bindings)?;
     let managed = managed_service_result_status(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -1819,7 +1836,7 @@ pub(crate) fn apply_hosted_machine_service_live(
         },
     )?)?;
     write_service_runtime_record(
-        &context.status.runtime_dir,
+        &runtime_dir,
         request.name,
         &service_runtime_record_from_managed_status(&managed),
     )?;
@@ -1838,8 +1855,7 @@ pub(crate) fn refresh_hosted_machine_service_runtime(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let context =
-        resolve_service_runtime_context(metadata_config, runtime_root, machine_name, None)?;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
     match managed_service_result_status(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -1854,7 +1870,7 @@ pub(crate) fn refresh_hosted_machine_service_runtime(
     )?) {
         Ok(status) => {
             write_service_runtime_record(
-                &context.status.runtime_dir,
+                &runtime_dir,
                 service_name,
                 &service_runtime_record_from_managed_status(&status),
             )?;
@@ -1871,8 +1887,7 @@ pub(crate) fn refresh_hosted_machine_service_list(
     runtime_root: &Path,
     machine_name: &str,
 ) -> Result<Vec<ServiceDefinitionStatus>> {
-    let context =
-        resolve_service_runtime_context(metadata_config, runtime_root, machine_name, None)?;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
     let statuses = managed_service_result_list(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -1885,7 +1900,7 @@ pub(crate) fn refresh_hosted_machine_service_list(
     )?)?;
     for status in statuses {
         write_service_runtime_record(
-            &context.status.runtime_dir,
+            &runtime_dir,
             &status.name,
             &service_runtime_record_from_managed_status(&status),
         )?;
@@ -1901,8 +1916,7 @@ pub(crate) fn stop_hosted_machine_service_live(
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
     let _ = stop_machine_service_local(metadata_config, runtime_root, machine_name, service_name)?;
-    let context =
-        resolve_service_runtime_context(metadata_config, runtime_root, machine_name, None)?;
+    let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
     match managed_service_result_status(execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -1917,7 +1931,7 @@ pub(crate) fn stop_hosted_machine_service_live(
     )?) {
         Ok(status) => {
             write_service_runtime_record(
-                &context.status.runtime_dir,
+                &runtime_dir,
                 service_name,
                 &service_runtime_record_from_managed_status(&status),
             )?;
@@ -3182,6 +3196,86 @@ fn service_status_from_record(
             .map(|runtime| runtime.detail)
             .unwrap_or(record.detail),
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HostedStoredServicePlacement {
+    pub status: ServiceDefinitionStatus,
+}
+
+pub(crate) fn hosted_stored_service_placements(
+    config: &PortConfig,
+    machine_name: &str,
+    service_name: Option<&str>,
+) -> Result<Vec<HostedStoredServicePlacement>> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{}'", machine_name))?;
+    let inventory = config.hosted_inventory_contract()?;
+    let mut placements = Vec::new();
+
+    for (node_name, node) in inventory
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.host == machine.host)
+    {
+        let definitions = service_definition_dir(&RuntimePaths::for_machine(
+            &node.runtime_root,
+            machine_name,
+        )
+        .runtime_dir);
+        if !definitions.exists() {
+            continue;
+        }
+
+        if let Some(service_name) = service_name {
+            let path = definitions.join(format!("{service_name}.json"));
+            if !path.exists() {
+                continue;
+            }
+            let record: ServiceDefinitionRecord = read_json_file(&path)?;
+            let mut status = service_status_from_record(record, path);
+            if status.node_name.is_none() {
+                status.node_name = Some(node_name.clone());
+            }
+            placements.push(HostedStoredServicePlacement { status });
+            continue;
+        }
+
+        for entry in fs::read_dir(&definitions)
+            .with_context(|| format!("failed to read '{}'", definitions.display()))?
+        {
+            let entry = entry.with_context(|| {
+                format!(
+                    "failed to inspect hosted service definitions in '{}'",
+                    definitions.display()
+                )
+            })?;
+            if !entry
+                .file_type()
+                .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+                .is_file()
+            {
+                continue;
+            }
+            let path = entry.path();
+            let record: ServiceDefinitionRecord = read_json_file(&path)?;
+            let mut status = service_status_from_record(record, path);
+            if status.node_name.is_none() {
+                status.node_name = Some(node_name.clone());
+            }
+            placements.push(HostedStoredServicePlacement { status });
+        }
+    }
+
+    placements.sort_by(|left, right| {
+        left.status
+            .name
+            .cmp(&right.status.name)
+            .then(left.status.node_name.cmp(&right.status.node_name))
+    });
+    Ok(placements)
 }
 
 fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
@@ -10051,5 +10145,196 @@ exec sleep 30
             message.contains("architecture 'x86_64' is required"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn hosted_service_list_status_and_stop_follow_stored_placement() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_service_config(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let primary_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let primary_paths = RuntimePaths::for_machine(&primary_runtime_root, "cloud-aws");
+        write_manifest(&primary_paths, "cloud-aws", 1);
+
+        let secondary_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let secondary_paths = RuntimePaths::for_machine(&secondary_runtime_root, "cloud-aws");
+        write_manifest(&secondary_paths, "cloud-aws", 2);
+
+        for guest_socket in [
+            primary_paths.guest_agent_socket.clone(),
+            secondary_paths.guest_agent_socket.clone(),
+        ] {
+            let guest_root = tempdir.path().join(format!(
+                "guest-{}",
+                guest_socket.display().to_string().replace('/', "_")
+            ));
+            fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+            thread::spawn(move || {
+                serve_guest_agent(&guest_socket, guest_root).expect("guest agent should serve")
+            });
+        }
+        for _ in 0..100 {
+            if primary_paths.guest_agent_socket.exists()
+                && secondary_paths.guest_agent_socket.exists()
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let config =
+            start_named_live_hosted_servers(&config, &["aws-linux-node", "aws-linux-node-b"])
+                .expect("hosted servers should start");
+
+        let applied = apply_machine_service(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "svc-secondary",
+                kind: ServiceKind::Service,
+                host_group: Some("aws-secondary"),
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+            },
+        )
+        .expect("secondary placement should succeed");
+        assert_eq!(applied.node_name.as_deref(), Some("aws-linux-node-b"));
+
+        let listed = list_machine_services(&config, tempdir.path(), "cloud-aws")
+            .expect("service list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(listed[0].target_host_group.as_deref(), Some("aws-secondary"));
+
+        let status = machine_service_status(&config, tempdir.path(), "cloud-aws", "svc-secondary")
+            .expect("service status should succeed");
+        assert_eq!(status.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(status.target_host_group.as_deref(), Some("aws-secondary"));
+        assert_eq!(
+            status.scheduler,
+            Some(HostedSchedulerPolicy::DeterministicFirstFit)
+        );
+
+        let stopped = stop_machine_service(&config, tempdir.path(), "cloud-aws", "svc-secondary")
+            .expect("service stop should succeed");
+        assert_eq!(stopped.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(stopped.target_host_group.as_deref(), Some("aws-secondary"));
+        assert_eq!(stopped.runtime.state, ServiceRuntimeState::Stopped);
+
+        assert!(
+            !service_definition_dir(&primary_paths.runtime_dir)
+                .join("svc-secondary.json")
+                .exists()
+        );
+        assert!(
+            service_definition_dir(&secondary_paths.runtime_dir)
+                .join("svc-secondary.json")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn hosted_service_output_surfaces_stale_stored_placement_detail() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_service_config(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let secondary_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let secondary_paths = RuntimePaths::for_machine(&secondary_runtime_root, "cloud-aws");
+        write_manifest(&secondary_paths, "cloud-aws", 2);
+
+        let guest_root = tempdir.path().join("guest-secondary");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let guest_socket = secondary_paths.guest_agent_socket.clone();
+        let guest_root_for_thread = guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&guest_socket, guest_root_for_thread)
+                .expect("guest agent should serve")
+        });
+        for _ in 0..100 {
+            if secondary_paths.guest_agent_socket.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let applied_config = start_named_live_hosted_servers(&config, &["aws-linux-node-b"])
+            .expect("secondary control plane should start");
+        let _applied = apply_machine_service(
+            &applied_config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "svc-stale",
+                kind: ServiceKind::Sandbox,
+                host_group: Some("aws-secondary"),
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+            },
+        )
+        .expect("secondary placement should succeed");
+
+        let stale_control_plane =
+            start_live_control_plane_with_bindings(&config, Vec::new())
+                .expect("stale control plane should start");
+        let mut stale_config = config.clone();
+        stale_config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{stale_control_plane}");
+
+        let listed = list_machine_services(&stale_config, tempdir.path(), "cloud-aws")
+            .expect("service list should still succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(listed[0].target_host_group.as_deref(), Some("aws-secondary"));
+        assert!(
+            listed[0]
+                .detail
+                .contains("no bound node-agent endpoint for it"),
+            "{}",
+            listed[0].detail
+        );
+
+        let status =
+            machine_service_status(&stale_config, tempdir.path(), "cloud-aws", "svc-stale")
+                .expect("service status should still succeed");
+        assert_eq!(status.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(status.target_host_group.as_deref(), Some("aws-secondary"));
+        assert!(
+            status.detail.contains("no bound node-agent endpoint for it"),
+            "{}",
+            status.detail
+        );
+
+        let stopped = stop_machine_service(&stale_config, tempdir.path(), "cloud-aws", "svc-stale")
+            .expect("service stop should return stored placement detail");
+        assert_eq!(stopped.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(stopped.target_host_group.as_deref(), Some("aws-secondary"));
+        assert!(
+            stopped
+                .detail
+                .contains("Stop request could not reach node 'aws-linux-node-b'"),
+            "{}",
+            stopped.detail
+        );
+        assert_eq!(stopped.desired_state, ServiceDesiredState::Active);
     }
 }

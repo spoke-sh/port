@@ -29,11 +29,12 @@ use tokio::net::TcpListener;
 
 use crate::{
     DetachedForwardLaunchRequest, GuestCopyRequest, GuestForwardRequest, GuestRequest,
-    LaunchMetadata, LaunchRequest, MachineRuntimeState, MachineStatus, RuntimePaths,
-    ServiceApplyRequest as RuntimeServiceApplyRequest, ServiceSecretBinding, StopResult,
-    apply_hosted_machine_service_live, copy_guest_file, copy_guest_via_endpoint,
-    delete_machine_secret_local, execute_guest_operation, hosted_placeholder_runtime_root,
-    launch_local_machine, list_detached_forwards, list_machine_secrets_local,
+    HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
+    MachineStatus, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
+    ServiceSecretBinding, StopResult, apply_hosted_machine_service_live, copy_guest_file,
+    copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
+    hosted_placeholder_runtime_root, hosted_stored_service_placements, launch_local_machine,
+    list_detached_forwards, list_machine_secrets_local,
     machine_monitor as runtime_machine_monitor, machine_status as runtime_machine_status,
     machine_top as runtime_machine_top, prepare_guest_forward, put_machine_secret_local,
     refresh_hosted_machine_service_list, refresh_hosted_machine_service_runtime,
@@ -661,17 +662,34 @@ async fn service_list(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
-        &state,
-        &headers,
-        &machine,
-        HostedNodeRoute::Service(HostedServiceRoute::List {
-            machine_name: machine.clone(),
-        }),
-        Method::GET,
-        None,
-    )
-    .await
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let route = HostedRouteContext::from_machine_summary(&summary);
+    let placements = match hosted_stored_service_placements(&state.inner.config, &machine, None) {
+        Ok(placements) => placements,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "control plane '{}' could not inspect stored service placement for machine '{}': {error}",
+                    state.inner.control_plane, machine
+                ),
+                Some(route),
+            );
+        }
+    };
+
+    let mut services = Vec::new();
+    for placement in placements {
+        services.push(refresh_or_stored_service_status(&state, &machine, placement).await);
+    }
+    services.sort_by(|left, right| left.name.cmp(&right.name));
+    json_response(StatusCode::OK, &HostedSuccess { route, result: services })
 }
 
 async fn service_status(
@@ -679,18 +697,57 @@ async fn service_status(
     Path((machine, service)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
-        &state,
-        &headers,
-        &machine,
-        HostedNodeRoute::Service(HostedServiceRoute::Status {
-            machine_name: machine.clone(),
-            service_name: service,
-        }),
-        Method::GET,
-        None,
-    )
-    .await
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let route = HostedRouteContext::from_machine_summary(&summary).with_service_name(service.clone());
+    let placements =
+        match hosted_stored_service_placements(&state.inner.config, &machine, Some(&service)) {
+            Ok(placements) => placements,
+            Err(error) => {
+                return error_response(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "control plane '{}' could not inspect stored placement for service '{}' on machine '{}': {error}",
+                        state.inner.control_plane, service, machine
+                    ),
+                    Some(route),
+                );
+            }
+        };
+    match placements.len() {
+        0 => error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "control plane '{}' could not find stored placement for service '{}' on machine '{}'. {}",
+                state.inner.control_plane, service, machine, summary.placement_detail
+            ),
+            Some(route),
+        ),
+        1 => {
+            let placement = placements.into_iter().next().expect("single placement must exist");
+            let response = refresh_or_stored_service_status(&state, &machine, placement).await;
+            json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: stored_service_route_context(&response),
+                    result: response,
+                },
+            )
+        }
+        _ => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' found multiple stored placements for service '{}' on machine '{}'",
+                state.inner.control_plane, service, machine
+            ),
+            Some(route),
+        ),
+    }
 }
 
 async fn service_command(
@@ -699,18 +756,108 @@ async fn service_command(
     headers: HeaderMap,
 ) -> Response {
     if let Some(service_name) = service.strip_suffix(":stop") {
-        return proxy_machine_route(
-            &state,
-            &headers,
+        if let Some(response) = authorize(&state, &headers) {
+            return response;
+        }
+        let summary = match resolve_summary(&state, &machine) {
+            Ok(summary) => summary,
+            Err(response) => return response,
+        };
+        let route =
+            HostedRouteContext::from_machine_summary(&summary).with_service_name(service_name.to_string());
+        let placements = match hosted_stored_service_placements(
+            &state.inner.config,
             &machine,
+            Some(service_name),
+        ) {
+            Ok(placements) => placements,
+            Err(error) => {
+                return error_response(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "control plane '{}' could not inspect stored placement for service '{}' on machine '{}': {error}",
+                        state.inner.control_plane, service_name, machine
+                    ),
+                    Some(route),
+                );
+            }
+        };
+        if placements.is_empty() {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                format!(
+                    "control plane '{}' could not find stored placement for service '{}' on machine '{}'. {}",
+                    state.inner.control_plane, service_name, machine, summary.placement_detail
+                ),
+                Some(route),
+            );
+        }
+        if placements.len() > 1 {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "control plane '{}' found multiple stored placements for service '{}' on machine '{}'",
+                    state.inner.control_plane, service_name, machine
+                ),
+                Some(route),
+            );
+        }
+
+        let placement = placements.into_iter().next().expect("single placement must exist");
+        let Some(node_name) = placement.status.node_name.clone() else {
+            return json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: stored_service_route_context(&placement.status),
+                    result: placement.status,
+                },
+            );
+        };
+        let Some(binding) = state.inner.node_bindings.get(&node_name) else {
+            let mut status = placement.status;
+            status.detail = format!(
+                "{} Stop request could not reach node '{}' because the control plane has no bound node-agent endpoint for it.",
+                status.detail, node_name
+            );
+            return json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: stored_service_route_context(&status),
+                    result: status,
+                },
+            );
+        };
+
+        let route_context = stored_service_route_context(&placement.status);
+        return match proxy_json::<HostedSuccess<crate::ServiceDefinitionStatus>>(
+            &state,
+            binding,
             HostedNodeRoute::Service(HostedServiceRoute::Stop {
                 machine_name: machine.clone(),
                 service_name: service_name.to_string(),
             }),
             Method::POST,
             None,
+            route_context.clone(),
         )
-        .await;
+        .await
+        {
+            Ok(success) => json_response(StatusCode::OK, &success),
+            Err(message) => {
+                let mut status = placement.status;
+                status.detail = format!(
+                    "{} Stop request could not refresh node '{}': {message}",
+                    status.detail, node_name
+                );
+                json_response(
+                    StatusCode::OK,
+                    &HostedSuccess {
+                        route: route_context,
+                        result: status,
+                    },
+                )
+            }
+        };
     }
 
     error_response(
@@ -728,6 +875,71 @@ async fn service_command(
             .with_service_name(service),
         ),
     )
+}
+
+fn stored_service_route_context(service: &crate::ServiceDefinitionStatus) -> HostedRouteContext {
+    HostedRouteContext {
+        control_plane: service.control_plane.clone(),
+        machine_name: Some(service.machine_name.clone()),
+        forward_name: None,
+        service_name: Some(service.name.clone()),
+        node_name: service.node_name.clone(),
+        candidate_nodes: Vec::new(),
+        host_groups: service.host_groups.clone(),
+        host_group_policies: service.host_group_policies.clone(),
+        rejected_nodes: BTreeMap::new(),
+        placement_detail: Some(service.detail.clone()),
+        runtime_root: service
+            .manifest_path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .map(std::path::Path::to_path_buf),
+        inventory_owner: Some(service.control.inventory_owner),
+        lifecycle_owner: Some(service.control.lifecycle_owner),
+        guest_broker: Some(service.control.guest_broker),
+    }
+}
+
+async fn refresh_or_stored_service_status(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    placement: HostedStoredServicePlacement,
+) -> crate::ServiceDefinitionStatus {
+    let Some(node_name) = placement.status.node_name.clone() else {
+        return placement.status;
+    };
+    let Some(binding) = state.inner.node_bindings.get(&node_name) else {
+        let mut status = placement.status;
+        status.detail = format!(
+            "{} Stored placement points at node '{}' but the control plane has no bound node-agent endpoint for it.",
+            status.detail, node_name
+        );
+        return status;
+    };
+
+    match proxy_json::<HostedSuccess<crate::ServiceDefinitionStatus>>(
+        state,
+        binding,
+        HostedNodeRoute::Service(HostedServiceRoute::Status {
+            machine_name: machine_name.to_string(),
+            service_name: placement.status.name.clone(),
+        }),
+        Method::GET,
+        None,
+        stored_service_route_context(&placement.status),
+    )
+    .await
+    {
+        Ok(success) => success.result,
+        Err(message) => {
+            let mut status = placement.status;
+            status.detail = format!(
+                "{} Stored placement on node '{}' could not be refreshed: {message}",
+                status.detail, node_name
+            );
+            status
+        }
+    }
 }
 
 async fn proxy_guest_route(

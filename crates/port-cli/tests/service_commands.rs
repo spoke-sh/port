@@ -206,6 +206,8 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(service_stdout.contains("kind: service"));
     assert!(service_stdout.contains("desired state: active"));
     assert!(service_stdout.contains("runtime state: running"));
+    assert!(service_stdout.contains("target host group: aws-builders"));
+    assert!(service_stdout.contains("scheduler: deterministic-first-fit"));
     assert!(
         service_stdout.contains("runtime record: ")
             && service_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
@@ -248,6 +250,7 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let list_stdout = String::from_utf8_lossy(&list.stdout);
     assert!(list_stdout.contains("name: api"));
     assert!(list_stdout.contains("name: buildbox"));
+    assert!(list_stdout.contains("target host group: aws-builders"));
 
     let status = port_command(&config_path)
         .arg("service")
@@ -263,6 +266,8 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(status_stdout.contains("guest broker: control-plane-node-agent-tunnel"));
     assert!(status_stdout.contains("service route: hosted-control-plane"));
     assert!(status_stdout.contains("runtime state: running"));
+    assert!(status_stdout.contains("target host group: aws-builders"));
+    assert!(status_stdout.contains("scheduler: deterministic-first-fit"));
     assert!(
         status_stdout.contains("runtime record: ")
             && status_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
@@ -282,6 +287,8 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let stop_stdout = String::from_utf8_lossy(&stop.stdout);
     assert!(stop_stdout.contains("desired state: stopped"));
     assert!(stop_stdout.contains("runtime state: stopped"));
+    assert!(stop_stdout.contains("target host group: aws-builders"));
+    assert!(stop_stdout.contains("scheduler: deterministic-first-fit"));
 
     let runtime_record = hosted_runtime_root.join("cloud-aws/services/runtime/api.json");
     let runtime_record_text =

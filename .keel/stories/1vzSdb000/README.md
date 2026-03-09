@@ -2,10 +2,11 @@
 id: 1vzSdb000
 title: Surface Placement State Through Canonical Service Commands
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-08T21:54:39
-updated_at: 2026-03-08T21:54:39
+updated_at: 2026-03-08T22:25:11
 scope: 1vzSbL000/1vzSc3000
+started_at: 2026-03-08T22:25:11
 ---
 
 # Surface Placement State Through Canonical Service Commands
