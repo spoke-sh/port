@@ -25,11 +25,11 @@ started_at: 2026-03-08T22:50:43
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 4/5 stories complete
+**Progress:** 5/5 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Publish Registered Hosted Machine Workflow](../../../../stories/1vzTSY000/README.md) | feat | backlog |
+| [Publish Registered Hosted Machine Workflow](../../../../stories/1vzTSY000/README.md) | feat | done |
 | [Define Registered Node Contract And State](../../../../stories/1vzTT1000/README.md) | feat | done |
 | [Implement Node Agent Registration Refresh](../../../../stories/1vzTTI000/README.md) | feat | done |
 | [Route Hosted Machine Launch Through Registered Nodes](../../../../stories/1vzTTJ000/README.md) | feat | done |

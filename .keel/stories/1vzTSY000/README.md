@@ -2,11 +2,12 @@
 id: 1vzTSY000
 title: Publish Registered Hosted Machine Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-08T22:47:18
-updated_at: 2026-03-09T00:03:28
+updated_at: 2026-03-09T00:11:49
 scope: 1vzTQB000/1vzTR9000
 started_at: 2026-03-09T00:03:28
+completed_at: 2026-03-09T00:11:49
 ---
 
 # Publish Registered Hosted Machine Workflow
