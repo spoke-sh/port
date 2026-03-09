@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use port_model::{
     ArtifactReference, ArtifactSelector, HostedApiIdentityContract, HostedAuthScheme,
     HostedGuestAttachContract, HostedMachineSummaryContract, HostedNodeRegistration,
-    HostedSchedulerPolicy, MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
+    HostedSchedulerPolicy, MachineArchitecture, MachineGuestBroker, MachineInventoryOwner,
+    MachineLifecycleOwner, PvmHostKitPackage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -220,6 +221,11 @@ pub enum HostedRegistrationRoute {
     Refresh { node_name: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HostedPreparationRoute {
+    PreparePvm { node_name: String },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostedArtifactRoute {
@@ -236,6 +242,7 @@ pub enum HostedControlPlaneRoute {
     DetachedForward(HostedDetachedForwardRoute),
     Service(HostedServiceRoute),
     Registration(HostedRegistrationRoute),
+    Preparation(HostedPreparationRoute),
 }
 
 impl HostedControlPlaneRoute {
@@ -249,6 +256,7 @@ impl HostedControlPlaneRoute {
             Self::DetachedForward(route) => detached_forward_route_path(route),
             Self::Service(route) => service_route_path(route),
             Self::Registration(route) => registration_route_path(route),
+            Self::Preparation(route) => preparation_route_path(route),
         }
     }
 }
@@ -378,6 +386,15 @@ pub struct HostedNodeRegistrationRequest {
     pub registration: HostedNodeRegistration,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedPreparePvmNodeRequest {
+    pub control_plane: String,
+    pub node_name: String,
+    pub architecture: MachineArchitecture,
+    pub provenance: String,
+    pub package: PvmHostKitPackage,
+}
+
 fn machine_route_path(route: &HostedMachineRoute) -> String {
     match route {
         HostedMachineRoute::List => String::from("/v1/machines"),
@@ -464,6 +481,14 @@ fn registration_route_path(route: &HostedRegistrationRoute) -> String {
     match route {
         HostedRegistrationRoute::Refresh { node_name } => {
             format!("/v1/nodes/{node_name}/registration")
+        }
+    }
+}
+
+fn preparation_route_path(route: &HostedPreparationRoute) -> String {
+    match route {
+        HostedPreparationRoute::PreparePvm { node_name } => {
+            format!("/v1/nodes/{node_name}/prepare-pvm")
         }
     }
 }
@@ -570,9 +595,10 @@ mod tests {
     use serde_json::to_value;
 
     use port_model::{
-        ArtifactReference, ArtifactSelector, ExecutionSubstrate, HostedNodeRegistration,
+        ArtifactReference, ArtifactSelector, ExecutionSubstrate, HostProvider,
+        HostedImportedNodeRecord, HostedNodeRegistration, HostedPvmHostKitPackageAttachment,
         HostedSchedulerPolicy, MachineArchitecture, MachineGuestBroker, MachineInventoryOwner,
-        MachineLifecycleOwner, PortConfig, ProtectionMode,
+        MachineLifecycleOwner, PortConfig, ProtectionMode, PvmHostKitPackage,
     };
 
     use super::{
@@ -580,8 +606,9 @@ mod tests {
         HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
         HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
         HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
-        HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
-        PORT_ARTIFACT_TRANSFER_HEADER, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedPreparationRoute, HostedPreparePvmNodeRequest, HostedRegistrationRoute,
+        HostedRouteContext, HostedServiceRoute, HostedSuccess, PORT_ARTIFACT_TRANSFER_HEADER,
+        PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -677,6 +704,13 @@ mod tests {
             })
             .path(),
             "/v1/nodes/aws-linux-node/registration"
+        );
+        assert_eq!(
+            HostedControlPlaneRoute::Preparation(HostedPreparationRoute::PreparePvm {
+                node_name: String::from("generic-linux-node"),
+            })
+            .path(),
+            "/v1/nodes/generic-linux-node/prepare-pvm"
         );
     }
 
@@ -871,6 +905,49 @@ mod tests {
         assert_eq!(success["result"]["endpoint"], "http://127.0.0.1:9001");
         assert_eq!(success["result"]["freshness"]["fresh_until"], 55);
         assert_eq!(success["result"]["host_groups"][0], "aws-builders");
+    }
+
+    #[test]
+    fn hosted_prepare_pvm_request_and_import_record_serialize_stably() {
+        let request = HostedPreparePvmNodeRequest {
+            control_plane: String::from("demo"),
+            node_name: String::from("generic-linux-node"),
+            architecture: MachineArchitecture::X86_64,
+            provenance: String::from("inventory-sync"),
+            package: PvmHostKitPackage {
+                name: String::from("firecracker-pvm-host-kit"),
+                version: String::from("2026.03"),
+                host_kernel_release: String::from("6.12.0-port-pvm"),
+                firecracker_build: String::from("v1.12.0-port-pvm"),
+            },
+        };
+        let body = to_value(&request).expect("prepare request should serialize");
+        assert_eq!(body["control_plane"], "demo");
+        assert_eq!(body["node_name"], "generic-linux-node");
+        assert_eq!(body["architecture"], "x86_64");
+        assert_eq!(body["package"]["name"], "firecracker-pvm-host-kit");
+
+        let record = HostedImportedNodeRecord {
+            provider: HostProvider::GenericLinux,
+            provenance: request.provenance.clone(),
+            imported_at: 42,
+            capability_summary: PortConfig::sample().nodes["generic-linux-node"]
+                .capabilities
+                .clone(),
+            pvm_host_kit_packages: vec![HostedPvmHostKitPackageAttachment {
+                architecture: request.architecture,
+                package: request.package.clone(),
+            }],
+        };
+        let success = to_value(HostedSuccess {
+            route: HostedRouteContext::default(),
+            result: record,
+        })
+        .expect("prepared record should serialize");
+        assert_eq!(
+            success["result"]["pvm_host_kit_packages"][0]["package"]["version"],
+            "2026.03"
+        );
     }
 
     #[test]

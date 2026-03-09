@@ -1329,6 +1329,12 @@ pub struct HostedPvmCapability {
     pub notes: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedPvmHostKitPackageAttachment {
+    pub architecture: MachineArchitecture,
+    pub package: PvmHostKitPackage,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PvmCapabilityState {
@@ -1369,6 +1375,8 @@ pub struct HostedImportedNodeRecord {
     pub provenance: String,
     pub imported_at: u64,
     pub capability_summary: HostedNodeCapabilities,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pvm_host_kit_packages: Vec<HostedPvmHostKitPackageAttachment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

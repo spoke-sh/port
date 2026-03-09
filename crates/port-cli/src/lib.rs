@@ -12,11 +12,12 @@ use port_agent_protocol::{
 };
 use port_model::{
     ExecutionSubstrate, HostConnection, HostedSchedulerPolicy, MachineArchitecture, PortConfig,
-    ProtectionMode,
+    ProtectionMode, PvmHostKitPackage,
 };
 use port_runtime::{
     ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
-    GuestRequest, HostedNodeBinding, LaunchRequest, NodeAgentServeRequest,
+    GuestRequest, HostedNodeBinding, HostedPvmNodePrepareRequest, LaunchRequest,
+    NodeAgentServeRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -595,6 +596,27 @@ pub enum ControlPlaneCommand {
         #[arg(long = "node-binding")]
         node_bindings: Vec<HostedNodeBindingArg>,
     },
+    #[command(
+        about = "Prepare one hosted node for Firecracker/PVM by attaching a canonical host-kit package through the control plane"
+    )]
+    PreparePvmNode {
+        #[arg(long)]
+        control_plane: String,
+        #[arg(long)]
+        node: String,
+        #[arg(long, value_enum, default_value_t = ArchitectureArg::X86_64)]
+        architecture: ArchitectureArg,
+        #[arg(long, default_value = "operator-prepare")]
+        provenance: String,
+        #[arg(long)]
+        package_name: String,
+        #[arg(long)]
+        package_version: String,
+        #[arg(long)]
+        host_kernel_release: String,
+        #[arg(long)]
+        firecracker_build: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -721,6 +743,47 @@ fn run_control_plane(command: ControlPlaneCommand, config: PortConfig) -> Result
                 node_bindings: node_bindings.into_iter().map(|binding| binding.0).collect(),
             },
         ),
+        ControlPlaneCommand::PreparePvmNode {
+            control_plane,
+            node,
+            architecture,
+            provenance,
+            package_name,
+            package_version,
+            host_kernel_release,
+            firecracker_build,
+        } => {
+            let record = port_runtime::prepare_hosted_pvm_node(
+                &config,
+                HostedPvmNodePrepareRequest {
+                    control_plane,
+                    node_name: node.clone(),
+                    architecture: architecture.into(),
+                    provenance,
+                    package: PvmHostKitPackage {
+                        name: package_name,
+                        version: package_version,
+                        host_kernel_release,
+                        firecracker_build,
+                    },
+                },
+            )?;
+            let prepared = record
+                .pvm_host_kit_packages
+                .iter()
+                .map(|attachment| {
+                    format!(
+                        "{:?}/{}@{}",
+                        attachment.architecture,
+                        attachment.package.name,
+                        attachment.package.version
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("prepared hosted pvm node: {node} ({prepared})");
+            Ok(())
+        }
     }
 }
 

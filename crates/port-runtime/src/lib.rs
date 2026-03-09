@@ -19,13 +19,16 @@ use port_agent_protocol::{
 use port_hosted_protocol::{
     HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedDetachedForwardStartRequest,
     HostedDetachedForwardState, HostedDetachedForwardStatus as HostedDetachedForwardStatusContract,
-    HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
+    HostedDetachedForwardStopResult, HostedError, HostedPreparePvmNodeRequest, HostedRouteContext,
+    HostedSuccess,
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
-    HostedApiIdentityContract, HostedArtifactIdentityContract, HostedSchedulerPolicy,
-    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmHostKit,
+    HostedApiIdentityContract, HostedArtifactIdentityContract, HostedImportedNodeRecord,
+    HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy,
+    MachineArchitecture, MachineControlContract, PortConfig, ProtectionMode, PvmCapabilityState,
+    PvmHostKit, PvmHostKitPackage,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -40,6 +43,15 @@ pub use hosted_control_plane::{
     ControlPlaneServeRequest, HostedNodeBinding, NodeAgentServeRequest, serve_control_plane,
     serve_node_agent,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedPvmNodePrepareRequest {
+    pub control_plane: String,
+    pub node_name: String,
+    pub architecture: MachineArchitecture,
+    pub provenance: String,
+    pub package: PvmHostKitPackage,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DoctorReport {
@@ -3506,8 +3518,211 @@ struct HostedMachineResolution {
     status: MachineStatus,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct HostedImportedInventoryStateFile {
+    control_plane: String,
+    nodes: BTreeMap<String, HostedImportedNodeRecord>,
+}
+
 fn hosted_placeholder_runtime_root(control_plane: &str) -> PathBuf {
     PathBuf::from(".port/hosted").join(control_plane)
+}
+
+fn hosted_imported_inventory_state_path(control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root(control_plane).join("imported-inventory.json")
+}
+
+fn read_hosted_imported_inventory_state(
+    control_plane: &str,
+) -> Result<Option<HostedImportedInventoryStateFile>> {
+    let path = hosted_imported_inventory_state_path(control_plane);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let state: HostedImportedInventoryStateFile = read_json_file(&path)?;
+    if state.control_plane != control_plane {
+        bail!(
+            "imported inventory state '{}' belongs to control plane '{}', not '{}'",
+            path.display(),
+            state.control_plane,
+            control_plane
+        );
+    }
+
+    Ok(Some(state))
+}
+
+fn hosted_control_plane_for_node<'a>(config: &'a PortConfig, node_name: &str) -> Option<&'a str> {
+    let node = config.nodes.get(node_name)?;
+    let host = config.hosts.get(&node.host)?;
+    match &host.connection {
+        HostConnection::HostedControlPlane { control_plane } => Some(control_plane.as_str()),
+        HostConnection::Local => None,
+    }
+}
+
+fn hosted_imported_pvm_package_attachment(
+    imported: &HostedImportedNodeRecord,
+    architecture: MachineArchitecture,
+) -> Option<&HostedPvmHostKitPackageAttachment> {
+    imported
+        .pvm_host_kit_packages
+        .iter()
+        .find(|attachment| attachment.architecture == architecture)
+}
+
+fn hosted_pvm_preparation_hint(
+    control_plane: Option<&str>,
+    node_name: &str,
+    architecture: MachineArchitecture,
+) -> String {
+    let mut command = String::from("port control-plane prepare-pvm-node");
+    if let Some(control_plane) = control_plane {
+        command.push_str(&format!(" --control-plane {control_plane}"));
+    }
+    command.push_str(&format!(
+        " --node {node_name} --architecture {}",
+        architecture_dir(architecture)
+    ));
+    format!("Prepare the node with `{command}`.")
+}
+
+fn effective_config_with_hosted_imported_inventory(config: &PortConfig) -> Result<PortConfig> {
+    let mut effective = config.clone();
+    let mut imported_by_control_plane =
+        BTreeMap::<String, Option<HostedImportedInventoryStateFile>>::new();
+
+    for node_name in config.nodes.keys() {
+        let Some(control_plane) = hosted_control_plane_for_node(config, node_name) else {
+            continue;
+        };
+
+        if !imported_by_control_plane.contains_key(control_plane) {
+            imported_by_control_plane.insert(
+                control_plane.to_string(),
+                read_hosted_imported_inventory_state(control_plane).with_context(|| {
+                    format!(
+                        "failed to load imported hosted inventory for control plane '{}'",
+                        control_plane
+                    )
+                })?,
+            );
+        }
+
+        let Some(Some(imported_state)) = imported_by_control_plane.get(control_plane) else {
+            continue;
+        };
+        let Some(imported) = imported_state.nodes.get(node_name) else {
+            continue;
+        };
+        if let Some(node) = effective.nodes.get_mut(node_name) {
+            node.capabilities = imported.capability_summary.clone();
+        }
+    }
+
+    Ok(effective)
+}
+
+fn hosted_pvm_lane_check_from_imported_record(
+    node_name: &str,
+    control_plane: Option<&str>,
+    lane: &HostedPvmCapability,
+    imported: &HostedImportedNodeRecord,
+) -> DoctorCheck {
+    let name = format!(
+        "pvm:{node_name}:{}:host-kit-contract",
+        architecture_dir(lane.architecture)
+    );
+
+    match lane.state {
+        PvmCapabilityState::ResearchOnly => DoctorCheck {
+            name,
+            ok: false,
+            required: false,
+            detail: format!(
+                "Hosted node '{}' imported from '{}' still marks the {} PVM lane as research-only. {}",
+                node_name,
+                imported.provenance,
+                architecture_dir(lane.architecture),
+                hosted_pvm_preparation_hint(control_plane, node_name, lane.architecture)
+            ),
+        },
+        PvmCapabilityState::Planned => DoctorCheck {
+            name,
+            ok: false,
+            required: false,
+            detail: format!(
+                "Hosted node '{}' remains PVM-planned in imported inventory from '{}'. {}",
+                node_name,
+                imported.provenance,
+                hosted_pvm_preparation_hint(control_plane, node_name, lane.architecture)
+            ),
+        },
+        PvmCapabilityState::Ready => match lane.host_kit.as_ref() {
+            Some(host_kit) => {
+                if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
+                    DoctorCheck {
+                        name,
+                        ok: false,
+                        required: false,
+                        detail: format!(
+                            "Hosted node '{}' imported from '{}' advertises an invalid prepared PVM host-kit contract: {}",
+                            node_name, imported.provenance, detail
+                        ),
+                    }
+                } else {
+                    match hosted_imported_pvm_package_attachment(imported, lane.architecture) {
+                        Some(attachment) if attachment.package == host_kit.package => DoctorCheck {
+                            name,
+                            ok: true,
+                            required: false,
+                            detail: format!(
+                                "Hosted node '{}' imported from '{}' is prepared with package {}@{} and {}",
+                                node_name,
+                                imported.provenance,
+                                attachment.package.name,
+                                attachment.package.version,
+                                pvm_host_kit_contract_detail(host_kit)
+                            ),
+                        },
+                        Some(attachment) => DoctorCheck {
+                            name,
+                            ok: false,
+                            required: false,
+                            detail: format!(
+                                "Hosted node '{}' imported from '{}' advertises prepared package {}@{}, but the ready host-kit contract resolves to {}@{}.",
+                                node_name,
+                                imported.provenance,
+                                attachment.package.name,
+                                attachment.package.version,
+                                host_kit.package.name,
+                                host_kit.package.version
+                            ),
+                        },
+                        None => DoctorCheck {
+                            name,
+                            ok: false,
+                            required: false,
+                            detail: format!(
+                                "Hosted node '{}' imported from '{}' advertises a ready PVM lane without a matching host-kit package attachment.",
+                                node_name, imported.provenance
+                            ),
+                        },
+                    }
+                }
+            }
+            None => DoctorCheck {
+                name,
+                ok: false,
+                required: false,
+                detail: format!(
+                    "Hosted node '{}' imported from '{}' advertises a ready PVM lane without a host-kit contract.",
+                    node_name, imported.provenance
+                ),
+            },
+        },
+    }
 }
 
 fn status_priority(state: MachineRuntimeState) -> u8 {
@@ -3523,15 +3738,16 @@ fn hosted_machine_resolution(
     config: &PortConfig,
     machine_name: &str,
 ) -> Result<HostedMachineResolution> {
-    let control = config.machine_control_contract(machine_name)?;
-    let hosted_identity = config
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let control = effective_config.machine_control_contract(machine_name)?;
+    let hosted_identity = effective_config
         .hosted_api_identity_contract(machine_name)?
         .ok_or_else(|| {
             anyhow!("machine '{machine_name}' does not target a hosted control plane")
         })?;
     let placeholder_root = hosted_placeholder_runtime_root(&hosted_identity.control_plane);
 
-    let summary = match config.hosted_machine_summary_contract(machine_name) {
+    let summary = match effective_config.hosted_machine_summary_contract(machine_name) {
         Ok(Some(summary)) => summary,
         Ok(None) => {
             return Ok(HostedMachineResolution {
@@ -3593,7 +3809,7 @@ fn hosted_machine_resolution(
         });
     }
 
-    let inventory = config.hosted_inventory_contract()?;
+    let inventory = effective_config.hosted_inventory_contract()?;
     if let Some(placement) = hosted_stored_machine_placement(config, machine_name)? {
         let paths = RuntimePaths::for_machine(&placement.runtime_root, machine_name);
         let placement_detail = placement
@@ -3713,16 +3929,17 @@ fn resolve_targeted_hosted_service_runtime(
     machine_name: &str,
     host_group: &str,
 ) -> Result<ResolvedMachineRuntime> {
-    let control = config.machine_control_contract(machine_name)?;
-    let hosted_identity = config
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let control = effective_config.machine_control_contract(machine_name)?;
+    let hosted_identity = effective_config
         .hosted_api_identity_contract(machine_name)?
         .ok_or_else(|| {
             anyhow!("machine '{machine_name}' does not target a hosted control plane")
         })?;
-    let summary = config
+    let summary = effective_config
         .hosted_machine_summary_contract(machine_name)?
         .ok_or_else(|| anyhow!("machine '{machine_name}' does not resolve to hosted inventory"))?;
-    let inventory = config.hosted_inventory_contract()?;
+    let inventory = effective_config.hosted_inventory_contract()?;
     let group = inventory.host_groups.get(host_group).ok_or_else(|| {
         anyhow!(
             "host group '{}' is not declared for hosted service placement on machine '{}'",
@@ -3835,6 +4052,33 @@ fn hosted_client_for_control_plane(
     })
 }
 
+pub fn prepare_hosted_pvm_node(
+    config: &PortConfig,
+    request: HostedPvmNodePrepareRequest,
+) -> Result<HostedImportedNodeRecord> {
+    let client = hosted_client_for_control_plane(config, &request.control_plane)?;
+    let response: HostedSuccess<HostedImportedNodeRecord> = client
+        .execute_json(
+            client
+                .inventory()
+                .prepare_pvm_node(HostedPreparePvmNodeRequest {
+                    control_plane: request.control_plane.clone(),
+                    node_name: request.node_name.clone(),
+                    architecture: request.architecture,
+                    provenance: request.provenance,
+                    package: request.package,
+                }),
+        )
+        .map_err(|error| {
+            anyhow!(
+                "failed to prepare hosted pvm node '{}' through control plane '{}': {error}",
+                request.node_name,
+                request.control_plane
+            )
+        })?;
+    Ok(response.result)
+}
+
 fn hosted_control_plane_names(config: &PortConfig) -> Vec<String> {
     let mut names = config
         .machines
@@ -3878,15 +4122,16 @@ fn hosted_control_plane_launch_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
 ) -> Result<LaunchMetadata> {
-    let machine = config
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let machine = effective_config
         .machines
         .get(request.machine_name)
         .with_context(|| format!("unknown machine '{}'", request.machine_name))?;
-    config
+    effective_config
         .hosts
         .get(&machine.host)
         .with_context(|| format!("unknown host '{}'", machine.host))?;
-    config
+    effective_config
         .hosted_api_identity_contract(request.machine_name)?
         .ok_or_else(|| {
             anyhow!(
@@ -3894,7 +4139,7 @@ fn hosted_control_plane_launch_machine(
                 request.machine_name
             )
         })?;
-    if let Some(summary) = config.hosted_machine_summary_contract(request.machine_name)? {
+    if let Some(summary) = effective_config.hosted_machine_summary_contract(request.machine_name)? {
         if summary.candidate_nodes.is_empty() {
             bail!(
                 "hosted machine '{}' is not placeable through control plane '{}': {}",
@@ -4644,8 +4889,38 @@ fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
 
     for (node_name, node) in &config.nodes {
+        let hosted_control_plane = hosted_control_plane_for_node(config, node_name);
+        let imported_record = if let Some(control_plane) = hosted_control_plane {
+            match read_hosted_imported_inventory_state(control_plane) {
+                Ok(Some(state)) => state.nodes.get(node_name).cloned(),
+                Ok(None) => None,
+                Err(error) => {
+                    for lane in &node.capabilities.pvm_lanes {
+                        if lane.state == PvmCapabilityState::ResearchOnly {
+                            continue;
+                        }
+                        checks.push(DoctorCheck {
+                            name: format!(
+                                "pvm:{node_name}:{}:host-kit-contract",
+                                architecture_dir(lane.architecture)
+                            ),
+                            ok: false,
+                            required: false,
+                            detail: format!(
+                                "Hosted control plane '{}' could not load imported inventory state for node '{}': {error}",
+                                control_plane, node_name
+                            ),
+                        });
+                    }
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+
         for lane in &node.capabilities.pvm_lanes {
-            if lane.state == port_model::PvmCapabilityState::ResearchOnly {
+            if lane.state == PvmCapabilityState::ResearchOnly {
                 continue;
             }
 
@@ -4653,6 +4928,19 @@ fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
                 "pvm:{node_name}:{}:host-kit-contract",
                 architecture_dir(lane.architecture)
             );
+            if let Some(imported) = imported_record.as_ref() {
+                if let Some(imported_lane) =
+                    imported.capability_summary.pvm_lane_for(lane.architecture)
+                {
+                    checks.push(hosted_pvm_lane_check_from_imported_record(
+                        node_name,
+                        hosted_control_plane,
+                        imported_lane,
+                        imported,
+                    ));
+                    continue;
+                }
+            }
             match lane.host_kit.as_ref() {
                 Some(host_kit) => {
                     if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
@@ -4680,8 +4968,14 @@ fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
                     ok: false,
                     required: false,
                     detail: format!(
-                        "Hosted node '{}' advertises a {:?} PVM lane without a host-kit contract.",
-                        node_name, lane.state
+                        "Hosted node '{}' advertises a {:?} PVM lane without a host-kit contract. {}",
+                        node_name,
+                        lane.state,
+                        hosted_pvm_preparation_hint(
+                            hosted_control_plane,
+                            node_name,
+                            lane.architecture
+                        )
                     ),
                 }),
             }
@@ -6941,8 +7235,8 @@ mod tests {
         HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
     };
     use port_model::{
-        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostedSchedulerPolicy,
-        MachineArchitecture, PortConfig, ProtectionMode,
+        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostProvider, HostedImportedNodeRecord,
+        HostedSchedulerPolicy, MachineArchitecture, PortConfig, ProtectionMode, PvmCapabilityState,
     };
     use tokio::net::TcpListener;
 
@@ -8406,6 +8700,61 @@ exec sleep 30
     }
 
     #[test]
+    fn doctor_report_uses_imported_prepared_hosted_pvm_state() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+
+        let config = PortConfig::sample();
+        let host_kit = config.hosts["local"].firecracker.pvm_lanes[0]
+            .host_kit
+            .clone()
+            .expect("local x86_64 PVM lane should define a host-kit");
+        let mut imported_summary = config.nodes["generic-linux-node"].capabilities.clone();
+        imported_summary.pvm_lanes[0].state = PvmCapabilityState::Ready;
+        imported_summary.pvm_lanes[0].host_kit = Some(host_kit.clone());
+        write_imported_inventory_state(
+            "demo",
+            BTreeMap::from([(
+                String::from("generic-linux-node"),
+                HostedImportedNodeRecord {
+                    provider: HostProvider::GenericLinux,
+                    provenance: String::from("inventory/generic-linux-node.json"),
+                    imported_at: 1_700_000_123,
+                    capability_summary: imported_summary,
+                    pvm_host_kit_packages: vec![port_model::HostedPvmHostKitPackageAttachment {
+                        architecture: MachineArchitecture::X86_64,
+                        package: host_kit.package.clone(),
+                    }],
+                },
+            )]),
+        );
+
+        let report = collect_doctor_report_with_facts(
+            Some(&config),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: String::from("x86_64"),
+                proc_cmdline: Some(String::from("console=ttyS0 pti=off")),
+                pvm_firecracker_binary: Some(PathBuf::from("/usr/bin/firecracker-pvm")),
+            },
+        );
+
+        let generic = report
+            .checks
+            .iter()
+            .find(|check| check.name == "pvm:generic-linux-node:x86_64:host-kit-contract")
+            .expect("generic hosted host-kit contract check should exist");
+
+        assert!(generic.ok);
+        assert!(generic.detail.contains("inventory/generic-linux-node.json"));
+        assert!(generic.detail.contains("firecracker-pvm-host-kit@2026.03"));
+        assert!(generic.detail.contains("6.12.0-port-pvm"));
+        assert!(generic.detail.contains("v1.12.0-port-pvm"));
+
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
     fn list_machines_reports_running_stale_and_malformed_runtime_entries() {
         let tempdir = tempdir().expect("tempdir should exist");
         let running_paths = RuntimePaths::for_machine(tempdir.path(), "running");
@@ -8798,6 +9147,7 @@ exec sleep 30
                         provenance: String::from("inventory-sync"),
                         imported_at: 100,
                         capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                        pvm_host_kit_packages: Vec::new(),
                     },
                 ),
                 (
@@ -8807,6 +9157,7 @@ exec sleep 30
                         provenance: String::from("inventory-sync"),
                         imported_at: 200,
                         capability_summary: config.nodes["aws-linux-node-b"].capabilities.clone(),
+                        pvm_host_kit_packages: Vec::new(),
                     },
                 ),
                 (
@@ -8816,6 +9167,7 @@ exec sleep 30
                         provenance: String::from("inventory-sync"),
                         imported_at: 300,
                         capability_summary: config.nodes["aws-linux-node-c"].capabilities.clone(),
+                        pvm_host_kit_packages: Vec::new(),
                     },
                 ),
             ]),

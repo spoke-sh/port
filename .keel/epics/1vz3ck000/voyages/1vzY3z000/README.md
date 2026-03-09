@@ -25,12 +25,12 @@ started_at: 2026-03-09T03:46:18
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Define Pvm Host Kit Package Contract](../../../../stories/1vzY51000/README.md) | feat | done |
-| [Add Pvm Artifact Mobility Workflow](../../../../stories/1vzY52000/README.md) | feat | backlog |
+| [Add Pvm Artifact Mobility Workflow](../../../../stories/1vzY52000/README.md) | feat | done |
 | [Implement Hosted Pvm Node Preparation](../../../../stories/1vzY6F000/README.md) | feat | backlog |
 | [Publish Pvm Host Kit Operator Workflow](../../../../stories/1vzY6J000/README.md) | feat | backlog |
 <!-- END GENERATED -->

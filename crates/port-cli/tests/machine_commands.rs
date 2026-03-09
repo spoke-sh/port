@@ -104,6 +104,64 @@ fn spawn_hosted_server_harness_preserving_state(
     )
 }
 
+fn spawn_hosted_server_harness_for_node(
+    server_config_path: &Path,
+    node_name: &str,
+    node_addr: &str,
+    control_plane_addr: &str,
+    extra_node_env: &[(&str, &Path)],
+) -> HostedServerHarness {
+    let lock = hosted_server_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cleanup_hosted_registration_state();
+
+    let mut control_command = Command::new(port_bin());
+    control_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(server_config_path)
+        .arg("control-plane")
+        .arg("serve")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--bind")
+        .arg(control_plane_addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let control_plane = ChildGuard::spawn("control-plane", control_command);
+    wait_for_tcp(control_plane_addr);
+
+    let mut node_command = Command::new(port_bin());
+    node_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg(node_name)
+        .arg("--bind")
+        .arg(node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    for (name, value) in extra_node_env {
+        node_command.env(name, value);
+    }
+    let node = ChildGuard::spawn("node-agent", node_command);
+    wait_for_tcp(node_addr);
+
+    HostedServerHarness {
+        _lock: lock,
+        _control_plane: control_plane,
+        _node: node,
+    }
+}
+
 fn spawn_hosted_server_harness_with_cleanup(
     server_config_path: &Path,
     node_addr: &str,
@@ -430,6 +488,42 @@ fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Pat
         .path = guest_path;
 }
 
+fn write_fake_pvm_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
+    let kernel_path = root.join("pvm-vmlinux");
+    let guest_path = root.join("pvm-rootfs.ext4");
+    fs::write(&kernel_path, b"fake-pvm-kernel").expect("pvm kernel should write");
+    fs::write(&guest_path, b"fake-pvm-rootfs").expect("pvm guest should write");
+
+    config
+        .artifacts
+        .kernels
+        .get_mut("demo-kernel")
+        .expect("demo-kernel should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Pvm
+        })
+        .expect("pvm kernel variant should exist")
+        .path = kernel_path;
+    config
+        .artifacts
+        .guest_images
+        .get_mut("demo-guest")
+        .expect("demo-guest should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Pvm
+        })
+        .expect("pvm guest variant should exist")
+        .path = guest_path;
+}
+
 #[test]
 fn cli_help_mentions_native_avf_workflow_and_boundaries() {
     let output = Command::new(port_bin())
@@ -746,6 +840,7 @@ fn cli_machine_status_surfaces_hosted_fleet_node_state() {
             provenance: String::from("imported/aws-linux-node-c.json"),
             imported_at: 1_700_000_123,
             capability_summary: imported_only_node.capabilities.clone(),
+            pvm_host_kit_packages: Vec::new(),
         },
     );
     write_imported_inventory_state("demo", imported_inventory);
@@ -956,6 +1051,157 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
     );
     assert_eq!(
         placement_state["machines"]["cloud-aws"]["runtime_root"].as_str(),
+        Some(hosted_runtime_root.to_string_lossy().as_ref())
+    );
+
+    let _ = Command::new("kill").arg(pid.to_string()).status();
+}
+
+#[test]
+fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/generic-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/generic-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = generic_hosted_config();
+    server_config
+        .machines
+        .get_mut("cloud-generic")
+        .expect("cloud-generic should exist")
+        .protection_mode = ProtectionMode::Pvm;
+    server_config
+        .nodes
+        .get_mut("generic-linux-node")
+        .expect("generic-linux-node should exist")
+        .runtime_root = hosted_runtime_root.clone();
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_fake_pvm_firecracker_artifacts(&mut server_config, temp.path());
+    let host_kit = server_config
+        .hosts
+        .get_mut("local")
+        .expect("local host should exist")
+        .firecracker
+        .pvm_lanes
+        .iter_mut()
+        .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+        .expect("local x86_64 PVM lane should exist")
+        .host_kit
+        .as_mut()
+        .expect("local x86_64 PVM lane should define a host-kit");
+    host_kit.requires_custom_host_kernel = false;
+    host_kit.host_boot_args.clear();
+    host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+    let package = host_kit.package.clone();
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("generic-linux-node")
+        .expect("generic-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker-pvm");
+    let _servers = spawn_hosted_server_harness_for_node(
+        &server_config_path,
+        "generic-linux-node",
+        &node_addr,
+        &control_plane_addr,
+        &[("PORT_TEST_CLI_PVM_FIRECRACKER", fake_binary.as_path())],
+    );
+
+    let prepare = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("control-plane")
+        .arg("prepare-pvm-node")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--node")
+        .arg("generic-linux-node")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--provenance")
+        .arg("inventory/generic-linux-node.json")
+        .arg("--package-name")
+        .arg(&package.name)
+        .arg("--package-version")
+        .arg(&package.version)
+        .arg("--host-kernel-release")
+        .arg(&package.host_kernel_release)
+        .arg("--firecracker-build")
+        .arg(&package.firecracker_build)
+        .output()
+        .expect("prepare-pvm-node command should run");
+    assert!(prepare.status.success(), "{prepare:?}");
+    let prepare_stdout = String::from_utf8_lossy(&prepare.stdout);
+    assert!(prepare_stdout.contains("prepared hosted pvm node: generic-linux-node"));
+    assert!(prepare_stdout.contains("firecracker-pvm-host-kit@2026.03"));
+
+    let imported_inventory: serde_json::Value = serde_json::from_slice(
+        &fs::read(".port/hosted/demo/imported-inventory.json")
+            .expect("imported inventory state should exist"),
+    )
+    .expect("imported inventory state should decode");
+    assert_eq!(
+        imported_inventory["nodes"]["generic-linux-node"]["provenance"].as_str(),
+        Some("inventory/generic-linux-node.json")
+    );
+    assert_eq!(
+        imported_inventory["nodes"]["generic-linux-node"]["capability_summary"]["pvm_lanes"][0]
+            ["state"]
+            .as_str(),
+        Some("ready")
+    );
+
+    let launch = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(launch_stdout.contains("launched machine: cloud-generic"));
+    assert!(launch_stdout.contains(fake_binary.to_string_lossy().as_ref()));
+
+    let pid_path = hosted_runtime_root.join("cloud-generic/firecracker.pid");
+    let pid = fs::read_to_string(&pid_path)
+        .expect("pid file should exist")
+        .trim()
+        .parse::<u32>()
+        .expect("pid should parse");
+    assert!(
+        hosted_runtime_root
+            .join("cloud-generic/manifest.json")
+            .exists()
+    );
+
+    let placement_state: serde_json::Value = serde_json::from_slice(
+        &fs::read(".port/hosted/demo/machine-placements.json")
+            .expect("machine placement state should exist"),
+    )
+    .expect("machine placement state should decode");
+    assert_eq!(
+        placement_state["machines"]["cloud-generic"]["node_name"].as_str(),
+        Some("generic-linux-node")
+    );
+    assert_eq!(
+        placement_state["machines"]["cloud-generic"]["runtime_root"].as_str(),
         Some(hosted_runtime_root.to_string_lossy().as_ref())
     );
 

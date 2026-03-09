@@ -18,14 +18,15 @@ use port_hosted_protocol::{
     HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedDetachedForwardStartRequest,
     HostedError, HostedGuestRoute, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
     HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
-    HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute, HostedSuccess,
-    PORT_ARTIFACT_TRANSFER_HEADER,
+    HostedPreparePvmNodeRequest, HostedRegistrationRoute, HostedRouteContext, HostedServiceRoute,
+    HostedSuccess, PORT_ARTIFACT_TRANSFER_HEADER,
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostProvider,
     HostedAuthTokenSource, HostedImportedNodeRecord, HostedMachineSummaryContract,
-    HostedNodeRegistration, HostedRegisteredNodeContract, MachineArchitecture, PortConfig,
-    ProtectionMode, hosted_artifact_store_path,
+    HostedNodeRegistration, HostedPvmHostKitPackageAttachment, HostedRegisteredNodeContract,
+    MachineArchitecture, PortConfig, ProtectionMode, PvmCapabilityState, PvmHostKit,
+    PvmHostKitPackage, hosted_artifact_store_path,
 };
 use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
@@ -38,8 +39,8 @@ use crate::{
     HostedFleetFreshnessState, HostedFleetNodeStatus, HostedFleetRoutingEligibility,
     HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
     MachineStatus, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
-    ServiceSecretBinding, StopResult, apply_hosted_machine_service_live, copy_guest_file,
-    copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
+    ServiceSecretBinding, StopResult, apply_hosted_machine_service_live, architecture_dir,
+    copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
     hosted_placeholder_runtime_root, hosted_stored_service_placements, launch_local_machine,
     list_detached_forwards, list_machine_secrets_local, machine_monitor as runtime_machine_monitor,
     machine_monitor_report, machine_status as runtime_machine_status,
@@ -141,6 +142,7 @@ struct NodeAgentState {
 struct NodeAgentStateInner {
     config: PortConfig,
     node_name: String,
+    control_plane: String,
     runtime_root: std::path::PathBuf,
     bind: String,
     token: String,
@@ -159,6 +161,7 @@ struct ImportedNodeRecord {
     provenance: String,
     imported_at: u64,
     capability_summary: port_model::HostedNodeCapabilities,
+    pvm_host_kit_packages: Vec<HostedPvmHostKitPackageAttachment>,
 }
 
 #[derive(Debug, Clone)]
@@ -557,6 +560,259 @@ fn imported_provider_label(provider: HostProvider) -> String {
         .to_string()
 }
 
+fn normalized_preparation_architecture(
+    architecture: MachineArchitecture,
+) -> Result<MachineArchitecture> {
+    match architecture {
+        MachineArchitecture::Native => {
+            bail!("hosted PVM preparation requires an explicit architecture, not 'native'");
+        }
+        other => Ok(other),
+    }
+}
+
+fn canonical_pvm_host_kit(
+    config: &PortConfig,
+    architecture: MachineArchitecture,
+    package: &PvmHostKitPackage,
+) -> Option<PvmHostKit> {
+    config
+        .hosts
+        .values()
+        .flat_map(|host| host.firecracker.pvm_lanes.iter())
+        .filter_map(|lane| lane.host_kit.clone())
+        .find(|host_kit| host_kit.host_architecture == architecture && host_kit.package == *package)
+        .or_else(|| {
+            config
+                .nodes
+                .values()
+                .flat_map(|node| node.capabilities.pvm_lanes.iter())
+                .filter_map(|lane| lane.host_kit.clone())
+                .find(|host_kit| {
+                    host_kit.host_architecture == architecture && host_kit.package == *package
+                })
+        })
+}
+
+fn imported_capability_summary_conflict(
+    path: &PathBuf,
+    node_name: &str,
+    detail: impl Into<String>,
+) -> anyhow::Error {
+    anyhow!(
+        "imported inventory state at '{}' for node '{}' conflicts on capability_summary: {}",
+        path.display(),
+        node_name,
+        detail.into()
+    )
+}
+
+fn imported_pvm_attachment_for_architecture<'a>(
+    attachments: &'a [HostedPvmHostKitPackageAttachment],
+    architecture: MachineArchitecture,
+) -> Option<&'a HostedPvmHostKitPackageAttachment> {
+    attachments
+        .iter()
+        .find(|attachment| attachment.architecture == architecture)
+}
+
+fn validate_imported_pvm_capability_summary(
+    config: &PortConfig,
+    path: &PathBuf,
+    node_name: &str,
+    configured: &port_model::HostedNodeContract,
+    imported: &HostedImportedNodeRecord,
+) -> Result<()> {
+    let mut seen_attachment_architectures = BTreeSet::new();
+    for attachment in &imported.pvm_host_kit_packages {
+        let architecture =
+            normalized_preparation_architecture(attachment.architecture).map_err(|_| {
+                imported_capability_summary_conflict(
+                    path,
+                    node_name,
+                    "PVM host-kit attachments must declare an explicit architecture",
+                )
+            })?;
+        if !seen_attachment_architectures.insert(architecture_dir(architecture).to_string()) {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "duplicate PVM host-kit attachments are not permitted for architecture '{}'",
+                    architecture_dir(architecture)
+                ),
+            ));
+        }
+    }
+
+    for lane in &imported.capability_summary.pvm_lanes {
+        if configured.capabilities.pvm_lanes.contains(lane) {
+            if let Some(attachment) = imported_pvm_attachment_for_architecture(
+                &imported.pvm_host_kit_packages,
+                lane.architecture,
+            ) {
+                let Some(host_kit) = lane.host_kit.as_ref() else {
+                    return Err(imported_capability_summary_conflict(
+                        path,
+                        node_name,
+                        format!(
+                            "PVM lane '{}' declares an attachment but no host-kit contract",
+                            architecture_dir(lane.architecture)
+                        ),
+                    ));
+                };
+                if host_kit.package != attachment.package {
+                    return Err(imported_capability_summary_conflict(
+                        path,
+                        node_name,
+                        format!(
+                            "PVM lane '{}' host-kit package does not match the imported attachment",
+                            architecture_dir(lane.architecture)
+                        ),
+                    ));
+                }
+            }
+            continue;
+        }
+
+        let Some(configured_lane) = configured.capabilities.pvm_lane_for(lane.architecture) else {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "PVM lane '{}' is not permitted by the configured inventory contract",
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        };
+        if configured_lane.state == PvmCapabilityState::ResearchOnly {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "PVM lane '{}' remains research-only in the configured inventory contract",
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        }
+        if lane.state != PvmCapabilityState::Ready {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "PVM lane '{}' may only diverge from configured state when promoted to ready",
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        }
+        let Some(host_kit) = lane.host_kit.as_ref() else {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "ready PVM lane '{}' must declare a host-kit contract",
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        };
+        let Some(attachment) = imported_pvm_attachment_for_architecture(
+            &imported.pvm_host_kit_packages,
+            lane.architecture,
+        ) else {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "ready PVM lane '{}' must declare a matching imported host-kit attachment",
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        };
+        if attachment.package != host_kit.package {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "ready PVM lane '{}' host-kit package does not match the imported attachment",
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        }
+        let Some(canonical_host_kit) =
+            canonical_pvm_host_kit(config, lane.architecture, &attachment.package)
+        else {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "no canonical PVM host-kit contract exists for package '{}@{}' on architecture '{}'",
+                    attachment.package.name,
+                    attachment.package.version,
+                    architecture_dir(lane.architecture)
+                ),
+            ));
+        };
+        if *host_kit != canonical_host_kit {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "ready PVM lane '{}' does not match the canonical host-kit contract for package '{}@{}'",
+                    architecture_dir(lane.architecture),
+                    attachment.package.name,
+                    attachment.package.version
+                ),
+            ));
+        }
+    }
+
+    for attachment in &imported.pvm_host_kit_packages {
+        let architecture =
+            normalized_preparation_architecture(attachment.architecture).map_err(|_| {
+                imported_capability_summary_conflict(
+                    path,
+                    node_name,
+                    "PVM host-kit attachments must declare an explicit architecture",
+                )
+            })?;
+        let Some(lane) = imported.capability_summary.pvm_lane_for(architecture) else {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "imported host-kit attachment '{}' for architecture '{}' has no matching capability_summary lane",
+                    attachment.package.name,
+                    architecture_dir(architecture)
+                ),
+            ));
+        };
+        let Some(host_kit) = lane.host_kit.as_ref() else {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "imported host-kit attachment '{}' for architecture '{}' requires a matching host-kit contract",
+                    attachment.package.name,
+                    architecture_dir(architecture)
+                ),
+            ));
+        };
+        if host_kit.package != attachment.package {
+            return Err(imported_capability_summary_conflict(
+                path,
+                node_name,
+                format!(
+                    "imported host-kit attachment '{}' for architecture '{}' does not match the capability_summary host-kit package",
+                    attachment.package.name,
+                    architecture_dir(architecture)
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn imported_inventory_records(
     config: &PortConfig,
     path: &PathBuf,
@@ -622,7 +878,29 @@ fn imported_inventory_records(
         }
         if !imported
             .capability_summary
-            .is_subset_of(&configured.capabilities)
+            .providers
+            .iter()
+            .all(|provider| configured.capabilities.providers.contains(provider))
+            || !imported
+                .capability_summary
+                .platforms
+                .iter()
+                .all(|platform| configured.capabilities.platforms.contains(platform))
+            || !imported
+                .capability_summary
+                .substrates
+                .iter()
+                .all(|substrate| configured.capabilities.substrates.contains(substrate))
+            || !imported
+                .capability_summary
+                .architectures
+                .iter()
+                .all(|architecture| configured.capabilities.architectures.contains(architecture))
+            || !imported
+                .capability_summary
+                .protection_modes
+                .iter()
+                .all(|mode| configured.capabilities.protection_modes.contains(mode))
         {
             bail!(
                 "imported inventory state at '{}' for node '{}' conflicts on capability_summary with the configured inventory contract",
@@ -630,6 +908,7 @@ fn imported_inventory_records(
                 node_name
             );
         }
+        validate_imported_pvm_capability_summary(config, path, node_name, configured, imported)?;
         records.insert(
             node_name.clone(),
             ImportedNodeRecord {
@@ -638,6 +917,7 @@ fn imported_inventory_records(
                 provenance: imported.provenance.clone(),
                 imported_at: imported.imported_at,
                 capability_summary: imported.capability_summary.clone(),
+                pvm_host_kit_packages: imported.pvm_host_kit_packages.clone(),
             },
         );
     }
@@ -770,6 +1050,7 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
             "/v1/nodes/{node}/registration",
             post(node_registration_refresh),
         )
+        .route("/v1/nodes/{node}/prepare-pvm", post(prepare_pvm_node))
         .route(
             "/v1/artifacts:push",
             post(artifact_push).layer(DefaultBodyLimit::disable()),
@@ -1136,16 +1417,9 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
 
     let mut machines = Vec::new();
     for machine_name in state.inner.config.machines.keys() {
-        let Ok(Some(summary)) = state
-            .inner
-            .config
-            .hosted_machine_summary_contract(machine_name)
-        else {
+        let Ok(summary) = resolve_summary(&state, machine_name) else {
             continue;
         };
-        if summary.control_plane != state.inner.control_plane {
-            continue;
-        }
         match resolve_machine_binding(&state, &summary) {
             Ok((Some(binding), route, None)) => {
                 let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
@@ -1545,6 +1819,61 @@ async fn machine_command(
             ..HostedRouteContext::default()
         }),
     )
+}
+
+async fn prepare_pvm_node(
+    State(state): State<ControlPlaneState>,
+    Path(node_name): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let route = HostedRouteContext {
+        control_plane: Some(state.inner.control_plane.clone()),
+        node_name: Some(node_name.clone()),
+        ..HostedRouteContext::default()
+    };
+    let request: HostedPreparePvmNodeRequest = match serde_json::from_slice(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' received invalid hosted PVM preparation JSON: {error}",
+                    state.inner.control_plane
+                ),
+                Some(route),
+            );
+        }
+    };
+    if request.control_plane != state.inner.control_plane {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted PVM preparation request targets control plane '{}', not '{}'",
+                request.control_plane, state.inner.control_plane
+            ),
+            Some(route),
+        );
+    }
+    if request.node_name != node_name {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted PVM preparation request targets node '{}', not '{}'",
+                request.node_name, node_name
+            ),
+            Some(route),
+        );
+    }
+
+    match prepare_pvm_import_record(&state, request) {
+        Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
+        Err(response) => response,
+    }
 }
 
 async fn guest_exec(
@@ -2451,9 +2780,8 @@ fn resolve_summary(
     state: &ControlPlaneState,
     machine: &str,
 ) -> Result<HostedMachineSummaryContract, Response> {
-    let summary = state
-        .inner
-        .config
+    let effective_config = effective_control_plane_config(state)?;
+    let summary = effective_config
         .hosted_machine_summary_contract(machine)
         .map_err(|error| {
             error_response(
@@ -2496,6 +2824,338 @@ fn resolve_summary(
     }
 
     Ok(summary)
+}
+
+fn prepare_pvm_import_record(
+    state: &ControlPlaneState,
+    request: HostedPreparePvmNodeRequest,
+) -> Result<HostedImportedNodeRecord, Response> {
+    let architecture =
+        normalized_preparation_architecture(request.architecture).map_err(|error| {
+            error_response(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "control plane '{}' cannot prepare node '{}': {error}",
+                    state.inner.control_plane, request.node_name
+                ),
+                Some(HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    node_name: Some(request.node_name.clone()),
+                    ..HostedRouteContext::default()
+                }),
+            )
+        })?;
+    let inventory = state
+        .inner
+        .config
+        .hosted_inventory_contract()
+        .map_err(|error| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "control plane '{}' could not load hosted inventory while preparing node '{}': {error}",
+                    state.inner.control_plane, request.node_name
+                ),
+                Some(HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    node_name: Some(request.node_name.clone()),
+                    ..HostedRouteContext::default()
+                }),
+            )
+        })?;
+    let configured = inventory.nodes.get(&request.node_name).ok_or_else(|| {
+        error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "control plane '{}' does not declare hosted node '{}'",
+                state.inner.control_plane, request.node_name
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })?;
+    if configured.control_plane != state.inner.control_plane {
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            format!(
+                "hosted node '{}' belongs to control plane '{}', not '{}'",
+                request.node_name, configured.control_plane, state.inner.control_plane
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    }
+    let Some(configured_lane) = configured.capabilities.pvm_lane_for(architecture) else {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted node '{}' does not advertise a '{}' PVM lane",
+                request.node_name,
+                architecture_dir(architecture)
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    };
+    if configured_lane.state == PvmCapabilityState::ResearchOnly {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted node '{}' keeps '{}' PVM research-only and cannot be prepared",
+                request.node_name,
+                architecture_dir(architecture)
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    }
+    let Some(canonical_host_kit) =
+        canonical_pvm_host_kit(&state.inner.config, architecture, &request.package)
+    else {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "control plane '{}' does not know a canonical PVM host-kit package '{}@{}' for architecture '{}'",
+                state.inner.control_plane,
+                request.package.name,
+                request.package.version,
+                architecture_dir(architecture)
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    };
+
+    let configured_node = state
+        .inner
+        .config
+        .nodes
+        .get(&request.node_name)
+        .expect("configured hosted node should exist");
+    let configured_host = state
+        .inner
+        .config
+        .hosts
+        .get(&configured_node.host)
+        .expect("configured hosted node host should exist");
+    let provider = configured_host.provider;
+    let imported_at = current_unix_timestamp_seconds().map_err(|error| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "control plane '{}' could not timestamp hosted PVM preparation for node '{}': {error}",
+                state.inner.control_plane, request.node_name
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })?;
+    let mut next_state = state.inner.imported_inventory_state.read().map_err(|_| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "control plane '{}' could not read imported inventory state while preparing node '{}'",
+                state.inner.control_plane, request.node_name
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })?.clone();
+    let mut record = next_state
+        .nodes
+        .get(&request.node_name)
+        .cloned()
+        .unwrap_or_else(|| HostedImportedNodeRecord {
+            provider,
+            provenance: request.provenance.clone(),
+            imported_at,
+            capability_summary: configured.capabilities.clone(),
+            pvm_host_kit_packages: Vec::new(),
+        });
+    record.provider = provider;
+    record.provenance = request.provenance;
+    record.imported_at = imported_at;
+    if !record.capability_summary.is_populated() {
+        record.capability_summary = configured.capabilities.clone();
+    }
+    if let Some(lane) = record
+        .capability_summary
+        .pvm_lanes
+        .iter_mut()
+        .find(|lane| lane.architecture == architecture)
+    {
+        lane.state = PvmCapabilityState::Ready;
+        lane.host_kit = Some(canonical_host_kit.clone());
+    } else {
+        let mut lane = configured_lane.clone();
+        lane.state = PvmCapabilityState::Ready;
+        lane.host_kit = Some(canonical_host_kit.clone());
+        record.capability_summary.pvm_lanes.push(lane);
+    }
+    record
+        .pvm_host_kit_packages
+        .retain(|attachment| attachment.architecture != architecture);
+    record
+        .pvm_host_kit_packages
+        .push(HostedPvmHostKitPackageAttachment {
+            architecture,
+            package: canonical_host_kit.package.clone(),
+        });
+    next_state
+        .nodes
+        .insert(request.node_name.clone(), record.clone());
+
+    let imported_inventory = imported_inventory_records(
+        &state.inner.config,
+        &state.inner.imported_inventory_path,
+        &next_state,
+    )
+    .map_err(|error| {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "control plane '{}' could not prepare hosted PVM node '{}': {error}",
+                state.inner.control_plane, request.node_name
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })?;
+    persist_imported_inventory_state(&state.inner.imported_inventory_path, &next_state).map_err(
+        |error| {
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "control plane '{}' could not persist hosted PVM preparation for node '{}': {error}",
+                    state.inner.control_plane, request.node_name
+                ),
+                Some(HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    node_name: Some(request.node_name),
+                    ..HostedRouteContext::default()
+                }),
+            )
+        },
+    )?;
+    *state.inner.imported_inventory_state.write().map_err(|_| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "control plane '{}' could not update imported inventory state while preparing hosted node",
+                state.inner.control_plane
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })? = next_state;
+    *state.inner.imported_inventory.write().map_err(|_| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "control plane '{}' could not update imported inventory cache while preparing hosted node",
+                state.inner.control_plane
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })? = imported_inventory;
+
+    Ok(record)
+}
+
+fn effective_config_with_imported_inventory(
+    config: &PortConfig,
+    imported_inventory: &BTreeMap<String, ImportedNodeRecord>,
+) -> PortConfig {
+    let mut effective = config.clone();
+    for (node_name, imported) in imported_inventory {
+        if let Some(node) = effective.nodes.get_mut(node_name) {
+            node.capabilities = imported.capability_summary.clone();
+        }
+    }
+    effective
+}
+
+fn effective_control_plane_config(state: &ControlPlaneState) -> Result<PortConfig, Response> {
+    let imported_inventory = state.inner.imported_inventory.read().map_err(|_| {
+        error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "control plane '{}' could not read imported inventory cache",
+                state.inner.control_plane
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                ..HostedRouteContext::default()
+            }),
+        )
+    })?;
+    Ok(effective_config_with_imported_inventory(
+        &state.inner.config,
+        &imported_inventory,
+    ))
+}
+
+fn effective_node_agent_config(state: &NodeAgentState) -> Result<PortConfig, Response> {
+    let imported_inventory_path = imported_inventory_state_path(&state.inner.control_plane);
+    let imported_inventory_state = load_imported_inventory_state(
+        &imported_inventory_path,
+        &state.inner.control_plane,
+    )
+    .map_err(|error| {
+        error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' could not load imported inventory state for control plane '{}': {error}",
+                state.inner.node_name, state.inner.control_plane
+            ),
+            Some(node_route_context(state, None)),
+        )
+    })?;
+    let imported_inventory =
+        imported_inventory_records(&state.inner.config, &imported_inventory_path, &imported_inventory_state)
+            .map_err(|error| {
+                error_response(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "node '{}' could not validate imported inventory state for control plane '{}': {error}",
+                        state.inner.node_name, state.inner.control_plane
+                    ),
+                    Some(node_route_context(state, None)),
+                )
+            })?;
+    Ok(effective_config_with_imported_inventory(
+        &state.inner.config,
+        &imported_inventory,
+    ))
 }
 
 fn resolve_node_binding(
@@ -3154,22 +3814,32 @@ fn build_node_agent_state(
     config: PortConfig,
     request: NodeAgentServeRequest,
 ) -> Result<NodeAgentState> {
-    let runtime_root = config
-        .nodes
-        .get(&request.node_name)
-        .with_context(|| {
-            format!(
-                "unknown hosted node '{}' for node-agent serve",
-                request.node_name
-            )
-        })?
-        .runtime_root
-        .clone();
+    let node = config.nodes.get(&request.node_name).with_context(|| {
+        format!(
+            "unknown hosted node '{}' for node-agent serve",
+            request.node_name
+        )
+    })?;
+    let runtime_root = node.runtime_root.clone();
+    let host = config.hosts.get(&node.host).with_context(|| {
+        format!(
+            "hosted node '{}' references unknown host '{}'",
+            request.node_name, node.host
+        )
+    })?;
+    let HostConnection::HostedControlPlane { control_plane } = &host.connection else {
+        bail!(
+            "hosted node '{}' must use a hosted control-plane connection for node-agent serve",
+            request.node_name
+        );
+    };
+    let control_plane = control_plane.clone();
 
     Ok(NodeAgentState {
         inner: Arc::new(NodeAgentStateInner {
             config,
             node_name: request.node_name,
+            control_plane,
             runtime_root,
             bind: request.bind,
             token: request.token,
@@ -3953,9 +4623,8 @@ fn localize_machine_for_node(
     state: &NodeAgentState,
     machine_name: &str,
 ) -> Result<(PortConfig, HostedRouteContext), Response> {
-    let summary = state
-        .inner
-        .config
+    let effective_config = effective_node_agent_config(state)?;
+    let summary = effective_config
         .hosted_machine_summary_contract(machine_name)
         .map_err(|error| {
             error_response(
@@ -3996,7 +4665,7 @@ fn localize_machine_for_node(
         ));
     }
 
-    let mut localized = state.inner.config.clone();
+    let mut localized = effective_config;
     let host_name = localized
         .machines
         .get(machine_name)
@@ -4616,6 +5285,7 @@ mod tests {
                     provenance: String::from("inventory-sync"),
                     imported_at: 123,
                     capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                    pvm_host_kit_packages: Vec::new(),
                 },
             )]),
         };
@@ -4689,6 +5359,7 @@ mod tests {
                         provenance: String::from("inventory-sync"),
                         imported_at: 456,
                         capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                        pvm_host_kit_packages: Vec::new(),
                     },
                 )]),
             },
@@ -4743,6 +5414,7 @@ mod tests {
                         provenance: String::from("inventory-sync"),
                         imported_at: 789,
                         capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                        pvm_host_kit_packages: Vec::new(),
                     },
                 )]),
             },
@@ -5856,6 +6528,7 @@ mod tests {
                     provenance: String::from("inventory-sync"),
                     imported_at: 123,
                     capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                    pvm_host_kit_packages: Vec::new(),
                 },
             );
 

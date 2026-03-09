@@ -9,8 +9,8 @@ use port_hosted_protocol::{
     HostedArtifactRoute, HostedArtifactTransferRequest, HostedClientHeaders,
     HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedDetachedForwardStartRequest,
     HostedError, HostedGuestRoute, HostedGuestStreamProtocol, HostedGuestStreamRoute,
-    HostedGuestVerb, HostedMachineRoute, HostedRouteContext, HostedServiceRoute,
-    PORT_ARTIFACT_TRANSFER_HEADER,
+    HostedGuestVerb, HostedMachineRoute, HostedPreparationRoute, HostedPreparePvmNodeRequest,
+    HostedRouteContext, HostedServiceRoute, PORT_ARTIFACT_TRANSFER_HEADER,
 };
 use port_model::{
     HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
@@ -139,6 +139,11 @@ impl HostedClient {
     #[must_use]
     pub fn services(&self) -> ServiceClient<'_> {
         ServiceClient { client: self }
+    }
+
+    #[must_use]
+    pub fn inventory(&self) -> InventoryClient<'_> {
+        InventoryClient { client: self }
     }
 
     pub fn execute_json<T>(&self, request: HostedApiRequest) -> Result<T>
@@ -316,6 +321,10 @@ pub struct MachineClient<'a> {
     client: &'a HostedClient,
 }
 
+pub struct InventoryClient<'a> {
+    client: &'a HostedClient,
+}
+
 impl<'a> MachineClient<'a> {
     #[must_use]
     pub fn list(&self) -> HostedApiRequest {
@@ -378,6 +387,21 @@ impl<'a> MachineClient<'a> {
                 machine_name: machine_name.to_string(),
             }),
             None,
+        )
+    }
+}
+
+impl<'a> InventoryClient<'a> {
+    #[must_use]
+    pub fn prepare_pvm_node(&self, request: HostedPreparePvmNodeRequest) -> HostedApiRequest {
+        let node_name = request.node_name.clone();
+        self.client.request(
+            HttpMethod::Post,
+            HostedControlPlaneRoute::Preparation(HostedPreparationRoute::PreparePvm { node_name }),
+            Some(
+                serde_json::to_value(request)
+                    .expect("hosted pvm node prepare request should serialize"),
+            ),
         )
     }
 }
