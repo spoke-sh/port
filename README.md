@@ -301,7 +301,7 @@ port guest forward --machine <name> --listen <tcp-addr|unix:path> --target <tcp-
 port service secret put --machine <name> --name <secret> --value <value>
 port service secret list --machine <name>
 port service secret remove --machine <name> --name <secret>
-port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--secret <ENV=SECRET_NAME>]... -- <command...>
+port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--restart <never|on-failure|always>] [--health <none|command>] [--health-command <token>]... [--secret <ENV=SECRET_NAME>]... -- <command...>
 port service list --machine <name>
 port service status --machine <name> --name <name>
 port service stop --machine <name> --name <name>
@@ -589,7 +589,7 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve 
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
@@ -603,8 +603,8 @@ What operators should expect:
 - Both node agents register themselves with the control plane before placement
   starts; manual `--node-binding` is not the default operator path anymore.
 - `service list`, `status`, and `stop` surface the selected node, target host
-  group, scheduler, and runtime state through the same canonical service
-  output.
+  group, scheduler, restart/health state, secret-source provenance, and
+  runtime state through the same canonical service output.
 - If the control plane later loses the selected node binding, `service list`,
   `status`, and `stop` still surface the stored placement and explain the
   stale-binding failure instead of collapsing into a generic hosted error.
@@ -675,20 +675,34 @@ The launched-VM guest transport is now the canonical path for the guest CLI:
 
 The first service/sandbox surface builds on that same runtime ownership model:
 
-- `port service secret put|list|remove` stores machine-scoped secret references
-  under the resolved runtime owner.
+- `port service secret put|list|remove` stores machine-scoped secret metadata
+  plus the runtime-file backend under the resolved runtime owner.
 - `port service apply --kind service|sandbox` stores a guest command plus
-  secret bindings under the same runtime owner and, for hosted machines,
-  executes the resulting managed process through the live control-plane and
-  node-agent path instead of inventing a second hosted surface.
+  secret bindings, restart policy, and health policy under the same runtime
+  owner and, for hosted machines, executes the resulting managed process
+  through the live control-plane and node-agent path instead of inventing a
+  second hosted surface.
 - `port service list|status|stop` lets operators inspect or change the desired
   state for those definitions and surfaces the canonical runtime-state
-  contract, including the node-owned runtime record path.
+  contract, including restart count, health state, secret-source provenance,
+  and the node-owned runtime record path.
 - Managed guest-process `start|list|status|stop` is an internal runtime
   contract, not a second hosted-only CLI surface.
 - Restart policy, health checks, scheduler policy, and the first hardened
   runtime-owned secret backend now ship on the canonical `port service`
   surface; external secret-manager integrations remain follow-on work.
+
+Repository-local service reliability proof:
+
+```bash
+bash scripts/service-reliability-demo.sh
+```
+
+That proof script starts the repo-local hosted demo servers, stores a secret,
+applies a service with restart and health policy, waits for the first restart
+and unhealthy health check, flips the health marker, verifies the healthy
+status projection, and stops the workload through canonical `port service`
+verbs.
 
 ## SDK And API Clients
 

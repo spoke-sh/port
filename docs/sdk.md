@@ -45,8 +45,8 @@ Still planned:
 - retries and richer client policies on top of the shipped transport
 - generated or versioned external API packages beyond the in-repo Rust crate
 - advanced auth, RBAC, and multi-tenant concerns
-- restart policy, scheduler policy, health checks, and hardened secret
-  backends for hosted services and sandboxes
+- external secret-manager integrations and broader orchestration policy beyond
+  the shipped restart/health/runtime-file service contract
 
 ## Example
 

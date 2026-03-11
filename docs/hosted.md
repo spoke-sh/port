@@ -258,8 +258,8 @@ What this does not claim:
 - no scheduler behavior exists yet beyond the deterministic-first-fit contract
 - no autoscaling, retry policy, or broader placement product exists beyond the
   shipped explicit-node hosted launch path
-- no restart-policy, scheduler-policy, or hardened secret-backend product
-  exists yet for hosted services and sandboxes
+- external secret-manager integrations, multi-tenant isolation, and broader
+  hosted orchestration remain follow-on work for services and sandboxes
 - hosted `machine monitor` and `top` are runtime-inspection surfaces, not a
   full metrics or fleet-observability product yet
 
@@ -405,7 +405,7 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve 
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
@@ -416,13 +416,20 @@ Why this is the canonical workflow:
 - `service apply --host-group aws-secondary` targets the existing hosted
   inventory model instead of inventing a second scheduler command family.
 - The selected node remains visible through `service list`, `status`, and
-  `stop`, together with the target host group, scheduler, and runtime state.
+  `stop`, together with the target host group, scheduler, restart/health
+  state, secret-source provenance, and runtime state.
 - Both node agents register with the control plane before placement starts, so
   the service workflow now matches the same registered-node story as `machine
   list` and `machine status`.
 - If the selected node binding goes stale, the stored placement remains
   operator-visible through the same service commands so routing drift is not
   hidden behind a generic hosted control-plane failure.
+
+Repository-local proof:
+
+```bash
+bash scripts/service-reliability-demo.sh
+```
 
 Current hosted service limits:
 
@@ -657,7 +664,8 @@ the shared route and auth contract from `port-hosted-protocol`.
 - hosted `service secret` and `service apply|list|status|stop` are also
   config-backed and in-process; they persist spec state under the selected node
   `runtime_root`, execute managed guest processes through the live hosted
-  route, and expose the canonical runtime-state record path.
+  route, and expose restart/health state, secret-source provenance, and the
+  canonical runtime-state record path.
 - managed guest-process `start|list|status|stop` remains an internal guest and
   node runtime contract beneath the same canonical `port service` surface; it
   is not a hosted-only CLI family.

@@ -1,0 +1,195 @@
+---
+recorded_at: 2026-03-11T11:44:42.268811512-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && bash scripts/service-reliability-demo.sh'
+---
+workdir: /tmp/portsvc.Q07UL7
+server config: /tmp/portsvc.Q07UL7/server-port.toml
+client config: /tmp/portsvc.Q07UL7/client-port.toml
+
+service secret put:
+machine: cloud-aws
+secret: demo-token
+backend: runtime-file
+materialization: env
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+path: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/demo-token.json
+backend path: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/runtime-file/demo-token
+detail: stored secret metadata plus runtime-file backend under the resolved machine runtime; service execution now materializes the value through the same runtime owner
+
+service secret list:
+machine: cloud-aws
+secret: demo-token
+backend: runtime-file
+materialization: env
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+path: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/demo-token.json
+backend path: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/runtime-file/demo-token
+detail: secret metadata is available to service and sandbox bindings through the runtime-file backend
+
+service apply:
+machine: cloud-aws
+name: api
+kind: service
+desired state: active
+runtime state: running
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: on-failure
+health policy: command
+health command: /bin/test -f workspace/healthy
+manifest: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/definitions/api.json
+runtime record: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/runtime/api.json
+runtime pid: 1741915
+runtime exit code: (none)
+restart count: 0
+last exit code: (none)
+last exit detail: (none)
+health state: unhealthy
+health detail: health command exited with code 1
+stdout log: /run/port/services/api.stdout.log
+stderr log: /run/port/services/api.stderr.log
+command: /bin/sh -lc count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done
+secret bindings: API_TOKEN=demo-token
+secret sources: API_TOKEN<=demo-token via runtime-file/env @ /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/runtime-file/demo-token
+detail: managed process is running
+
+service status (unhealthy after restart):
+machine: cloud-aws
+name: api
+kind: service
+desired state: active
+runtime state: running
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: on-failure
+health policy: command
+health command: /bin/test -f workspace/healthy
+manifest: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/definitions/api.json
+runtime record: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/runtime/api.json
+runtime pid: 1742107
+runtime exit code: (none)
+restart count: 1
+last exit code: 23
+last exit detail: managed process exited with code 23
+health state: unhealthy
+health detail: health command exited with code 1
+stdout log: /run/port/services/api.stdout.log
+stderr log: /run/port/services/api.stderr.log
+command: /bin/sh -lc count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done
+secret bindings: API_TOKEN=demo-token
+secret sources: API_TOKEN<=demo-token via runtime-file/env @ /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/runtime-file/demo-token
+detail: managed process restarted after exit code 23
+
+service status (healthy):
+machine: cloud-aws
+name: api
+kind: service
+desired state: active
+runtime state: running
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: on-failure
+health policy: command
+health command: /bin/test -f workspace/healthy
+manifest: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/definitions/api.json
+runtime record: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/runtime/api.json
+runtime pid: 1742107
+runtime exit code: (none)
+restart count: 1
+last exit code: 23
+last exit detail: managed process exited with code 23
+health state: healthy
+health detail: (none)
+stdout log: /run/port/services/api.stdout.log
+stderr log: /run/port/services/api.stderr.log
+command: /bin/sh -lc count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done
+secret bindings: API_TOKEN=demo-token
+secret sources: API_TOKEN<=demo-token via runtime-file/env @ /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/runtime-file/demo-token
+detail: managed process restarted after exit code 23
+
+service stop:
+machine: cloud-aws
+name: api
+kind: service
+desired state: stopped
+runtime state: stopped
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: on-failure
+health policy: command
+health command: /bin/test -f workspace/healthy
+manifest: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/definitions/api.json
+runtime record: /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/runtime/api.json
+runtime pid: (none)
+runtime exit code: 0
+restart count: 1
+last exit code: 0
+last exit detail: managed process stopped
+health state: unknown
+health detail: (none)
+stdout log: /run/port/services/api.stdout.log
+stderr log: /run/port/services/api.stderr.log
+command: /bin/sh -lc count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done
+secret bindings: API_TOKEN=demo-token
+secret sources: API_TOKEN<=demo-token via runtime-file/env @ /tmp/portsvc.Q07UL7/hosted/aws-linux-node/cloud-aws/services/secrets/runtime-file/demo-token
+detail: managed process stopped
+
+current service reliability limits:
+- runtime-file is the shipped repo-local secret backend; external secret managers remain follow-on work
+- the demo keeps one hosted control plane and one node-agent in-process; no multi-tenant secret isolation ships yet
+- autoscaling, preemption, and broader orchestration remain out of scope for this workflow
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

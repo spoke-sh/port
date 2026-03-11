@@ -556,3 +556,10 @@ rootfs_read_only = false
 vsock_cid = 63
 control_port = 7000
 console_log = "runtime/cloud-azure/console.log"
+
+# Service reliability workflow (repo-local hosted proof):
+# export PORT_DEMO_TOKEN=demo-token
+# port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+# port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+# port --config examples/port.toml service status --machine cloud-aws --name api
+# port --config examples/port.toml service stop --machine cloud-aws --name api
