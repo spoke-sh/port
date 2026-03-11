@@ -19,7 +19,7 @@ its local Firecracker MVP:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - model and CLI/runtime changes for substrate-aware planning;
 - local runtime lifecycle inspection and stop behavior;
@@ -27,7 +27,7 @@ In scope:
 - artifact mobility contracts and docs;
 - support-matrix/help/documentation updates.
 
-Out of scope:
+### Out of Scope
 
 - shipping a complete PVM runtime;
 - shipping full AVF execution;

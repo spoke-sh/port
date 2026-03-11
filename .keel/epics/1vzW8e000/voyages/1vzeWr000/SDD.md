@@ -27,12 +27,12 @@ discoverable and explicit about prerequisites.
                     [OCI registry]
 ```
 
-In scope:
+### In Scope
 - artifact-store contract changes for `oci-registry`
 - runtime push and pull execution
 - doctor/help/example/just workflow publication
 
-Out of scope:
+### Out of Scope
 - in-process registry transport
 - signing, SBOMs, manifest lists, and deduplication
 - backend-specific CLI verbs

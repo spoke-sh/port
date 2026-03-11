@@ -17,13 +17,13 @@ with generic prerequisite language:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - `port --help` wording in `port-cli`;
 - README and operator docs that were changed by the help-example clarification;
 - verification proving absence of the nix-specific prescription.
 
-Out of scope:
+### Out of Scope
 
 - development-environment docs outside the help/example correction;
 - runtime behavior; and

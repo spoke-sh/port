@@ -37,7 +37,7 @@ The design adds three coordinated pieces:
    prepared x86_64 host kit              future PVM launch lane
 ```
 
-Out of scope:
+### Out of Scope
 
 - executing a real Firecracker/PVM launch
 - arm64 protected virtualization claims

@@ -2,27 +2,16 @@
 id: 1vz4Yn000
 ---
 
-# Hosted Control Plane And Operator Surface — Survey
+# Hosted Control Plane And Operator Surface — Evidence
 
 ## Sources
 
-- SlicerVM docs:
-  https://docs.slicervm.com/
-  https://docs.slicervm.com/getting-started/walkthrough/
-  https://docs.slicervm.com/reference/api/
-  https://docs.slicervm.com/tasks/monitoring/
-  https://docs.slicervm.com/tasks/pvm/
-- Apple AVF docs already landed in Port's current contract work:
-  [docs/avf.md](../../../docs/avf.md)
-- Port hosted and operator docs:
-  [README.md](../../README.md),
-  [docs/hosted.md](../../../docs/hosted.md),
-  [docs/cloud.md](../../../docs/cloud.md),
-  [docs/operators.md](../../../docs/operators.md)
-- Local codebase inspection:
-  [crates/port-cli/src/lib.rs](../../../crates/port-cli/src/lib.rs),
-  [crates/port-runtime/src/lib.rs](../../../crates/port-runtime/src/lib.rs),
-  [crates/port-model/src/lib.rs](../../../crates/port-model/src/lib.rs)
+| ID | Class | Provenance | Location | Observed / Published | Retrieved | Authority | Freshness | Notes |
+|----|-------|------------|----------|----------------------|-----------|-----------|-----------|-------|
+| SRC-01 | web | manual:web-search | https://docs.slicervm.com/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer docs show the broader hosted product surface Port is trying to sequence. |
+| SRC-02 | web | manual:web-search | https://docs.slicervm.com/reference/api/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer's API reference supports the need for an authenticated remote lifecycle surface. |
+| SRC-03 | manual | manual:doc-review | /home/alex/workspace/spoke-sh/port/docs/hosted.md | 2026-03-07 | 2026-03-07 | high | high | Port's hosted docs capture intent but not yet a productized remote control surface. |
+| SRC-04 | manual | manual:code-inspection | /home/alex/workspace/spoke-sh/port/crates/port-runtime/src/lib.rs | 2026-03-07 | 2026-03-07 | high | high | Local runtime inspection supports the finding that lifecycle and guest brokerage remain local-process owned. |
 
 ## Feasibility
 

@@ -24,14 +24,14 @@ boundary:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - guest-agent boot/init wiring inside the built guest image;
 - runtime transport selection and Firecracker vsock handshakes;
 - protocol changes required for streamed copy and proxy forwarding;
 - CLI/help/doc updates for the new live-VM behavior.
 
-Out of scope:
+### Out of Scope
 
 - Firecracker REST API support;
 - remote/cloud launch execution;

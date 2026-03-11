@@ -22,22 +22,30 @@ id: 1vz4Yn000
 
 ## Analysis
 
+### Findings
+
+- Hosted lifecycle control, API identity, and operator visibility are the next
+  highest-leverage gaps between Port's current state and a real hosted product
+  surface [SRC-01][SRC-03][SRC-04].
+- Auth, inventory, node ownership, and guest brokerage form the shared
+  foundation most downstream operator features depend on [SRC-02][SRC-04].
+
 ### Opportunity Cost
 
 The opportunity cost is delaying some user-visible operator ergonomics such as
 `top`, secrets, or service or sandbox workflows. That delay is justified
 because those features all become more coherent once Port has a real hosted
-control plane instead of a design-only hosted contract.
+control plane instead of a design-only hosted contract [SRC-01][SRC-03][SRC-04].
 
 ### Dependencies
 
 The next epic depends on:
 
-- one authenticated API identity model,
-- a node or host-group vocabulary,
-- hosted machine inventory and lifecycle contracts,
+- one authenticated API identity model [SRC-02][SRC-04],
+- a node or host-group vocabulary [SRC-01][SRC-02],
+- hosted machine inventory and lifecycle contracts [SRC-01][SRC-03][SRC-04],
 - and a guest-connect or bridge primitive that preserves the existing guest
-  protocol.
+  protocol [SRC-03][SRC-04].
 
 ### Alternatives Considered
 
@@ -45,19 +53,19 @@ Alternatives considered:
 
 - Expand more local-only operator verbs first:
   rejected because it would keep Port behind on the hosted product axis the
-  user explicitly prioritized.
+  user explicitly prioritized [SRC-01][SRC-03].
 - Implement a node agent before the authenticated API and inventory model:
   rejected because it risks inventing daemon semantics that later diverge from
-  the control plane.
+  the control plane [SRC-02][SRC-04].
 - Jump directly to secrets, services, or sandboxes:
   rejected because those features depend on the same hosted-control foundation
-  and would arrive on unstable ground.
+  and would arrive on unstable ground [SRC-01][SRC-02][SRC-04].
 
 ## Recommendation
 
-- [x] Proceed → create a hosted-control expansion epic immediately
-- [ ] Park → revisit later
-- [ ] Decline → document learnings
+- [x] Proceed → create a hosted-control expansion epic immediately [SRC-01][SRC-02][SRC-03][SRC-04]
+- [ ] Park → revisit later [SRC-03]
+- [ ] Decline → document learnings [SRC-04]
 
 Proceed with a hosted-control expansion epic whose first voyage establishes:
 
@@ -68,4 +76,4 @@ Proceed with a hosted-control expansion epic whose first voyage establishes:
 
 Then layer monitoring, secrets, services, sandboxes, detached forwards,
 Unix-socket forwarding, and SDK work on top of that foundation instead of
-trying to land all of them in the same first slice.
+trying to land all of them in the same first slice [SRC-01][SRC-02][SRC-03][SRC-04].

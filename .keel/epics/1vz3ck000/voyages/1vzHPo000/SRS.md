@@ -10,7 +10,7 @@ selection and placement contract across local and hosted Port surfaces
 This voyage turns the existing PVM foundation into the first executable runtime
 and placement contract.
 
-In scope:
+### In Scope
 
 - represent x86_64 PVM readiness explicitly in Port's machine, host, and hosted
   node contracts
@@ -21,7 +21,7 @@ In scope:
 - publish the resulting local and hosted operator workflows in canonical CLI and
   docs
 
-Out of scope:
+### Out of Scope
 
 - a fully shipped `firecracker-pvm` host package for every target platform
 - claiming `aarch64` Firecracker/PVM runtime support

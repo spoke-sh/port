@@ -15,14 +15,14 @@ surfaces where placement landed or why it failed.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - registration state stored by the control plane
 - node-agent registration and refresh behavior
 - machine placement through registered hosted nodes
 - operator-visible placement detail in `port machine` output and docs
 
-Out of scope:
+### Out of Scope
 
 - full cluster management or autoscaling
 - richer fleet scoring and rebalance policy

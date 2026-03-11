@@ -17,14 +17,14 @@ evaluation. The design is intentionally small:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - `flake.nix` package selection for `devShells.default`,
 - Darwin evaluation proof,
 - Linux shell preservation proof,
 - minimal operator messaging for the macOS boundary.
 
-Out of scope:
+### Out of Scope
 
 - AVF runtime execution,
 - macOS local Firecracker launch,

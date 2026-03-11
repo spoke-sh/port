@@ -5,8 +5,14 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
+    sift = {
+      url = "github:rupurt/sift";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+      inputs.flake-utils.follows = "flake-utils";
+    };
     keel = {
-      url = "git+ssh://git@github.com/rupurt/keel.git";
+      url = "github:spoke-sh/keel";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -18,6 +24,7 @@
     nixpkgs,
     rust-overlay,
     flake-utils,
+    sift,
     keel,
   }:
     flake-utils.lib.eachDefaultSystem (system:
@@ -29,6 +36,7 @@
         };
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
+        siftPkg = sift.packages.${system}.sift;
         keelPkg = keel.packages.${system}.keel;
         sharedInputs = [
           rust
@@ -36,6 +44,7 @@
           pkgs.oras
           pkgs.cargo-nextest
           pkgs.cargo-llvm-cov
+          siftPkg
           keelPkg
           pkgs.curl
         ];

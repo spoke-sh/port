@@ -31,6 +31,31 @@ Port still cannot:
 
 We need the next executable split, not more placeholder scope.
 
+## Context
+
+This bearing started after the first hosted-control and substrate foundations
+had landed, but before Port had any real executable PVM or macOS runtime lane.
+The board needed a decision on how to split the next delivery program so Linux
+cost-control work and macOS operator work could advance without diluting each
+other.
+
+## Objectives
+
+- Decide whether the next execution work should split into separate Linux PVM
+  and AVF programs.
+- Define the smallest credible `x86_64` PVM host-kit and hosted-launch program.
+- Define the smallest real AVF runtime program that still preserves Port's
+  canonical lifecycle and guest verbs.
+
+## Scope
+
+- In scope: `x86_64` PVM host-kit delivery, prepared-node hosted launch, AVF
+  runtime delivery on macOS, and arm64 cost-control positioning relative to
+  those lanes.
+- Out of scope: implementing the full host kit, claiming immediate arm64
+  Firecracker/PVM support, or collapsing Linux and macOS runtime work back into
+  one generic queue.
+
 ## Success Criteria
 
 How will we know if this research was valuable?
@@ -40,11 +65,20 @@ How will we know if this research was valuable?
 - [x] The outcome names the next epics or voyages needed to resume execution
   immediately instead of leaving the board empty.
 
-## Open Questions
+## Research Questions
 
 - Should Port pursue arm64 cost control through Firecracker/PVM, or through
   standard virtualization on native arm64 hosts?
-- What is the smallest shippable x86_64 PVM program beyond the current
+- What is the smallest shippable `x86_64` PVM program beyond the current
   admission and docs foundation?
 - What is the smallest real AVF program that preserves Port's canonical
   lifecycle and guest verbs on macOS?
+
+## Open Questions
+
+- What packaging boundary will make the first PVM host kit portable across
+  prepared Linux nodes?
+- How much hosted-control durability must land before prepared-node launch is
+  worth productizing?
+- Should the first AVF implementation use direct Rust bindings or a narrower
+  helper boundary?

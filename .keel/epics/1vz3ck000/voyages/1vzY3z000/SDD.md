@@ -31,14 +31,14 @@ The design keeps one canonical Port control model:
           prepared host kit             hosted operator
 ```
 
-In scope:
+### In Scope
 
 - PVM host-kit package metadata and validation
 - PVM artifact mobility on canonical Port commands
 - hosted node-preparation/import and readiness advertisement
 - operator docs and proof
 
-Out of scope:
+### Out of Scope
 
 - new guest protocol work
 - `aarch64` Firecracker/PVM runtime claims

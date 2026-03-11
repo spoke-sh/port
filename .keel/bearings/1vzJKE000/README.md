@@ -3,6 +3,7 @@ id: 1vzJKE000
 index: 5
 title: Executable Pvm And Avf Lanes
 status: laid
+epic: 1vzJKE000
 created_at: 2026-03-08T11:58:02
 laid_at: 2026-03-08T12:02:25
 ---
@@ -16,7 +17,7 @@ See [BRIEF.md](BRIEF.md) for research details.
 <!-- BEGIN DOCUMENTS -->
 | Document | Description |
 |----------|-------------|
-| [BRIEF.md](BRIEF.md) | Research hypothesis, problem space, success criteria, and open questions |
-| [SURVEY.md](SURVEY.md) | Findings, constraints, and evaluated alternatives |
-| [ASSESSMENT.md](ASSESSMENT.md) | Recommendation and downstream impact |
+| [BRIEF.md](BRIEF.md) | Framing brief covering the hypothesis, problem space, success criteria, and open questions |
+| [EVIDENCE.md](EVIDENCE.md) | Cited research sources, synthesized findings, and unresolved unknowns |
+| [ASSESSMENT.md](ASSESSMENT.md) | Impact scoring, tradeoff analysis, and the final recommendation |
 <!-- END DOCUMENTS -->

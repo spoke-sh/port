@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Define a hosted node registration contract and persisted
   registration state for the control plane.
@@ -17,7 +17,7 @@ In scope:
 - [SCOPE-04] Surface registered-node and placement detail through canonical
   machine output and docs/help.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-05] Autoscaling, fleet rebalance, or weighted/spread placement.
 - [SCOPE-06] Full node health scoring, restart automation, or reconciliation

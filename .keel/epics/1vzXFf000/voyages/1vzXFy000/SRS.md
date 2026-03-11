@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Admit `standard` provider-backed Firecracker machines onto
   registered hosted nodes using the current control-plane and node-agent
@@ -16,7 +16,7 @@ In scope:
 - [SCOPE-03] Publish operator-facing docs, help text, and command proof for the
   shipped hosted standard-lane workflow.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-04] Direct SSH orchestration or agentless remote launch.
 - [SCOPE-05] Cloud Hypervisor, OCI artifact transport, or new hypervisor work.

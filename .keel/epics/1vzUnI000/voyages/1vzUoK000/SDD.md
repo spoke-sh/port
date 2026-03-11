@@ -17,14 +17,14 @@ repo-local demo.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - persisted hosted node registry state and freshness metadata
 - node-agent registration refresh against that persistent store
 - imported fleet inventory materialization into the hosted control-plane view
 - canonical operator visibility for persisted/merged fleet state
 
-Out of scope:
+### Out of Scope
 
 - autoscaling, rebalancing, or richer placement policy
 - live per-provider discovery backends for all clouds

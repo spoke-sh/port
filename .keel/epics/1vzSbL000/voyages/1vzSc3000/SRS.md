@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Define host-group and scheduler-policy contracts in the shared
   model, sample config, and hosted inventory/state surfaces.
@@ -18,7 +18,7 @@ In scope:
 - [SCOPE-04] Publish help, docs, and proof for the first multi-node hosted
   operator workflow and the remaining limits after this slice.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-05] Autoscaling, fleet rebalancing, spread/anti-affinity, or weighted
   placement.

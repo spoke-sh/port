@@ -7,7 +7,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Persist hosted node registration and freshness state under the
   control plane.
@@ -18,7 +18,7 @@ In scope:
 - [SCOPE-04] Surface persisted registration, freshness, and imported inventory
   through canonical operator-visible fleet or machine output and docs.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-05] Autoscaling, rebalancing, or new scheduler policies beyond the
   current deterministic-first-fit contract.

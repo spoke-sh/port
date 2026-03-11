@@ -14,14 +14,14 @@ console or transport metadata.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - AVF local driver selection and macOS doctor checks
 - canonical machine lifecycle for AVF-backed local VMs
 - guest attach transport mapping and console/log capture contract
 - operator docs and proof commands for the first local macOS lane
 
-Out of scope:
+### Out of Scope
 
 - hosted macOS nodes
 - AVF directory sharing or Rosetta convenience workflows beyond explicit docs

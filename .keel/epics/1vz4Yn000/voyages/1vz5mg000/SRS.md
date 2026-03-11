@@ -24,7 +24,7 @@
 - [SCOPE-06] Publish supported SDK and API client surfaces for hosted machine,
   guest, and service operations once the runtime interfaces stabilize.
 
-Out of scope:
+### Out of Scope
 
 - full multi-tenant auth and RBAC
 - generalized scheduler policy beyond the existing node and host-group model

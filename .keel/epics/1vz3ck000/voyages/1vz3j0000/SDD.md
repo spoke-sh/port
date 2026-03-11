@@ -20,7 +20,7 @@ them without breaking the existing local Linux workflow:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - substrate driver architecture and migration seams,
 - hosted inventory/lifecycle contract over drivers,
@@ -28,7 +28,7 @@ In scope:
 - AVF execution and guest-transport contract,
 - story decomposition and verification planning.
 
-Out of scope:
+### Out of Scope
 
 - fully shipping PVM runtime execution,
 - fully shipping AVF execution,

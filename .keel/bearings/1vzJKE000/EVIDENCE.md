@@ -2,7 +2,7 @@
 id: 1vzJKE000
 ---
 
-# Executable Pvm And Avf Lanes — Survey
+# Executable Pvm And Avf Lanes — Evidence
 
 ## Market Research
 
@@ -119,9 +119,11 @@ real hosted Linux cost-control story and a first-class macOS story.
 
 ## Sources
 
-- Firecracker upstream repository: https://github.com/firecracker-microvm/firecracker
-- Apple Virtualization framework docs: https://developer.apple.com/documentation/virtualization/
-- Actuated requirements: https://docs.actuated.com/tasks/bring-your-own-cloud/
-- Actuated hosted runners overview: https://docs.actuated.com/tasks/self-hosted-runners/
-- Port PVM contract: /home/alex/workspace/spoke-sh/port/docs/pvm.md
-- Port AVF contract: /home/alex/workspace/spoke-sh/port/docs/avf.md
+| ID | Class | Provenance | Location | Observed / Published | Retrieved | Authority | Freshness | Notes |
+|----|-------|------------|----------|----------------------|-----------|-----------|-----------|-------|
+| SRC-01 | web | manual:web-search | https://github.com/firecracker-microvm/firecracker | 2026-03-08 | 2026-03-08 | high | high | Firecracker upstream remains KVM-centered, supporting the need for Port-owned PVM host-kit work. |
+| SRC-02 | web | manual:web-search | https://developer.apple.com/documentation/virtualization/ | 2026-03-08 | 2026-03-08 | high | high | Apple's Virtualization framework provides the primitives needed for a real AVF runtime lane. |
+| SRC-03 | web | manual:web-search | https://docs.actuated.com/tasks/bring-your-own-cloud/ | 2026-03-08 | 2026-03-08 | medium | high | Actuated's documentation supports native-arm and host-controlled execution as distinct cost-control lanes. |
+| SRC-04 | web | manual:web-search | https://docs.actuated.com/tasks/self-hosted-runners/ | 2026-03-08 | 2026-03-08 | medium | high | Hosted-runner docs reinforce the distinction between prepared-host execution and generic managed cloud VMs. |
+| SRC-05 | manual | manual:doc-review | /home/alex/workspace/spoke-sh/port/docs/pvm.md | 2026-03-08 | 2026-03-08 | high | high | Port's PVM contract already defines host-kit readiness and launch constraints for the Linux lane. |
+| SRC-06 | manual | manual:doc-review | /home/alex/workspace/spoke-sh/port/docs/avf.md | 2026-03-08 | 2026-03-08 | high | high | Port's AVF contract captures the macOS substrate expectations that need to become executable work. |

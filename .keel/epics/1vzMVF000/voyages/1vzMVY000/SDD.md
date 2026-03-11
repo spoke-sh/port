@@ -14,14 +14,14 @@ lived PTY/log sessions and hosted byte streams become real first-class flows.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - stream-capable guest protocol framing for PTY and logs
 - CLI/runtime support for interactive PTY and log-follow
 - hosted byte-stream transport for copy and forward
 - help/docs/SDK updates for the streamed workflows
 
-Out of scope:
+### Out of Scope
 
 - scheduler or host-group policy
 - real hosted service execution and teardown

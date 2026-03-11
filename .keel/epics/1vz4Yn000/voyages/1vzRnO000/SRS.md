@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Execute hosted `port service apply|list|status|stop` through the
   live control-plane and node-agent path instead of only storing desired state.
@@ -20,7 +20,7 @@ In scope:
   sandbox execution now ships versus which higher-level behaviors remain
   follow-on work.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-06] Scheduler or host-group policy changes beyond the current placement model.
 - [SCOPE-07] Secret-backend hardening, encryption, or external secret stores.

@@ -20,13 +20,13 @@ runtime and product sequence. The order is deliberate:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - hosted runtime driver work in the CLI/runtime/model
 - control-plane and node-agent runtime APIs and transport brokerage
 - forwarding, monitoring, secrets, services, sandboxes, and SDK/API sequencing
 
-Out of scope:
+### Out of Scope
 
 - multi-tenant RBAC and enterprise auth
 - scheduler policy beyond existing nodes and host groups

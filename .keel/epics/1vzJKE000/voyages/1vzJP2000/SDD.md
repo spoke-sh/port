@@ -14,14 +14,14 @@ machine is admission-ready.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - host-kit selection and validation for x86_64 PVM
 - node-agent launch ownership for prepared Linux nodes
 - hosted control-plane launch routing to prepared nodes
 - CLI/docs/evidence updates for the prepared-node operator workflow
 
-Out of scope:
+### Out of Scope
 
 - arm64 Firecracker/PVM
 - AVF runtime implementation

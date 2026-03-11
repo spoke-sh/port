@@ -15,14 +15,14 @@ without being reflected back through status output.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - managed guest-process contract for service and sandbox execution
 - node-owned runtime state and secret materialization
 - hosted control-plane and node-agent routing for `service apply|list|status|stop`
 - operator docs and proof for the shipped hosted execution slice
 
-Out of scope:
+### Out of Scope
 
 - scheduler policy, host-group balancing, or multi-node placement changes
 - secret-backend hardening and external secret stores

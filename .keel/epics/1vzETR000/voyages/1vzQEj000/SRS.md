@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Shared hosted control-plane and node-agent contracts for detached
   forward start, list, stop, and named session semantics.
@@ -17,7 +17,7 @@ In scope:
 - [SCOPE-04] Help text, docs, and proof for the hosted detached forward
   operator workflow.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-07] Multi-tenant auth, RBAC, or hosted billing changes beyond the
   existing single-node bearer-token lane.

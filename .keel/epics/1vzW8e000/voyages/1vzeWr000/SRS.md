@@ -6,14 +6,14 @@
 
 ## Scope
 
-In scope:
+### In Scope
 - [SCOPE-04] Deliver a real `oci-registry` backend for `port artifacts
   push|pull` without changing the canonical artifact reference, selector, or
   CLI vocabulary.
 - [SCOPE-05] Define the registry transport contract, auth-source contract, and
   repo-local proof workflow for the first OCI slice.
 
-Out of scope:
+### Out of Scope
 - [SCOPE-06] Artifact deduplication, garbage collection, or quota management
   beyond deterministic overwrite semantics.
 - [SCOPE-08] Provenance signing, SBOM upload, and manifest-list assembly.

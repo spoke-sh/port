@@ -31,17 +31,47 @@
         ]
       },
       "locked": {
-        "lastModified": 1773011558,
-        "narHash": "sha256-nOEImI258bTx7cBWTGB5MejEgyBR5N1daic+l3B50d0=",
-        "ref": "refs/heads/main",
-        "rev": "9d31b495257240605199856d013c214b4908b954",
-        "revCount": 156,
-        "type": "git",
-        "url": "ssh://git@github.com/rupurt/keel.git"
+        "lastModified": 1773243332,
+        "narHash": "sha256-Mtr6hgJb2FJmzqvOz9KzuHae/vj+83yUlFLpl46wxGA=",
+        "owner": "spoke-sh",
+        "repo": "keel",
+        "rev": "ba702094cbb1328492949bd51cd1feca9c9ce05b",
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "ssh://git@github.com/rupurt/keel.git"
+        "owner": "spoke-sh",
+        "repo": "keel",
+        "type": "github"
+      }
+    },
+    "keel_2": {
+      "inputs": {
+        "flake-utils": [
+          "sift",
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "sift",
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "sift",
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773100503,
+        "narHash": "sha256-YKDmgpHuO7N+fx1o3+n4KFyAL44F0zlAAQfY5vy5qpo=",
+        "owner": "rupurt",
+        "repo": "keel",
+        "rev": "3966e1cd0d48c4a0b0a0bf6074310af521d3cd80",
+        "type": "github"
+      },
+      "original": {
+        "owner": "rupurt",
+        "repo": "keel",
+        "rev": "3966e1cd0d48c4a0b0a0bf6074310af521d3cd80",
+        "type": "github"
       }
     },
     "nixpkgs": {
@@ -81,7 +111,8 @@
         "flake-utils": "flake-utils",
         "keel": "keel",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay"
+        "rust-overlay": "rust-overlay",
+        "sift": "sift"
       }
     },
     "rust-overlay": {
@@ -99,6 +130,33 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "sift": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "keel": "keel_2",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773243299,
+        "narHash": "sha256-m9OP3nz9DHXeXzrEQEA7K9b6o1PmJzB1iNdB4ijbJEE=",
+        "owner": "rupurt",
+        "repo": "sift",
+        "rev": "cb600a7c6bf10eaf224e0615a1c49f29ad510379",
+        "type": "github"
+      },
+      "original": {
+        "owner": "rupurt",
+        "repo": "sift",
         "type": "github"
       }
     },

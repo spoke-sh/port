@@ -2,7 +2,7 @@
 id: 1vz2eV000
 ---
 
-# Cloud Substrate And PVM Strategy — Survey
+# Cloud Substrate And PVM Strategy — Evidence
 
 ## Market Research
 
@@ -231,11 +231,13 @@ start immediately with coherent stories instead of broad aspirations.
 
 ## Sources
 
-- Slicer overview: https://docs.slicervm.com/
-- Slicer PVM docs: https://docs.slicervm.com/tasks/pvm/
-- Slicer API reference: https://docs.slicervm.com/reference/api/
-- Alex Ellis on Firecracker without KVM: https://blog.alexellis.io/how-to-run-firecracker-without-kvm-on-regular-cloud-vms/
-- LWN 2021 Protected KVM article: https://lwn.net/Articles/848284/
-- LWN 2025 pKVM coverage: https://lwn.net/Articles/1055029/
-- Lore patch thread for the PVM virtualization framework: https://lore.kernel.org/lkml/CABgObfaSGOt4AKRF5WEJt2fGMj_hLXd7J2x2etce2ymvT4HkpA@mail.gmail.com/T/
-- Android pKVM documentation: https://source.android.com/docs/core/virtualization/pkvm-hypercalls
+| ID | Class | Provenance | Location | Observed / Published | Retrieved | Authority | Freshness | Notes |
+|----|-------|------------|----------|----------------------|-----------|-----------|-----------|-------|
+| SRC-01 | web | manual:web-search | https://docs.slicervm.com/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer documents the broader hosted CLI/API/SDK and multi-substrate product surface Port is comparing against. |
+| SRC-02 | web | manual:web-search | https://docs.slicervm.com/tasks/pvm/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer scopes its current Firecracker PVM lane to custom components and `x86_64`. |
+| SRC-03 | web | manual:web-search | https://docs.slicervm.com/reference/api/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer's product surface includes a real API, supporting the hosted-control-plane implications in this bearing. |
+| SRC-04 | web | manual:web-search | https://blog.alexellis.io/how-to-run-firecracker-without-kvm-on-regular-cloud-vms/ | 2026-03-07 | 2026-03-07 | medium | medium | Operational write-up showing current Firecracker PVM lanes remain patch-heavy and specialized. |
+| SRC-05 | web | manual:web-search | https://lwn.net/Articles/848284/ | 2026-03-07 | 2026-03-07 | high | medium | LWN's protected-KVM coverage supports the claim that upstream arm64 protected virtualization is real. |
+| SRC-06 | web | manual:web-search | https://lwn.net/Articles/1055029/ | 2026-03-07 | 2026-03-07 | high | high | Recent LWN coverage supports continued movement in pKVM and protected virtualization upstream. |
+| SRC-07 | web | manual:web-search | https://lore.kernel.org/lkml/CABgObfaSGOt4AKRF5WEJt2fGMj_hLXd7J2x2etce2ymvT4HkpA@mail.gmail.com/T/ | 2026-03-07 | 2026-03-07 | medium | medium | Lore thread shows the PVM framework as active but still RFC-grade and operationally specialized. |
+| SRC-08 | web | manual:web-search | https://source.android.com/docs/core/virtualization/pkvm-hypercalls | 2026-03-07 | 2026-03-07 | high | high | Android's pKVM documentation provides a concrete arm64 protected-virtualization implementation model. |

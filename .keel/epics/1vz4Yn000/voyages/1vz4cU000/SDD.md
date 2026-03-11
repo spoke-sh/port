@@ -22,7 +22,7 @@ machine and guest operations, not the operator verbs or guest semantics.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - token-shaped hosted API identity and endpoint vocabulary,
 - node records, host-group records, and lifecycle ownership terms,
@@ -31,7 +31,7 @@ In scope:
   in-guest agent,
 - CLI/help/docs wording that explains what is shipped versus planned.
 
-Out of scope:
+### Out of Scope
 
 - a production-ready hosted daemon implementation,
 - scheduler policy beyond node and host-group vocabulary,

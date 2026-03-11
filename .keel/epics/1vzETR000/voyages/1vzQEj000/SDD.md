@@ -43,7 +43,7 @@ start or stop action against node-owned runtime state.
                                             forward daemon, monitor/top
 ```
 
-Out of scope:
+### Out of Scope
 
 - new scheduler policy
 - general service/sandbox background process management

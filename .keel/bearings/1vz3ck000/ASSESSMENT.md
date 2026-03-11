@@ -2,59 +2,77 @@
 id: 1vz3ck000
 ---
 
-# Assessment - PVM And Multi-Substrate Execution
+# PVM And Multi-Substrate Execution — Assessment
+
+## Scoring Factors
+
+| Factor | Score | Rationale |
+|--------|-------|-----------|
+| Impact | 5 | This bearing resets the product roadmap around real execution lanes instead of speculative future claims. |
+| Confidence | 4 | Public substrate evidence and direct code inspection are strong enough to narrow the next planning move. |
+| Effort | 4 | The follow-on work spans runtime, artifacts, hosted lifecycle ownership, and at least two substrate programs. |
+| Risk | 4 | The main risk is overcommitting to unsupported architecture claims or mixing unrelated backends into one queue. |
+
+*Scores range from 1-5:*
+- 1 = Very Low
+- 2 = Low
+- 3 = Medium
+- 4 = High
+- 5 = Very High
+
+## Analysis
+
+### Findings
+
+- `x86_64` Firecracker/PVM is a real execution lane, but it is a host-kit and
+  runtime-ownership problem rather than a simple config flag [SRC-01][SRC-02][SRC-03].
+- arm64 Firecracker/PVM should remain research-only, while native arm hardware
+  remains a separate cost-control lane [SRC-02][SRC-06].
+- AVF deserves a first-class macOS substrate track, and Port still needs a
+  substrate-driver boundary in the runtime to support that split [SRC-04][SRC-05][SRC-07].
+
+### Opportunity Cost
+
+If Port keeps broad future-lane planning bundled together, it delays the
+runtime and control-plane changes needed to make any of those lanes real. The
+cost of splitting now is modest compared with the risk of another round of
+documentation-only planning [SRC-01][SRC-04][SRC-07].
+
+### Dependencies
+
+- Port needs a substrate-driver boundary in the runtime before multiple
+  execution programs can land cleanly [SRC-05][SRC-07].
+- Port needs a hosted lifecycle contract above that boundary so local and remote
+  ownership stop sharing one Firecracker-local critical path [SRC-05][SRC-07].
+- Port needs an `x86_64` PVM host-kit plan covering kernel, Firecracker, and
+  artifact variants [SRC-01][SRC-02][SRC-03].
+- Port needs an AVF-specific implementation track for macOS operators
+  [SRC-04][SRC-05].
+
+### Alternatives Considered
+
+- Keep treating provider-only planning as sufficient:
+  rejected because provider labels do not solve runtime ownership, transport,
+  or host-kit requirements [SRC-03][SRC-07].
+- Promote arm64 Firecracker/PVM into immediate implementation:
+  rejected because current reviewed evidence still supports research-only status
+  [SRC-02][SRC-06].
+- Drop AVF back to a documentation-only future lane:
+  rejected because adjacent product and platform evidence support a first-class
+  macOS substrate program [SRC-04][SRC-05].
 
 ## Recommendation
+
+- [x] Proceed → plan execution backends around substrate drivers, hosted runtime ownership, `x86_64` PVM host kits, and an AVF macOS lane [SRC-01][SRC-04][SRC-05][SRC-07]
+- [ ] Park → revisit later [SRC-06]
+- [ ] Decline → document learnings [SRC-02]
 
 Keep Firecracker/PVM for `x86_64` as a strategic execution lane. Keep Apple
 Virtualization Framework as a first-class macOS substrate lane. Drop arm64
 Firecracker/PVM from near-term implementation scope and keep it research-only
-until there is stronger evidence than "arm64 hardware exists elsewhere".
+until there is stronger evidence than current public sources provide
+[SRC-01][SRC-03][SRC-04][SRC-06].
 
 Port should immediately plan the next implementation work around substrate
-drivers and host/runtime ownership, not around more support-matrix prose.
-
-## Decision Matrix
-
-| Topic | Recommendation | Why |
-|-------|----------------|-----|
-| Firecracker/PVM on `x86_64` | Keep | Strongest path to cloud cost control on hosts without nested virtualization; external evidence shows a real, if custom, lane |
-| Firecracker/PVM on `aarch64` | Keep as research only | Current reviewed evidence does not justify a supportable Port runtime claim |
-| Native arm execution on arm hardware | Keep | Valid cost/performance lane, but different from PVM |
-| AVF on macOS | Keep as first-class planned implementation lane | Real operator need, real substrate support, and already proven by adjacent products |
-| More provider-only planning | Drop | Provider tokens do not solve runtime ownership, transport, or host-kit requirements |
-
-## Immediate Implications For Port
-
-1. Port needs a substrate driver boundary in the runtime.
-2. Port needs a node-agent-oriented lifecycle contract above that boundary for
-   hosted operation.
-3. Port needs an x86_64 PVM host-kit plan covering kernel, Firecracker, and
-   artifact variants.
-4. Port needs an AVF-specific implementation plan for macOS operators.
-5. Port should stop implying that arm64 Firecracker/PVM is merely "one story
-   away" from shipping.
-
-## Proposed Next Planning Unit
-
-Create an epic focused on productized execution backends and hosted runtime
-ownership, then decompose a first voyage with these stories:
-
-- introduce a substrate driver interface in `port-runtime`,
-- define a hosted node-agent API and local/remote machine inventory model,
-- plan and scaffold the x86_64 PVM host kit and artifact variants,
-- plan the AVF macOS driver lane and guest transport mapping,
-- expand the CLI toward local-or-hosted lifecycle surfaces rather than
-  runtime-root-only commands.
-
-## Keep / Drop Summary
-
-- Keep:
-  x86_64 PVM, AVF, hosted node-agent architecture, native arm execution on real
-  arm hosts
-- Drop from near-term promises:
-  arm64 Firecracker/PVM implementation claims
-- Reframe:
-  cloud cost control as a combination of prepared x86 PVM hosts, native-capable
-  KVM hosts, and arm hardware lanes rather than one universal virtualization
-  trick
+drivers and host/runtime ownership instead of more support-matrix prose
+[SRC-05][SRC-07].

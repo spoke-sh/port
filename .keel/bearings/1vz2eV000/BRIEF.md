@@ -29,16 +29,56 @@ requires current research on Slicer's PVM claims, upstream protected
 virtualization work, cloud-host cost boundaries, and the architectural changes
 needed in Port's model, runtime, CLI, and artifact system.
 
+## Context
+
+Port had completed a narrowly scoped local-Linux MVP, but the product target had
+expanded to a broader hosted and multi-substrate platform. The board needed a
+fresh research package to decide whether that expansion should be organized
+around substrate drivers, protected-VM execution, hosted lifecycle ownership,
+and artifact mobility instead of continuing as a Firecracker-only roadmap.
+
+## Objectives
+
+- Separate near-term executable lanes from research-only lanes across
+  Firecracker KVM, Firecracker PVM, Cloud Hypervisor, and Apple Virtualization
+  Framework.
+- Evaluate the current public evidence behind Slicer's PVM claims and upstream
+  protected-virtualization work.
+- Produce a recommendation that can feed the next hosted-control and
+  multi-substrate planning slices immediately.
+
+## Scope
+
+- In scope: substrate selection, protection-mode strategy, hosted control-plane
+  implications, artifact-system implications, and current public evidence for
+  protected virtualization across architectures.
+- Out of scope: implementing the hosted control plane, delivering a production
+  PVM runtime, or proving substrate readiness through live provider prototypes.
+
 ## Success Criteria
 
 - [x] The research distinguishes near-term, supportable execution lanes from aspirational ones across Firecracker KVM, Firecracker PVM, Cloud Hypervisor, and Apple Virtualization Framework.
 - [x] The research clarifies what is true today about Slicer's PVM lane versus upstream arm64 protected-virtualization work.
 - [x] The research yields a concrete recommendation for Port's control-plane, model, and artifact evolution, with at least one immediately plannable voyage.
 
+## Research Questions
+
+- Is Slicer's current PVM lane actually multi-architecture, or is the published
+  support boundary still `x86_64`-only for that specific lane?
+- Which protected-virtualization technologies are mature enough to matter for
+  Port in the near term, and how do they map to Firecracker?
+- What changes are required to carry Port's current guest transport and CLI
+  model into a hosted control plane?
+- How should Port represent substrates, protection modes, and artifact variants
+  without creating a fragmented operator experience?
+- Which gaps should land first to move Port toward Slicer-level capability
+  without overcommitting to speculative platform work?
+
 ## Open Questions
 
-- Is Slicer's current PVM lane actually multi-architecture, or is the published support boundary still x86_64-only for that specific lane?
-- Which protected-virtualization technologies are mature enough to matter for Port in the near term, and how do they map to Firecracker?
-- What changes are required to carry Port's current guest transport and CLI model into a hosted control plane?
-- How should Port represent substrates, protection modes, and artifact variants without creating a fragmented operator experience?
-- Which gaps should land first to move Port toward Slicer-level capability without overcommitting to speculative platform work?
+- How much packaging and distribution ownership would Port need to assume for a
+  serious protected-VM lane?
+- Which hosted API and inventory seams should harden before artifact mobility
+  expands further?
+- Where should the eventual line fall between shared cross-substrate contracts
+  and substrate-specific operator behavior?

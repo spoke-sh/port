@@ -32,6 +32,31 @@ The immediate research question is which of those claims are technically real,
 which are still research-only, and what concrete implementation slices follow
 from that distinction.
 
+## Context
+
+This bearing followed another round of board starvation after earlier cloud,
+PVM, and AVF contract work. Port had more vocabulary and design intent, but it
+still lacked a disciplined decomposition of execution backends, hosted runtime
+ownership, and architecture-specific claims that could survive contact with
+implementation.
+
+## Objectives
+
+- Make an explicit keep/drop call for the current PVM, AVF, native-arm, and
+  hosted-runtime claims.
+- Identify the concrete runtime, host-kit, and artifact implications of a real
+  protected-VM lane.
+- Recommend the next epic or voyage that should unblock implementation rather
+  than another documentation-only slice.
+
+## Scope
+
+- In scope: `x86_64` PVM viability, `aarch64` PVM evidence, native arm cost
+  control versus protected-VM claims, AVF as a first-class substrate, and local
+  runtime module inspection.
+- Out of scope: implementing substrate drivers, building the PVM host kit, or
+  proving AVF transport behavior through a live runtime prototype.
+
 ## Success Criteria
 
 How will we know if this research was valuable?
@@ -45,11 +70,11 @@ How will we know if this research was valuable?
 - [x] Translate the findings into a concrete recommendation for the next epic
   or voyage instead of leaving the board starved.
 
-## Open Questions
+## Research Questions
 
-- Is x86_64 PVM mature enough to justify near-term Port investment, or is it
+- Is `x86_64` PVM mature enough to justify near-term Port investment, or is it
   still too custom to plan beyond research?
-- Does any current evidence justify arm64 Firecracker/PVM as more than a
+- Does any current evidence justify `aarch64` Firecracker/PVM as more than a
   research lane?
 - How much of Actuated's arm64 story is PVM versus native arm hardware with
   normal virtualization support?
@@ -57,3 +82,12 @@ How will we know if this research was valuable?
   assumptions and therefore need substrate or hosted abstractions first?
 - What is the smallest next planning slice that keeps Port honest while still
   moving toward Slicer-class capability?
+
+## Open Questions
+
+- How much operational ownership will the eventual PVM host kit require across
+  kernel, VMM, and image distribution?
+- How large will the runtime refactor be once substrate drivers and hosted
+  ownership become real code rather than planning terms?
+- Which AVF implementation boundary will best preserve the shared CLI and guest
+  protocol semantics?

@@ -16,7 +16,7 @@ assumptions.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - `port-model` capability and inventory contracts for x86_64 PVM readiness
 - `port-runtime` local launch selection and hosted admission checks
@@ -24,7 +24,7 @@ In scope:
   capability
 - canonical CLI/help/docs updates for the new runtime boundary
 
-Out of scope:
+### Out of Scope
 
 - a production scheduler
 - an `aarch64` PVM implementation

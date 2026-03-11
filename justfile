@@ -10,6 +10,12 @@ fmt:
 fmt-check:
   cargo fmt --all -- --check
 
+doctest *args:
+  cargo test --doc {{args}}
+
+clippy *args:
+  cargo clippy --workspace --all-targets -- {{args}}
+
 test *args:
   cargo test {{args}}
 
@@ -24,6 +30,9 @@ quality: fmt-check test
   @echo "quality checks passed"
 
 # Keel workflows
+keel *args:
+  keel {{args}}
+
 doctor:
   keel doctor
 
@@ -34,7 +43,7 @@ generate:
   keel generate
 
 next:
-  keel next --agent
+  keel next --role operator
 
 verify story:
   keel verify run {{story}}

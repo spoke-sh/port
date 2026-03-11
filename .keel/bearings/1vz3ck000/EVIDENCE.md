@@ -2,30 +2,19 @@
 id: 1vz3ck000
 ---
 
-# Survey - PVM And Multi-Substrate Execution
+# PVM And Multi-Substrate Execution — Evidence
 
 ## Sources
 
-- LWN: https://lwn.net/Articles/963718/
-- LKML mirror of the x86 pagetable-based PVM RFC:
-  https://lkml.rescloud.iu.edu/2402.3/04599.html
-- LPC 2024 session listing on protected VMs:
-  https://lpc.events/event/18/sessions/185/#20240918
-- Slicer PVM docs:
-  https://docs.slicervm.com/tasks/pvm/
-- Slicer for Mac overview:
-  https://docs.slicervm.com/getting-started/slicer-for-mac/
-- Apple Virtualization / Rosetta Linux guest support:
-  https://developer.apple.com/documentation/virtualization/running-intel-binaries-in-linux-vms-with-rosetta
-- Actuated bare-metal FAQ:
-  https://docs.actuated.com/tasks/faq/
-- Local codebase inspection:
-  [README.md](../../README.md),
-  [docs/cloud.md](../../../docs/cloud.md),
-  [docs/hosted.md](../../../docs/hosted.md),
-  [crates/port-runtime/src/lib.rs](../../../crates/port-runtime/src/lib.rs),
-  [crates/port-cli/src/lib.rs](../../../crates/port-cli/src/lib.rs),
-  [crates/port-model/src/lib.rs](../../../crates/port-model/src/lib.rs)
+| ID | Class | Provenance | Location | Observed / Published | Retrieved | Authority | Freshness | Notes |
+|----|-------|------------|----------|----------------------|-----------|-----------|-----------|-------|
+| SRC-01 | web | manual:web-search | https://lwn.net/Articles/963718/ | 2026-03-07 | 2026-03-07 | high | medium | LWN describes the x86 pagetable-based PVM work and supports the host-kit-heavy interpretation of PVM. |
+| SRC-02 | web | manual:web-search | https://lkml.rescloud.iu.edu/2402.3/04599.html | 2026-03-07 | 2026-03-07 | medium | medium | The RFC thread supports the claim that the x86 PVM lane remained specialized and nontrivial. |
+| SRC-03 | web | manual:web-search | https://docs.slicervm.com/tasks/pvm/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer documents a current Firecracker PVM lane on `x86_64`, supporting the keep/drop decision. |
+| SRC-04 | web | manual:web-search | https://docs.slicervm.com/getting-started/slicer-for-mac/ | 2026-03-07 | 2026-03-07 | medium | high | Slicer for Mac supports treating AVF as its own first-class substrate lane. |
+| SRC-05 | web | manual:web-search | https://developer.apple.com/documentation/virtualization/running-intel-binaries-in-linux-vms-with-rosetta | 2026-03-07 | 2026-03-07 | high | high | Apple's AVF documentation supports the feasibility of a real macOS virtualization lane. |
+| SRC-06 | web | manual:web-search | https://docs.actuated.com/tasks/faq/ | 2026-03-07 | 2026-03-07 | medium | medium | Actuated's FAQ supports separating native arm hardware lanes from PVM claims. |
+| SRC-07 | manual | manual:code-inspection | /home/alex/workspace/spoke-sh/port/crates/port-runtime/src/lib.rs | 2026-03-07 | 2026-03-07 | high | high | Local runtime inspection supports the finding that Port still couples lifecycle ownership to Firecracker-local code paths. |
 
 ## Findings
 

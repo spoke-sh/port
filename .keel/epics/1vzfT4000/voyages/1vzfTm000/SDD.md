@@ -20,14 +20,14 @@ service supervisor. The design keeps one canonical surface:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - shared service policy and secret-backend contract changes
 - runtime supervision and state reporting
 - local and hosted CLI/API/SDK exposure of the same state
 - operator workflow and evidence
 
-Out of scope:
+### Out of Scope
 
 - external secret managers, KMS, or tenant-aware auth
 - advanced scheduler policy beyond existing placement

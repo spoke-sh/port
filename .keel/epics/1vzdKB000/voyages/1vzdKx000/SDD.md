@@ -29,14 +29,14 @@ protocol.
       Linux host             kernel/guest artifacts   docs/help
 ```
 
-In scope:
+### In Scope
 
 - Cloud Hypervisor `standard` lane on Linux
 - local and hosted lifecycle ownership
 - guest transport parity using the existing Port guest protocol
 - docs/help/example updates
 
-Out of scope:
+### Out of Scope
 
 - Cloud Hypervisor confidential or protected modes
 - new guest APIs

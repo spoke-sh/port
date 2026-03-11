@@ -2,7 +2,7 @@
 id: 1vydg7000
 ---
 
-# Cloud Linux and PVM Viability — Survey
+# Cloud Linux and PVM Viability — Evidence
 
 ## Market Research
 
@@ -120,9 +120,11 @@ implemented, and documented alongside macOS and Windows operator workflows.
 
 ## Sources
 
-- Firecracker getting started: https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md
-- AWS EC2 nested virtualization: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html
-- AWS AMD SEV-SNP support: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/snp-requirements.html
-- Google Cloud nested virtualization overview: https://cloud.google.com/compute/docs/instances/nested-virtualization/overview
-- Microsoft Hyper-V nested virtualization support policy: https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/hyper-v-nested-virtualization
-- Azure confidential VM FAQ: https://learn.microsoft.com/en-us/azure/confidential-computing/confidential-vm-faq
+| ID | Class | Provenance | Location | Observed / Published | Retrieved | Authority | Freshness | Notes |
+|----|-------|------------|----------|----------------------|-----------|-----------|-----------|-------|
+| SRC-01 | web | manual:web-search | https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md | 2026-03-06 | 2026-03-06 | high | medium | Firecracker setup assumes a Linux host and validates the remote-Linux-host framing. |
+| SRC-02 | web | manual:web-search | https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html | 2026-03-06 | 2026-03-06 | high | high | AWS documents nested virtualization on selected EC2 families, supporting a limited Firecracker-host lane. |
+| SRC-03 | web | manual:web-search | https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/snp-requirements.html | 2026-03-06 | 2026-03-06 | high | high | AWS SEV-SNP support lands on a different lane than nested virtualization, which helps justify dropping MVP PVM. |
+| SRC-04 | web | manual:web-search | https://cloud.google.com/compute/docs/instances/nested-virtualization/overview | 2026-03-06 | 2026-03-06 | high | high | Google Cloud documents nested virtualization on selected Intel families, supporting a second remote-Linux-host path. |
+| SRC-05 | web | manual:web-search | https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/hyper-v-nested-virtualization | 2026-03-06 | 2026-03-06 | high | high | Microsoft's support policy limits Azure to Hyper-V-centric nesting and does not support non-Microsoft virtualization. |
+| SRC-06 | web | manual:web-search | https://learn.microsoft.com/en-us/azure/confidential-computing/confidential-vm-faq | 2026-03-06 | 2026-03-06 | high | high | Azure confidential VMs do not support nested virtualization, ruling out an MVP Firecracker lane there. |

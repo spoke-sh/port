@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 - [SCOPE-01] Add shared restart-policy and health-policy fields for Port
   services and sandboxes across the model, runtime, CLI, hosted API, and SDK.
 - [SCOPE-02] Implement runtime-owned supervision and status reporting for
@@ -16,7 +16,7 @@ In scope:
 - [SCOPE-04] Publish a repo-local operator workflow and evidence for the new
   service reliability slice.
 
-Out of scope:
+### Out of Scope
 - [SCOPE-05] External secret-manager integrations, KMS, or tenant-aware auth.
 - [SCOPE-06] Autoscaling, preemption, richer fleet scheduling, or service
   orchestration beyond the current runtime owner.

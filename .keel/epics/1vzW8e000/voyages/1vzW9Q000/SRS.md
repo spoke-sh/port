@@ -6,7 +6,7 @@
 
 ## Scope
 
-In scope:
+### In Scope
 
 - [SCOPE-01] Ship a live `hosted-api` artifact backend through the existing
   hosted control-plane auth and transport path.
@@ -16,7 +16,7 @@ In scope:
 - [SCOPE-03] Publish CLI help, docs, and executable proof for local build plus
   hosted publish and fetch workflows.
 
-Out of scope:
+### Out of Scope
 
 - [SCOPE-04] OCI registry transport or registry-auth integration.
 - [SCOPE-05] Artifact deduplication, garbage collection, or quota management

@@ -30,14 +30,14 @@ design has three pieces:
         remote Linux host profiles    AWS / GCP / Azure / PVM decision
 ```
 
-In scope:
+### In Scope
 
 - provider-aware host modeling for remote Linux targets;
 - CLI diagnostics and launch guardrails for partial cloud support; and
 - documentation that explains the supported remote workflow from Linux, macOS,
   and Windows workstations.
 
-Out of scope:
+### Out of Scope
 
 - live cloud launch orchestration;
 - SSH command execution against real hosts; and

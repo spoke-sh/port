@@ -18,13 +18,13 @@ behavior. The design is to tighten three surfaces together:
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - help text and examples in `port-cli`;
 - README / operator docs that explain the prerequisite boundary; and
 - verification evidence for the updated example workflow.
 
-Out of scope:
+### Out of Scope
 
 - installing dependencies automatically;
 - changing how `port doctor` or `port machine launch` behave at runtime; and

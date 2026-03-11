@@ -16,14 +16,14 @@ canonical `port service` status path.
 
 ## Context & Boundaries
 
-In scope:
+### In Scope
 
 - shared model and sample config for host groups and scheduler policy
 - deterministic node selection for hosted service and sandbox execution
 - placement metadata in hosted runtime state and CLI rendering
 - docs/help/proof for the multi-node hosted workflow
 
-Out of scope:
+### Out of Scope
 
 - autoscaling, rebalance, or policy beyond first-fit deterministic placement
 - replicated or multi-instance services
