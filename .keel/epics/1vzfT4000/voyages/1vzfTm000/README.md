@@ -29,7 +29,7 @@ started_at: 2026-03-09T11:43:07
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Implement Service Supervision And Health State](../../../../stories/1vzfV4000/README.md) | feat | backlog |
+| [Implement Service Supervision And Health State](../../../../stories/1vzfV4000/README.md) | feat | in-progress |
 | [Publish Service Reliability Operator Workflow](../../../../stories/1vzfV5000/README.md) | feat | backlog |
 | [Define Service Policy And Health Contract](../../../../stories/1vzfVW000/README.md) | feat | done |
 | [Implement Secret Backend And Materialization](../../../../stories/1vzfVh000/README.md) | feat | backlog |
