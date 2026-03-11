@@ -2,11 +2,12 @@
 id: 1vzdMZ000
 title: Implement Local Cloud Hypervisor Machine Driver
 type: feat
-status: in-progress
+status: done
 scope: 1vzdKB000/1vzdKx000
 created_at: 2026-03-09T09:21:47
-updated_at: 2026-03-09T09:36:35
+updated_at: 2026-03-09T09:53:46
 started_at: 2026-03-09T09:36:35
+completed_at: 2026-03-09T09:53:46
 ---
 
 # Implement Local Cloud Hypervisor Machine Driver

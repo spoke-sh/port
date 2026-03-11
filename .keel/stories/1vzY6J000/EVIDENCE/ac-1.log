@@ -1,0 +1,87 @@
+---
+recorded_at: 2026-03-09T09:14:16.394326658-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzY6J000/verify-ac-1.sh
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+README.md:81:| Firecracker | `standard` | `x86_64`, `aarch64`, or `native` | Supported today | This is the real Linux execution lane behind today's `port machine launch` workflow |
+README.md:83:| Firecracker | `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path here |
+README.md:84:| Cloud Hypervisor | `standard` | `x86_64` or `aarch64` | Planned | Secondary Linux hypervisor lane, not yet implemented |
+README.md:92:- treat it as a dedicated host kit plus artifact kit, not just a model flag
+README.md:93:- keep Firecracker/PVM on `aarch64` research-only until there is a supportable
+README.md:122:- `aarch64/firecracker/pvm` remains research-only in the model, docs, and
+README.md:145:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+README.md:153:- before `control-plane prepare-pvm-node`, the same `cloud-generic` launch is
+README.md:155:- `control-plane prepare-pvm-node` writes the imported ready record under
+README.md:165:- `aarch64/firecracker/pvm` stays research-only; there is no supported
+README.md:166:  `prepare-pvm-node` or launch proof for that architecture
+README.md:204:port artifacts build --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:205:port artifacts validate --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:206:port artifacts push --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:207:port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:291:  resolves to a ready prepared node with the required PVM host kit and PVM
+README.md:343:that machine to `protection_mode = "pvm"` and provide the prepared host kit
+README.md:792:- `architecture = "native" | "x86_64" | "aarch64"`
+docs/pvm.md:11:- keep `aarch64` Firecracker/PVM research-only until Port has a supportable
+docs/pvm.md:19:| `aarch64` | Research-only | Upstream arm64 protected-virtualization work is real, but Port does not yet have a vendor-grade Firecracker/PVM runtime contract to ship or validate |
+docs/pvm.md:31:- arm64 Firecracker/PVM remains research-only until the Firecracker runtime
+docs/pvm.md:36:The x86_64 Firecracker/PVM lane needs a dedicated host kit.
+docs/pvm.md:44:- explicit operator separation between the standard Firecracker host kit and
+docs/pvm.md:45:  the PVM host kit
+docs/pvm.md:131:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+docs/pvm.md:139:- before `control-plane prepare-pvm-node`, the same `cloud-generic` workflow
+docs/pvm.md:143:- `control-plane prepare-pvm-node` writes the imported ready record under
+docs/pvm.md:153:- `aarch64/firecracker/pvm` stays research-only; there is no supported
+docs/pvm.md:154:  `prepare-pvm-node` or launch proof for that architecture.
+docs/pvm.md:184:  artifacts, or docs until the host kit, VMM path, artifact kit, and runtime
+docs/pvm.md:193:1. Build and package the x86_64 PVM host kit.
+docs/hosted.md:19:  when a hosted machine resolves to a ready node with a real PVM host kit and
+docs/hosted.md:111:through `port control-plane prepare-pvm-node`.
+docs/hosted.md:126:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+docs/hosted.md:132:Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because
+docs/hosted.md:133:`generic-linux-node` is only `planned`. `prepare-pvm-node` writes the imported
+docs/hosted.md:136:planned to ready. `aarch64/firecracker/pvm` remains research-only and is not a
+docs/hosted.md:390:`protection_mode = "pvm"` and the prepared host kit exists.
+crates/port-cli/src/lib.rs:94:  Firecracker + pvm on x86_64 now launches through the hosted control-plane and node-agent path on prepared Linux nodes and still depends on a dedicated host kit plus pvm artifact variants.
+crates/port-cli/src/lib.rs:95:  Firecracker + pvm on aarch64 remains research-only until Port has a supportable Firecracker runtime path.
+crates/port-cli/src/lib.rs:112:  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+crates/port-cli/src/lib.rs:116:  Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because `generic-linux-node` stays `planned`.
+crates/port-cli/src/lib.rs:117:  `prepare-pvm-node` writes the imported ready record under `.port/hosted/<control-plane>/imported-inventory.json`, which is the canonical repo-local proof that the node moved from planned to ready.
+crates/port-cli/src/lib.rs:119:  Firecracker + pvm on aarch64 stays research-only; there is no supported `prepare-pvm-node` or launch proof for that architecture.
+crates/port-cli/src/lib.rs:185:  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
+crates/port-cli/src/lib.rs:959:            MachineArchitecture::Aarch64 => "aarch64",
+crates/port-cli/src/lib.rs:2237:            "prepare-pvm-node",
+crates/port-cli/src/lib.rs:2240:            "research-only",

@@ -19,9 +19,9 @@ index: 7
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 8/8 stories done
+**Progress:** 2/2 voyages complete, 8/8 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Hosted Artifact Push And Pull](voyages/1vzW9Q000/) | done | 4/4 |
-| [OCI Artifact Registry Mobility](voyages/1vzeWr000/) | in-progress | 4/4 |
+| [OCI Artifact Registry Mobility](voyages/1vzeWr000/) | done | 4/4 |
 <!-- END GENERATED -->

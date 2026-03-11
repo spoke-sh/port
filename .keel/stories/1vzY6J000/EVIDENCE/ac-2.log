@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-03-09T09:14:19.743607073-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/1vzY6J000/verify-ac-2.sh
+---
+README.md:145:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+README.md:153:- before `control-plane prepare-pvm-node`, the same `cloud-generic` launch is
+README.md:155:- `control-plane prepare-pvm-node` writes the imported ready record under
+README.md:156:  `.port/hosted/<control-plane>/imported-inventory.json`; that imported record
+README.md:166:  `prepare-pvm-node` or launch proof for that architecture
+README.md:204:port artifacts build --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:205:port artifacts validate --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:206:port artifacts push --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:207:port artifacts pull --artifact <name> [--architecture <native|x86-64|aarch64>] [--substrate <firecracker|cloud-hypervisor|avf>] [--protection-mode <standard|pvm>]
+README.md:257:- `port artifacts build` and `port artifacts validate` now run real in-repo
+README.md:259:- `port artifacts push` and `port artifacts pull` now use the artifact's
+README.md:393:  `.port/hosted/demo/imported-inventory.json`; there is not yet a first-class
+docs/pvm.md:131:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+docs/pvm.md:139:- before `control-plane prepare-pvm-node`, the same `cloud-generic` workflow
+docs/pvm.md:143:- `control-plane prepare-pvm-node` writes the imported ready record under
+docs/pvm.md:144:  `.port/hosted/<control-plane>/imported-inventory.json`; that imported record
+docs/pvm.md:154:  `prepare-pvm-node` or launch proof for that architecture.
+docs/hosted.md:109:same `port artifacts build|validate|push|pull` proof published in
+docs/hosted.md:111:through `port control-plane prepare-pvm-node`.
+docs/hosted.md:126:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+docs/hosted.md:132:Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because
+docs/hosted.md:133:`generic-linux-node` is only `planned`. `prepare-pvm-node` writes the imported
+docs/hosted.md:134:ready record under `.port/hosted/<control-plane>/imported-inventory.json`;
+docs/hosted.md:457:  `.port/hosted/<control-plane>/imported-inventory.json`
