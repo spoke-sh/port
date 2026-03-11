@@ -85,7 +85,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Mission Verification And Help Simplification](epics/VDaiFfFPe/voyages/VDaiL5HDr/) | planned |
+| [Mission Verification And Help Simplification](epics/VDaiFfFPe/voyages/VDaiL5HDr/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

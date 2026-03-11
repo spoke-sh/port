@@ -25,5 +25,5 @@ index: 11
 **Progress:** 0/1 voyages complete, 0/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Mission Verification And Help Simplification](voyages/VDaiL5HDr/) | planned | 0/2 |
+| [Mission Verification And Help Simplification](voyages/VDaiL5HDr/) | in-progress | 0/2 |
 <!-- END GENERATED -->

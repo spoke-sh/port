@@ -1,0 +1,7 @@
+---
+recorded_at: 2026-03-11T13:20:03.997365852-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/VDaiNxnwT/verify-ac-3.sh
+---
+93:  if next_output="$(NO_COLOR=1 run_keel mission next "$mission_id" 2>/dev/null)"; then
+111:  throughput_output="$(NO_COLOR=1 run_keel throughput 2>/dev/null || true)"
+147:NO_COLOR=1 run_keel mission show "$mission_id"

@@ -1,0 +1,51 @@
+---
+recorded_at: 2026-03-11T13:20:04.009055436-07:00
+command: bash /home/alex/workspace/spoke-sh/port/.keel/stories/VDaiNxnwT/verify-ac-2.sh
+---
+Common recipes:
+  just mission               Run repo verification and show mission signal
+  just quality               Run formatting, tests, and doctests
+  just doctor                Validate the Keel board
+  just flow                  Show workflow lane state
+  just test                  Run workspace tests
+  just build                 Build the port CLI binary
+  just port -- --help        Run the Port CLI through cargo
+  just keel flow             Run arbitrary Keel commands
+
+More recipes:
+  just --list board
+  just --list checks
+  just --list signal
+  just --list cli
+  just --list demo
+Available recipes:
+    build
+    default
+    doctest *args
+    doctor
+    flow
+    keel *args
+    mission *args
+    port *args
+    quality
+    test *args
+    board ...
+    checks ...
+    cli ...
+    demo ...
+    signal ...
+Available recipes:
+    build-guest config="examples/port.toml" architecture="native" substrate="firecracker" protection="standard"
+    build-kernel config="examples/port.toml" architecture="native" substrate="firecracker" protection="standard"
+    doctor config="examples/port.toml"
+    launch machine="demo" config="examples/port.toml"
+    pull-oci config=".port/demo-oci.toml" container="port-demo-oci-registry"
+    push-oci config=".port/demo-oci.toml" registry="127.0.0.1:5510" registry_port="5510" container="port-demo-oci-registry"
+    status machine="demo" config="examples/port.toml"
+    stop machine="demo" config="examples/port.toml"
+    validate-guest config="examples/port.toml" architecture="native" substrate="firecracker" protection="standard"
+    validate-kernel config="examples/port.toml" architecture="native" substrate="firecracker" protection="standard"
+Common recipes:
+  just --list demo
+    push-oci config=".port/demo-oci.toml" registry="127.0.0.1:5510" registry_port="5510" container="port-demo-oci-registry"
+    build-kernel config="examples/port.toml" architecture="native" substrate="firecracker" protection="standard"
