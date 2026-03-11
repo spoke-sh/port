@@ -1,272 +1,35 @@
-# Operator Workflows
+# Operator Guide
 
-This document explains the supported MVP workflows for Linux, macOS, and
-Windows operators.
+Use `port` for runtime workflows and `just mission` for repo-level
+verification.
 
-## Support Matrix
+## Platform Summary
 
-| Operator environment | Supported MVP workflow | Unsupported MVP workflow | Why |
-|----------------------|------------------------|--------------------------|-----|
-| Linux host with `/dev/kvm` and Firecracker | Run the full local Port workflow directly through the `port` CLI | n/a | Firecracker local launch requires Linux and KVM |
-| macOS workstation | Run the native AVF workflow through `machines.demo-avf` and the canonical `port machine` and `port guest` verbs when `PORT_AVF_LAUNCHER` is configured | Local Firecracker launch on macOS | Firecracker local launch requires Linux and `/dev/kvm`; AVF is the macOS-native substrate and remains `standard` protection only |
-| Windows workstation | Use WSL or a remote Linux host for the Linux-side `port` workflow | Native Windows Firecracker launch | Firecracker local launch requires a Linux environment with `/dev/kvm`; not every WSL setup exposes that capability |
+| Environment | Supported path |
+|-------------|----------------|
+| Linux | Local Firecracker plus hosted control-plane demos |
+| macOS | AVF local workflow through the same `machine` and `guest` verbs |
+| Windows | Linux-backed workflow through WSL or a remote Linux host |
 
-## Linux Workflow
-
-Use this workflow when `port doctor` passes on a Linux host.
-Run the sample-config commands from the repository root so
-`examples/port.toml` resolves correctly.
+## Common Examples
 
 ```bash
-cargo run -p port-cli -- doctor
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-kernel --architecture native
-cargo run -p port-cli -- --config examples/port.toml artifacts build --artifact demo-guest --architecture native
-cargo run -p port-cli -- --config examples/port.toml artifacts validate --artifact demo-guest --architecture native
-cargo run -p port-cli -- --config examples/port.toml doctor
-cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo
-cargo run -p port-cli -- machine list
-cargo run -p port-cli -- machine status --machine demo
-cargo run -p port-cli -- machine stop --machine demo
+port doctor
+port --config examples/port.toml machine launch --machine demo
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
 ```
 
-Artifact variants land under
-`artifacts/<kind>/<name>/<architecture>/<substrate>/<protection-mode>/`.
-Runtime manifests and console logs land under the chosen runtime root, which
-defaults to `runtime/`.
+## Where To Go Next
 
-Artifact mobility quick reference:
-
-```bash
-cargo run -p port-cli -- --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64
-rm -f artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
-cargo run -p port-cli -- --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64
-```
-
-Those commands use the artifact's configured mobility backend. In the sample
-config, that means a file-backed store at `artifact-store/demo-fs/` plus a
-local cache at `.port/cache/`.
-
-The local lifecycle commands are the canonical way to manage a launched Port
-machine:
-
-- `port machine list` enumerates Port-managed runtime directories under the
-  local runtime root and gives you the inventory view for locally owned
-  machines.
-- `port machine status --machine <name>` reads one machine's local runtime
-  state back out of that runtime root so you can inspect manifests, pid files,
-  config paths, and console/log paths without talking to Firecracker directly.
-- `port machine stop --machine <name>` stops a Port-managed local machine and
-  clears runtime ownership details that would otherwise make a relaunch
-  ambiguous.
-
-Important prerequisite note:
-
-- The sample artifact and launch workflow assumes `firecracker`,
-  artifact-build tools, and the Linux networking utilities that `port doctor`
-  checks are available in the execution environment.
-- `nix develop` is one way to provide those tools, but it is not a Port
-  runtime requirement. Installing the required tools on the host directly is
-  equally valid.
-- If `port doctor` reports a missing dependency, treat that as the explanation
-  for why a later `port machine launch` example will fail.
-
-Current lifecycle behavior:
-
-- `port machine list` enumerates Port-managed runtime directories and reports
-  `running`, `stopped`, `stale`, or `malformed` state from manifests plus live
-  PID inspection.
-- `port machine list`, `status`, and `stop` also publish the local control
-  contract: `inventory scope`, `inventory owner`, `lifecycle owner`, `status
-  source`, and routing fields that currently resolve to the local runtime root.
-- After a machine has been launched, `list`, `status`, and `stop` operate on
-  the runtime root directly and do not require the model file again.
-- `port machine status --machine demo` prints the runtime directory, config
-  path, manifest, pid file, console/log references, and the control-contract
-  routing fields needed for debugging or for mapping the same verbs onto future
-  hosted ownership.
-- `port machine stop --machine demo` signals a live Firecracker process and
-  cleans stale pid/vsock/socket files so the next launch is deterministic.
-- Those commands are the local ownership implementation of Port's longer-term
-  hosted contract. In hosted Port, the CLI keeps the same verbs while a
-  node-local agent plus control plane take over runtime ownership.
-
-Use those lifecycle commands as the first inspection and recovery surface after
-launch. The intended local path is `launch`, then `list` or `status` to inspect
-what Port owns under `runtime/`, then `stop` when you want Port to end and
-cleanly release that local runtime state.
-
-Current guest-command behavior:
-
-- `port guest exec`, `copy`, `pty`, `logs`, and `forward` now work against
-  launched Firecracker VMs through the machine model's live guest control port.
-- `port guest copy` transfers bytes across the real host/guest boundary; it no
-  longer depends on the guest seeing host paths directly.
-- `port guest forward` binds on the host and stays attached in the foreground
-  until you stop it.
-- Guest-side `port guest forward --target ...` addresses still depend on guest
-  networking being up. In the sample guest image, bring loopback up before
-  targeting `127.0.0.1`, for example with
-  `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
-
-Current artifact-command behavior:
-
-- `port artifacts build` and `validate` operate on one selected artifact
-  variant at a time.
-- The variant vocabulary is explicit on the CLI:
-  `--architecture`, `--substrate`, and `--protection-mode`.
-- The sample config now ships Firecracker/standard plus AVF/standard variants,
-  while the same command surface remains reserved for PVM and Cloud Hypervisor
-  follow-on lanes.
-- `port artifacts push` writes the selected local variant into the configured
-  backend and warms the local cache.
-- `port artifacts pull` restores the selected variant from the configured
-  backend into both the cache and the canonical local path used by `launch`.
-- Firecracker/PVM is a separate future artifact kit on `x86_64`; do not assume
-  the current `standard` kernel or guest image can be reused there.
-
-## Remote Linux And Cloud Workflow
-
-The shared model now includes explicit provider identity for remote Linux and
-cloud-adjacent hosts:
-
-- `generic-linux` for a future remote Linux control lane
-- `aws` and `gcp` for the currently justified future cloud lanes
-- `azure` for an explicitly unsupported Firecracker MVP lane
-
-Use the canonical CLI to inspect that boundary:
-
-```bash
-cargo run -p port-cli -- --config examples/port.toml doctor
-cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-ch
-```
-
-What to expect:
-
-- `port doctor` shows provider-aware checks for `generic-linux`, `aws`, `gcp`,
-  and `azure` alongside the usual local Linux prerequisites.
-- `port doctor` also prints the modeled hosted control-plane endpoint,
-  audience, and token source from `[control_planes.demo]`.
-- `port machine launch --machine demo-ch` is the canonical local Cloud
-  Hypervisor proof on Linux and fails fast only if the lane-specific host
-  contract is missing, for example when `cloud-hypervisor` is not on `PATH`.
-- `port machine launch --machine demo` remains the supported local Linux launch
-  proof for the MVP.
-- Artifact mobility is already designed around that future remote workflow:
-  build or publish the selected variant on one Linux host, then pull the same
-  logical reference onto another Linux host once the execution lane requires it.
-- `port machine list`, `status`, `monitor`, `top`, and `stop` now inspect both
-  local Port-managed runtime roots and hosted-control-plane machines through
-  the same canonical machine family.
-- The operator-visible ownership vocabulary is already aligned with hosted
-  design work: local commands report `local-runtime-root` /
-  `local-port-runtime` today, and future hosted drivers are expected to report
-  `hosted-control-plane` / `hosted-node-agent` through the same fields.
-- The hosted split for lifecycle ownership and guest-operation brokering is
-  live for the demo lane and documented in [`hosted.md`](hosted.md).
-- The explicit Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
-- Remote/cloud hosts in the sample config no longer use SSH placeholders;
-  they declare `mode = "hosted-control-plane"` and `control_plane = "demo"`
-  so the operator-facing contract matches the hosted product.
-
-Hosted standard Firecracker workflow:
-
-```bash
-export PORT_DEMO_TOKEN=demo-token
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine launch --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine status --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config examples/port.toml machine stop --machine cloud-aws
-```
-
-Hosted Cloud Hypervisor workflow:
-
-1. Copy `examples/port.toml` to `/tmp/port-cloud-hypervisor.toml`.
-2. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
-3. Switch `machines.cloud-aws.substrate` to `cloud-hypervisor`.
-4. Switch `machines.cloud-aws.architecture` to `x86_64`.
-5. Switch `nodes.aws-linux-node.capabilities.substrates` to
-   `["cloud-hypervisor"]`.
-
-```bash
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
-PORT_DEMO_TOKEN=demo-token cargo run -p port-cli -- --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
-```
-
-Explicit unsupported boundaries:
-
-- leaving `aws-linux-node` on `substrates = ["firecracker"]` is an explicit
-  rejected-node proof for the hosted Cloud Hypervisor lane
-- Azure remains unsupported for the current hosted Linux MVP
-- Cloud Hypervisor is a `standard`-only Port lane today
-
-The full cloud matrix and substrate lane guidance live in [`docs/cloud.md`](cloud.md).
-The hosted node-agent/control-plane split that sits behind the same CLI lives
-in [`docs/hosted.md`](hosted.md).
-
-## macOS Workflow
-
-Port now ships a native macOS AVF workflow through the same canonical CLI.
-
-Use the checked-in sample config path:
-
-```bash
-cargo run -p port-cli -- --config examples/port.toml doctor
-PORT_AVF_LAUNCHER=/path/to/port-avf-launcher cargo run -p port-cli -- --config examples/port.toml machine launch --machine demo-avf
-cargo run -p port-cli -- --config examples/port.toml machine status --machine demo-avf
-cargo run -p port-cli -- --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
-cargo run -p port-cli -- --config examples/port.toml machine monitor --machine demo-avf
-cargo run -p port-cli -- --config examples/port.toml machine stop --machine demo-avf
-```
-
-Current operator contract:
-
-- the sample config now declares `hosts.mac-local` and `machines.demo-avf`
-- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
-  transport onto `runtime/demo-avf/guest-agent.sock` and writes serial output
-  to `runtime/demo-avf/console.log`
-- `port doctor` emits the AVF-specific host-platform, host-architecture, and
-  entitlement-boundary checks before launch
-- `port machine launch|status|stop|monitor|top` and `port guest
-  exec|copy|pty|logs|forward` stay on the canonical command family; no
-  macOS-only command tree exists
-
-Explicit unsupported boundaries:
-
-- local Firecracker launch on macOS remains unsupported because that lane still
-  requires Linux and `/dev/kvm`
-- `nix develop` evaluates on macOS for repo tooling, but intentionally omits
-  Linux-only runtime packages such as `firecracker`, `iproute2`, and `iptables`
-- Port does not define an AVF/PVM lane
-- distributed macOS binaries still need Apple's virtualization entitlement
-- remote cloud execution remains a Linux-hosted workflow, not a macOS-hosted
-  one
-
-## Windows Workflow
-
-The supported Windows workflow is a Linux-backed one:
-
-1. Use WSL if you want a local Linux shell for the repository and CLI.
-2. Run `port doctor` inside that Linux environment.
-3. If `port doctor` reports missing `/dev/kvm`, Firecracker, or other required
-   Linux host capabilities, switch to a remote Linux host and run the same `port`
-   commands there.
-
-Supported path:
-
-- WSL or remote Linux is valid for editing the model, building artifacts, and
-  running the canonical CLI.
-
-Current constraint:
-
-- Native Windows is not a supported Firecracker execution environment for the
-  MVP, and WSL availability of the required Linux virtualization features is an
-  environment check rather than a Port guarantee.
-- The cloud provider matrix is still a Linux-hosted workflow; Windows changes
-  the operator workstation, not the underlying Firecracker requirement.
+- Detailed config edits and longer examples:
+  [`CONFIGURATION.md`](../CONFIGURATION.md)
+- Hosted control-plane and service workflows:
+  [`hosted.md`](hosted.md)
+- Cloud lanes and provider boundaries:
+  [`cloud.md`](cloud.md)
+- Artifact references and backend contracts:
+  [`artifacts.md`](artifacts.md)
+- Firecracker/PVM:
+  [`pvm.md`](pvm.md)
+- Apple Virtualization Framework:
+  [`avf.md`](avf.md)

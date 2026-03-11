@@ -23,215 +23,28 @@ use port_runtime::{
 use serde::{Deserialize, Serialize};
 
 const AFTER_HELP: &str = "\
-Example assumptions:
-  Run these sample-config commands from the repository root.
-  Local artifact and launch workflows require the needed host tools to be available in the execution environment.
-  Treat `port doctor` as the gate for whether local `port machine launch` can succeed.
+Quick start:
+  `port` uses the built-in sample model when `--config` is omitted.
+  Use `--config examples/port.toml` for the checked-in repo workflow.
 
-Runnable local workflow:
+Examples:
   port doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
-  port --config examples/port.toml artifacts build --artifact demo-guest --architecture native
-  port --config examples/port.toml artifacts push --artifact demo-kernel --architecture native
-  port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture native
-  port --config examples/port.toml doctor
   port --config examples/port.toml machine launch --machine demo
-  port --config examples/port.toml machine list
-  port --config examples/port.toml machine status --machine demo
-  port --config examples/port.toml machine monitor --machine demo
-  port --config examples/port.toml machine top --machine demo
-  port --config examples/port.toml machine stop --machine demo
 
-Repo-local OCI artifact proof:
-  Copy `examples/port.toml` to a temp config and switch `demo-kernel` to `backend = \"oci-registry\"` with `transport = \"plain-http\"` and `kind = \"anonymous\"`.
-  Set `[artifacts.kernels.demo-kernel.reference].registry` to a reachable local registry such as `127.0.0.1:5510`.
-  Direct CLI use of `oci-registry` requires `oras` on PATH for `port artifacts push|pull`.
-  Repository helpers: `just demo-push-oci` then `just demo-pull-oci`
-
-Guest workflow examples:
-  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'uname -a'
-  port --config examples/port.toml guest copy --machine demo --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
-  port --config examples/port.toml guest pty --machine demo -- /bin/sh -lc 'printf pty-ok'
-  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --tail-lines 50
-  port --config examples/port.toml guest logs --machine demo --path /var/log/port-agent.log --follow
-  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8080 --target 127.0.0.1:80
-  port --config examples/port.toml guest forward --machine demo --listen unix:/tmp/port-demo.sock --target unix:/var/run/app.sock
-  port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
-Service workflow examples:
-  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /app/web --listen :8080
-  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
-  port --config examples/port.toml service list --machine cloud-aws
-  port --config examples/port.toml service status --machine cloud-aws --name web
-  port --config examples/port.toml service stop --machine cloud-aws --name web
-Multi-node hosted service workflow:
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
-  Registered nodes publish inventory to the configured control plane before service placement starts.
-  `port service list|status|stop` surface the selected node, target host group, scheduler, and runtime state for the stored placement.
-Current hosted service limits:
-  No autoscaling or rescheduling yet.
-  Deterministic-first-fit is the only shipped scheduler policy.
-  No broader fleet policy yet.
-  Imported inventory exists, but it is still a control-plane-owned state file contract rather than a first-class `port inventory import` command.
-  `port guest exec`, `copy`, `pty`, `logs`, and `forward` work against launched Firecracker VMs through the live guest transport.
-  `port guest forward` now supports foreground and detached lifecycle modes plus TCP and Unix-socket listeners through the same command family.
-  Guest-side `forward --target` addresses still depend on the guest network state. In the sample guest image, bring loopback up before targeting `127.0.0.1`, for example with `port guest exec --machine demo -- /bin/sh -lc 'busybox ifconfig lo up'`.
-
-Platform Support:
-  Linux: local Firecracker launch is supported when port doctor passes.
-  macOS: the native AVF lane now uses the same `port machine` and `port guest` verbs when `PORT_AVF_LAUNCHER` points at a launcher helper that exposes the runtime guest socket and console log.
-  Windows: use WSL or a remote Linux host, then rely on port doctor to confirm whether local launch is supported.
-Native macOS AVF workflow:
-  port --config examples/port.toml doctor
-  PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
-  port --config examples/port.toml machine status --machine demo-avf
-  port --config examples/port.toml guest exec --machine demo-avf -- /bin/sh -lc 'uname -a'
-  port --config examples/port.toml machine monitor --machine demo-avf
-  port --config examples/port.toml machine stop --machine demo-avf
-  Firecracker launch stays Linux-only; on non-macOS hosts the AVF lane fails fast with an explicit macOS boundary.
-Execution Lanes:
-  Firecracker + standard on Linux is the current shipped lane.
-  Firecracker + pvm on x86_64 now launches through the hosted control-plane and node-agent path on prepared Linux nodes and still depends on a dedicated host kit plus pvm artifact variants.
-  Firecracker + pvm on aarch64 remains research-only until Port has a supportable Firecracker runtime path.
-  Cloud Hypervisor + standard now ships as a proof-backed local and hosted lane through the canonical machine and guest verbs.
-  Apple Virtualization Framework now ships as a proof-backed local macOS standard lane.
-PVM foundation workflow:
-  port --config examples/port.toml doctor
-  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts push --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts push --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts pull --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
-  port --config examples/port.toml artifacts pull --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
-  Read the `pvm:local:x86_64:*` doctor checks as the host-kit gate for a prepared Linux node.
-  Local PVM launch still requires a prepared x86_64 Linux host with the patched `firecracker-pvm` binary and the required host boot state.
-Hosted prepared-node PVM workflow:
-  Copy `examples/port.toml` to `/tmp/port-pvm.toml`, point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`, switch `machines.cloud-generic` to `protection_mode = \"pvm\"`, and point the `x86_64/firecracker/pvm` kernel and guest variants at prepared artifact paths.
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-generic
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-generic
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
-  Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because `generic-linux-node` stays `planned`.
-  `prepare-pvm-node` writes the imported ready record under `.port/hosted/<control-plane>/imported-inventory.json`, which is the canonical repo-local proof that the node moved from planned to ready.
-  Missing `firecracker-pvm`, missing host boot prerequisites, or missing PVM artifact paths fail explicitly; Port does not fall back to the standard Firecracker lane.
-  Firecracker + pvm on aarch64 stays research-only; there is no supported `prepare-pvm-node` or launch proof for that architecture.
-Local Cloud Hypervisor workflow:
-  port --config examples/port.toml doctor
-  port --config examples/port.toml machine launch --machine demo-ch
-  port --config examples/port.toml machine status --machine demo-ch
-  port --config examples/port.toml guest exec --machine demo-ch -- /bin/sh -lc 'uname -a'
-  port --config examples/port.toml guest copy --machine demo-ch --direction host-to-guest --source ./host.txt --destination /workspace/host.txt
-  port --config examples/port.toml guest pty --machine demo-ch -- /bin/sh -lc 'printf ch-pty-ok'
-  port --config examples/port.toml guest logs --machine demo-ch --path /var/log/app.log --tail-lines 20
-  port --config examples/port.toml guest forward --machine demo-ch --listen 127.0.0.1:8080 --target 127.0.0.1:80
-  port --config examples/port.toml machine stop --machine demo-ch
-Hosted Cloud Hypervisor workflow:
-  Copy `examples/port.toml` to `/tmp/port-cloud-hypervisor.toml`, point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`, switch `machines.cloud-aws.substrate` to `cloud-hypervisor`, switch `machines.cloud-aws.architecture` to `x86_64`, and switch `nodes.aws-linux-node.capabilities.substrates` to `[\"cloud-hypervisor\"]`.
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine launch --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine status --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
-Repository-local Cloud Hypervisor proof:
-  cargo test -q -p port-runtime cloud_hypervisor_launch_status_and_stop_write_canonical_runtime_state
-  cargo test -q -p port-runtime cloud_hypervisor_launch_surfaces_missing_binary_preflight
-  cargo test -q -p port-runtime guest_exec_uses_cloud_hypervisor_vsock_tunnel_when_runtime_socket_is_absent
-  cargo test -q -p port-runtime hosted_cloud_hypervisor_launch_status_stop_route_through_live_control_plane
-  cargo test -q -p port-runtime hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
-  cargo test -q -p port-runtime hosted_guest_exec_routes_cloud_hypervisor_machine_through_node_runtime_root
-  cargo test -q -p port-cli --test machine_commands cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally
-  cargo test -q -p port-cli --test machine_commands cli_machine_launch_surfaces_missing_cloud_hypervisor_binary
-  cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
-  cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
-  cargo test -q -p port-cli --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
-  cargo test -q -p port-cli --test guest_commands cli_guest_commands_cover_hosted_cloud_hypervisor_runtime
-  Firecracker-only nodes are rejected explicitly for hosted Cloud Hypervisor; Port does not silently fall back.
-Standard lane preservation:
-  port --config examples/port.toml artifacts build --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode standard
-  port --config examples/port.toml artifacts build --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode standard
-  port --config examples/port.toml machine launch --machine demo
-  PVM admission failures must never silently fall back to the standard Firecracker lane.
-  Cloud Hypervisor and Apple Virtualization Framework are modeled explicitly as substrate lanes, and `port doctor` reports their lane-specific host contracts before launch.
-  The AVF contract keeps the current guest protocol over AVF virtio sockets and uses AVF serial ports for console capture.
-Cloud Linux:
-  generic-linux, aws, and gcp providers are modeled through the shared config and surfaced by port doctor.
-Hosted standard cloud workflow:
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
-  Repeat the same hosted control-plane flow for `cloud-generic` with `generic-linux-node` or for `cloud-gcp` with `gcp-linux-node`.
-Repository-local hosted standard proof:
-  cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
-  cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
-Artifact Mobility:
-  `port artifacts build` and `validate` materialize one canonical local variant selected by architecture, substrate, and protection mode.
-  `port artifacts push` and `pull` use the selected artifact variant's configured mobility backend.
-  The checked-in sample config defaults to the file-backed store for local proofs and cache warming.
-Hosted artifact workflow:
-  Copy `examples/port.toml` to a temp config, point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`, and switch the selected artifact distribution `push` and `pull` backends from `file-system` to `hosted-api` with that same endpoint.
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-  port --config /tmp/port-hosted-artifacts.toml artifacts build --artifact demo-kernel --architecture native
-  PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts push --artifact demo-kernel --architecture native
-  Remove the local artifact path printed by `build` or `push`, then run `PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted-artifacts.toml artifacts pull --artifact demo-kernel --architecture native`.
-  Hosted pushes land in `.port/hosted/<control-plane>/artifacts/...` under the control-plane owner, and hosted auth uses the configured bearer token from `PORT_DEMO_TOKEN`.
-  The repo-local OCI proof uses the same `port artifacts push|pull` surface with `backend = \"oci-registry\"`, `oras`, and `just demo-push-oci` / `just demo-pull-oci`.
-Hosted Control:
-  Local Port still owns the shipped direct Linux launch path, and hosted standard-cloud plus prepared-node PVM launch now route through the control plane and node agent.
-  `port control-plane serve` now exposes the first live hosted HTTP entrypoint for canonical machine and guest routes and reloads durable fleet state from `.port/hosted/<control-plane>/registered-nodes.json` plus `.port/hosted/<control-plane>/imported-inventory.json`.
-  `port node-agent serve` now exposes the node-owned runtime endpoint that serves those internal routes from one hosted node runtime root and refreshes durable node registration plus heartbeat ownership to the configured control plane.
-  Hosted demo flow:
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine list`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws`
-    `PORT_DEMO_TOKEN=demo-token port --config examples/port.toml guest exec --machine cloud-aws -- /bin/sh -lc 'uname -a'`
-  `cloud-generic` and `cloud-gcp` use that same hosted surface with `generic-linux-node` and `gcp-linux-node`.
-  Imported inventory is currently a control-plane-owned state-file contract, not a first-class `port inventory import` command: seed or sync `.port/hosted/<control-plane>/imported-inventory.json`, then inspect it through `port machine list|status`.
-  Hosted Port now resolves `machine list|status|stop|monitor|top` through control-plane contracts plus node-agent runtime roots while preserving the current machine and guest vocabulary.
-  The sample config now declares `[control_planes.demo]` with endpoint `https://port.example.internal`.
-  Hosted auth is modeled explicitly as a bearer token read from `PORT_DEMO_TOKEN` through the `authorization` header.
-  `--node-binding <node>=<endpoint>,<token>` remains a bootstrap or debug override when a node cannot self-register yet.
-  Remote/cloud sample hosts now use `mode = \"hosted-control-plane\"` and `control_plane = \"demo\"` instead of SSH placeholders, and hosted nodes declare `runtime_root` so the first machine-runtime slice has a concrete node-agent state location.
-  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted `machine status` surfaces configured, imported, registered, freshness, selected-node, and routing-eligibility detail for each hosted node, and that fleet state survives control-plane restart because it is reloaded from the durable state files.
-  Hosted `guest exec|copy|pty|logs` now execute through the live hosted HTTP path to the control plane and node agent while keeping the existing guest protocol unchanged.
-  Hosted `guest copy` now streams bytes through the live control-plane and node-agent path.
-  Hosted `guest forward` now supports foreground and detached lifecycle modes plus `--list`, `--stop`, and `--name` through the live control-plane and node-agent path.
-  Hosted detached forward returns a node-owned listener address and keeps detached lifecycle state under the node runtime root.
-  `port machine monitor` and `top` currently inspect node-agent-owned runtime state plus detached forward manifests.
-  Current hosted fleet limits: no autoscaling, no broader fleet policy, and no first-class `port inventory import` command yet.
-  Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
-Service Control:
-  `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
-  Managed guest-process `start|list|status|stop` is an internal contract beneath that same surface, not a second hosted-only CLI family.
-  Secret values now live in a runtime-owned backend plus explicit materialization contract under the resolved machine runtime root, so `port service secret` and `port service apply` stay on one canonical surface without embedding plaintext in service metadata.
-  `port service apply|list|status|stop` now exposes the shared restart policy and health-check contract, canonical runtime-state contract, and record path through the same local and hosted service model.
-  `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service request construction.
-  See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
-  See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
-  Azure remains an explicitly unsupported Firecracker provider lane.";
+Detailed examples:
+  CONFIGURATION.md
+  docs/operators.md
+  docs/hosted.md
+  docs/cloud.md
+  docs/artifacts.md";
 
 #[derive(Debug, Parser)]
 #[command(
     name = "port",
     version,
     about = "CLI-first Firecracker orchestration for local and cloud Linux hosts",
-    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the current execution lane; Firecracker/PVM, Cloud Hypervisor, and Apple Virtualization Framework are modeled explicitly and surfaced through shared machine and guest verbs; remote generic-linux, AWS, and GCP hosts are surfaced through provider-aware diagnostics; macOS and Windows operators use the same CLI while substrate-specific prerequisites stay explicit.",
+    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the default local lane; hosted control-plane, Cloud Hypervisor, Apple Virtualization Framework, and service workflows reuse the same `artifacts`, `machine`, `guest`, and `service` verbs.",
     after_help = AFTER_HELP
 )]
 pub struct Cli {
@@ -2356,47 +2169,18 @@ mod tests {
             "artifacts",
             "machine",
             "guest",
-            "guest pty",
-            "--follow",
-            "Linux",
-            "macOS",
-            "Windows",
-            "repository root",
-            "generic-linux",
-            "AWS",
-            "GCP",
-            "Azure",
-            "PVM",
-            "Cloud Hypervisor",
-            "Local Cloud Hypervisor workflow",
-            "Hosted Cloud Hypervisor workflow",
-            "Repository-local Cloud Hypervisor proof",
-            "Apple Virtualization Framework",
-            "Hosted Control",
-            "Hosted standard cloud workflow",
-            "Repository-local hosted standard proof",
-            "Firecracker-only nodes are rejected explicitly",
-            "push",
-            "pull",
             "service",
             "control-plane",
-            "prepare-pvm-node",
             "node-agent",
-            "Artifact Mobility",
-            "research-only",
-            "detached lifecycle modes",
-            "node-owned listener",
-            "--list",
-            "--stop",
-            "--name",
-            "node-binding",
-            "bootstrap or debug",
-            "machine list",
-            "Hosted artifact workflow",
-            "just demo-push-oci",
-            "first-class `port inventory import` command",
-            "artifacts push --artifact demo-guest",
-            "artifacts pull --artifact demo-guest",
+            "examples/port.toml",
+            "CONFIGURATION.md",
+            "docs/operators.md",
+            "docs/hosted.md",
+            "docs/cloud.md",
+            "docs/artifacts.md",
+            "port doctor",
+            "artifacts build --artifact demo-kernel",
+            "machine launch --machine demo",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

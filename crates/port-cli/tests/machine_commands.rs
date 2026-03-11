@@ -563,7 +563,7 @@ fn write_fake_pvm_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
 }
 
 #[test]
-fn cli_help_mentions_native_avf_workflow_and_boundaries() {
+fn cli_help_stays_concise_and_links_lane_specific_docs() {
     let output = Command::new(port_bin())
         .arg("--help")
         .output()
@@ -571,11 +571,12 @@ fn cli_help_mentions_native_avf_workflow_and_boundaries() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("demo-avf"));
-    assert!(stdout.contains("PORT_AVF_LAUNCHER"));
-    assert!(stdout.contains("machine launch"));
-    assert!(stdout.contains("--machine demo-avf"));
-    assert!(stdout.contains("Firecracker launch stays Linux-only"));
+    assert!(stdout.contains("Examples:"));
+    assert!(stdout.contains("port doctor"));
+    assert!(stdout.contains("CONFIGURATION.md"));
+    assert!(stdout.contains("docs/operators.md"));
+    assert!(stdout.contains("Apple Virtualization Framework"));
+    assert!(!stdout.contains("demo-avf"));
 }
 
 #[test]

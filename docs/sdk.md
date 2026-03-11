@@ -100,11 +100,7 @@ let status: HostedSuccess<serde_json::Value> =
 # Ok::<(), anyhow::Error>(())
 ```
 
-Run the in-repo example with:
-
-```bash
-cargo run -p port-sdk --example hosted-sdk
-```
+See `crates/port-sdk/examples/hosted-sdk.rs` for the in-repo sample program.
 
 The streamed hosted request builders stay explicit:
 
