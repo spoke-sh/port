@@ -7,11 +7,11 @@
 
 | Bearing | Status | Evidence | Assessment | Readiness | EV | Laid |
 |---------|--------|----------|------------|-----------|----|------|
-| [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ | repair evidence | - | - |
-| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid | ✓ | ✓ | repair evidence | - | ✓ |
-| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid | ✓ | ✓ | repair evidence | - | ✓ |
-| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | repair evidence | - | ✓ |
-| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | repair evidence | - | ✓ |
+| [Cloud Linux and PVM Viability](bearings/1vydg7000/) | ready | ✓ | ✓ | decision-ready | 3.88 | - |
+| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid | ✓ | ✓ | decision-ready | 2.58 | ✓ |
+| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid | ✓ | ✓ | decision-ready | 3.07 | ✓ |
+| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | decision-ready | 2.63 | ✓ |
+| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | decision-ready | 3.42 | ✓ |
 
 ## Epics
 
