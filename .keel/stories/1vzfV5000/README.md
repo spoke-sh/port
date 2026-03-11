@@ -20,7 +20,7 @@ services with restart and health visibility through canonical Port commands.
 ## Acceptance Criteria
 
 <!-- verify: command, SRS-04:start, proof: ac-1.log -->
-- [x] [SRS-04/AC-01] README, hosted/operator docs, CLI help, and sample-config guidance publish the service reliability workflow and its remaining limits through the canonical `port service` surface. <!-- [SRS-04/AC-01] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n \"restart|health|service secret|service apply|service status\" README.md docs examples/port.toml crates/port-cli/src/lib.rs', proof: ac-1.log -->
+- [x] [SRS-04/AC-01] README, hosted/operator docs, CLI help, and sample-config guidance publish the service reliability workflow and its remaining limits through the canonical `port service` surface. <!-- [SRS-04/AC-01] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && bash scripts/verify-service-reliability-docs.sh', proof: ac-1.log -->
 <!-- verify: command, SRS-04:end -->
 <!-- verify: command, SRS-04:start, proof: ac-2.log -->
 - [x] [SRS-04/AC-02] Port records a repo-local proof that stores a secret, launches a service, observes health or restart state, and stops the workload through canonical `port service` verbs. <!-- [SRS-04/AC-02] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && bash scripts/service-reliability-demo.sh', proof: ac-2.log -->

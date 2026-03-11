@@ -1,89 +1,129 @@
 ---
-recorded_at: 2026-03-11T11:47:07-07:00
-command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "restart|health|service secret|service apply|service status" README.md docs examples/port.toml crates/port-cli/src/lib.rs'
+recorded_at: 2026-03-11T11:48:39.631354581-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && bash scripts/verify-service-reliability-docs.sh'
 ---
-examples/port.toml:562:# port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 examples/port.toml:563:# port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
-examples/port.toml:564:# port --config examples/port.toml service status --machine cloud-aws --name api
-crates/port-cli/src/lib.rs:61:  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 crates/port-cli/src/lib.rs:62:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /app/web --listen :8080
-crates/port-cli/src/lib.rs:63:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
-crates/port-cli/src/lib.rs:65:  port --config examples/port.toml service status --machine cloud-aws --name web
-crates/port-cli/src/lib.rs:71:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 crates/port-cli/src/lib.rs:72:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
-crates/port-cli/src/lib.rs:74:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
 crates/port-cli/src/lib.rs:211:  `port machine list|status|stop|monitor|top` now show both local runtime-root machines and hosted-control-plane machines; hosted `machine status` surfaces configured, imported, registered, freshness, selected-node, and routing-eligibility detail for each hosted node, and that fleet state survives control-plane restart because it is reloaded from the durable state files.
-crates/port-cli/src/lib.rs:218:  Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
-crates/port-cli/src/lib.rs:222:  Secret values now live in a runtime-owned backend plus explicit materialization contract under the resolved machine runtime root, so `port service secret` and `port service apply` stay on one canonical surface without embedding plaintext in service metadata.
 crates/port-cli/src/lib.rs:223:  `port service apply|list|status|stop` now exposes the shared restart policy and health-check contract, canonical runtime-state contract, and record path through the same local and hosted service model.
 crates/port-cli/src/lib.rs:534:        restart: ServiceRestartPolicyArg,
+crates/port-cli/src/lib.rs:1364:            restart,
+crates/port-cli/src/lib.rs:1382:                        restart: restart.into(),
+crates/port-cli/src/lib.rs:1602:    println!("restart policy: {}", service.policy.restart);
+crates/port-cli/src/lib.rs:1628:    println!("restart count: {}", service.runtime.restart_count);
+crates/port-cli/src/lib.rs:2434:            "--restart",
+crates/port-cli/src/lib.rs:2827:            "--restart",
+crates/port-cli/src/lib.rs:2848:                restart,
+crates/port-cli/src/lib.rs:2859:                assert_eq!(restart, ServiceRestartPolicyArg::OnFailure);
+README.md:304:port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--restart <never|on-failure|always>] [--health <none|command>] [--health-command <token>]... [--secret <ENV=SECRET_NAME>]... -- <command...>
+README.md:514:- Control-plane restart recovery is now part of the supported repo-local hosted
+README.md:515:  workflow: restarting `port control-plane serve` reloads both durable fleet
+README.md:592:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+README.md:606:  group, scheduler, restart/health state, secret-source provenance, and
+README.md:681:  secret bindings, restart policy, and health policy under the same runtime
+README.md:687:  contract, including restart count, health state, secret-source provenance,
+README.md:702:applies a service with restart and health policy, waits for the first restart
+docs/hosted.md:408:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+docs/hosted.md:419:  `stop`, together with the target host group, scheduler, restart/health
+docs/hosted.md:512:`port machine status` view remains available after control-plane restart
+docs/hosted.md:667:  route, and expose restart/health state, secret-source provenance, and the
+docs/sdk.md:49:  the shipped restart/health/runtime-file service contract
+crates/port-cli/src/lib.rs:62:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /app/web --listen :8080
+crates/port-cli/src/lib.rs:72:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+crates/port-cli/src/lib.rs:223:  `port service apply|list|status|stop` now exposes the shared restart policy and health-check contract, canonical runtime-state contract, and record path through the same local and hosted service model.
 crates/port-cli/src/lib.rs:536:        health: ServiceHealthPolicyArg,
 crates/port-cli/src/lib.rs:537:        #[arg(long = "health-command")]
 crates/port-cli/src/lib.rs:538:        health_command: Vec<String>,
-crates/port-cli/src/lib.rs:1364:            restart,
 crates/port-cli/src/lib.rs:1365:            health,
 crates/port-cli/src/lib.rs:1366:            health_command,
-crates/port-cli/src/lib.rs:1382:                        restart: restart.into(),
 crates/port-cli/src/lib.rs:1383:                        healthcheck: ServiceHealthcheck {
 crates/port-cli/src/lib.rs:1384:                            policy: health.into(),
 crates/port-cli/src/lib.rs:1385:                            command: health_command,
-crates/port-cli/src/lib.rs:1602:    println!("restart policy: {}", service.policy.restart);
 crates/port-cli/src/lib.rs:1603:    println!("health policy: {}", service.policy.healthcheck.policy);
 crates/port-cli/src/lib.rs:1605:        "health command: {}",
 crates/port-cli/src/lib.rs:1606:        if service.policy.healthcheck.command.is_empty() {
 crates/port-cli/src/lib.rs:1609:            service.policy.healthcheck.command.join(" ")
-crates/port-cli/src/lib.rs:1628:    println!("restart count: {}", service.runtime.restart_count);
 crates/port-cli/src/lib.rs:1644:    println!("health state: {}", service.runtime.health_state);
 crates/port-cli/src/lib.rs:1646:        "health detail: {}",
 crates/port-cli/src/lib.rs:1647:        service.runtime.health_detail.as_deref().unwrap_or("(none)")
-crates/port-cli/src/lib.rs:2425:            .expect("service apply help should exist");
-crates/port-cli/src/lib.rs:2434:            "--restart",
 crates/port-cli/src/lib.rs:2435:            "--health",
 crates/port-cli/src/lib.rs:2436:            "--health-command",
-crates/port-cli/src/lib.rs:2442:                "missing service apply help keyword: {keyword}"
-crates/port-cli/src/lib.rs:2827:            "--restart",
 crates/port-cli/src/lib.rs:2829:            "--health",
 crates/port-cli/src/lib.rs:2831:            "--health-command",
-crates/port-cli/src/lib.rs:2848:                restart,
 crates/port-cli/src/lib.rs:2849:                health,
 crates/port-cli/src/lib.rs:2850:                health_command,
-crates/port-cli/src/lib.rs:2859:                assert_eq!(restart, ServiceRestartPolicyArg::OnFailure);
 crates/port-cli/src/lib.rs:2860:                assert_eq!(health, ServiceHealthPolicyArg::Command);
 crates/port-cli/src/lib.rs:2861:                assert_eq!(health_command, vec![String::from("/bin/true")]);
-README.md:301:port service secret put --machine <name> --name <secret> --value <value>
-README.md:302:port service secret list --machine <name>
-README.md:303:port service secret remove --machine <name> --name <secret>
+examples/port.toml:563:# port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
 README.md:304:port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--restart <never|on-failure|always>] [--health <none|command>] [--health-command <token>]... [--secret <ENV=SECRET_NAME>]... -- <command...>
-README.md:306:port service status --machine <name> --name <name>
-README.md:382:- `port service secret` and `port service apply|list|status|stop` now persist
-README.md:514:- Control-plane restart recovery is now part of the supported repo-local hosted
-README.md:515:  workflow: restarting `port control-plane serve` reloads both durable fleet
-README.md:536:  explicit host groups and node bindings: `service apply --host-group
-README.md:591:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 README.md:592:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
-README.md:594:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
-README.md:600:- `service apply --host-group aws-secondary` selects one eligible member of
 README.md:606:  group, scheduler, restart/health state, secret-source provenance, and
-README.md:678:- `port service secret put|list|remove` stores machine-scoped secret metadata
-README.md:680:- `port service apply --kind service|sandbox` stores a guest command plus
 README.md:681:  secret bindings, restart policy, and health policy under the same runtime
 README.md:687:  contract, including restart count, health state, secret-source provenance,
 README.md:691:- Restart policy, health checks, scheduler policy, and the first hardened
 README.md:702:applies a service with restart and health policy, waits for the first restart
 README.md:703:and unhealthy health check, flips the health marker, verifies the healthy
-README.md:725:- `services()` mirrors `port service secret put|list|remove` and
-README.md:726:  `port service apply|list|status|stop`.
 docs/hosted.md:58:- reports node and machine health back to the control plane
-docs/hosted.md:353:- hosted `service secret put|list|remove` now stores machine-scoped secret
-docs/hosted.md:356:- hosted `service apply --kind service|sandbox` now stores service and sandbox
-docs/hosted.md:407:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
 docs/hosted.md:408:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
-docs/hosted.md:410:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
-docs/hosted.md:416:- `service apply --host-group aws-secondary` targets the existing hosted
 docs/hosted.md:419:  `stop`, together with the target host group, scheduler, restart/health
-docs/hosted.md:512:`port machine status` view remains available after control-plane restart
-docs/hosted.md:664:- hosted `service secret` and `service apply|list|status|stop` are also
 docs/hosted.md:667:  route, and expose restart/health state, secret-source provenance, and the
-docs/sdk.md:30:- `services()` mirrors `port service secret put|list|remove` plus
-docs/sdk.md:31:  `port service apply|list|status|stop`
 docs/sdk.md:49:  the shipped restart/health/runtime-file service contract
+crates/port-cli/src/lib.rs:61:  port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+crates/port-cli/src/lib.rs:71:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+crates/port-cli/src/lib.rs:218:  Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
+crates/port-cli/src/lib.rs:222:  Secret values now live in a runtime-owned backend plus explicit materialization contract under the resolved machine runtime root, so `port service secret` and `port service apply` stay on one canonical surface without embedding plaintext in service metadata.
+examples/port.toml:562:# port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+README.md:301:port service secret put --machine <name> --name <secret> --value <value>
+README.md:302:port service secret list --machine <name>
+README.md:303:port service secret remove --machine <name> --name <secret>
+README.md:382:- `port service secret` and `port service apply|list|status|stop` now persist
+README.md:591:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+README.md:678:- `port service secret put|list|remove` stores machine-scoped secret metadata
+README.md:725:- `services()` mirrors `port service secret put|list|remove` and
+docs/sdk.md:30:- `services()` mirrors `port service secret put|list|remove` plus
+docs/hosted.md:353:- hosted `service secret put|list|remove` now stores machine-scoped secret
+docs/hosted.md:407:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+docs/hosted.md:664:- hosted `service secret` and `service apply|list|status|stop` are also
+examples/port.toml:563:# port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+crates/port-cli/src/lib.rs:62:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /app/web --listen :8080
+crates/port-cli/src/lib.rs:63:  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
+crates/port-cli/src/lib.rs:72:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+crates/port-cli/src/lib.rs:218:  Hosted `port service secret` and `port service apply|list|status|stop` now execute through the live control-plane and node-agent path while keeping `port service` as the canonical secrets/services/sandboxes surface.
+crates/port-cli/src/lib.rs:222:  Secret values now live in a runtime-owned backend plus explicit materialization contract under the resolved machine runtime root, so `port service secret` and `port service apply` stay on one canonical surface without embedding plaintext in service metadata.
+crates/port-cli/src/lib.rs:223:  `port service apply|list|status|stop` now exposes the shared restart policy and health-check contract, canonical runtime-state contract, and record path through the same local and hosted service model.
+crates/port-cli/src/lib.rs:2425:            .expect("service apply help should exist");
+crates/port-cli/src/lib.rs:2442:                "missing service apply help keyword: {keyword}"
+README.md:304:port service apply --machine <name> --name <name> [--kind <service|sandbox>] [--restart <never|on-failure|always>] [--health <none|command>] [--health-command <token>]... [--secret <ENV=SECRET_NAME>]... -- <command...>
+README.md:382:- `port service secret` and `port service apply|list|status|stop` now persist
+README.md:536:  explicit host groups and node bindings: `service apply --host-group
+README.md:592:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+README.md:600:- `service apply --host-group aws-secondary` selects one eligible member of
+README.md:680:- `port service apply --kind service|sandbox` stores a guest command plus
+README.md:726:  `port service apply|list|status|stop`.
+docs/hosted.md:356:- hosted `service apply --kind service|sandbox` now stores service and sandbox
+docs/hosted.md:408:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+docs/hosted.md:416:- `service apply --host-group aws-secondary` targets the existing hosted
+docs/hosted.md:664:- hosted `service secret` and `service apply|list|status|stop` are also
+docs/sdk.md:31:  `port service apply|list|status|stop`
+examples/port.toml:564:# port --config examples/port.toml service status --machine cloud-aws --name api
+crates/port-cli/src/lib.rs:65:  port --config examples/port.toml service status --machine cloud-aws --name web
+crates/port-cli/src/lib.rs:74:  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+README.md:306:port service status --machine <name> --name <name>
+README.md:594:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+docs/hosted.md:410:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable
