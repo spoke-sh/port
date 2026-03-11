@@ -1,6 +1,9 @@
 use port_agent_protocol::ExecRequest;
 use port_model::PortConfig;
-use port_sdk::{HostedClient, ServiceApplyRequest, ServiceKind, ServiceSecretBinding};
+use port_sdk::{
+    HostedClient, ServiceApplyRequest, ServiceHealthPolicy, ServiceHealthcheck, ServiceKind,
+    ServicePolicy, ServiceRestartPolicy, ServiceSecretBinding,
+};
 
 fn main() -> anyhow::Result<()> {
     let config = PortConfig::sample();
@@ -30,6 +33,13 @@ fn main() -> anyhow::Result<()> {
                 env: String::from("API_TOKEN"),
                 secret: String::from("demo-token"),
             }],
+            policy: ServicePolicy {
+                restart: ServiceRestartPolicy::Never,
+                healthcheck: ServiceHealthcheck {
+                    policy: ServiceHealthPolicy::None,
+                    command: Vec::new(),
+                },
+            },
         },
     )?;
 

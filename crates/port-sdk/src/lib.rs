@@ -20,6 +20,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use port_model::{
+    ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
+    ServiceSecretBinding,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
@@ -289,19 +294,6 @@ fn render_route_context(route: Option<&HostedRouteContext>) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ServiceKind {
-    Service,
-    Sandbox,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServiceSecretBinding {
-    pub env: String,
-    pub secret: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceApplyRequest {
     pub name: String,
     pub kind: ServiceKind,
@@ -309,6 +301,8 @@ pub struct ServiceApplyRequest {
     pub host_group: Option<String>,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
+    #[serde(default)]
+    pub policy: ServicePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -713,7 +707,7 @@ mod tests {
 
     use super::{
         HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest, ServiceApplyRequest,
-        ServiceClient, ServiceKind, ServiceSecretBinding,
+        ServiceClient,
     };
     use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode};
@@ -723,6 +717,10 @@ mod tests {
     use port_hosted_protocol::{
         HostedDetachedForwardStartRequest, HostedError, HostedGuestStreamProtocol,
         HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
+    };
+    use port_model::{
+        ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
+        ServiceSecretBinding,
     };
     use serde_json::json;
 
@@ -800,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn service_requests_cover_secret_and_sandbox_surfaces() {
+    fn service_policy_requests_cover_secret_sandbox_and_policy_contracts() {
         let client = HostedClient::new(
             "https://port.example.internal",
             "port-hosted-demo",
@@ -840,6 +838,13 @@ mod tests {
                         env: String::from("API_TOKEN"),
                         secret: String::from("demo-token"),
                     }],
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::OnFailure,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![String::from("/bin/true")],
+                        },
+                    },
                 },
             )
             .expect("service request should encode");
@@ -852,6 +857,9 @@ mod tests {
         assert_eq!(body["kind"], "sandbox");
         assert_eq!(body["host_group"], "aws-builders");
         assert_eq!(body["secret_bindings"][0]["secret"], "demo-token");
+        assert_eq!(body["policy"]["restart"], "on-failure");
+        assert_eq!(body["policy"]["healthcheck"]["policy"], "command");
+        assert_eq!(body["policy"]["healthcheck"]["command"][0], "/bin/true");
 
         let status = services.status("cloud-aws", "buildbox");
         assert_eq!(status.method, HttpMethod::Get);

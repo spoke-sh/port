@@ -4447,10 +4447,7 @@ async fn node_service_apply(
         machine_name: &machine,
         runtime_root: &state.inner.runtime_root,
         name: &request.name,
-        kind: match request.kind {
-            port_sdk::ServiceKind::Service => crate::ServiceKind::Service,
-            port_sdk::ServiceKind::Sandbox => crate::ServiceKind::Sandbox,
-        },
+        kind: request.kind,
         host_group: host_group.as_deref(),
         command: request.command,
         secret_bindings: request
@@ -4461,6 +4458,7 @@ async fn node_service_apply(
                 secret: binding.secret,
             })
             .collect(),
+        policy: request.policy,
     };
     match apply_hosted_machine_service_live(&state.inner.config, &localized, runtime_request) {
         Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),

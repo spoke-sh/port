@@ -1792,6 +1792,114 @@ pub struct GuestControl {
     pub console_log: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceKind {
+    Service,
+    Sandbox,
+}
+
+impl std::fmt::Display for ServiceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Service => f.write_str("service"),
+            Self::Sandbox => f.write_str("sandbox"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceSecretBinding {
+    pub env: String,
+    pub secret: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceRestartPolicy {
+    #[default]
+    Never,
+    OnFailure,
+    Always,
+}
+
+impl std::fmt::Display for ServiceRestartPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Never => f.write_str("never"),
+            Self::OnFailure => f.write_str("on-failure"),
+            Self::Always => f.write_str("always"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceHealthPolicy {
+    #[default]
+    None,
+    Command,
+}
+
+impl std::fmt::Display for ServiceHealthPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => f.write_str("none"),
+            Self::Command => f.write_str("command"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ServiceHealthcheck {
+    #[serde(default)]
+    pub policy: ServiceHealthPolicy,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ServicePolicy {
+    #[serde(default)]
+    pub restart: ServiceRestartPolicy,
+    #[serde(default)]
+    pub healthcheck: ServiceHealthcheck,
+}
+
+impl ServicePolicy {
+    pub fn validate_for_kind(&self, kind: ServiceKind) -> std::result::Result<(), String> {
+        if matches!(kind, ServiceKind::Sandbox)
+            && !matches!(self.restart, ServiceRestartPolicy::Never)
+        {
+            return Err(String::from(
+                "sandbox services only support restart policy 'never'",
+            ));
+        }
+        if matches!(kind, ServiceKind::Sandbox)
+            && !matches!(self.healthcheck.policy, ServiceHealthPolicy::None)
+        {
+            return Err(String::from(
+                "sandbox services only support health policy 'none'",
+            ));
+        }
+        if matches!(self.healthcheck.policy, ServiceHealthPolicy::Command)
+            && self.healthcheck.command.is_empty()
+        {
+            return Err(String::from(
+                "health policy 'command' requires at least one health command token",
+            ));
+        }
+        if matches!(self.healthcheck.policy, ServiceHealthPolicy::None)
+            && !self.healthcheck.command.is_empty()
+        {
+            return Err(String::from(
+                "health command requires health policy 'command', not health policy 'none'",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineControlContract {
     pub inventory_scope: MachineInventoryScope,
@@ -2814,7 +2922,8 @@ mod tests {
         MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
         MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
         OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
-        PvmLaneDecision, hosted_artifact_store_path,
+        PvmLaneDecision, ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy,
+        ServiceRestartPolicy, hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
@@ -2873,6 +2982,62 @@ mod tests {
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.distribution.push]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.variants]"));
+    }
+
+    #[test]
+    fn service_policy_defaults_to_never_and_no_healthcheck() {
+        let policy = ServicePolicy::default();
+
+        assert_eq!(policy.restart, ServiceRestartPolicy::Never);
+        assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::None);
+        assert!(policy.healthcheck.command.is_empty());
+        policy
+            .validate_for_kind(ServiceKind::Service)
+            .expect("default policy should be valid");
+    }
+
+    #[test]
+    fn service_policy_invalid_combinations_reject_restart_and_health_mismatches() {
+        let sandbox_error = ServicePolicy {
+            restart: ServiceRestartPolicy::Always,
+            healthcheck: ServiceHealthcheck::default(),
+        }
+        .validate_for_kind(ServiceKind::Sandbox)
+        .expect_err("sandbox restart policy should reject");
+        assert!(sandbox_error.contains("sandbox"), "{sandbox_error}");
+        assert!(
+            sandbox_error.contains("restart policy 'never'"),
+            "{sandbox_error}"
+        );
+
+        let missing_command = ServicePolicy {
+            restart: ServiceRestartPolicy::OnFailure,
+            healthcheck: ServiceHealthcheck {
+                policy: ServiceHealthPolicy::Command,
+                command: Vec::new(),
+            },
+        }
+        .validate_for_kind(ServiceKind::Service)
+        .expect_err("command health policy should require a command");
+        assert!(
+            missing_command.contains("health policy 'command'"),
+            "{missing_command}"
+        );
+
+        let stray_command = ServicePolicy {
+            restart: ServiceRestartPolicy::Never,
+            healthcheck: ServiceHealthcheck {
+                policy: ServiceHealthPolicy::None,
+                command: vec![String::from("/bin/true")],
+            },
+        }
+        .validate_for_kind(ServiceKind::Service)
+        .expect_err("health command should reject when policy is none");
+        assert!(stray_command.contains("health command"), "{stray_command}");
+        assert!(
+            stray_command.contains("health policy 'none'"),
+            "{stray_command}"
+        );
     }
 
     #[test]

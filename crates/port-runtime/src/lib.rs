@@ -33,11 +33,15 @@ use port_model::{
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
     SecretPutRequest as HostedSecretPutRequest, ServiceApplyRequest as HostedServiceApplyRequest,
-    ServiceKind as HostedServiceKind, ServiceSecretBinding as HostedServiceSecretBinding,
 };
 use serde::{Deserialize, Serialize};
 
 mod hosted_control_plane;
+
+pub use port_model::{
+    ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
+    ServiceSecretBinding,
+};
 
 pub use hosted_control_plane::{
     ControlPlaneServeRequest, HostedNodeBinding, NodeAgentServeRequest, serve_control_plane,
@@ -305,22 +309,6 @@ pub struct MachineTopReport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ServiceKind {
-    Service,
-    Sandbox,
-}
-
-impl std::fmt::Display for ServiceKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Service => f.write_str("service"),
-            Self::Sandbox => f.write_str("sandbox"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum ServiceDesiredState {
     Active,
     Stopped,
@@ -359,12 +347,6 @@ impl std::fmt::Display for ServiceRuntimeState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServiceSecretBinding {
-    pub env: String,
-    pub secret: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct SecretPutRequest<'a> {
     pub machine_name: &'a str,
@@ -382,6 +364,7 @@ pub struct ServiceApplyRequest<'a> {
     pub host_group: Option<&'a str>,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
+    pub policy: ServicePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +388,7 @@ pub struct ServiceDefinitionStatus {
     pub runtime: ServiceRuntimeObservation,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
+    pub policy: ServicePolicy,
     pub control: MachineControlContract,
     pub control_plane: Option<String>,
     pub node_name: Option<String>,
@@ -2523,16 +2507,20 @@ pub(crate) fn apply_machine_service_local(
     config: &PortConfig,
     request: ServiceApplyRequest<'_>,
 ) -> Result<ServiceDefinitionStatus> {
+    validate_identifier(request.name, "service name")?;
+    if request.command.is_empty() {
+        bail!("service apply requires a command");
+    }
+    request
+        .policy
+        .validate_for_kind(request.kind)
+        .map_err(anyhow::Error::msg)?;
     let context = resolve_service_runtime_context(
         config,
         request.runtime_root,
         request.machine_name,
         request.host_group,
     )?;
-    validate_identifier(request.name, "service name")?;
-    if request.command.is_empty() {
-        bail!("service apply requires a command");
-    }
     validate_secret_bindings(&request.secret_bindings)?;
     for binding in &request.secret_bindings {
         let path = service_secret_dir(&context.status.runtime_dir)
@@ -2558,6 +2546,7 @@ pub(crate) fn apply_machine_service_local(
         desired_state: ServiceDesiredState::Active,
         command: request.command,
         secret_bindings: request.secret_bindings,
+        policy: request.policy,
         control: context.status.control.clone(),
         control_plane: context.control_plane.clone(),
         node_name: context.node_name.clone(),
@@ -3991,6 +3980,7 @@ struct ServiceDefinitionRecord {
     desired_state: ServiceDesiredState,
     command: Vec<String>,
     secret_bindings: Vec<ServiceSecretBinding>,
+    policy: ServicePolicy,
     control: MachineControlContract,
     control_plane: Option<String>,
     node_name: Option<String>,
@@ -4265,6 +4255,7 @@ fn service_status_from_record(
         runtime,
         command: record.command,
         secret_bindings: record.secret_bindings,
+        policy: record.policy,
         control: record.control,
         control_plane: record.control_plane,
         node_name: record.node_name,
@@ -5131,17 +5122,10 @@ fn hosted_control_plane_stop_machine(
     Ok(response.result)
 }
 
-fn hosted_service_kind(kind: ServiceKind) -> HostedServiceKind {
-    match kind {
-        ServiceKind::Service => HostedServiceKind::Service,
-        ServiceKind::Sandbox => HostedServiceKind::Sandbox,
-    }
-}
-
-fn hosted_service_bindings(bindings: &[ServiceSecretBinding]) -> Vec<HostedServiceSecretBinding> {
+fn hosted_service_bindings(bindings: &[ServiceSecretBinding]) -> Vec<ServiceSecretBinding> {
     bindings
         .iter()
-        .map(|binding| HostedServiceSecretBinding {
+        .map(|binding| ServiceSecretBinding {
             env: binding.env.clone(),
             secret: binding.secret.clone(),
         })
@@ -5223,10 +5207,11 @@ fn hosted_control_plane_apply_machine_service(
                     request.machine_name,
                     HostedServiceApplyRequest {
                         name: request.name.to_string(),
-                        kind: hosted_service_kind(request.kind),
+                        kind: request.kind,
                         host_group: request.host_group.map(str::to_string),
                         command: request.command.clone(),
                         secret_bindings: hosted_service_bindings(&request.secret_bindings),
+                        policy: request.policy.clone(),
                     },
                 )
                 .context("failed to encode hosted service apply request")?,
@@ -8639,9 +8624,9 @@ mod tests {
         GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
         MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
         ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
-        ServiceRuntimeState, ServiceSecretBinding, StopResult, apply_machine_service,
-        artifact_script, avf_local_launch_machine_with_host_os, build_firecracker_config,
-        cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
+        ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
+        apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
+        build_firecracker_config, cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
         cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
         collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
         ensure_native_build_lane, execute_guest_operation, hosted_placeholder_runtime_root,
@@ -14061,6 +14046,7 @@ exec sleep 30
                 String::from("make test"),
             ],
             secret_bindings: Vec::new(),
+            policy: ServicePolicy::default(),
             control: port_model::MachineControlContract::local_runtime_root(),
             control_plane: None,
             node_name: None,
@@ -14157,6 +14143,7 @@ exec sleep 30
                     env: String::from("API_TOKEN"),
                     secret: String::from("demo-token"),
                 }],
+                policy: ServicePolicy::default(),
             },
         )
         .expect("service apply should succeed");
@@ -14282,6 +14269,7 @@ exec sleep 30
                     String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
                 ],
                 secret_bindings: Vec::new(),
+                policy: ServicePolicy::default(),
             },
         )
         .expect("first hosted service apply should succeed");
@@ -14299,6 +14287,7 @@ exec sleep 30
                     String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
                 ],
                 secret_bindings: Vec::new(),
+                policy: ServicePolicy::default(),
             },
         )
         .expect("second hosted service apply should succeed");
@@ -14371,6 +14360,7 @@ exec sleep 30
                 host_group: Some("aws-secondary"),
                 command: vec![String::from("/bin/true")],
                 secret_bindings: Vec::new(),
+                policy: ServicePolicy::default(),
             },
         )
         .expect_err("requested host group should reject ineligible placement");
@@ -14441,6 +14431,7 @@ exec sleep 30
                     String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
                 ],
                 secret_bindings: Vec::new(),
+                policy: ServicePolicy::default(),
             },
         )
         .expect("secondary placement should succeed");
@@ -14526,6 +14517,7 @@ exec sleep 30
                     String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
                 ],
                 secret_bindings: Vec::new(),
+                policy: ServicePolicy::default(),
             },
         )
         .expect("secondary placement should succeed");

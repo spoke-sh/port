@@ -93,7 +93,7 @@ fn wait_for_port(addr: &str, rx: &mpsc::Receiver<anyhow::Result<()>>, label: &st
 }
 
 #[test]
-fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
+fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let control_plane_addr = reserve_addr();
@@ -187,6 +187,12 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
         .arg("api")
         .arg("--kind")
         .arg("service")
+        .arg("--restart")
+        .arg("on-failure")
+        .arg("--health")
+        .arg("command")
+        .arg("--health-command")
+        .arg("/bin/true")
         .arg("--secret")
         .arg("API_TOKEN=demo-token")
         .arg("--")
@@ -203,6 +209,9 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(service_stdout.contains("runtime state: running"));
     assert!(service_stdout.contains("target host group: aws-builders"));
     assert!(service_stdout.contains("scheduler: deterministic-first-fit"));
+    assert!(service_stdout.contains("restart policy: on-failure"));
+    assert!(service_stdout.contains("health policy: command"));
+    assert!(service_stdout.contains("health command: /bin/true"));
     assert!(
         service_stdout.contains("runtime record: ")
             && service_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
@@ -263,6 +272,9 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     assert!(status_stdout.contains("runtime state: running"));
     assert!(status_stdout.contains("target host group: aws-builders"));
     assert!(status_stdout.contains("scheduler: deterministic-first-fit"));
+    assert!(status_stdout.contains("restart policy: on-failure"));
+    assert!(status_stdout.contains("health policy: command"));
+    assert!(status_stdout.contains("health command: /bin/true"));
     assert!(
         status_stdout.contains("runtime record: ")
             && status_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
@@ -290,4 +302,54 @@ fn cli_service_commands_cover_hosted_secret_service_and_sandbox_contracts() {
         fs::read_to_string(runtime_record).expect("runtime record should read");
     assert!(runtime_record_text.contains("\"state\": \"stopped\""));
     assert!(!runtime_record_text.contains("s3cr3t"));
+}
+
+#[test]
+fn cli_service_policy_invalid_combinations_reject_before_runtime_lookup() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    write_config(&config_path, &port_model::PortConfig::sample());
+
+    let invalid_restart = port_command(&config_path)
+        .arg("service")
+        .arg("apply")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--name")
+        .arg("buildbox")
+        .arg("--kind")
+        .arg("sandbox")
+        .arg("--restart")
+        .arg("always")
+        .arg("--")
+        .arg("/bin/true")
+        .output()
+        .expect("invalid restart command should run");
+    assert!(!invalid_restart.status.success());
+    let invalid_restart_stderr = String::from_utf8_lossy(&invalid_restart.stderr);
+    assert!(
+        invalid_restart_stderr.contains("sandbox services only support restart policy 'never'"),
+        "{invalid_restart_stderr}"
+    );
+
+    let missing_health_command = port_command(&config_path)
+        .arg("service")
+        .arg("apply")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--name")
+        .arg("api")
+        .arg("--health")
+        .arg("command")
+        .arg("--")
+        .arg("/bin/true")
+        .output()
+        .expect("missing health command should run");
+    assert!(!missing_health_command.status.success());
+    let missing_health_stderr = String::from_utf8_lossy(&missing_health_command.stderr);
+    assert!(
+        missing_health_stderr
+            .contains("health policy 'command' requires at least one health command token"),
+        "{missing_health_stderr}"
+    );
 }

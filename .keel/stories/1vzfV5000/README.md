@@ -2,9 +2,9 @@
 id: 1vzfV5000
 title: Publish Service Reliability Operator Workflow
 type: feat
-status: icebox
+status: backlog
 created_at: 2026-03-09T11:38:43
-updated_at: 2026-03-09T11:39:32
+updated_at: 2026-03-09T11:43:06
 scope: 1vzfT4000/1vzfTm000
 ---
 

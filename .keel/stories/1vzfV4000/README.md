@@ -2,9 +2,9 @@
 id: 1vzfV4000
 title: Implement Service Supervision And Health State
 type: feat
-status: icebox
+status: backlog
 created_at: 2026-03-09T11:38:42
-updated_at: 2026-03-09T11:39:32
+updated_at: 2026-03-09T11:43:06
 scope: 1vzfT4000/1vzfTm000
 ---
 

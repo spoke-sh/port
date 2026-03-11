@@ -1,10 +1,12 @@
 ---
 id: 1vzfTm000
 title: Service Policy And Secret Runtime Foundations
-status: draft
+status: in-progress
 epic: 1vzfT4000
 created_at: 2026-03-09T11:37:22
 index: 1
+updated_at: 2026-03-09T11:43:06
+started_at: 2026-03-09T11:43:07
 ---
 
 # Service Policy And Secret Runtime Foundations
@@ -27,8 +29,8 @@ index: 1
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Implement Service Supervision And Health State](../../../../stories/1vzfV4000/README.md) | feat | icebox |
-| [Publish Service Reliability Operator Workflow](../../../../stories/1vzfV5000/README.md) | feat | icebox |
-| [Define Service Policy And Health Contract](../../../../stories/1vzfVW000/README.md) | feat | icebox |
-| [Implement Secret Backend And Materialization](../../../../stories/1vzfVh000/README.md) | feat | icebox |
+| [Implement Service Supervision And Health State](../../../../stories/1vzfV4000/README.md) | feat | backlog |
+| [Publish Service Reliability Operator Workflow](../../../../stories/1vzfV5000/README.md) | feat | backlog |
+| [Define Service Policy And Health Contract](../../../../stories/1vzfVW000/README.md) | feat | backlog |
+| [Implement Secret Backend And Materialization](../../../../stories/1vzfVh000/README.md) | feat | backlog |
 <!-- END GENERATED -->

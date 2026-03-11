@@ -17,7 +17,8 @@ use port_model::{
 use port_runtime::{
     ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
     GuestRequest, HostedNodeBinding, HostedPvmNodePrepareRequest, LaunchRequest,
-    NodeAgentServeRequest,
+    NodeAgentServeRequest, ServiceHealthPolicy, ServiceHealthcheck, ServicePolicy,
+    ServiceRestartPolicy,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,7 +59,7 @@ Guest workflow examples:
   port --config examples/port.toml guest forward --machine demo --listen 127.0.0.1:8081 --target 127.0.0.1:80 --lifecycle detached --name demo-web
 Service workflow examples:
   port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --secret API_TOKEN=demo-token -- /app/web --listen :8080
+  port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /app/web --listen :8080
   port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name buildbox --kind sandbox --secret API_TOKEN=demo-token -- /bin/sh -lc 'make test'
   port --config examples/port.toml service list --machine cloud-aws
   port --config examples/port.toml service status --machine cloud-aws --name web
@@ -68,7 +69,7 @@ Multi-node hosted service workflow:
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve --node aws-linux-node-b --bind 127.0.0.1:9235 --token node-secret-b
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
-  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+  PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service apply --machine cloud-aws --host-group aws-secondary --name api --kind service --restart on-failure --health command --health-command /bin/true --secret API_TOKEN=demo-token -- /bin/sh -lc 'trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service list --machine cloud-aws
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --machine cloud-aws --name api
   PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
@@ -219,7 +220,7 @@ Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
   Managed guest-process `start|list|status|stop` is an internal contract beneath that same surface, not a second hosted-only CLI family.
   Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
-  `port service apply|list|status|stop` now also exposes a canonical runtime-state contract and record path; restart policy, health checks, scheduler policy, and hardened secret backends remain explicit follow-on work.
+  `port service apply|list|status|stop` now exposes the shared restart policy and health-check contract, canonical runtime-state contract, and record path through the same local and hosted service model.
   `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service request construction.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
   See `docs/avf.md` for the AVF launch, guest-transport, serial-console, entitlement, and Rosetta workflow contract.
@@ -294,6 +295,19 @@ pub enum ForwardLifecycleArg {
 pub enum ServiceKindArg {
     Service,
     Sandbox,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ServiceRestartPolicyArg {
+    Never,
+    OnFailure,
+    Always,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ServiceHealthPolicyArg {
+    None,
+    Command,
 }
 
 #[derive(Debug, Clone)]
@@ -431,6 +445,25 @@ impl From<ServiceKindArg> for port_runtime::ServiceKind {
     }
 }
 
+impl From<ServiceRestartPolicyArg> for ServiceRestartPolicy {
+    fn from(value: ServiceRestartPolicyArg) -> Self {
+        match value {
+            ServiceRestartPolicyArg::Never => Self::Never,
+            ServiceRestartPolicyArg::OnFailure => Self::OnFailure,
+            ServiceRestartPolicyArg::Always => Self::Always,
+        }
+    }
+}
+
+impl From<ServiceHealthPolicyArg> for ServiceHealthPolicy {
+    fn from(value: ServiceHealthPolicyArg) -> Self {
+        match value {
+            ServiceHealthPolicyArg::None => Self::None,
+            ServiceHealthPolicyArg::Command => Self::Command,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
     #[command(about = "Launch a named machine from the model")]
@@ -497,6 +530,12 @@ pub enum ServiceCommand {
         kind: ServiceKindArg,
         #[arg(long)]
         host_group: Option<String>,
+        #[arg(long, value_enum, default_value_t = ServiceRestartPolicyArg::Never)]
+        restart: ServiceRestartPolicyArg,
+        #[arg(long, value_enum, default_value_t = ServiceHealthPolicyArg::None)]
+        health: ServiceHealthPolicyArg,
+        #[arg(long = "health-command")]
+        health_command: Vec<String>,
         #[arg(long = "secret")]
         secret: Vec<String>,
         #[arg(last = true, required = true)]
@@ -1322,6 +1361,9 @@ fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
             name,
             kind,
             host_group,
+            restart,
+            health,
+            health_command,
             secret,
             command,
         } => {
@@ -1336,6 +1378,13 @@ fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
                     host_group: host_group.as_deref(),
                     command,
                     secret_bindings: parse_secret_bindings(secret)?,
+                    policy: ServicePolicy {
+                        restart: restart.into(),
+                        healthcheck: ServiceHealthcheck {
+                            policy: health.into(),
+                            command: health_command,
+                        },
+                    },
                 },
             )?;
             print_service_definition(&definition);
@@ -1546,6 +1595,16 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
         service
             .scheduler
             .map_or_else(|| String::from("(none)"), render_scheduler_policy)
+    );
+    println!("restart policy: {}", service.policy.restart);
+    println!("health policy: {}", service.policy.healthcheck.policy);
+    println!(
+        "health command: {}",
+        if service.policy.healthcheck.command.is_empty() {
+            String::from("(none)")
+        } else {
+            service.policy.healthcheck.command.join(" ")
+        }
     );
     println!("manifest: {}", service.manifest_path.display());
     println!("runtime record: {}", service.runtime.record_path.display());
@@ -2217,9 +2276,9 @@ mod tests {
     use super::{
         ArchitectureArg, ArtifactCommand, Cli, Command, ControlPlaneCommand, CopyDirectionArg,
         GuestCommand, HostedNodeBindingArg, MachineCommand, NodeAgentCommand, ProtectionModeArg,
-        ServiceCommand, ServiceKindArg, ServiceSecretCommand, SubstrateArg,
-        format_hosted_fleet_nodes, format_machine_status, render_help,
-        render_nested_subcommand_help, render_subcommand_help,
+        ServiceCommand, ServiceHealthPolicyArg, ServiceKindArg, ServiceRestartPolicyArg,
+        ServiceSecretCommand, SubstrateArg, format_hosted_fleet_nodes, format_machine_status,
+        render_help, render_nested_subcommand_help, render_subcommand_help,
     };
 
     fn sample_hosted_status(
@@ -2318,10 +2377,25 @@ mod tests {
         }
 
         let service_help = render_subcommand_help("service").expect("service help should exist");
+        let service_apply_help = render_nested_subcommand_help(&["service", "apply"])
+            .expect("service apply help should exist");
         for keyword in ["secret", "apply", "list", "status", "stop", "sandbox"] {
             assert!(
                 service_help.contains(keyword),
                 "missing service help keyword: {keyword}"
+            );
+        }
+
+        for keyword in [
+            "--restart",
+            "--health",
+            "--health-command",
+            "on-failure",
+            "command",
+        ] {
+            assert!(
+                service_apply_help.contains(keyword),
+                "missing service apply help keyword: {keyword}"
             );
         }
 
@@ -2706,6 +2780,12 @@ mod tests {
             "api",
             "--kind",
             "service",
+            "--restart",
+            "on-failure",
+            "--health",
+            "command",
+            "--health-command",
+            "/bin/true",
             "--secret",
             "API_TOKEN=demo-token",
             "--",
@@ -2721,6 +2801,9 @@ mod tests {
                 name,
                 kind,
                 host_group,
+                restart,
+                health,
+                health_command,
                 secret,
                 command,
             }) => {
@@ -2729,6 +2812,9 @@ mod tests {
                 assert_eq!(name, "api");
                 assert_eq!(kind, ServiceKindArg::Service);
                 assert_eq!(host_group.as_deref(), Some("aws-builders"));
+                assert_eq!(restart, ServiceRestartPolicyArg::OnFailure);
+                assert_eq!(health, ServiceHealthPolicyArg::Command);
+                assert_eq!(health_command, vec![String::from("/bin/true")]);
                 assert_eq!(secret, vec![String::from("API_TOKEN=demo-token")]);
                 assert_eq!(command, vec!["/app/api", "--listen", ":8080"]);
             }

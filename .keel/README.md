@@ -75,11 +75,11 @@
 |--------|--------|
 | [Foundation And Hosted Cloud Hypervisor Lane](epics/1vzdKB000/voyages/1vzdKx000/) | done |
 
-### [Hosted Service Reliability And Secret Hardening](epics/1vzfT4000/) (draft)
+### [Hosted Service Reliability And Secret Hardening](epics/1vzfT4000/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Service Policy And Secret Runtime Foundations](epics/1vzfT4000/voyages/1vzfTm000/) | draft |
+| [Service Policy And Secret Runtime Foundations](epics/1vzfT4000/voyages/1vzfTm000/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
