@@ -81,6 +81,12 @@
 |--------|--------|
 | [Service Policy And Secret Runtime Foundations](epics/1vzfT4000/voyages/1vzfTm000/) | done |
 
+### [Operator Signal And Documentation Foundations](epics/VDaiFfFPe/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Mission Verification And Help Simplification](epics/VDaiFfFPe/voyages/VDaiL5HDr/) | planned |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
