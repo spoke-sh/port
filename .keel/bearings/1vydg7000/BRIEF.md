@@ -43,9 +43,9 @@ architecture.
 
 ## Success Criteria
 
-- [ ] A current cloud support matrix exists for local-style Firecracker hosts on AWS, GCP, and Azure.
-- [ ] The PVM lane has an explicit keep-or-drop decision backed by current provider documentation.
-- [ ] Research results are concrete enough to drive at least one cloud-oriented planning or implementation slice.
+- [x] A current cloud support matrix exists for local-style Firecracker hosts on AWS, GCP, and Azure.
+- [x] The PVM lane has an explicit keep-or-drop decision backed by current provider documentation.
+- [x] Research results are concrete enough to drive at least one cloud-oriented planning or implementation slice.
 
 ## Research Questions
 

@@ -2,6 +2,7 @@
 id: 1vydg7000
 index: 1
 title: Port MVP
+bearing: 1vydg7000
 created_at: 2026-03-06T14:29:51
 ---
 

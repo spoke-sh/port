@@ -103,3 +103,7 @@ macOS, and Windows.
 - [ ] Cloud Linux support has a documented design, a partial implementation, and an explicit PVM keep-or-drop decision backed by research.
 - [ ] README and supporting docs let a new operator understand supported platforms, limitations, and MVP workflows without reading source code first.
 <!-- END SUCCESS_CRITERIA -->
+
+---
+
+This epic was originally seeded from bearing [`1vydg7000`](../../bearings/1vydg7000/), which established the MVP-era cloud Linux support boundary and the decision to drop the PVM lane from MVP scope.

@@ -2,9 +2,11 @@
 id: 1vydg7000
 index: 1
 title: Cloud Linux and PVM Viability
-status: ready
+status: laid
 epic: 1vydg7000
+goals: [GOAL-04]
 created_at: 2026-03-06T14:29:51
+laid_at: 2026-03-06T14:29:51
 ---
 
 # Cloud Linux and PVM Viability
