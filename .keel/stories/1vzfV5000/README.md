@@ -2,11 +2,12 @@
 id: 1vzfV5000
 title: Publish Service Reliability Operator Workflow
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-09T11:38:43
-updated_at: 2026-03-11T11:40:14
+updated_at: 2026-03-11T11:49:35
 scope: 1vzfT4000/1vzfTm000
 started_at: 2026-03-11T11:40:14
+completed_at: 2026-03-11T11:49:35
 ---
 
 # Publish Service Reliability Operator Workflow

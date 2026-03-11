@@ -20,8 +20,8 @@ index: 10
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Service Policy And Secret Runtime Foundations](voyages/1vzfTm000/) | in-progress | 2/4 |
+| [Service Policy And Secret Runtime Foundations](voyages/1vzfTm000/) | done | 4/4 |
 <!-- END GENERATED -->
