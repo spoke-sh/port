@@ -549,9 +549,9 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machi
 - `port service` is now the canonical secrets/services/sandboxes family. It
   uses the same resolved runtime ownership as `machine` and `guest`, with
   sandboxes expressed as `--kind sandbox` instead of a second runtime model.
-- Secret values are currently stored as runtime-owned JSON files under the
-  resolved machine runtime root. Treat that as a bootstrap operator workflow,
-  not as a hardened secret backend.
+- Secret values now live in runtime-owned secret metadata plus a hardened
+  runtime-file backend under the resolved machine runtime root, and service
+  status surfaces backend/materialization provenance without leaking values.
 - `port-sdk` now publishes typed hosted request builders plus live response
   execution helpers for canonical machine, guest, and service operations so
   SDK/API consumers can follow the same surface as the CLI.
@@ -686,9 +686,9 @@ The first service/sandbox surface builds on that same runtime ownership model:
   contract, including the node-owned runtime record path.
 - Managed guest-process `start|list|status|stop` is an internal runtime
   contract, not a second hosted-only CLI surface.
-- Secret values are still stored as runtime-owned JSON for the demo lane, and
-  restart policy, health checks, scheduler policy, and hardened secret
-  backends remain follow-on work.
+- Restart policy, health checks, scheduler policy, and the first hardened
+  runtime-owned secret backend now ship on the canonical `port service`
+  surface; external secret-manager integrations remain follow-on work.
 
 ## SDK And API Clients
 

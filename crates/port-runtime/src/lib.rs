@@ -3,6 +3,7 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -29,6 +30,7 @@ use port_model::{
     HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy,
     MachineArchitecture, MachineControlContract, OciRegistryAuth, OciRegistryTransport, PortConfig,
     ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
+    ServiceSecretSourceStatus,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -40,7 +42,7 @@ mod hosted_control_plane;
 
 pub use port_model::{
     ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
-    ServiceSecretBinding,
+    ServiceSecretBackend, ServiceSecretBinding, ServiceSecretMaterialization,
 };
 
 pub use hosted_control_plane::{
@@ -371,11 +373,14 @@ pub struct ServiceApplyRequest<'a> {
 pub struct MachineSecretSummary {
     pub machine_name: String,
     pub name: String,
+    pub backend: ServiceSecretBackend,
+    pub materialization: ServiceSecretMaterialization,
     pub control: MachineControlContract,
     pub control_plane: Option<String>,
     pub node_name: Option<String>,
     pub host_groups: Vec<String>,
     pub path: PathBuf,
+    pub backend_path: PathBuf,
     pub detail: String,
 }
 
@@ -388,6 +393,7 @@ pub struct ServiceDefinitionStatus {
     pub runtime: ServiceRuntimeObservation,
     pub command: Vec<String>,
     pub secret_bindings: Vec<ServiceSecretBinding>,
+    pub secret_sources: Vec<ServiceSecretSourceStatus>,
     pub policy: ServicePolicy,
     pub control: MachineControlContract,
     pub control_plane: Option<String>,
@@ -2381,27 +2387,47 @@ pub(crate) fn put_machine_secret_local(
 ) -> Result<MachineSecretSummary> {
     let context =
         resolve_service_runtime_context(config, request.runtime_root, request.machine_name, None)?;
-    validate_identifier(request.name, "secret name")?;
-    let dir = service_secret_dir(&context.status.runtime_dir);
+    let secret = store_machine_secret(&context.status.runtime_dir, request.name, request.value)?;
+    let detail = String::from(
+        "stored secret metadata plus runtime-file backend under the resolved machine runtime; service execution now materializes the value through the same runtime owner",
+    );
+    Ok(machine_secret_summary_from_storage(
+        request.machine_name,
+        context,
+        &secret,
+        detail,
+    ))
+}
+
+fn store_machine_secret(
+    runtime_dir: &Path,
+    secret_name: &str,
+    value: &str,
+) -> Result<StoredMachineSecret> {
+    validate_identifier(secret_name, "secret name")?;
+    let dir = service_secret_dir(runtime_dir);
     fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create secret directory '{}'", dir.display()))?;
+    let backend_dir = service_secret_backend_dir(runtime_dir, ServiceSecretBackend::RuntimeFile);
+    fs::create_dir_all(&backend_dir).with_context(|| {
+        format!(
+            "failed to create secret backend directory '{}'",
+            backend_dir.display()
+        )
+    })?;
     let record = MachineSecretRecord {
-        name: request.name.to_string(),
-        value: request.value.to_string(),
+        name: secret_name.to_string(),
+        backend: ServiceSecretBackend::RuntimeFile,
+        materialization: ServiceSecretMaterialization::Env,
     };
-    let path = dir.join(format!("{}.json", request.name));
+    let path = service_secret_metadata_path(runtime_dir, secret_name);
+    let backend_path = service_secret_value_path(runtime_dir, secret_name, record.backend);
+    write_secret_value_file(&backend_path, value)?;
     write_json_file(&path, &record)?;
-    Ok(MachineSecretSummary {
-        machine_name: request.machine_name.to_string(),
-        name: request.name.to_string(),
-        control: context.status.control,
-        control_plane: context.control_plane,
-        node_name: context.node_name,
-        host_groups: context.host_groups,
+    Ok(StoredMachineSecret {
+        record,
         path,
-        detail: String::from(
-            "stored secret reference under the resolved machine runtime; future service execution will materialize it through the same runtime owner",
-        ),
+        backend_path,
     })
 }
 
@@ -2438,17 +2464,29 @@ pub(crate) fn list_machine_secrets_local(
         {
             continue;
         }
+        if entry
+            .path()
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("json")
+        {
+            continue;
+        }
         let record: MachineSecretRecord = read_json_file(&entry.path())?;
-        secrets.push(MachineSecretSummary {
-            machine_name: machine_name.to_string(),
-            name: record.name,
-            control: context.status.control.clone(),
-            control_plane: context.control_plane.clone(),
-            node_name: context.node_name.clone(),
-            host_groups: context.host_groups.clone(),
-            path: entry.path(),
-            detail: String::from("secret reference is available to service and sandbox bindings"),
-        });
+        let backend_path =
+            service_secret_value_path(&context.status.runtime_dir, &record.name, record.backend);
+        secrets.push(machine_secret_summary_from_storage(
+            machine_name,
+            context.clone(),
+            &StoredMachineSecret {
+                record,
+                path: entry.path(),
+                backend_path,
+            },
+            String::from(
+                "secret metadata is available to service and sandbox bindings through the runtime-file backend",
+            ),
+        ));
     }
     secrets.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(secrets)
@@ -2482,20 +2520,23 @@ pub(crate) fn delete_machine_secret_local(
             references.join(", ")
         );
     }
-    let path = service_secret_dir(&context.status.runtime_dir).join(format!("{secret_name}.json"));
-    let record: MachineSecretRecord = read_json_file(&path)?;
-    fs::remove_file(&path)
-        .with_context(|| format!("failed to remove secret '{}'", path.display()))?;
-    Ok(MachineSecretSummary {
-        machine_name: machine_name.to_string(),
-        name: record.name,
-        control: context.status.control,
-        control_plane: context.control_plane,
-        node_name: context.node_name,
-        host_groups: context.host_groups,
-        path,
-        detail: String::from("removed secret reference from the resolved machine runtime"),
-    })
+    let secret = load_machine_secret(&context.status.runtime_dir, secret_name)?;
+    fs::remove_file(&secret.backend_path).with_context(|| {
+        format!(
+            "failed to remove secret backend value '{}'",
+            secret.backend_path.display()
+        )
+    })?;
+    fs::remove_file(&secret.path)
+        .with_context(|| format!("failed to remove secret '{}'", secret.path.display()))?;
+    Ok(machine_secret_summary_from_storage(
+        machine_name,
+        context,
+        &secret,
+        String::from(
+            "removed secret metadata and runtime-file backend value from the resolved machine runtime",
+        ),
+    ))
 }
 
 pub fn apply_machine_service(
@@ -2528,14 +2569,21 @@ pub(crate) fn apply_machine_service_local(
     )?;
     validate_secret_bindings(&request.secret_bindings)?;
     for binding in &request.secret_bindings {
-        let path = service_secret_dir(&context.status.runtime_dir)
-            .join(format!("{}.json", binding.secret));
-        if !path.exists() {
+        let secret = load_machine_secret(&context.status.runtime_dir, &binding.secret)
+            .with_context(|| {
+                format!(
+                    "secret '{}' referenced by '{}' is unavailable for machine '{}'",
+                    binding.secret, binding.env, request.machine_name
+                )
+            })?;
+        if !matches!(
+            secret.record.materialization,
+            ServiceSecretMaterialization::Env
+        ) {
             bail!(
-                "secret '{}' referenced by '{}' does not exist for machine '{}'",
+                "secret '{}' referenced by '{}' does not support env materialization",
                 binding.secret,
-                binding.env,
-                request.machine_name
+                binding.env
             );
         }
     }
@@ -2694,9 +2742,20 @@ fn load_service_secret_env(
 ) -> Result<BTreeMap<String, String>> {
     let mut env = BTreeMap::new();
     for binding in bindings {
-        let path = service_secret_dir(runtime_dir).join(format!("{}.json", binding.secret));
-        let record: MachineSecretRecord = read_json_file(&path)?;
-        env.insert(binding.env.clone(), record.value);
+        let secret = load_machine_secret(runtime_dir, &binding.secret)?;
+        if !matches!(
+            secret.record.materialization,
+            ServiceSecretMaterialization::Env
+        ) {
+            bail!(
+                "secret '{}' cannot be materialized as an environment binding",
+                binding.secret
+            );
+        }
+        env.insert(
+            binding.env.clone(),
+            read_secret_value_file(&secret.backend_path)?,
+        );
     }
     Ok(env)
 }
@@ -2850,8 +2909,12 @@ pub(crate) fn stop_machine_service_live(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let _ =
-        stop_machine_service_stored_local(metadata_config, runtime_root, machine_name, service_name)?;
+    let _ = stop_machine_service_stored_local(
+        metadata_config,
+        runtime_root,
+        machine_name,
+        service_name,
+    )?;
     let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
     match managed_service_result_status(execute_guest_operation(
         guest_config,
@@ -3981,7 +4044,8 @@ fn machine_top_entry_rank(kind: MachineTopEntryKind) -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct MachineSecretRecord {
     name: String,
-    value: String,
+    backend: ServiceSecretBackend,
+    materialization: ServiceSecretMaterialization,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4043,6 +4107,24 @@ fn service_secret_dir(runtime_dir: &Path) -> PathBuf {
     service_state_dir(runtime_dir).join("secrets")
 }
 
+fn service_secret_backend_dir(runtime_dir: &Path, backend: ServiceSecretBackend) -> PathBuf {
+    match backend {
+        ServiceSecretBackend::RuntimeFile => service_secret_dir(runtime_dir).join("runtime-file"),
+    }
+}
+
+fn service_secret_metadata_path(runtime_dir: &Path, secret_name: &str) -> PathBuf {
+    service_secret_dir(runtime_dir).join(format!("{secret_name}.json"))
+}
+
+fn service_secret_value_path(
+    runtime_dir: &Path,
+    secret_name: &str,
+    backend: ServiceSecretBackend,
+) -> PathBuf {
+    service_secret_backend_dir(runtime_dir, backend).join(secret_name)
+}
+
 fn service_runtime_dir(runtime_dir: &Path) -> PathBuf {
     service_state_dir(runtime_dir).join("runtime")
 }
@@ -4101,6 +4183,31 @@ fn write_service_runtime_record(
         &service_runtime_record_path(runtime_dir, service_name),
         record,
     )
+}
+
+fn write_secret_value_file(path: &Path, value: &str) -> Result<()> {
+    fs::write(path, value)
+        .with_context(|| format!("failed to write secret backend value '{}'", path.display()))?;
+    let mut permissions = fs::metadata(path)
+        .with_context(|| {
+            format!(
+                "failed to inspect secret backend value '{}'",
+                path.display()
+            )
+        })?
+        .permissions();
+    permissions.set_mode(0o600);
+    fs::set_permissions(path, permissions).with_context(|| {
+        format!(
+            "failed to harden secret backend permissions for '{}'",
+            path.display()
+        )
+    })
+}
+
+fn read_secret_value_file(path: &Path) -> Result<String> {
+    fs::read_to_string(path)
+        .with_context(|| format!("failed to read secret backend value '{}'", path.display()))
 }
 
 fn resolve_machine_runtime(
@@ -4250,24 +4357,118 @@ fn service_references_secret(runtime_dir: &Path, secret_name: &str) -> Result<Ve
     Ok(references)
 }
 
+#[derive(Debug, Clone)]
+struct StoredMachineSecret {
+    record: MachineSecretRecord,
+    path: PathBuf,
+    backend_path: PathBuf,
+}
+
+fn load_machine_secret(runtime_dir: &Path, secret_name: &str) -> Result<StoredMachineSecret> {
+    validate_identifier(secret_name, "secret name")?;
+    let path = service_secret_metadata_path(runtime_dir, secret_name);
+    let record: MachineSecretRecord = read_json_file(&path)?;
+    let backend_path = service_secret_value_path(runtime_dir, &record.name, record.backend);
+    if !backend_path.exists() {
+        bail!(
+            "secret backend value for '{}' is missing under '{}'",
+            secret_name,
+            backend_path.display()
+        );
+    }
+    Ok(StoredMachineSecret {
+        record,
+        path,
+        backend_path,
+    })
+}
+
+fn machine_secret_summary_from_storage(
+    machine_name: &str,
+    context: ResolvedMachineRuntime,
+    secret: &StoredMachineSecret,
+    detail: String,
+) -> MachineSecretSummary {
+    MachineSecretSummary {
+        machine_name: machine_name.to_string(),
+        name: secret.record.name.clone(),
+        backend: secret.record.backend,
+        materialization: secret.record.materialization,
+        control: context.status.control,
+        control_plane: context.control_plane,
+        node_name: context.node_name,
+        host_groups: context.host_groups,
+        path: secret.path.clone(),
+        backend_path: secret.backend_path.clone(),
+        detail,
+    }
+}
+
+fn service_secret_source_from_binding(
+    runtime_dir: &Path,
+    binding: &ServiceSecretBinding,
+) -> Result<ServiceSecretSourceStatus> {
+    let secret = load_machine_secret(runtime_dir, &binding.secret)?;
+    Ok(ServiceSecretSourceStatus {
+        env: binding.env.clone(),
+        secret: binding.secret.clone(),
+        backend: secret.record.backend,
+        materialization: secret.record.materialization,
+        path: secret.backend_path,
+        detail: String::from(
+            "secret value remains under the resolved runtime owner and is materialized for process launch without being embedded in service status",
+        ),
+    })
+}
+
+fn project_service_secret_sources(
+    runtime_dir: &Path,
+    bindings: &[ServiceSecretBinding],
+) -> (Vec<ServiceSecretSourceStatus>, Option<String>) {
+    let mut sources = Vec::new();
+    let mut errors = Vec::new();
+    for binding in bindings {
+        match service_secret_source_from_binding(runtime_dir, binding) {
+            Ok(source) => sources.push(source),
+            Err(error) => errors.push(format!("{}={}: {error}", binding.env, binding.secret)),
+        }
+    }
+    sources.sort_by(|left, right| {
+        left.env
+            .cmp(&right.env)
+            .then(left.secret.cmp(&right.secret))
+    });
+    let detail = if errors.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Secret source projection could not resolve: {}.",
+            errors.join("; ")
+        ))
+    };
+    (sources, detail)
+}
+
 fn service_status_from_record(
     record: ServiceDefinitionRecord,
     manifest_path: PathBuf,
 ) -> ServiceDefinitionStatus {
-    let runtime_root = manifest_path
+    let runtime_dir = manifest_path
         .parent()
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let runtime_record = read_service_runtime_record(&runtime_root, &record.name)
+    let runtime_record = read_service_runtime_record(&runtime_dir, &record.name)
         .ok()
         .flatten();
+    let (secret_sources, secret_projection_detail) =
+        project_service_secret_sources(&runtime_dir, &record.secret_bindings);
     let runtime = runtime_record
         .as_ref()
         .map(|runtime| ServiceRuntimeObservation {
             state: runtime.state,
-            record_path: service_runtime_record_path(&runtime_root, &record.name),
+            record_path: service_runtime_record_path(&runtime_dir, &record.name),
             restart_count: runtime.restart_count,
             pid: runtime.pid,
             exit_code: runtime.exit_code,
@@ -4278,7 +4479,13 @@ fn service_status_from_record(
             stdout_path: runtime.stdout_path.clone(),
             stderr_path: runtime.stderr_path.clone(),
         })
-        .unwrap_or_else(|| default_service_runtime_observation(&runtime_root, &record.name));
+        .unwrap_or_else(|| default_service_runtime_observation(&runtime_dir, &record.name));
+    let mut detail = runtime_record
+        .map(|runtime| runtime.detail)
+        .unwrap_or(record.detail);
+    if let Some(secret_projection_detail) = secret_projection_detail {
+        detail = format!("{detail} {secret_projection_detail}");
+    }
     ServiceDefinitionStatus {
         machine_name: record.machine_name,
         name: record.name,
@@ -4287,6 +4494,7 @@ fn service_status_from_record(
         runtime,
         command: record.command,
         secret_bindings: record.secret_bindings,
+        secret_sources,
         policy: record.policy,
         control: record.control,
         control_plane: record.control_plane,
@@ -4296,9 +4504,7 @@ fn service_status_from_record(
         target_host_group: record.target_host_group,
         scheduler: record.scheduler,
         manifest_path,
-        detail: runtime_record
-            .map(|runtime| runtime.detail)
-            .unwrap_or(record.detail),
+        detail,
     }
 }
 
@@ -8660,15 +8866,15 @@ mod tests {
         apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
         build_firecracker_config, cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
         cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
-        collect_doctor_report_with_facts, copy_guest_file, driver_for_machine,
-        ensure_native_build_lane, execute_guest_operation, hosted_placeholder_runtime_root,
-        launch_local_machine, list_machine_services, list_machines, machine_monitor,
-        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
-        read_pid_file, repo_root, resolve_artifact_metadata, resolve_artifact_store_contract,
-        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
-        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
-        stop_machine, stop_machine_service,
+        collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
+        driver_for_machine, ensure_native_build_lane, execute_guest_operation,
+        hosted_placeholder_runtime_root, launch_local_machine, list_machine_secrets,
+        list_machine_services, list_machines, machine_monitor, machine_service_status,
+        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
+        pull_artifact, push_artifact, put_machine_secret, read_json_file, read_pid_file, repo_root,
+        resolve_artifact_metadata, resolve_artifact_store_contract, resolve_machine_architecture,
+        select_firecracker_binary, serve_control_plane, serve_node_agent, service_definition_dir,
+        service_runtime_dir, service_status_from_record, stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -8685,7 +8891,8 @@ mod tests {
         ArtifactKind, ArtifactStore, ExecutionSubstrate, HostProvider, HostedImportedNodeRecord,
         HostedSchedulerPolicy, MachineArchitecture, OciRegistryAuth, OciRegistryTransport,
         PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy, ServiceHealthState,
-        ServiceHealthcheck, ServiceRestartPolicy,
+        ServiceHealthcheck, ServiceRestartPolicy, ServiceSecretBackend,
+        ServiceSecretMaterialization,
     };
     use tokio::net::TcpListener;
 
@@ -14122,6 +14329,56 @@ exec sleep 30
     }
 
     #[test]
+    fn service_secret_status_projects_runtime_owned_provenance_without_value_leak() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        write_manifest(&paths, "demo", 1);
+        let secret = super::store_machine_secret(&paths.runtime_dir, "demo-token", "s3cr3t")
+            .expect("secret should store");
+        let manifest_path = service_definition_dir(&paths.runtime_dir).join("api.json");
+        let record = ServiceDefinitionRecord {
+            machine_name: String::from("demo"),
+            name: String::from("api"),
+            kind: ServiceKind::Service,
+            desired_state: ServiceDesiredState::Active,
+            command: vec![String::from("/bin/true")],
+            secret_bindings: vec![ServiceSecretBinding {
+                env: String::from("API_TOKEN"),
+                secret: String::from("demo-token"),
+            }],
+            policy: ServicePolicy::default(),
+            control: port_model::MachineControlContract::local_runtime_root(),
+            control_plane: None,
+            node_name: None,
+            host_groups: Vec::new(),
+            host_group_policies: BTreeMap::new(),
+            target_host_group: None,
+            scheduler: None,
+            created_at_unix_s: 1,
+            detail: String::from("stored definition"),
+        };
+
+        let first = service_status_from_record(record.clone(), manifest_path.clone());
+        let second = service_status_from_record(record, manifest_path);
+        assert_eq!(first.secret_bindings.len(), 1);
+        assert_eq!(first.secret_sources.len(), 1);
+        assert_eq!(first.secret_sources, second.secret_sources);
+        assert_eq!(
+            first.secret_sources[0].backend,
+            ServiceSecretBackend::RuntimeFile
+        );
+        assert_eq!(
+            first.secret_sources[0].materialization,
+            ServiceSecretMaterialization::Env
+        );
+        assert_eq!(first.secret_sources[0].path, secret.backend_path);
+        assert!(!first.secret_sources[0].detail.contains("s3cr3t"));
+        let status_debug = format!("{first:?}");
+        assert!(!status_debug.contains("s3cr3t"));
+        assert!(!first.detail.contains("s3cr3t"));
+    }
+
+    #[test]
     fn service_supervision_restarts_local_service_and_projects_last_exit_state() {
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = PortConfig::sample();
@@ -14270,7 +14527,10 @@ exec sleep 30
             machine_service_status(&local_config, tempdir.path(), "demo", "health-local")
                 .expect("local service status should succeed");
         assert_eq!(unhealthy_local.runtime.state, ServiceRuntimeState::Running);
-        assert_eq!(unhealthy_local.runtime.health_state, ServiceHealthState::Unhealthy);
+        assert_eq!(
+            unhealthy_local.runtime.health_state,
+            ServiceHealthState::Unhealthy
+        );
         assert!(
             unhealthy_local
                 .runtime
@@ -14285,7 +14545,10 @@ exec sleep 30
         let healthy_local =
             machine_service_status(&local_config, tempdir.path(), "demo", "health-local")
                 .expect("local service status should succeed");
-        assert_eq!(healthy_local.runtime.health_state, ServiceHealthState::Healthy);
+        assert_eq!(
+            healthy_local.runtime.health_state,
+            ServiceHealthState::Healthy
+        );
         assert_eq!(healthy_local.runtime.health_detail, None);
 
         let mut hosted_config = sample_config_with_hosted_runtime_roots(tempdir.path());
@@ -14337,24 +14600,33 @@ exec sleep 30
         let unhealthy_hosted =
             machine_service_status(&hosted_config, tempdir.path(), "cloud-aws", "health-hosted")
                 .expect("hosted service status should succeed");
-        assert_eq!(unhealthy_hosted.runtime.health_state, ServiceHealthState::Unhealthy);
+        assert_eq!(
+            unhealthy_hosted.runtime.health_state,
+            ServiceHealthState::Unhealthy
+        );
 
         fs::write(hosted_guest_root.join("workspace/healthy"), "ok")
             .expect("healthy marker should write");
         let healthy_hosted =
             machine_service_status(&hosted_config, tempdir.path(), "cloud-aws", "health-hosted")
                 .expect("hosted service status should succeed");
-        assert_eq!(healthy_hosted.runtime.health_state, ServiceHealthState::Healthy);
+        assert_eq!(
+            healthy_hosted.runtime.health_state,
+            ServiceHealthState::Healthy
+        );
         assert_eq!(healthy_hosted.runtime.health_detail, None);
 
         let hosted_list = list_machine_services(&hosted_config, tempdir.path(), "cloud-aws")
             .expect("hosted service list should succeed");
         assert_eq!(hosted_list.len(), 1);
-        assert_eq!(hosted_list[0].runtime.health_state, ServiceHealthState::Healthy);
+        assert_eq!(
+            hosted_list[0].runtime.health_state,
+            ServiceHealthState::Healthy
+        );
     }
 
     #[test]
-    fn hosted_service_lifecycle_routes_through_live_runtime_and_persists_redacted_state() {
+    fn service_secret_backend_hosted_lifecycle_uses_runtime_file_backend() {
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
         config.machines.retain(|name, _| name == "cloud-aws");
@@ -14383,7 +14655,7 @@ exec sleep 30
 
         let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
 
-        let _secret = put_machine_secret(
+        let secret = put_machine_secret(
             &config,
             super::SecretPutRequest {
                 machine_name: "cloud-aws",
@@ -14393,6 +14665,63 @@ exec sleep 30
             },
         )
         .expect("secret put should succeed");
+        assert_eq!(secret.backend, ServiceSecretBackend::RuntimeFile);
+        assert_eq!(secret.materialization, ServiceSecretMaterialization::Env);
+        assert!(
+            secret
+                .path
+                .ends_with("cloud-aws/services/secrets/demo-token.json")
+        );
+        assert!(
+            secret
+                .backend_path
+                .ends_with("cloud-aws/services/secrets/runtime-file/demo-token")
+        );
+        let metadata = fs::read_to_string(&secret.path).expect("secret metadata should read");
+        assert!(metadata.contains("\"backend\": \"runtime-file\""));
+        assert!(metadata.contains("\"materialization\": \"env\""));
+        assert!(!metadata.contains("s3cr3t"));
+        assert_eq!(
+            fs::read_to_string(&secret.backend_path).expect("secret backend should read"),
+            "s3cr3t"
+        );
+        assert_eq!(
+            fs::metadata(&secret.backend_path)
+                .expect("secret backend metadata should read")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+
+        let cleanup_secret = put_machine_secret(
+            &config,
+            super::SecretPutRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "cleanup-token",
+                value: "cleanup",
+            },
+        )
+        .expect("second secret put should succeed");
+        let listed_secrets = list_machine_secrets(&config, tempdir.path(), "cloud-aws")
+            .expect("secret list should succeed");
+        assert_eq!(listed_secrets.len(), 2);
+        assert!(
+            listed_secrets
+                .iter()
+                .all(|secret| secret.backend == ServiceSecretBackend::RuntimeFile)
+        );
+        assert!(
+            listed_secrets
+                .iter()
+                .all(|secret| secret.materialization == ServiceSecretMaterialization::Env)
+        );
+        let removed = delete_machine_secret(&config, tempdir.path(), "cloud-aws", "cleanup-token")
+            .expect("unused secret should delete");
+        assert_eq!(removed.backend_path, cleanup_secret.backend_path);
+        assert!(!removed.path.exists());
+        assert!(!removed.backend_path.exists());
 
         let applied = apply_machine_service(
             &config,
@@ -14434,6 +14763,17 @@ exec sleep 30
                 .map(|path| path.as_path()),
             Some(Path::new("/run/port/services/buildbox.stderr.log"))
         );
+        assert_eq!(applied.secret_sources.len(), 1);
+        assert_eq!(
+            applied.secret_sources[0].backend,
+            ServiceSecretBackend::RuntimeFile
+        );
+        assert_eq!(
+            applied.secret_sources[0].materialization,
+            ServiceSecretMaterialization::Env
+        );
+        assert_eq!(applied.secret_sources[0].path, secret.backend_path);
+        assert!(!applied.secret_sources[0].detail.contains("s3cr3t"));
 
         let runtime_record = service_runtime_dir(&paths.runtime_dir).join("buildbox.json");
         for _ in 0..100 {
@@ -14461,6 +14801,7 @@ exec sleep 30
             listed[0].host_group_policies["aws-builders"],
             HostedSchedulerPolicy::DeterministicFirstFit
         );
+        assert_eq!(listed[0].secret_sources[0].path, secret.backend_path);
 
         let status = machine_service_status(&config, tempdir.path(), "cloud-aws", "buildbox")
             .expect("service status should succeed");
@@ -14469,6 +14810,8 @@ exec sleep 30
             status.host_group_policies["aws-builders"],
             HostedSchedulerPolicy::DeterministicFirstFit
         );
+        assert_eq!(status.secret_sources.len(), 1);
+        assert_eq!(status.secret_sources[0].path, secret.backend_path);
         assert!(!status.detail.contains("s3cr3t"));
 
         let stopped = stop_machine_service(&config, tempdir.path(), "cloud-aws", "buildbox")

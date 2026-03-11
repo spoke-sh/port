@@ -93,7 +93,7 @@ fn wait_for_port(addr: &str, rx: &mpsc::Receiver<anyhow::Result<()>>, label: &st
 }
 
 #[test]
-fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts() {
+fn cli_service_secret_backend_commands_cover_hosted_secret_service_and_sandbox_contracts() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let control_plane_addr = reserve_addr();
@@ -172,9 +172,13 @@ fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts
     assert!(secret_put.status.success());
     let secret_stdout = String::from_utf8_lossy(&secret_put.stdout);
     assert!(secret_stdout.contains("secret: demo-token"));
+    assert!(secret_stdout.contains("backend: runtime-file"));
+    assert!(secret_stdout.contains("materialization: env"));
     assert!(secret_stdout.contains("service route: hosted-control-plane"));
     assert!(secret_stdout.contains("control plane: demo"));
     assert!(secret_stdout.contains("node: aws-linux-node"));
+    assert!(secret_stdout.contains("backend path: "));
+    assert!(secret_stdout.contains("services/secrets/runtime-file/demo-token"));
 
     let apply_service = port_command(&config_path)
         .arg("service")
@@ -217,6 +221,10 @@ fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts
             && service_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
     );
     assert!(service_stdout.contains("secret bindings: API_TOKEN=demo-token"));
+    assert!(
+        service_stdout.contains("secret sources: ")
+            && service_stdout.contains("API_TOKEN<=demo-token via runtime-file/env @ ")
+    );
     assert!(service_stdout.contains("stderr log: /run/port/services/api.stderr.log"));
 
     let apply_sandbox = port_command(&config_path)
@@ -280,6 +288,10 @@ fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts
             && status_stdout.contains("hosted/aws-linux-node/cloud-aws/services/runtime/api.json")
     );
     assert!(status_stdout.contains("command: /bin/sh -lc"));
+    assert!(
+        status_stdout.contains("secret sources: ")
+            && status_stdout.contains("API_TOKEN<=demo-token via runtime-file/env @ ")
+    );
 
     let stop = port_command(&config_path)
         .arg("service")
@@ -305,7 +317,7 @@ fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts
 }
 
 #[test]
-fn cli_service_status_projects_restart_and_health_state_for_hosted_runtime() {
+fn cli_service_secret_status_projects_restart_health_and_provenance_for_hosted_runtime() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let control_plane_addr = reserve_addr();
@@ -370,6 +382,20 @@ fn cli_service_status_projects_restart_and_health_state_for_hosted_runtime() {
     });
     wait_for_port(&node_bind, &node_rx, "node-agent");
 
+    let secret_put = port_command(&config_path)
+        .arg("service")
+        .arg("secret")
+        .arg("put")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--name")
+        .arg("demo-token")
+        .arg("--value")
+        .arg("s3cr3t")
+        .output()
+        .expect("secret put should run");
+    assert!(secret_put.status.success());
+
     let apply = port_command(&config_path)
         .arg("service")
         .arg("apply")
@@ -390,6 +416,8 @@ fn cli_service_status_projects_restart_and_health_state_for_hosted_runtime() {
         .arg("--health-command=-f")
         .arg("--health-command")
         .arg("workspace/healthy")
+        .arg("--secret")
+        .arg("API_TOKEN=demo-token")
         .arg("--")
         .arg("/bin/sh")
         .arg("-lc")
@@ -416,16 +444,28 @@ fn cli_service_status_projects_restart_and_health_state_for_hosted_runtime() {
     assert!(first_status.status.success());
     let first_stdout = String::from_utf8_lossy(&first_status.stdout);
     assert!(first_stdout.contains("restart count: 1"), "{first_stdout}");
-    assert!(first_stdout.contains("last exit code: 23"), "{first_stdout}");
+    assert!(
+        first_stdout.contains("last exit code: 23"),
+        "{first_stdout}"
+    );
     assert!(
         first_stdout.contains("last exit detail: managed process exited with code 23"),
         "{first_stdout}"
     );
-    assert!(first_stdout.contains("health state: unhealthy"), "{first_stdout}");
+    assert!(
+        first_stdout.contains("health state: unhealthy"),
+        "{first_stdout}"
+    );
     assert!(
         first_stdout.contains("health detail: health command exited with code 1"),
         "{first_stdout}"
     );
+    assert!(
+        first_stdout.contains("secret sources: ")
+            && first_stdout.contains("API_TOKEN<=demo-token via runtime-file/env @ "),
+        "{first_stdout}"
+    );
+    assert!(!first_stdout.contains("s3cr3t"), "{first_stdout}");
 
     fs::write(guest_root.join("workspace/healthy"), "ok").expect("healthy marker should write");
     let second_status = port_command(&config_path)
@@ -439,9 +479,23 @@ fn cli_service_status_projects_restart_and_health_state_for_hosted_runtime() {
         .expect("service status should run");
     assert!(second_status.status.success());
     let second_stdout = String::from_utf8_lossy(&second_status.stdout);
-    assert!(second_stdout.contains("restart count: 1"), "{second_stdout}");
-    assert!(second_stdout.contains("health state: healthy"), "{second_stdout}");
-    assert!(second_stdout.contains("health detail: (none)"), "{second_stdout}");
+    assert!(
+        second_stdout.contains("restart count: 1"),
+        "{second_stdout}"
+    );
+    assert!(
+        second_stdout.contains("health state: healthy"),
+        "{second_stdout}"
+    );
+    assert!(
+        second_stdout.contains("health detail: (none)"),
+        "{second_stdout}"
+    );
+    assert!(
+        second_stdout.contains("services/secrets/runtime-file/demo-token"),
+        "{second_stdout}"
+    );
+    assert!(!second_stdout.contains("s3cr3t"), "{second_stdout}");
 }
 
 #[test]

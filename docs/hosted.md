@@ -351,12 +351,12 @@ What is runnable today:
   hosted control-plane and node-agent path while keeping the same canonical
   command family
 - hosted `service secret put|list|remove` now stores machine-scoped secret
-  references under the resolved runtime owner instead of inventing a separate
-  hosted secret store
+  metadata plus runtime-file backend state under the resolved runtime owner
+  instead of inventing a separate hosted secret store
 - hosted `service apply --kind service|sandbox` now stores service and sandbox
   definitions under that same runtime owner, including desired state, guest
-  command, secret bindings, hosted routing context, and the node-owned runtime
-  record path
+  command, secret bindings, secret-source provenance, hosted routing context,
+  and the node-owned runtime record path
 
 ## Hosted Standard Cloud Workflow
 

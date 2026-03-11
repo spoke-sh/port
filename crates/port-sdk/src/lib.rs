@@ -22,7 +22,8 @@ use serde_json::Value;
 
 pub use port_model::{
     ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy,
-    ServiceRestartPolicy, ServiceSecretBinding,
+    ServiceRestartPolicy, ServiceSecretBackend, ServiceSecretBinding, ServiceSecretMaterialization,
+    ServiceSecretSourceStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -353,6 +354,10 @@ pub struct ServiceStatus {
     pub kind: ServiceKind,
     pub desired_state: ServiceDesiredState,
     pub runtime: ServiceRuntimeStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_bindings: Vec<ServiceSecretBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_sources: Vec<ServiceSecretSourceStatus>,
     pub policy: ServicePolicy,
 }
 
@@ -765,7 +770,8 @@ mod tests {
     };
     use port_model::{
         ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy,
-        ServiceRestartPolicy, ServiceSecretBinding,
+        ServiceRestartPolicy, ServiceSecretBackend, ServiceSecretBinding,
+        ServiceSecretMaterialization, ServiceSecretSourceStatus,
     };
     use serde_json::json;
 
@@ -931,12 +937,22 @@ mod tests {
                         pid: Some(4242),
                         exit_code: None,
                         last_exit_code: Some(23),
-                        last_exit_detail: Some(String::from(
-                            "managed process exited with code 23",
-                        )),
+                        last_exit_detail: Some(String::from("managed process exited with code 23")),
                         health_state: ServiceHealthState::Healthy,
                         health_detail: None,
                     },
+                    secret_bindings: vec![ServiceSecretBinding {
+                        env: String::from("API_TOKEN"),
+                        secret: String::from("demo-token"),
+                    }],
+                    secret_sources: vec![ServiceSecretSourceStatus {
+                        env: String::from("API_TOKEN"),
+                        secret: String::from("demo-token"),
+                        backend: ServiceSecretBackend::RuntimeFile,
+                        materialization: ServiceSecretMaterialization::Env,
+                        path: "/runtime/cloud-aws/services/secrets/runtime-file/demo-token".into(),
+                        detail: String::from("runtime owned secret source"),
+                    }],
                     policy: ServicePolicy {
                         restart: ServiceRestartPolicy::OnFailure,
                         healthcheck: ServiceHealthcheck {
@@ -952,10 +968,9 @@ mod tests {
             })
         }
 
-        let endpoint = serve_router(Router::new().route(
-            "/v1/machines/cloud-aws/services/api",
-            get(status_handler),
-        ));
+        let endpoint = serve_router(
+            Router::new().route("/v1/machines/cloud-aws/services/api", get(status_handler)),
+        );
         let client = HostedClient::new(
             endpoint,
             "port-hosted-demo",
@@ -972,8 +987,19 @@ mod tests {
             response.result.runtime.last_exit_detail.as_deref(),
             Some("managed process exited with code 23")
         );
-        assert_eq!(response.result.runtime.health_state, ServiceHealthState::Healthy);
-        assert_eq!(response.result.policy.restart, ServiceRestartPolicy::OnFailure);
+        assert_eq!(
+            response.result.runtime.health_state,
+            ServiceHealthState::Healthy
+        );
+        assert_eq!(response.result.secret_bindings.len(), 1);
+        assert_eq!(
+            response.result.secret_sources[0].backend,
+            ServiceSecretBackend::RuntimeFile
+        );
+        assert_eq!(
+            response.result.policy.restart,
+            ServiceRestartPolicy::OnFailure
+        );
     }
 
     #[test]

@@ -219,7 +219,7 @@ Hosted Control:
 Service Control:
   `port service` is the canonical secrets/services/sandboxes family; `--kind sandbox` keeps sandbox work on the same service surface instead of inventing a second runtime model.
   Managed guest-process `start|list|status|stop` is an internal contract beneath that same surface, not a second hosted-only CLI family.
-  Secret values are currently stored as runtime-owned JSON files under the resolved machine runtime root, so treat this as a bootstrap operator workflow rather than a hardened secret backend.
+  Secret values now live in a runtime-owned backend plus explicit materialization contract under the resolved machine runtime root, so `port service secret` and `port service apply` stay on one canonical surface without embedding plaintext in service metadata.
   `port service apply|list|status|stop` now exposes the shared restart policy and health-check contract, canonical runtime-state contract, and record path through the same local and hosted service model.
   `port-sdk` now publishes the supported typed hosted client surface for machine, guest, and service request construction.
   See `docs/pvm.md` for the explicit Firecracker/PVM host-kit contract and the x86_64 keep versus aarch64 research-only decision.
@@ -1539,6 +1539,8 @@ fn print_machine_top(report: &port_runtime::MachineTopReport) {
 fn print_machine_secret(secret: &port_runtime::MachineSecretSummary) {
     println!("machine: {}", secret.machine_name);
     println!("secret: {}", secret.name);
+    println!("backend: {}", secret.backend);
+    println!("materialization: {}", secret.materialization);
     println!("inventory scope: {}", secret.control.inventory_scope);
     println!("lifecycle owner: {}", secret.control.lifecycle_owner);
     println!("guest broker: {}", secret.control.guest_broker);
@@ -1557,6 +1559,7 @@ fn print_machine_secret(secret: &port_runtime::MachineSecretSummary) {
         }
     );
     println!("path: {}", secret.path.display());
+    println!("backend path: {}", secret.backend_path.display());
     println!("detail: {}", secret.detail);
 }
 
@@ -1676,6 +1679,26 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
                 .secret_bindings
                 .iter()
                 .map(|binding| format!("{}={}", binding.env, binding.secret))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if service.secret_sources.is_empty() {
+        println!("secret sources: (none)");
+    } else {
+        println!(
+            "secret sources: {}",
+            service
+                .secret_sources
+                .iter()
+                .map(|source| format!(
+                    "{}<={} via {}/{} @ {}",
+                    source.env,
+                    source.secret,
+                    source.backend,
+                    source.materialization,
+                    source.path.display()
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         );

@@ -1816,6 +1816,46 @@ pub struct ServiceSecretBinding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
+pub enum ServiceSecretBackend {
+    #[default]
+    RuntimeFile,
+}
+
+impl std::fmt::Display for ServiceSecretBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RuntimeFile => f.write_str("runtime-file"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceSecretMaterialization {
+    #[default]
+    Env,
+}
+
+impl std::fmt::Display for ServiceSecretMaterialization {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Env => f.write_str("env"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceSecretSourceStatus {
+    pub env: String,
+    pub secret: String,
+    pub backend: ServiceSecretBackend,
+    pub materialization: ServiceSecretMaterialization,
+    pub path: PathBuf,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub enum ServiceRestartPolicy {
     #[default]
     Never,
