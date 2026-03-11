@@ -1,5 +1,5 @@
 build:
-  cargo build -p port-cli
+  cd {{justfile_directory()}} && cargo build -p port-cli
 
 run *args:
-  cargo run -p port-cli -- {{args}}
+  cd {{justfile_directory()}} && cargo run -p port-cli -- {{args}}

@@ -10,8 +10,8 @@ Port exposes real delivery progress, but the signal is hard to audit quickly:
 
 - `just` shows an overwhelming flat list with demo tasks mixed into common
   workflows
-- there is no single `just mission` command that runs the canonical proof path
-  and ends with a compact mission status view
+- there is no single `just mission` command that presents compact mission
+  status and a high-level artifact gallery
 - `port --help` dumps a wall of examples that is too large to scan during
   review
 - foundational repository docs such as configuration, release, architecture,
@@ -26,7 +26,7 @@ and makes documentation review noisier than the underlying product state.
 
 | ID | Goal | Success Metric | Target |
 |----|------|----------------|--------|
-| GOAL-01 | Give maintainers one concise mission verification surface. | `just mission` runs the canonical checks and ends with a compact board-backed report | First voyage complete |
+| GOAL-01 | Give maintainers one concise mission verification surface. | `just mission` shows a compact board-backed report and a high-level artifact gallery | First voyage complete |
 | GOAL-02 | Make the repo's primary docs auditable from the root. | Root documentation covers constitution, architecture, configuration, release, and evaluation expectations | First voyage complete |
 | GOAL-03 | Reduce help-surface noise without losing discoverability. | Root `just` help and `port --help` keep only common workflows and 2-3 high-value examples | First voyage complete |
 | GOAL-04 | Publish one canonical operator vocabulary. | User-facing examples use `port` and point detailed flows to `CONFIGURATION.md` and focused docs | First voyage complete |
@@ -62,7 +62,7 @@ and makes documentation review noisier than the underlying product state.
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Goals | Priority | Rationale |
 |----|-------------|-------|----------|-----------|
-| FR-01 | Port must provide a single `just mission` verification path that runs the canonical repo checks and ends with a concise mission-success report plus visual progress signal. | GOAL-01, GOAL-03 | must | Maintainers need one command to judge progress without reading multiple tools by hand. |
+| FR-01 | Port must provide a single `just mission` mission report path that presents a concise board-backed report plus a high-level artifact gallery. | GOAL-01, GOAL-03 | must | Maintainers need one command to judge progress without reading multiple tools by hand. |
 | FR-02 | The repository must reorganize `just` into logical modules and keep the default top-level help focused on common workflows. | GOAL-01, GOAL-03 | must | The current flat help surface obscures the tasks people actually use. |
 | FR-03 | Port must publish root-level foundational docs covering constitution, architecture, configuration, release, and evaluation expectations. | GOAL-02, GOAL-04 | must | The current documentation contract is fragmented and hard to audit from the repo root. |
 | FR-04 | Port must simplify the top-level CLI and README examples to a small set of useful entry examples and move detailed configuration workflows into `CONFIGURATION.md`. | GOAL-02, GOAL-03, GOAL-04 | must | Help output should guide operators quickly without burying the real signals. |
@@ -94,19 +94,19 @@ and makes documentation review noisier than the underlying product state.
 | Assumption | Impact if Wrong | Validation |
 |------------|-----------------|------------|
 | Maintainers care more about fast status signal than exhaustive inline examples. | A simplified help surface could feel too terse. | Validate by keeping canonical detail in root docs and focused pages. |
-| Existing board and throughput commands are stable enough to power a mission report without adding a new product CLI command. | The report may need deeper product integration later. | Validate in the first verification story. |
+| Existing mission, epic, voyage, and story board artifacts are stable enough to power a mission report without adding a new product CLI command. | The report may need deeper product integration later. | Validate in the first verification story. |
 
 ## Open Questions & Risks
 
 | Question/Risk | Owner | Status |
 |---------------|-------|--------|
-| Is a board-backed ASCII plot sufficient signal, or will Port eventually need a dedicated product-level progress view? | Maintainer | Open |
+| Is the current artifact gallery enough, or will Port eventually need a richer product-level demo/media view? | Maintainer | Open |
 | Which long-form examples should remain in focused docs versus move entirely into `CONFIGURATION.md`? | Maintainer | Open |
 
 ## Success Criteria
 
 <!-- BEGIN SUCCESS_CRITERIA -->
-- [ ] Maintainers can run one `just mission` command and immediately see mission status, child progress, next step, and a visual throughput signal.
+- [ ] Maintainers can run one `just mission` command and immediately see mission status, child progress, next step, recent achievements, and high-level artifacts.
 - [ ] Root docs explain Port's constitution, architecture, configuration, release, and evaluation expectations without requiring a deep docs crawl.
 - [ ] `port --help` and the README keep only a short set of useful examples and point detailed workflows to `CONFIGURATION.md` and focused docs.
 - [ ] User-facing docs no longer publish `cargo run -p port-cli` as the operator path.

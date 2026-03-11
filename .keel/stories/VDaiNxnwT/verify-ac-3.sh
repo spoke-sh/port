@@ -4,4 +4,5 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$repo_root"
 
-rg -n "keel mission show|keel mission next|keel throughput" scripts/mission-report.sh
+rg -n "goal_rows|emit_artifact_gallery|mission next" scripts/mission-report.sh
+! rg -n "keel throughput|emit_trend|run_keel mission show" scripts/mission-report.sh

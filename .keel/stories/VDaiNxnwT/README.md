@@ -22,7 +22,7 @@ show only the workflows maintainers actually use.
 ## Acceptance Criteria
 
 <!-- verify: command, SRS-01:start:end, proof: ac-1.log -->
-- [x] [SRS-01/AC-01] `just mission` runs the canonical verification path and ends with a compact mission report that shows mission status, child progress, next step, and a visual throughput or progress plot. <!-- [SRS-01/AC-01] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/VDaiNxnwT/verify-ac-1.sh, proof: ac-1.log -->
+- [x] [SRS-01/AC-01] `just mission` presents the mission report and ends with a compact mission summary that shows mission status, child progress, next step, recent achievements, and a human-facing artifact gallery. <!-- [SRS-01/AC-01] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/VDaiNxnwT/verify-ac-1.sh, proof: ac-1.log -->
 <!-- verify: command, SRS-02:start:end, proof: ac-2.log -->
 - [x] [SRS-02/AC-02] The root `just` surface is reorganized into logical modules so the default help focuses on common workflows and demo recipes are no longer listed by default. <!-- [SRS-02/AC-02] verify: bash /home/alex/workspace/spoke-sh/port/.keel/stories/VDaiNxnwT/verify-ac-2.sh, proof: ac-2.log -->
 <!-- verify: command, SRS-NFR-01:start:end, proof: ac-3.log -->

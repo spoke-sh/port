@@ -24,7 +24,7 @@
 
 | Assumption/Dependency | Type | Impact if Invalid |
 |-----------------------|------|-------------------|
-| `keel mission show`, `keel mission next`, `keel flow`, and `keel throughput` provide enough stable signal to drive a repo-local mission report. | dependency | `just mission` would need a custom parser or a new product-side command |
+| Mission charters, epic/voyage/story board artifacts, and `keel mission next` provide enough stable signal to drive a repo-local mission report. | dependency | `just mission` would need a custom parser or a new product-side command |
 | `just` module support is available in the repository toolchain. | dependency | Help simplification would require a weaker flat-file grouping only |
 | Port can keep a concise help surface without losing discoverability if detailed flows are linked from canonical docs. | assumption | Users may lose important workflows unless links are clear and well-placed |
 
@@ -42,7 +42,7 @@
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Scope | Source | Verification |
 |----|-------------|-------|--------|--------------|
-| SRS-01 | `just mission` must run the canonical mission verification path and finish with a compact report that shows mission status, child progress, next step, and a visual throughput or progress plot. | SCOPE-01 | FR-01 | command proof + inspection |
+| SRS-01 | `just mission` must present the mission report and finish with a compact summary that shows mission status, child progress, next step, recent achievements, and a human-facing artifact gallery. | SCOPE-01 | FR-01 | command proof + inspection |
 | SRS-02 | The repository must split `just` into logical modules and keep the default root help focused on common workflows while keeping demo tasks available outside the default list. | SCOPE-02 | FR-02 | command proof |
 | SRS-03 | Port must publish root-level `CONSTITUTION.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `RELEASE.md`, and `EVALUATIONS.md` documents that reflect the real current product contract. | SCOPE-03 | FR-03 | inspection + doc audit |
 | SRS-04 | `port --help` and the README must keep only 2-3 useful examples and point detailed workflow examples and config edits to `CONFIGURATION.md` and focused docs. | SCOPE-04 | FR-04 | automated help test + command proof + inspection |

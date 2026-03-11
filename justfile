@@ -9,8 +9,8 @@ mod demo '.justfiles/demo.just'
 default:
   @printf '%s\n' \
     'Common recipes:' \
-    '  just mission               Run repo verification and show mission signal' \
-    '  just quality               Run formatting, tests, and doctests' \
+    '  just mission               Show mission artifact report' \
+    '  just check                 Run formatting, tests, and doctests' \
     '  just doctor                Validate the Keel board' \
     '  just flow                  Show workflow lane state' \
     '  just test                  Run workspace tests' \
@@ -29,11 +29,9 @@ keel *args:
   if command -v nix >/dev/null 2>&1; then nix develop {{justfile_directory()}} -c keel {{args}}; else keel {{args}}; fi
 
 mission *args:
-  @just quality
-  @just doctor
   @just signal::report {{args}}
 
-quality:
+check:
   @just checks::check
 
 test *args:

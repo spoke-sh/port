@@ -30,14 +30,14 @@ port --config examples/port.toml machine launch --machine demo
 Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
 
-## Mission Signal
+## Mission Report
 
 ```bash
 just mission
 ```
 
-That runs the repo verification path and ends with a compact mission report,
-board status, and throughput sparkline.
+That shows a compact mission report with board-backed goal status, recent
+achievements, and a human-facing artifact gallery for the active mission.
 
 ## Documentation Map
 

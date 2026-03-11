@@ -8,7 +8,7 @@ imported by harness-specific files.
 1. Enter the development shell with `nix develop`.
 2. If the board is not initialized yet, run `just keel init` in the repo root.
 3. Regenerate board summaries after structural or lifecycle changes with `just keel generate`.
-4. Validate board health before finalizing work with `just keel doctor`.
+4. Validate board health before finalizing work with `just doctor`.
 
 ## Search Tools
 
@@ -25,7 +25,7 @@ task-local contexts, use them to preserve workflow-specific focus instead of
 carrying one mixed context across planning, research, and execution.
 
 1. **Keep One Mission Steward**: The top-level harness/session owns mission
-   scope, charter integrity, `just keel mission show <id>`, `just keel flow`,
+   scope, charter integrity, `just keel mission show <id>`, `just flow`,
    `just keel mission next <id>`, mission logging, phase switching, and final
    mission lifecycle transitions.
 2. **Delegate By Workflow Type**: Hand one concrete work unit to a dedicated
@@ -55,7 +55,7 @@ carrying one mixed context across planning, research, and execution.
 **Operational Contract**: Focused operator for evidence-backed delivery.
 
 1. **Pull Context**: Read current board health and identify bottlenecks with
-   `just keel flow`.
+   `just flow`.
 2. **Claim Work**: Pull the highest-priority implementation item with
    `just keel next --role operator`. Use
    `just keel next --role operator --parallel` to identify safe concurrent
@@ -105,7 +105,7 @@ carrying one mixed context across planning, research, and execution.
 
 **Operational Contract**: Scope, requirements, and decomposition steward.
 
-1. **Identify Gaps & Maintain Architectural Integrity**: Use `just keel flow`
+1. **Identify Gaps & Maintain Architectural Integrity**: Use `just flow`
    to find epics needing tactical decomposition and to detect when delivery is
    starved by missing planning work.
 2. **Scaffold Planning Unit (Atomic Planning)**: Focus on one strategic or
@@ -194,7 +194,7 @@ is broad and no mission covers it yet, create one first.
    - `just keel mission activate <id>`
 4. **Refresh State At The Start Of Every Cycle**:
    - `just keel mission show <id>`
-   - `just keel flow`
+   - `just flow`
    - `just keel mission next <id>`
 5. **Choose The Correct Phase And Hand Off To The Matching Workflow**:
    - Use `just keel mission next <id>` to see the immediate priority for all
@@ -229,8 +229,8 @@ is broad and no mission covers it yet, create one first.
 
 Apply these checks to every change before finalizing work:
 
-1. **Doctor Check**: `just keel doctor` must pass with zero warnings or errors.
-2. **Quality Check**: `just quality` must pass.
+1. **Doctor Check**: `just doctor` must pass with zero warnings or errors.
+2. **Quality Check**: `just check` must pass.
 3. **Verification**: `just test` and `just doctest` must pass when relevant to
    the change.
 4. **Lifecycle Before Commit**: Run board-mutating lifecycle commands before
@@ -327,9 +327,9 @@ Use one path for each concern:
 | `just fmt` | Format the workspace |
 | `just fmt-check` | Check formatting |
 | `just clippy` | Run workspace clippy |
+| `just check` | Run the repo's quality gate |
 | `just test [args]` | Run tests |
 | `just doctest [args]` | Run doc tests |
-| `just quality` | Run the repo's quality gate |
 | `just coverage [args]` | Produce coverage output |
 | `just port ...` | Run the Port CLI |
 | `just next` | Convenience alias for `keel next --role operator` |
@@ -343,7 +343,7 @@ Run `just keel --help` for the full command tree. Common commands:
 | Discovery | `just keel bearing new <name>` `just keel bearing research <id>` `just keel bearing assess <id>` `just keel bearing list` |
 | Planning | `just keel epic new "<name>" --problem "<problem>"` `just keel voyage new "<name>" --epic <epic-id> --goal "<goal>"` |
 | Execution | `just keel next --role operator` `just keel story new "<title>" [--type <type>] [--epic <epic-id> [--voyage <voyage-id>]]` |
-| Board Ops | `just keel mission next <id>` `just keel flow` `just keel doctor` `just keel generate` `just keel config show` `just keel mission show <id>` |
+| Board Ops | `just keel mission next <id>` `just flow` `just doctor` `just keel generate` `just keel config show` `just keel mission show <id>` |
 | Verification | `just keel verify run <id>` `just keel verify detect` `just keel verify recommend` |
 
 ## Story and Milestone State Changes

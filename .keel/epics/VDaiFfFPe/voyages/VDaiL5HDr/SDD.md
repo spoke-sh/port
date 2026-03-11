@@ -9,8 +9,8 @@
 This voyage introduces one board-backed verification path and one canonical
 documentation structure instead of adding more ad hoc examples. The design
 keeps `just` thin: a root `just mission` recipe will orchestrate the existing
-verification commands and a repo-local report script will summarize mission
-state, progress, and throughput signal. In parallel, the `just` file is split
+mission report script and a repo-local report will summarize mission
+state, progress, recent achievements, and high-level human artifacts. In parallel, the `just` file is split
 into logical modules so the root help only shows common workflows, and the
 root documentation is promoted into canonical contracts for configuration,
 architecture, constitution, release, and evaluation.
@@ -35,7 +35,7 @@ architecture, constitution, release, and evaluation.
 ┌──────────────────────────────────────────────────────────┐
 │      Mission Verification And Help Simplification        │
 │                                                          │
-│  just mission ──> repo checks ──> mission report         │
+│  just mission ─────────────────> mission report          │
 │       │                             │                    │
 │       ├────────> just modules <─────┤                    │
 │       └────────> root docs/help ----┘                    │
@@ -48,7 +48,7 @@ architecture, constitution, release, and evaluation.
 
 | Dependency | Type | Purpose | Version/API |
 |------------|------|---------|-------------|
-| `keel mission show|next`, `keel flow`, `keel throughput` | internal CLI | canonical board-backed mission signal | current Keel CLI |
+| mission/epic/voyage/story board artifacts plus `keel mission next` | internal CLI + board files | canonical board-backed mission report inputs | current Keel CLI |
 | `just` modules | toolchain | hide low-signal recipes from root help while keeping them available | `just 1.46.0` |
 | `clap` help rendering in `port-cli` | internal | keeps the top-level CLI help concise and testable | current workspace crate |
 
@@ -74,11 +74,12 @@ The voyage touches three layers:
 ### Mission Report Script
 
 - Purpose: select the relevant mission, run the canonical board views, and
-  render a concise terminal summary ending with a throughput plot.
+  render a concise terminal summary ending with recent achievements and a
+  high-level artifact gallery.
 - Interface: invoked from `just mission`, optionally with a mission id.
 - Behavior: derives mission identity from board files, prints mission status and
-  child progress, shows the next step when relevant, and appends the
-  throughput sparkline section.
+  child progress, shows the next step when relevant, and highlights the most
+  human-meaningful proof artifacts linked to the mission.
 
 ### `just` Modules
 
@@ -114,10 +115,10 @@ The voyage touches three layers:
 ## Data Flow
 
 1. The maintainer runs `just mission`.
-2. `just mission` runs the canonical repository checks and then invokes the
-   mission-report script.
-3. The mission-report script reads board state through Keel commands and
-   mission metadata, then renders a compact summary plus throughput plot.
+2. `just mission` invokes the mission-report script.
+3. The mission-report script reads mission metadata, linked board artifacts,
+   and the current `keel mission next` output, then renders a compact summary
+   plus recent achievements and a high-level artifact gallery.
 4. The maintainer uses root docs and concise help output to drill into detailed
    examples only when needed.
 

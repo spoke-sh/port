@@ -1,7 +1,7 @@
 # Operator Guide
 
-Use `port` for runtime workflows and `just mission` for repo-level
-verification.
+Use `port` for runtime workflows and `just mission` for a repo-level mission
+report with recent achievements and human-facing artifacts.
 
 ## Platform Summary
 

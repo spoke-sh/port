@@ -5,11 +5,11 @@
 | ID | Description | Verification |
 |----|-------------|--------------|
 | MG-01 | Complete epic `VDaiFfFPe` so Port has one concise mission-verification entrypoint, a simplified `just` surface, and foundational documentation that is fast to audit. | board: VDaiFfFPe |
-| MG-02 | Leave the repository in a doctor-clean state with mission progress legible through `just mission` and linked board artifacts. | manual: run `just mission` and `just keel doctor` |
+| MG-02 | Leave the repository in a doctor-clean state with mission progress legible through `just mission` and linked board artifacts. | manual: run `just mission` and `just doctor` |
 
 ## Constraints
 
-- Keep `nix develop -c just keel doctor` clean after structural board changes.
+- Keep `nix develop -c just doctor` clean after structural board changes.
 - Use `port` as the canonical user-facing command in docs and help; do not publish `cargo run -p port-cli` in user-facing examples.
 - Keep default help surfaces concise: root `just` help should emphasize common workflows, and `port --help` should keep only a small set of high-value examples.
 - Preserve access to lower-level or demo recipes without surfacing them in the default top-level help.
