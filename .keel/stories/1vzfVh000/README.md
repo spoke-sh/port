@@ -2,11 +2,12 @@
 id: 1vzfVh000
 title: Implement Secret Backend And Materialization
 type: feat
-status: in-progress
+status: done
 created_at: 2026-03-09T11:39:21
-updated_at: 2026-03-11T11:25:33
+updated_at: 2026-03-11T11:39:02
 scope: 1vzfT4000/1vzfTm000
 started_at: 2026-03-11T11:25:33
+completed_at: 2026-03-11T11:39:02
 ---
 
 # Implement Secret Backend And Materialization
