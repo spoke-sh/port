@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use port_model::{
-    ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
-    ServiceSecretBinding,
+    ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy,
+    ServiceRestartPolicy, ServiceSecretBinding,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -309,6 +309,51 @@ pub struct ServiceApplyRequest {
 pub struct SecretPutRequest {
     pub name: String,
     pub value: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceDesiredState {
+    Active,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceRuntimeState {
+    Stored,
+    Starting,
+    Running,
+    Exited,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceRuntimeStatus {
+    pub state: ServiceRuntimeState,
+    #[serde(default)]
+    pub restart_count: u32,
+    pub pid: Option<u32>,
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exit_detail: Option<String>,
+    #[serde(default)]
+    pub health_state: ServiceHealthState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_detail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceStatus {
+    pub machine_name: String,
+    pub name: String,
+    pub kind: ServiceKind,
+    pub desired_state: ServiceDesiredState,
+    pub runtime: ServiceRuntimeStatus,
+    pub policy: ServicePolicy,
 }
 
 pub struct MachineClient<'a> {
@@ -707,7 +752,7 @@ mod tests {
 
     use super::{
         HostedApiStreamRequest, HostedClient, HttpMethod, SecretPutRequest, ServiceApplyRequest,
-        ServiceClient,
+        ServiceClient, ServiceDesiredState, ServiceRuntimeState, ServiceStatus,
     };
     use axum::extract::State;
     use axum::http::{HeaderMap, StatusCode};
@@ -719,8 +764,8 @@ mod tests {
         HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
     };
     use port_model::{
-        ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
-        ServiceSecretBinding,
+        ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy,
+        ServiceRestartPolicy, ServiceSecretBinding,
     };
     use serde_json::json;
 
@@ -863,6 +908,72 @@ mod tests {
 
         let status = services.status("cloud-aws", "buildbox");
         assert_eq!(status.method, HttpMethod::Get);
+    }
+
+    #[test]
+    fn service_status_live_decode_preserves_restart_and_health_projection() {
+        async fn status_handler() -> Json<HostedSuccess<ServiceStatus>> {
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(String::from("cloud-aws")),
+                    service_name: Some(String::from("api")),
+                    ..HostedRouteContext::default()
+                },
+                result: ServiceStatus {
+                    machine_name: String::from("cloud-aws"),
+                    name: String::from("api"),
+                    kind: ServiceKind::Service,
+                    desired_state: ServiceDesiredState::Active,
+                    runtime: super::ServiceRuntimeStatus {
+                        state: ServiceRuntimeState::Running,
+                        restart_count: 1,
+                        pid: Some(4242),
+                        exit_code: None,
+                        last_exit_code: Some(23),
+                        last_exit_detail: Some(String::from(
+                            "managed process exited with code 23",
+                        )),
+                        health_state: ServiceHealthState::Healthy,
+                        health_detail: None,
+                    },
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::OnFailure,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![
+                                String::from("/bin/sh"),
+                                String::from("-lc"),
+                                String::from("test -f workspace/healthy"),
+                            ],
+                        },
+                    },
+                },
+            })
+        }
+
+        let endpoint = serve_router(Router::new().route(
+            "/v1/machines/cloud-aws/services/api",
+            get(status_handler),
+        ));
+        let client = HostedClient::new(
+            endpoint,
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let response: HostedSuccess<ServiceStatus> = client
+            .execute_json(client.services().status("cloud-aws", "api"))
+            .expect("status request should decode");
+
+        assert_eq!(response.result.runtime.restart_count, 1);
+        assert_eq!(response.result.runtime.last_exit_code, Some(23));
+        assert_eq!(
+            response.result.runtime.last_exit_detail.as_deref(),
+            Some("managed process exited with code 23")
+        );
+        assert_eq!(response.result.runtime.health_state, ServiceHealthState::Healthy);
+        assert_eq!(response.result.policy.restart, ServiceRestartPolicy::OnFailure);
     }
 
     #[test]

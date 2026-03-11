@@ -39,15 +39,15 @@ use crate::{
     HostedFleetFreshnessState, HostedFleetNodeStatus, HostedFleetRoutingEligibility,
     HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
     MachineStatus, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
-    ServiceSecretBinding, StopResult, apply_hosted_machine_service_live, architecture_dir,
+    ServiceSecretBinding, StopResult, apply_machine_service_live, architecture_dir,
     copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
     hosted_placeholder_runtime_root, hosted_stored_service_placements, launch_local_machine,
     list_detached_forwards, list_machine_secrets_local, machine_monitor as runtime_machine_monitor,
     machine_monitor_report, machine_status as runtime_machine_status,
     machine_top as runtime_machine_top, machine_top_report, prepare_guest_forward,
-    put_machine_secret_local, refresh_hosted_machine_service_list,
-    refresh_hosted_machine_service_runtime, start_detached_forward, stop_detached_forward,
-    stop_hosted_machine_service_live, stop_machine as runtime_stop_machine,
+    put_machine_secret_local, refresh_machine_service_list, refresh_machine_service_runtime,
+    start_detached_forward, stop_detached_forward, stop_machine as runtime_stop_machine,
+    stop_machine_service_live,
 };
 use port_agent_protocol::{
     CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
@@ -4460,7 +4460,7 @@ async fn node_service_apply(
             .collect(),
         policy: request.policy,
     };
-    match apply_hosted_machine_service_live(&state.inner.config, &localized, runtime_request) {
+    match apply_machine_service_live(&state.inner.config, &localized, runtime_request) {
         Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
@@ -4485,7 +4485,7 @@ async fn node_service_list(
         Ok(value) => value,
         Err(response) => return response,
     };
-    match refresh_hosted_machine_service_list(
+    match refresh_machine_service_list(
         &state.inner.config,
         &localized,
         &state.inner.runtime_root,
@@ -4515,7 +4515,7 @@ async fn node_service_status(
         Ok((localized, route)) => (localized, route.with_service_name(service.clone())),
         Err(response) => return response,
     };
-    match refresh_hosted_machine_service_runtime(
+    match refresh_machine_service_runtime(
         &state.inner.config,
         &localized,
         &state.inner.runtime_root,
@@ -4549,7 +4549,7 @@ async fn node_service_command(
             }
             Err(response) => return response,
         };
-        return match stop_hosted_machine_service_live(
+        return match stop_machine_service_live(
             &state.inner.config,
             &localized,
             &state.inner.runtime_root,

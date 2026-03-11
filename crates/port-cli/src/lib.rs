@@ -1622,6 +1622,27 @@ fn print_service_definition(service: &port_runtime::ServiceDefinitionStatus) {
             .exit_code
             .map_or_else(|| String::from("(none)"), |code| code.to_string())
     );
+    println!("restart count: {}", service.runtime.restart_count);
+    println!(
+        "last exit code: {}",
+        service
+            .runtime
+            .last_exit_code
+            .map_or_else(|| String::from("(none)"), |code| code.to_string())
+    );
+    println!(
+        "last exit detail: {}",
+        service
+            .runtime
+            .last_exit_detail
+            .as_deref()
+            .unwrap_or("(none)")
+    );
+    println!("health state: {}", service.runtime.health_state);
+    println!(
+        "health detail: {}",
+        service.runtime.health_detail.as_deref().unwrap_or("(none)")
+    );
     println!(
         "stdout log: {}",
         service

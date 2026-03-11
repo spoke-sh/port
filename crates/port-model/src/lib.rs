@@ -1850,6 +1850,25 @@ impl std::fmt::Display for ServiceHealthPolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServiceHealthState {
+    #[default]
+    Unknown,
+    Healthy,
+    Unhealthy,
+}
+
+impl std::fmt::Display for ServiceHealthState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unknown => f.write_str("unknown"),
+            Self::Healthy => f.write_str("healthy"),
+            Self::Unhealthy => f.write_str("unhealthy"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ServiceHealthcheck {
     #[serde(default)]

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 
+use port_model::{ServiceHealthState, ServicePolicy};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +86,7 @@ pub enum ManagedServiceOperation {
         command: Vec<String>,
         env: BTreeMap<String, String>,
         cwd: Option<String>,
+        policy: ServicePolicy,
     },
     List,
     Status {
@@ -111,8 +113,18 @@ pub struct ManagedServiceStatus {
     pub name: String,
     pub kind: ManagedServiceKind,
     pub state: ManagedServiceRuntimeState,
+    #[serde(default)]
+    pub restart_count: u32,
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exit_detail: Option<String>,
+    #[serde(default)]
+    pub health_state: ServiceHealthState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_detail: Option<String>,
     pub stdout_path: Option<String>,
     pub stderr_path: Option<String>,
     pub detail: String,
@@ -382,6 +394,7 @@ mod tests {
         StreamRequestFrame, StreamResponseFrame, StreamSessionContract, StreamTerminationMode,
         parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
     };
+    use port_model::{ServiceHealthState, ServicePolicy};
     use std::collections::BTreeMap;
     use std::io::Cursor;
     use std::path::PathBuf;
@@ -580,6 +593,7 @@ mod tests {
                     ],
                     env: BTreeMap::from([(String::from("API_TOKEN"), String::from("demo"))]),
                     cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy::default(),
                 },
             }),
         };
@@ -591,8 +605,13 @@ mod tests {
                     name: String::from("buildbox"),
                     kind: ManagedServiceKind::Sandbox,
                     state: ManagedServiceRuntimeState::Running,
+                    restart_count: 1,
                     pid: Some(4242),
                     exit_code: None,
+                    last_exit_code: Some(23),
+                    last_exit_detail: Some(String::from("managed process exited with code 23")),
+                    health_state: ServiceHealthState::Healthy,
+                    health_detail: None,
                     stdout_path: Some(String::from("/run/port/services/buildbox.stdout.log")),
                     stderr_path: Some(String::from("/run/port/services/buildbox.stderr.log")),
                     detail: String::from("managed sandbox is running"),

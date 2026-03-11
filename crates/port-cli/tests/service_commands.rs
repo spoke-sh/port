@@ -305,6 +305,146 @@ fn cli_service_policy_commands_cover_hosted_secret_service_and_sandbox_contracts
 }
 
 #[test]
+fn cli_service_status_projects_restart_and_health_state_for_hosted_runtime() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let control_plane_addr = reserve_addr();
+    let control_plane_endpoint = format!("http://{control_plane_addr}");
+    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
+    unsafe {
+        std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+    }
+    let config_path = temp.path().join("port.toml");
+    let config = hosted_config(&hosted_runtime_root, &control_plane_endpoint);
+    write_config(&config_path, &config);
+    write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424243);
+
+    let guest_root = temp.path().join("guest");
+    fs::create_dir_all(guest_root.join("workspace")).expect("guest workspace should exist");
+    let guest_socket = hosted_runtime_root.join("cloud-aws/guest-agent.sock");
+    let guest_socket_for_thread = guest_socket.clone();
+    let guest_root_for_thread = guest_root.clone();
+    thread::spawn(move || {
+        serve_guest_agent(&guest_socket_for_thread, guest_root_for_thread)
+            .expect("guest agent should serve");
+    });
+    for _ in 0..100 {
+        if guest_socket.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let (control_tx, control_rx) = mpsc::channel();
+    let control_plane_config = config.clone();
+    let control_plane_addr_for_thread = control_plane_addr.clone();
+    thread::spawn(move || {
+        let result = serve_control_plane(
+            control_plane_config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: control_plane_addr_for_thread,
+                node_bindings: Vec::new(),
+            },
+        )
+        .map(|_| ());
+        let _ = control_tx.send(result);
+    });
+    wait_for_port(&control_plane_addr, &control_rx, "control plane");
+
+    let node_bind = reserve_addr();
+    let node_bind_for_thread = node_bind.clone();
+    let (node_tx, node_rx) = mpsc::channel();
+    let node_config = config.clone();
+    thread::spawn(move || {
+        let result = serve_node_agent(
+            node_config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: node_bind_for_thread,
+                token: String::from("node-secret"),
+            },
+        )
+        .map(|_| ());
+        let _ = node_tx.send(result);
+    });
+    wait_for_port(&node_bind, &node_rx, "node-agent");
+
+    let apply = port_command(&config_path)
+        .arg("service")
+        .arg("apply")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--host-group")
+        .arg("aws-builders")
+        .arg("--name")
+        .arg("api")
+        .arg("--kind")
+        .arg("service")
+        .arg("--restart")
+        .arg("on-failure")
+        .arg("--health")
+        .arg("command")
+        .arg("--health-command")
+        .arg("/bin/test")
+        .arg("--health-command=-f")
+        .arg("--health-command")
+        .arg("workspace/healthy")
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-lc")
+        .arg("count_file=workspace/restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; if [ \"$count\" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done")
+        .output()
+        .expect("service apply should run");
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+
+    thread::sleep(Duration::from_millis(350));
+
+    let first_status = port_command(&config_path)
+        .arg("service")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--name")
+        .arg("api")
+        .output()
+        .expect("service status should run");
+    assert!(first_status.status.success());
+    let first_stdout = String::from_utf8_lossy(&first_status.stdout);
+    assert!(first_stdout.contains("restart count: 1"), "{first_stdout}");
+    assert!(first_stdout.contains("last exit code: 23"), "{first_stdout}");
+    assert!(
+        first_stdout.contains("last exit detail: managed process exited with code 23"),
+        "{first_stdout}"
+    );
+    assert!(first_stdout.contains("health state: unhealthy"), "{first_stdout}");
+    assert!(
+        first_stdout.contains("health detail: health command exited with code 1"),
+        "{first_stdout}"
+    );
+
+    fs::write(guest_root.join("workspace/healthy"), "ok").expect("healthy marker should write");
+    let second_status = port_command(&config_path)
+        .arg("service")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--name")
+        .arg("api")
+        .output()
+        .expect("service status should run");
+    assert!(second_status.status.success());
+    let second_stdout = String::from_utf8_lossy(&second_status.stdout);
+    assert!(second_stdout.contains("restart count: 1"), "{second_stdout}");
+    assert!(second_stdout.contains("health state: healthy"), "{second_stdout}");
+    assert!(second_stdout.contains("health detail: (none)"), "{second_stdout}");
+}
+
+#[test]
 fn cli_service_policy_invalid_combinations_reject_before_runtime_lookup() {
     let temp = tempdir().expect("tempdir should exist");
     let config_path = temp.path().join("port.toml");

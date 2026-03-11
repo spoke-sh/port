@@ -15,6 +15,7 @@ clap.workspace = true
 libc.workspace = true
 portable-pty.workspace = true
 port-agent-protocol = { path = "../port-agent-protocol" }
+port-model = { path = "../port-model" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

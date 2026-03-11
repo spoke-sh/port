@@ -28,7 +28,7 @@ use port_model::{
     HostedApiIdentityContract, HostedArtifactIdentityContract, HostedImportedNodeRecord,
     HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy,
     MachineArchitecture, MachineControlContract, OciRegistryAuth, OciRegistryTransport, PortConfig,
-    ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage,
+    ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -404,8 +404,13 @@ pub struct ServiceDefinitionStatus {
 pub struct ServiceRuntimeObservation {
     pub state: ServiceRuntimeState,
     pub record_path: PathBuf,
+    pub restart_count: u32,
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
+    pub last_exit_code: Option<i32>,
+    pub last_exit_detail: Option<String>,
+    pub health_state: ServiceHealthState,
+    pub health_detail: Option<String>,
     pub stdout_path: Option<PathBuf>,
     pub stderr_path: Option<PathBuf>,
 }
@@ -2500,7 +2505,7 @@ pub fn apply_machine_service(
     if machine_is_hosted(config, request.machine_name)? {
         return hosted_control_plane_apply_machine_service(config, request);
     }
-    apply_machine_service_local(config, request)
+    apply_machine_service_live(config, config, request)
 }
 
 pub(crate) fn apply_machine_service_local(
@@ -2571,10 +2576,10 @@ pub fn list_machine_services(
     if machine_is_hosted(config, machine_name)? {
         return hosted_control_plane_list_machine_services(config, machine_name);
     }
-    list_machine_services_local(config, runtime_root, machine_name)
+    refresh_machine_service_list(config, config, runtime_root, machine_name)
 }
 
-pub(crate) fn list_machine_services_local(
+pub(crate) fn list_machine_services_stored_local(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
@@ -2621,10 +2626,10 @@ pub fn machine_service_status(
     if machine_is_hosted(config, machine_name)? {
         return hosted_control_plane_machine_service_status(config, machine_name, service_name);
     }
-    machine_service_status_local(config, runtime_root, machine_name, service_name)
+    refresh_machine_service_runtime(config, config, runtime_root, machine_name, service_name)
 }
 
-pub(crate) fn machine_service_status_local(
+pub(crate) fn machine_service_status_stored_local(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
@@ -2654,10 +2659,10 @@ pub fn stop_machine_service(
     if machine_is_hosted(config, machine_name)? {
         return hosted_control_plane_stop_machine_service(config, machine_name, service_name);
     }
-    stop_machine_service_local(config, runtime_root, machine_name, service_name)
+    stop_machine_service_live(config, config, runtime_root, machine_name, service_name)
 }
 
-pub(crate) fn stop_machine_service_local(
+pub(crate) fn stop_machine_service_stored_local(
     config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
@@ -2709,8 +2714,13 @@ fn service_runtime_record_from_managed_status(
     };
     ServiceRuntimeRecord {
         state,
+        restart_count: status.restart_count,
         pid: status.pid,
         exit_code: status.exit_code,
+        last_exit_code: status.last_exit_code,
+        last_exit_detail: status.last_exit_detail.clone(),
+        health_state: status.health_state,
+        health_detail: status.health_detail.clone(),
         stdout_path: status.stdout_path.as_ref().map(PathBuf::from),
         stderr_path: status.stderr_path.as_ref().map(PathBuf::from),
         detail: status.detail.clone(),
@@ -2731,7 +2741,7 @@ fn managed_service_result_list(result: OperationResult) -> Result<Vec<ManagedSer
     Ok(services)
 }
 
-pub(crate) fn apply_hosted_machine_service_live(
+pub(crate) fn apply_machine_service_live(
     metadata_config: &PortConfig,
     guest_config: &PortConfig,
     request: ServiceApplyRequest<'_>,
@@ -2755,6 +2765,7 @@ pub(crate) fn apply_hosted_machine_service_live(
                     command: request.command.clone(),
                     env,
                     cwd: None,
+                    policy: request.policy.clone(),
                 },
             }),
         },
@@ -2764,7 +2775,7 @@ pub(crate) fn apply_hosted_machine_service_live(
         request.name,
         &service_runtime_record_from_managed_status(&managed),
     )?;
-    machine_service_status_local(
+    machine_service_status_stored_local(
         metadata_config,
         request.runtime_root,
         request.machine_name,
@@ -2772,7 +2783,7 @@ pub(crate) fn apply_hosted_machine_service_live(
     )
 }
 
-pub(crate) fn refresh_hosted_machine_service_runtime(
+pub(crate) fn refresh_machine_service_runtime(
     metadata_config: &PortConfig,
     guest_config: &PortConfig,
     runtime_root: &Path,
@@ -2802,10 +2813,10 @@ pub(crate) fn refresh_hosted_machine_service_runtime(
         Err(error) if error.to_string().contains("does not exist") => {}
         Err(error) => return Err(error),
     }
-    machine_service_status_local(metadata_config, runtime_root, machine_name, service_name)
+    machine_service_status_stored_local(metadata_config, runtime_root, machine_name, service_name)
 }
 
-pub(crate) fn refresh_hosted_machine_service_list(
+pub(crate) fn refresh_machine_service_list(
     metadata_config: &PortConfig,
     guest_config: &PortConfig,
     runtime_root: &Path,
@@ -2829,17 +2840,18 @@ pub(crate) fn refresh_hosted_machine_service_list(
             &service_runtime_record_from_managed_status(&status),
         )?;
     }
-    list_machine_services_local(metadata_config, runtime_root, machine_name)
+    list_machine_services_stored_local(metadata_config, runtime_root, machine_name)
 }
 
-pub(crate) fn stop_hosted_machine_service_live(
+pub(crate) fn stop_machine_service_live(
     metadata_config: &PortConfig,
     guest_config: &PortConfig,
     runtime_root: &Path,
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
-    let _ = stop_machine_service_local(metadata_config, runtime_root, machine_name, service_name)?;
+    let _ =
+        stop_machine_service_stored_local(metadata_config, runtime_root, machine_name, service_name)?;
     let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
     match managed_service_result_status(execute_guest_operation(
         guest_config,
@@ -2863,7 +2875,7 @@ pub(crate) fn stop_hosted_machine_service_live(
         Err(error) if error.to_string().contains("does not exist") => {}
         Err(error) => return Err(error),
     }
-    machine_service_status_local(metadata_config, runtime_root, machine_name, service_name)
+    machine_service_status_stored_local(metadata_config, runtime_root, machine_name, service_name)
 }
 
 pub fn stop_machine(
@@ -3995,8 +4007,18 @@ struct ServiceDefinitionRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ServiceRuntimeRecord {
     state: ServiceRuntimeState,
+    #[serde(default)]
+    restart_count: u32,
     pid: Option<u32>,
     exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_exit_detail: Option<String>,
+    #[serde(default)]
+    health_state: ServiceHealthState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    health_detail: Option<String>,
     stdout_path: Option<PathBuf>,
     stderr_path: Option<PathBuf>,
     detail: String,
@@ -4040,8 +4062,13 @@ fn default_service_runtime_observation(
     ServiceRuntimeObservation {
         state: ServiceRuntimeState::Stored,
         record_path: service_runtime_record_path(runtime_dir, service_name),
+        restart_count: 0,
         pid: None,
         exit_code: None,
+        last_exit_code: None,
+        last_exit_detail: None,
+        health_state: ServiceHealthState::Unknown,
+        health_detail: None,
         stdout_path: None,
         stderr_path: None,
     }
@@ -4241,8 +4268,13 @@ fn service_status_from_record(
         .map(|runtime| ServiceRuntimeObservation {
             state: runtime.state,
             record_path: service_runtime_record_path(&runtime_root, &record.name),
+            restart_count: runtime.restart_count,
             pid: runtime.pid,
             exit_code: runtime.exit_code,
+            last_exit_code: runtime.last_exit_code,
+            last_exit_detail: runtime.last_exit_detail.clone(),
+            health_state: runtime.health_state,
+            health_detail: runtime.health_detail.clone(),
             stdout_path: runtime.stdout_path.clone(),
             stderr_path: runtime.stderr_path.clone(),
         })
@@ -8652,7 +8684,8 @@ mod tests {
     use port_model::{
         ArtifactKind, ArtifactStore, ExecutionSubstrate, HostProvider, HostedImportedNodeRecord,
         HostedSchedulerPolicy, MachineArchitecture, OciRegistryAuth, OciRegistryTransport,
-        PortConfig, ProtectionMode, PvmCapabilityState,
+        PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy, ServiceHealthState,
+        ServiceHealthcheck, ServiceRestartPolicy,
     };
     use tokio::net::TcpListener;
 
@@ -14067,8 +14100,13 @@ exec sleep 30
             status.runtime.record_path,
             service_runtime_dir(Path::new("/tmp/runtime/demo")).join("buildbox.json")
         );
+        assert_eq!(status.runtime.restart_count, 0);
         assert_eq!(status.runtime.pid, None);
         assert_eq!(status.runtime.exit_code, None);
+        assert_eq!(status.runtime.last_exit_code, None);
+        assert_eq!(status.runtime.last_exit_detail, None);
+        assert_eq!(status.runtime.health_state, ServiceHealthState::Unknown);
+        assert_eq!(status.runtime.health_detail, None);
         assert_eq!(status.runtime.stdout_path, None);
         assert_eq!(status.runtime.stderr_path, None);
         assert_eq!(
@@ -14081,6 +14119,238 @@ exec sleep 30
             Some(HostedSchedulerPolicy::DeterministicFirstFit)
         );
         assert_eq!(status.manifest_path, manifest_path);
+    }
+
+    #[test]
+    fn service_supervision_restarts_local_service_and_projects_last_exit_state() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = PortConfig::sample();
+        config.machines.retain(|name, _| name == "demo");
+
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        write_manifest(&paths, "demo", 1);
+
+        let guest_root = tempdir.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let guest_socket = paths.guest_agent_socket.clone();
+        let guest_root_for_thread = guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&guest_socket, guest_root_for_thread)
+                .expect("guest agent should serve")
+        });
+        for _ in 0..100 {
+            if paths.guest_agent_socket.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let applied = apply_machine_service(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                name: "api",
+                kind: ServiceKind::Service,
+                host_group: None,
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from(
+                        "count_file=workspace/restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; if [ \"$count\" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done",
+                    ),
+                ],
+                secret_bindings: Vec::new(),
+                policy: ServicePolicy {
+                    restart: ServiceRestartPolicy::OnFailure,
+                    healthcheck: ServiceHealthcheck::default(),
+                },
+            },
+        )
+        .expect("service apply should succeed");
+        assert_eq!(applied.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(applied.runtime.restart_count, 0);
+
+        thread::sleep(Duration::from_millis(350));
+
+        let mut restarted = None;
+        for _ in 0..20 {
+            let status = machine_service_status(&config, tempdir.path(), "demo", "api")
+                .expect("service status should succeed");
+            if status.runtime.state == ServiceRuntimeState::Running
+                && status.runtime.restart_count >= 1
+            {
+                restarted = Some(status);
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let restarted = restarted.expect("service should restart after the first failure");
+        assert_eq!(restarted.runtime.restart_count, 1);
+        assert_eq!(restarted.runtime.last_exit_code, Some(23));
+        assert!(
+            restarted
+                .runtime
+                .last_exit_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("exited with code 23")
+        );
+        assert_eq!(restarted.runtime.health_state, ServiceHealthState::Unknown);
+
+        let listed = list_machine_services(&config, tempdir.path(), "demo")
+            .expect("service list should succeed");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].runtime.restart_count, 1);
+        assert_eq!(listed[0].runtime.last_exit_code, Some(23));
+
+        let runtime_record =
+            fs::read_to_string(service_runtime_dir(&paths.runtime_dir).join("api.json"))
+                .expect("runtime record should read");
+        assert!(runtime_record.contains("\"restart_count\": 1"));
+        assert!(runtime_record.contains("\"last_exit_code\": 23"));
+    }
+
+    #[test]
+    fn service_health_projects_local_and_hosted_status_consistently() {
+        let tempdir = tempdir().expect("tempdir should exist");
+
+        let mut local_config = PortConfig::sample();
+        local_config.machines.retain(|name, _| name == "demo");
+        let local_paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        write_manifest(&local_paths, "demo", 1);
+
+        let local_guest_root = tempdir.path().join("guest-local");
+        fs::create_dir_all(local_guest_root.join("workspace")).expect("workspace should exist");
+        let local_guest_socket = local_paths.guest_agent_socket.clone();
+        let local_guest_root_for_thread = local_guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&local_guest_socket, local_guest_root_for_thread)
+                .expect("guest agent should serve")
+        });
+        for _ in 0..100 {
+            if local_paths.guest_agent_socket.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let health_policy = ServicePolicy {
+            restart: ServiceRestartPolicy::Never,
+            healthcheck: ServiceHealthcheck {
+                policy: ServiceHealthPolicy::Command,
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("test -f workspace/healthy"),
+                ],
+            },
+        };
+
+        let _local_applied = apply_machine_service(
+            &local_config,
+            ServiceApplyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                name: "health-local",
+                kind: ServiceKind::Service,
+                host_group: None,
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+                policy: health_policy.clone(),
+            },
+        )
+        .expect("local service apply should succeed");
+
+        let unhealthy_local =
+            machine_service_status(&local_config, tempdir.path(), "demo", "health-local")
+                .expect("local service status should succeed");
+        assert_eq!(unhealthy_local.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(unhealthy_local.runtime.health_state, ServiceHealthState::Unhealthy);
+        assert!(
+            unhealthy_local
+                .runtime
+                .health_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("health command exited with code 1")
+        );
+
+        fs::write(local_guest_root.join("workspace/healthy"), "ok")
+            .expect("healthy marker should write");
+        let healthy_local =
+            machine_service_status(&local_config, tempdir.path(), "demo", "health-local")
+                .expect("local service status should succeed");
+        assert_eq!(healthy_local.runtime.health_state, ServiceHealthState::Healthy);
+        assert_eq!(healthy_local.runtime.health_detail, None);
+
+        let mut hosted_config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        hosted_config.machines.retain(|name, _| name == "cloud-aws");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let hosted_runtime_root = hosted_config.nodes["aws-linux-node"].runtime_root.clone();
+        let hosted_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+        write_manifest(&hosted_paths, "cloud-aws", 2);
+
+        let hosted_guest_root = tempdir.path().join("guest-hosted");
+        fs::create_dir_all(hosted_guest_root.join("workspace")).expect("workspace should exist");
+        let hosted_guest_socket = hosted_paths.guest_agent_socket.clone();
+        let hosted_guest_root_for_thread = hosted_guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&hosted_guest_socket, hosted_guest_root_for_thread)
+                .expect("guest agent should serve")
+        });
+        for _ in 0..100 {
+            if hosted_paths.guest_agent_socket.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+
+        let hosted_config =
+            start_live_hosted_servers(&hosted_config, true).expect("hosted servers should start");
+        let _hosted_applied = apply_machine_service(
+            &hosted_config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "health-hosted",
+                kind: ServiceKind::Service,
+                host_group: Some("aws-builders"),
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+                policy: health_policy,
+            },
+        )
+        .expect("hosted service apply should succeed");
+
+        let unhealthy_hosted =
+            machine_service_status(&hosted_config, tempdir.path(), "cloud-aws", "health-hosted")
+                .expect("hosted service status should succeed");
+        assert_eq!(unhealthy_hosted.runtime.health_state, ServiceHealthState::Unhealthy);
+
+        fs::write(hosted_guest_root.join("workspace/healthy"), "ok")
+            .expect("healthy marker should write");
+        let healthy_hosted =
+            machine_service_status(&hosted_config, tempdir.path(), "cloud-aws", "health-hosted")
+                .expect("hosted service status should succeed");
+        assert_eq!(healthy_hosted.runtime.health_state, ServiceHealthState::Healthy);
+        assert_eq!(healthy_hosted.runtime.health_detail, None);
+
+        let hosted_list = list_machine_services(&hosted_config, tempdir.path(), "cloud-aws")
+            .expect("hosted service list should succeed");
+        assert_eq!(hosted_list.len(), 1);
+        assert_eq!(hosted_list[0].runtime.health_state, ServiceHealthState::Healthy);
     }
 
     #[test]

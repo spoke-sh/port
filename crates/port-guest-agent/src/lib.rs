@@ -17,6 +17,7 @@ use port_agent_protocol::{
     PtyRequest, PtyResult, RequestEnvelope, ResponseEnvelope, StreamKind, StreamOutputChannel,
     StreamRequestFrame, StreamResponseFrame, parse_forward_endpoint, read_frame, write_frame,
 };
+use port_model::{ServiceHealthPolicy, ServiceHealthState, ServicePolicy, ServiceRestartPolicy};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use vsock::{VMADDR_CID_ANY, VsockListener, VsockStream};
@@ -29,6 +30,10 @@ struct ManagedProcessSupervisor {
 #[derive(Debug)]
 struct ManagedProcessHandle {
     record: ManagedProcessRecord,
+    command: Vec<String>,
+    env: BTreeMap<String, String>,
+    cwd: PathBuf,
+    policy: ServicePolicy,
     child: Child,
 }
 
@@ -37,8 +42,18 @@ struct ManagedProcessRecord {
     name: String,
     kind: ManagedServiceKind,
     state: ManagedServiceRuntimeState,
+    #[serde(default)]
+    restart_count: u32,
     pid: Option<u32>,
     exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_exit_detail: Option<String>,
+    #[serde(default)]
+    health_state: ServiceHealthState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    health_detail: Option<String>,
     stdout_path: String,
     stderr_path: String,
     detail: String,
@@ -179,7 +194,8 @@ impl AgentService {
                 command,
                 env,
                 cwd,
-            } => self.start_managed_service(name, kind, command, env, cwd),
+                policy,
+            } => self.start_managed_service(name, kind, command, env, cwd, policy),
             ManagedServiceOperation::List => self.list_managed_services(),
             ManagedServiceOperation::Status { name } => self.status_managed_service(&name),
             ManagedServiceOperation::Stop { name } => self.stop_managed_service(&name),
@@ -193,73 +209,29 @@ impl AgentService {
         command: Vec<String>,
         env: BTreeMap<String, String>,
         cwd: Option<String>,
+        policy: ServicePolicy,
     ) -> Result<(i32, OperationResult)> {
         validate_managed_service_name(&name)?;
-        let (program, args) = command
-            .split_first()
-            .ok_or_else(|| anyhow!("managed service start requires a command"))?;
         let cwd = cwd
             .as_deref()
             .map(|path| self.resolve_guest_path(path))
             .transpose()?
             .unwrap_or_else(|| self.root.clone());
-        let log_dir = self.managed_service_root();
-        let runtime_dir = self.managed_service_runtime_dir();
-        fs::create_dir_all(&log_dir)
-            .with_context(|| format!("failed to create '{}'", log_dir.display()))?;
-        fs::create_dir_all(&runtime_dir)
-            .with_context(|| format!("failed to create '{}'", runtime_dir.display()))?;
-
+        let mut child = spawn_managed_process(&self.root, &name, &command, &env, &cwd)?;
         let stdout_relative = managed_service_stdout_relative_path(&name);
         let stderr_relative = managed_service_stderr_relative_path(&name);
-        let stdout_path = self.root.join(&stdout_relative);
-        let stderr_path = self.root.join(&stderr_relative);
-        if stdout_path.exists() {
-            fs::remove_file(&stdout_path)
-                .with_context(|| format!("failed to remove '{}'", stdout_path.display()))?;
-        }
-        if stderr_path.exists() {
-            fs::remove_file(&stderr_path)
-                .with_context(|| format!("failed to remove '{}'", stderr_path.display()))?;
-        }
-        let stdout_writer = File::create(&stdout_path)
-            .with_context(|| format!("failed to create '{}'", stdout_path.display()))?;
-        let stderr_writer = File::create(&stderr_path)
-            .with_context(|| format!("failed to create '{}'", stderr_path.display()))?;
-
-        let redactions = env
-            .values()
-            .filter(|value| !value.is_empty())
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let mut child = Command::new(program)
-            .args(args)
-            .current_dir(cwd)
-            .envs(&env)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("failed to spawn managed service '{}'", name))?;
-
-        let stdout_reader = child
-            .stdout
-            .take()
-            .context("managed service stdout was not piped")?;
-        let stderr_reader = child
-            .stderr
-            .take()
-            .context("managed service stderr was not piped")?;
-        spawn_redacted_log_pump(stdout_reader, stdout_writer, redactions.clone());
-        spawn_redacted_log_pump(stderr_reader, stderr_writer, redactions);
 
         let mut record = ManagedProcessRecord {
             name: name.clone(),
             kind,
             state: ManagedServiceRuntimeState::Running,
+            restart_count: 0,
             pid: Some(child.id()),
             exit_code: None,
+            last_exit_code: None,
+            last_exit_detail: None,
+            health_state: ServiceHealthState::Unknown,
+            health_detail: None,
             stdout_path: guest_visible_path(&stdout_relative),
             stderr_path: guest_visible_path(&stderr_relative),
             detail: String::from("managed process is running"),
@@ -293,9 +265,16 @@ impl AgentService {
             }
         }
         if record.state == ManagedServiceRuntimeState::Running {
-            supervisor
-                .processes
-                .insert(name.clone(), ManagedProcessHandle { record, child });
+            let mut handle = ManagedProcessHandle {
+                record,
+                command,
+                env,
+                cwd,
+                policy,
+                child,
+            };
+            refresh_managed_process_handle(&self.root, &mut handle)?;
+            supervisor.processes.insert(name.clone(), handle);
         } else {
             supervisor.processes.remove(&name);
         }
@@ -354,6 +333,10 @@ impl AgentService {
         handle.record.state = ManagedServiceRuntimeState::Stopped;
         handle.record.pid = None;
         handle.record.exit_code = exit_status.code();
+        handle.record.last_exit_code = exit_status.code();
+        handle.record.last_exit_detail = Some(String::from("managed process stopped"));
+        handle.record.health_state = ServiceHealthState::Unknown;
+        handle.record.health_detail = None;
         handle.record.detail = String::from("managed process stopped");
         self.persist_managed_process_record(&handle.record)?;
         let status = managed_service_status(&handle.record);
@@ -490,8 +473,13 @@ fn managed_service_status(record: &ManagedProcessRecord) -> ManagedServiceStatus
         name: record.name.clone(),
         kind: record.kind,
         state: record.state,
+        restart_count: record.restart_count,
         pid: record.pid,
         exit_code: record.exit_code,
+        last_exit_code: record.last_exit_code,
+        last_exit_detail: record.last_exit_detail.clone(),
+        health_state: record.health_state,
+        health_detail: record.health_detail.clone(),
         stdout_path: Some(record.stdout_path.clone()),
         stderr_path: Some(record.stderr_path.clone()),
         detail: record.detail.clone(),
@@ -516,12 +504,191 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
         } else {
             ManagedServiceRuntimeState::Failed
         };
-        handle.record.detail = format!(
+        let exit_detail = format!(
             "managed process exited with code {}",
             handle.record.exit_code.unwrap_or(1)
         );
+        handle.record.last_exit_code = handle.record.exit_code;
+        handle.record.last_exit_detail = Some(exit_detail.clone());
+        handle.record.health_state = ServiceHealthState::Unknown;
+        handle.record.health_detail = None;
+        handle.record.detail = exit_detail;
+        if should_restart_managed_service(handle.policy.restart, handle.record.state) {
+            handle.record.restart_count += 1;
+            match spawn_managed_process(
+                root,
+                &handle.record.name,
+                &handle.command,
+                &handle.env,
+                &handle.cwd,
+            ) {
+                Ok(mut child) => {
+                    if let Some(status) = child
+                        .try_wait()
+                        .context("failed to inspect managed service state after restart")?
+                    {
+                        handle.record.pid = None;
+                        handle.record.exit_code = status.code();
+                        handle.record.state = if status.success() {
+                            ManagedServiceRuntimeState::Exited
+                        } else {
+                            ManagedServiceRuntimeState::Failed
+                        };
+                        handle.record.last_exit_code = handle.record.exit_code;
+                        handle.record.last_exit_detail = Some(format!(
+                            "managed process exited immediately after restart with code {}",
+                            handle.record.exit_code.unwrap_or(1)
+                        ));
+                        handle.record.detail = handle
+                            .record
+                            .last_exit_detail
+                            .clone()
+                            .unwrap_or_else(|| String::from("managed process restart failed"));
+                    } else {
+                        handle.record.state = ManagedServiceRuntimeState::Running;
+                        handle.record.pid = Some(child.id());
+                        handle.record.exit_code = None;
+                        handle.record.detail = format!(
+                            "managed process restarted after exit code {}",
+                            handle.record.last_exit_code.unwrap_or(1)
+                        );
+                        handle.child = child;
+                    }
+                }
+                Err(error) => {
+                    handle.record.state = ManagedServiceRuntimeState::Failed;
+                    handle.record.detail = format!(
+                        "managed process restart attempt {} failed: {error}",
+                        handle.record.restart_count
+                    );
+                }
+            }
+        }
+    }
+
+    if handle.record.state == ManagedServiceRuntimeState::Running {
+        let (health_state, health_detail) = evaluate_managed_service_health(handle)?;
+        handle.record.health_state = health_state;
+        handle.record.health_detail = health_detail;
     }
     write_managed_process_record(root, &handle.record)
+}
+
+fn should_restart_managed_service(
+    policy: ServiceRestartPolicy,
+    state: ManagedServiceRuntimeState,
+) -> bool {
+    match policy {
+        ServiceRestartPolicy::Never => false,
+        ServiceRestartPolicy::OnFailure => matches!(state, ManagedServiceRuntimeState::Failed),
+        ServiceRestartPolicy::Always => {
+            matches!(
+                state,
+                ManagedServiceRuntimeState::Exited | ManagedServiceRuntimeState::Failed
+            )
+        }
+    }
+}
+
+fn evaluate_managed_service_health(
+    handle: &ManagedProcessHandle,
+) -> Result<(ServiceHealthState, Option<String>)> {
+    match handle.policy.healthcheck.policy {
+        ServiceHealthPolicy::None => Ok((ServiceHealthState::Unknown, None)),
+        ServiceHealthPolicy::Command => {
+            let (program, args) = handle
+                .policy
+                .healthcheck
+                .command
+                .split_first()
+                .ok_or_else(|| anyhow!("managed service health check requires a command"))?;
+            let status = Command::new(program)
+                .args(args)
+                .current_dir(&handle.cwd)
+                .envs(&handle.env)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            match status {
+                Ok(status) if status.success() => Ok((ServiceHealthState::Healthy, None)),
+                Ok(status) => Ok((
+                    ServiceHealthState::Unhealthy,
+                    Some(format!(
+                        "health command exited with code {}",
+                        status.code().unwrap_or(1)
+                    )),
+                )),
+                Err(error) => Ok((
+                    ServiceHealthState::Unhealthy,
+                    Some(format!("health command failed: {error}")),
+                )),
+            }
+        }
+    }
+}
+
+fn spawn_managed_process(
+    root: &Path,
+    name: &str,
+    command: &[String],
+    env: &BTreeMap<String, String>,
+    cwd: &Path,
+) -> Result<Child> {
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| anyhow!("managed service start requires a command"))?;
+    let log_dir = root.join("run/port/services");
+    let runtime_dir = log_dir.join("runtime");
+    fs::create_dir_all(&log_dir)
+        .with_context(|| format!("failed to create '{}'", log_dir.display()))?;
+    fs::create_dir_all(&runtime_dir)
+        .with_context(|| format!("failed to create '{}'", runtime_dir.display()))?;
+
+    let stdout_relative = managed_service_stdout_relative_path(name);
+    let stderr_relative = managed_service_stderr_relative_path(name);
+    let stdout_path = root.join(&stdout_relative);
+    let stderr_path = root.join(&stderr_relative);
+    if stdout_path.exists() {
+        fs::remove_file(&stdout_path)
+            .with_context(|| format!("failed to remove '{}'", stdout_path.display()))?;
+    }
+    if stderr_path.exists() {
+        fs::remove_file(&stderr_path)
+            .with_context(|| format!("failed to remove '{}'", stderr_path.display()))?;
+    }
+    let stdout_writer = File::create(&stdout_path)
+        .with_context(|| format!("failed to create '{}'", stdout_path.display()))?;
+    let stderr_writer = File::create(&stderr_path)
+        .with_context(|| format!("failed to create '{}'", stderr_path.display()))?;
+
+    let redactions = env
+        .values()
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut child = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
+        .envs(env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn managed service '{name}'"))?;
+
+    let stdout_reader = child
+        .stdout
+        .take()
+        .context("managed service stdout was not piped")?;
+    let stderr_reader = child
+        .stderr
+        .take()
+        .context("managed service stderr was not piped")?;
+    spawn_redacted_log_pump(stdout_reader, stdout_writer, redactions.clone());
+    spawn_redacted_log_pump(stderr_reader, stderr_writer, redactions);
+    Ok(child)
 }
 
 fn write_managed_process_record(root: &Path, record: &ManagedProcessRecord) -> Result<()> {
@@ -1194,6 +1361,7 @@ mod tests {
         ManagedServiceRuntimeState, OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope,
         StreamKind, StreamRequestFrame, StreamResponseFrame, read_frame, write_frame,
     };
+    use port_model::{ServiceHealthState, ServicePolicy};
     use tempfile::tempdir;
 
     use super::{AgentService, handle_protocol_stream, serve_with_vsock};
@@ -1530,6 +1698,7 @@ mod tests {
                     ],
                     env: BTreeMap::from([(String::from("API_TOKEN"), String::from("s3cr3t"))]),
                     cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy::default(),
                 },
             }),
         });
@@ -1544,7 +1713,12 @@ mod tests {
         assert_eq!(start_status.name, "buildbox");
         assert_eq!(start_status.kind, ManagedServiceKind::Sandbox);
         assert_eq!(start_status.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(start_status.restart_count, 0);
         assert!(start_status.pid.is_some());
+        assert_eq!(start_status.last_exit_code, None);
+        assert_eq!(start_status.last_exit_detail, None);
+        assert_eq!(start_status.health_state, ServiceHealthState::Unknown);
+        assert_eq!(start_status.health_detail, None);
         assert_eq!(
             start_status.stdout_path.as_deref(),
             Some("/run/port/services/buildbox.stdout.log")
@@ -1581,6 +1755,7 @@ mod tests {
             other => panic!("unexpected status response: {other:?}"),
         };
         assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(status.health_state, ServiceHealthState::Unknown);
         assert!(status.detail.contains("running"));
 
         let list = service.handle(RequestEnvelope {
@@ -1600,6 +1775,7 @@ mod tests {
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].name, "buildbox");
         assert_eq!(services[0].state, ManagedServiceRuntimeState::Running);
+        assert_eq!(services[0].health_state, ServiceHealthState::Unknown);
 
         let exec = service.handle(RequestEnvelope {
             id: 12,
@@ -1642,6 +1818,11 @@ mod tests {
         assert_eq!(stop_status.state, ManagedServiceRuntimeState::Stopped);
         assert_eq!(stop_status.exit_code, Some(0));
         assert_eq!(stop_status.pid, None);
+        assert_eq!(stop_status.last_exit_code, Some(0));
+        assert_eq!(
+            stop_status.last_exit_detail.as_deref(),
+            Some("managed process stopped")
+        );
 
         wait_for(|| read_to_string(&runtime_record).contains("\"state\": \"stopped\""));
         assert!(!read_to_string(&runtime_record).contains("s3cr3t"));
