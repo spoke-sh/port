@@ -44,6 +44,17 @@ as `ssh-managed-remote`, `ssh-remote-runtime`, and
 `ssh-remote-port-runtime`. The first SSH slice does not add a second command
 family and does not yet cover guest or service workflows.
 
+## Attached Volume Boundary
+
+Attached volume support is narrower than the remote execution story:
+
+- the first attached volume slice supports one persistent `host-file`
+  attachment only on the local Firecracker `standard` lane
+- `port doctor` and config validation keep the attached volume backend, host
+  path, machine, and ownership detail explicit
+- hosted-control-plane and SSH-managed machines fail fast when they declare an
+  attached volume; Port does not silently reroute the request onto another lane
+
 ## Execution Lane Matrix
 
 | Lane | Architectures | Current status | Notes |

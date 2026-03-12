@@ -944,6 +944,7 @@ impl PortConfig {
             )
             .map_err(|message| ValidationError::new(message))?;
             validate_machine_volumes(machine_name, machine)?;
+            validate_machine_volume_lane(machine_name, &machine.host, host, machine)?;
 
             if !issues.is_empty() {
                 return Err(ValidationError::new(format!(
@@ -2605,6 +2606,60 @@ fn validate_machine_volumes(
     }
 
     Ok(())
+}
+
+fn machine_volume_backend_label(backend: MachineVolumeBackend) -> &'static str {
+    match backend {
+        MachineVolumeBackend::HostFile => "host-file",
+    }
+}
+
+fn machine_volume_persistence_label(persistence: MachineVolumePersistence) -> &'static str {
+    match persistence {
+        MachineVolumePersistence::Persistent => "persistent",
+    }
+}
+
+fn machine_volume_lane_supported(host: &HostSpec, machine: &MachineSpec) -> bool {
+    matches!(host.connection, HostConnection::Local)
+        && host.platform == HostPlatform::Linux
+        && machine.substrate == ExecutionSubstrate::Firecracker
+        && machine.protection_mode == ProtectionMode::Standard
+}
+
+fn validate_machine_volume_lane(
+    machine_name: &str,
+    host_name: &str,
+    host: &HostSpec,
+    machine: &MachineSpec,
+) -> Result<(), ValidationError> {
+    if machine.volumes.is_empty() || machine_volume_lane_supported(host, machine) {
+        return Ok(());
+    }
+
+    let control = MachineControlContract::for_connection(&host.connection);
+    let route = control.launch_route;
+    let inventory_owner = control.inventory_owner;
+    let lifecycle_owner = control.lifecycle_owner;
+
+    let volume = machine
+        .volumes
+        .first()
+        .expect("machine without attached volumes should return early");
+    let backend = machine_volume_backend_label(volume.backend);
+    let persistence = machine_volume_persistence_label(volume.persistence);
+
+    Err(ValidationError::new(format!(
+        "machine '{machine_name}' attached volume '{}' backend '{}' persistence '{}' host path '{}' targets host '{}' through launch route '{}' with inventory owner '{}' and lifecycle owner '{}'; attached volumes are only supported on the local Firecracker standard lane in this slice",
+        volume.name,
+        backend,
+        persistence,
+        volume.path.display(),
+        host_name,
+        route,
+        inventory_owner,
+        lifecycle_owner
+    )))
 }
 
 fn validate_hosted_control_plane(

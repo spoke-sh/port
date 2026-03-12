@@ -26,3 +26,7 @@ Completed VDfF1dZM9: added canonical machine volume model, recorded proof for th
 ## 2026-03-12T08:17:16
 
 Completed VDfF1csOC: attached one local Firecracker host-file volume with explicit runtime metadata, CLI context, and regression coverage; submitted the story.
+
+## 2026-03-12T08:28:45
+
+Completed VDfF1cZOD: added attached-volume doctor and validation guidance, explicit hosted and ssh lane rejection, and operator docs for the first supported storage lane; submitted the story.

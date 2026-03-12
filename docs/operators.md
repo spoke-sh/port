@@ -68,6 +68,27 @@ This first SSH slice is intentionally narrow:
 - Guest operations, service operations, `machine monitor`, and `machine top`
   remain future SSH follow-on work.
 
+## Attached Volume First Slice
+
+Port now keeps one attached volume contract explicit instead of treating data
+disks like alternate rootfs artifacts:
+
+- one persistent `host-file` attached volume per machine
+- one explicit host path owned by the launch route
+- one visible ownership contract in `port doctor`, `machine launch`,
+  `machine status`, and `machine stop`
+
+The currently supported lane is intentionally narrow:
+
+- local Firecracker with `standard` protection
+- route: `direct-local-runtime`
+- inventory owner: `local-runtime-root`
+- lifecycle owner: `local-port-runtime`
+
+Hosted-control-plane and SSH-managed machines reject attached volumes in this
+slice with explicit lane guidance. Port will not silently reroute the request
+or collapse the attached volume back into the guest image or rootfs contract.
+
 ## Repo-local Proof
 
 The checked-in proof command for this workflow is:

@@ -64,6 +64,26 @@ Each machine picks:
 - a substrate/protection combination
 - any lane-specific routing detail
 
+### Attached Volumes
+
+The first storage slice adds one optional attached volume per machine:
+
+- one persistent `host-file` backend
+- one explicit host path
+- one ownership contract surfaced through `port doctor`, `machine launch`,
+  `machine status`, and `machine stop`
+- support only on the local Firecracker `standard` lane in this slice
+
+Example:
+
+```toml
+[[machines.demo.volumes]]
+name = "data"
+backend = "host-file"
+persistence = "persistent"
+path = "volumes/demo-data.ext4"
+```
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -103,6 +123,10 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --mac
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
 ```
+
+Hosted and SSH-owned machines keep the attached-volume boundary explicit:
+declaring an attached volume on those lanes fails validation before launch
+instead of rerouting the request or collapsing it back into the rootfs story.
 
 ### 3. Cloud Hypervisor Override
 

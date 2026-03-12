@@ -716,6 +716,12 @@ fn collect_doctor_report_with_facts(
                 kernel,
                 guest_image,
             ));
+            checks.extend(attached_volume_doctor_checks(
+                name,
+                &machine.host,
+                host,
+                machine,
+            ));
             checks.extend(cloud_hypervisor_machine_checks(name, host, machine, facts));
             checks.extend(avf_machine_checks(name, host, machine, facts));
         }
@@ -6004,6 +6010,111 @@ fn machine_contract_check(
     }
 }
 
+fn attached_volume_lane_supported(
+    host: &port_model::HostSpec,
+    machine: &port_model::MachineSpec,
+) -> bool {
+    matches!(host.connection, HostConnection::Local)
+        && host.platform == HostPlatform::Linux
+        && machine.substrate == ExecutionSubstrate::Firecracker
+        && machine.protection_mode == ProtectionMode::Standard
+}
+
+fn attached_volume_doctor_checks(
+    machine_name: &str,
+    host_name: &str,
+    host: &port_model::HostSpec,
+    machine: &port_model::MachineSpec,
+) -> Vec<DoctorCheck> {
+    let control = MachineControlContract::for_connection(&host.connection);
+    let route = control.launch_route;
+    let inventory_owner = control.inventory_owner;
+    let lifecycle_owner = control.lifecycle_owner;
+    let supported_lane = attached_volume_lane_supported(host, machine);
+
+    machine
+        .volumes
+        .iter()
+        .map(|volume| {
+            let backend = volume_backend_label(volume.backend);
+            let persistence = volume_persistence_label(volume.persistence);
+
+            let (ok, detail) = if supported_lane {
+                let exists = volume.path.exists();
+                let is_file = exists
+                    && fs::metadata(&volume.path)
+                        .map(|metadata| metadata.is_file())
+                        .unwrap_or(false);
+                if exists && is_file {
+                    (
+                        true,
+                        format!(
+                            "machine '{machine_name}' attached volume '{}' backend '{}' persistence '{}' host path '{}' is ready for launch route '{}' with inventory owner '{}' and lifecycle owner '{}'.",
+                            volume.name,
+                            backend,
+                            persistence,
+                            volume.path.display(),
+                            route,
+                            inventory_owner,
+                            lifecycle_owner
+                        ),
+                    )
+                } else if exists {
+                    (
+                        false,
+                        format!(
+                            "machine '{machine_name}' attached volume '{}' backend '{}' persistence '{}' host path '{}' exists but is not a regular file; launch route '{}' requires a regular host file with inventory owner '{}' and lifecycle owner '{}'.",
+                            volume.name,
+                            backend,
+                            persistence,
+                            volume.path.display(),
+                            route,
+                            inventory_owner,
+                            lifecycle_owner
+                        ),
+                    )
+                } else {
+                    (
+                        false,
+                        format!(
+                            "machine '{machine_name}' attached volume '{}' backend '{}' persistence '{}' host path '{}' is missing; launch route '{}' requires a regular host file with inventory owner '{}' and lifecycle owner '{}'.",
+                            volume.name,
+                            backend,
+                            persistence,
+                            volume.path.display(),
+                            route,
+                            inventory_owner,
+                            lifecycle_owner
+                        ),
+                    )
+                }
+            } else {
+                (
+                    false,
+                    format!(
+                        "machine '{machine_name}' attached volume '{}' backend '{}' persistence '{}' host path '{}' targets host '{}' through launch route '{}' with inventory owner '{}' and lifecycle owner '{}', but attached volumes are only supported on the local Firecracker standard lane in this slice.",
+                        volume.name,
+                        backend,
+                        persistence,
+                        volume.path.display(),
+                        host_name,
+                        route,
+                        inventory_owner,
+                        lifecycle_owner
+                    ),
+                )
+            };
+
+            DoctorCheck {
+                name: format!("machine:{machine_name}:volume:{}:attached-volume", volume.name),
+                ok,
+                required: false,
+                detail,
+            }
+        })
+        .collect()
+}
+
 fn local_pvm_lane_checks(
     host_name: &str,
     host: &port_model::HostSpec,
@@ -9553,9 +9664,10 @@ mod tests {
     };
     use port_model::{
         ArtifactKind, ArtifactStore, ExecutionSubstrate, HostConnection, HostProvider,
-        HostedImportedNodeRecord, HostedSchedulerPolicy, MachineArchitecture, OciRegistryAuth,
-        OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy,
-        ServiceHealthState, ServiceHealthcheck, ServiceRestartPolicy, ServiceSecretBackend,
+        HostedImportedNodeRecord, HostedSchedulerPolicy, MachineArchitecture, MachineVolumeBackend,
+        MachineVolumePersistence, MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport,
+        PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy, ServiceHealthState,
+        ServiceHealthcheck, ServiceRestartPolicy, ServiceSecretBackend,
         ServiceSecretMaterialization,
     };
     use tokio::net::TcpListener;
@@ -11623,6 +11735,124 @@ exec sleep 30
         assert!(demo.ok);
         assert!(demo.detail.contains("Machine models"));
         assert!(demo.detail.contains("Firecracker"));
+    }
+
+    #[test]
+    fn doctor_attached_volume_guidance() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let volume_path = tempdir.path().join("demo-data.ext4");
+        fs::write(&volume_path, b"attached-volume").expect("attached volume should write");
+
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("demo")
+            .expect("demo machine should exist")
+            .volumes = vec![MachineVolumeSpec {
+            name: String::from("data"),
+            backend: MachineVolumeBackend::HostFile,
+            persistence: MachineVolumePersistence::Persistent,
+            path: volume_path.clone(),
+        }];
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws machine should exist")
+            .volumes = vec![MachineVolumeSpec {
+            name: String::from("data"),
+            backend: MachineVolumeBackend::HostFile,
+            persistence: MachineVolumePersistence::Persistent,
+            path: volume_path.clone(),
+        }];
+
+        let report = collect_doctor_report_with_facts(
+            Some(&config),
+            &DoctorHostFacts {
+                host_os: String::from("linux"),
+                host_architecture: std::env::consts::ARCH.to_string(),
+                proc_cmdline: None,
+                pvm_firecracker_binary: None,
+            },
+        );
+
+        let local = report
+            .checks
+            .iter()
+            .find(|check| check.name == "machine:demo:volume:data:attached-volume")
+            .expect("local attached-volume doctor check should exist");
+        assert!(local.ok);
+        assert!(local.detail.contains("machine 'demo'"), "{}", local.detail);
+        assert!(
+            local.detail.contains("attached volume 'data'"),
+            "{}",
+            local.detail
+        );
+        assert!(
+            local.detail.contains("backend 'host-file'"),
+            "{}",
+            local.detail
+        );
+        assert!(
+            local
+                .detail
+                .contains(volume_path.to_string_lossy().as_ref()),
+            "{}",
+            local.detail
+        );
+        assert!(
+            local.detail.contains("direct-local-runtime"),
+            "{}",
+            local.detail
+        );
+        assert!(
+            local.detail.contains("local-runtime-root"),
+            "{}",
+            local.detail
+        );
+        assert!(
+            local.detail.contains("local-port-runtime"),
+            "{}",
+            local.detail
+        );
+
+        let hosted = report
+            .checks
+            .iter()
+            .find(|check| check.name == "machine:cloud-aws:volume:data:attached-volume")
+            .expect("hosted attached-volume doctor check should exist");
+        assert!(!hosted.ok);
+        assert!(
+            hosted.detail.contains("machine 'cloud-aws'"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            hosted.detail.contains("attached volume 'data'"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            hosted.detail.contains("backend 'host-file'"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            hosted.detail.contains("hosted-control-plane"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            hosted.detail.contains("hosted-node-agent"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            hosted
+                .detail
+                .contains("local Firecracker standard lane in this slice"),
+            "{}",
+            hosted.detail
+        );
     }
 
     #[test]

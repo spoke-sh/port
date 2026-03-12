@@ -19,6 +19,9 @@ It keeps one operator vocabulary across lanes:
 - SSH-managed remote lane: one bounded Linux lifecycle slice for `machine
   launch`, `status`, and `stop` through `mode = "ssh"` with explicit route and
   ownership output
+- Attached volume first slice: one persistent `host-file` attached volume on
+  the local Firecracker `standard` lane with explicit host path and ownership
+  output
 - Additional proof-backed lanes: Cloud Hypervisor `standard`, AVF `standard`,
   and prepared-node Firecracker/PVM on `x86_64`
 

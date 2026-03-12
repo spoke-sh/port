@@ -1,0 +1,118 @@
+---
+recorded_at: 2026-03-12T08:27:51.288470014-07:00
+command: sh -c 'cd /home/alex/workspace/spoke-sh/port && cargo test -q doctor_attached_volume_guidance && /home/alex/.nix-profile/bin/rg -n "attached volume|host-file|host path|ownership" README.md docs CONFIGURATION.md'
+---
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 120 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+CONFIGURATION.md:69:The first storage slice adds one optional attached volume per machine:
+CONFIGURATION.md:71:- one persistent `host-file` backend
+CONFIGURATION.md:72:- one explicit host path
+CONFIGURATION.md:73:- one ownership contract surfaced through `port doctor`, `machine launch`,
+CONFIGURATION.md:82:backend = "host-file"
+CONFIGURATION.md:128:declaring an attached volume on those lanes fails validation before launch
+README.md:21:  ownership output
+README.md:22:- Attached volume first slice: one persistent `host-file` attached volume on
+README.md:23:  the local Firecracker `standard` lane with explicit host path and ownership
+README.md:63:| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System boundaries, ownership, and major components |
+docs/hosted.md:60:The node agent is the hosted analog of today's local `port-runtime` ownership.
+docs/hosted.md:77:runtime ownership to the configured control plane:
+docs/hosted.md:216:ownership instead of leaving "node" and "host group" as prose-only terms.
+docs/hosted.md:346:  ownership stay visible to the operator
+docs/hosted.md:348:  agent using the shared guest copy protocol, so client-side host paths no
+docs/hosted.md:364:runtime ownership:
+docs/hosted.md:622:  node-visible host paths.
+docs/cloud.md:42:Port makes the SSH lane explicit in output with route and ownership fields such
+docs/cloud.md:51:- the first attached volume slice supports one persistent `host-file`
+docs/cloud.md:53:- `port doctor` and config validation keep the attached volume backend, host
+docs/cloud.md:54:  path, machine, and ownership detail explicit
+docs/cloud.md:56:  attached volume; Port does not silently reroute the request onto another lane
+docs/cloud.md:190:runtime ownership:
+docs/operators.md:57:The SSH lane makes route ownership explicit in command output:
+docs/operators.md:73:Port now keeps one attached volume contract explicit instead of treating data
+docs/operators.md:76:- one persistent `host-file` attached volume per machine
+docs/operators.md:77:- one explicit host path owned by the launch route
+docs/operators.md:78:- one visible ownership contract in `port doctor`, `machine launch`,
+docs/operators.md:88:Hosted-control-plane and SSH-managed machines reject attached volumes in this
+docs/operators.md:90:or collapse the attached volume back into the guest image or rootfs contract.
+docs/avf.md:21:Port's AVF launch-ownership contract is:
+docs/avf.md:42:That is the same ownership rule Port now uses for Linux and hosted design work:
+docs/avf.md:129:1. Host platform is macOS and the AVF lane is modeled as a local host path.
+docs/avf.md:145:- hosted macOS node-agent ownership remains future work

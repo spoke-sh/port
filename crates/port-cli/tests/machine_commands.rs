@@ -571,17 +571,21 @@ fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Pat
 fn write_fake_attached_volume(config: &mut PortConfig, root: &Path, file_name: &str) -> PathBuf {
     let volume_path = root.join(file_name);
     fs::write(&volume_path, b"fake-attached-volume").expect("attached volume should write");
+    set_attached_volume(config, "demo", volume_path.clone());
+    volume_path
+}
+
+fn set_attached_volume(config: &mut PortConfig, machine_name: &str, volume_path: PathBuf) {
     config
         .machines
-        .get_mut("demo")
-        .expect("demo machine should exist")
+        .get_mut(machine_name)
+        .expect("machine should exist")
         .volumes = vec![MachineVolumeSpec {
         name: String::from("data"),
         backend: MachineVolumeBackend::HostFile,
         persistence: MachineVolumePersistence::Persistent,
-        path: volume_path.clone(),
+        path: volume_path,
     }];
-    volume_path
 }
 
 fn write_fake_cloud_hypervisor_artifacts(config: &mut PortConfig, root: &Path) {
@@ -1084,6 +1088,103 @@ fn cli_attached_volume_route_context() {
     assert!(stderr.contains("local-runtime-root"), "{stderr}");
     assert!(stderr.contains("local-port-runtime"), "{stderr}");
     assert!(stderr.contains("direct-local-runtime"), "{stderr}");
+}
+
+#[test]
+fn attached_volume_unsupported_lane_guidance() {
+    let temp = tempdir().expect("tempdir should exist");
+    let runtime_root = temp.path().join("runtime");
+    let volume_path = temp.path().join("remote-data.ext4");
+    fs::write(&volume_path, b"fake-attached-volume").expect("attached volume should write");
+
+    let hosted_config_path = temp.path().join("port-hosted.toml");
+    let mut hosted_config = PortConfig::sample();
+    set_attached_volume(&mut hosted_config, "cloud-aws", volume_path.clone());
+    write_config(&hosted_config_path, &hosted_config);
+
+    let hosted_launch = Command::new(port_bin())
+        .arg("--config")
+        .arg(&hosted_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("hosted launch command should run");
+    assert!(!hosted_launch.status.success(), "{hosted_launch:?}");
+    let hosted_stderr = String::from_utf8_lossy(&hosted_launch.stderr);
+    assert!(
+        hosted_stderr.contains("machine 'cloud-aws'"),
+        "{hosted_stderr}"
+    );
+    assert!(
+        hosted_stderr.contains("attached volume 'data'"),
+        "{hosted_stderr}"
+    );
+    assert!(
+        hosted_stderr.contains("backend 'host-file'"),
+        "{hosted_stderr}"
+    );
+    assert!(
+        hosted_stderr.contains(volume_path.to_string_lossy().as_ref()),
+        "{hosted_stderr}"
+    );
+    assert!(
+        hosted_stderr.contains("hosted-control-plane"),
+        "{hosted_stderr}"
+    );
+    assert!(
+        hosted_stderr.contains("hosted-node-agent"),
+        "{hosted_stderr}"
+    );
+    assert!(
+        hosted_stderr.contains("local Firecracker standard lane"),
+        "{hosted_stderr}"
+    );
+
+    let ssh_config_path = temp.path().join("port-ssh.toml");
+    let mut ssh_config = sample_ssh_machine_config(temp.path());
+    set_attached_volume(&mut ssh_config, "cloud-generic", volume_path.clone());
+    write_config(&ssh_config_path, &ssh_config);
+
+    let ssh_launch = Command::new(port_bin())
+        .arg("--config")
+        .arg(&ssh_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("ssh launch command should run");
+    assert!(!ssh_launch.status.success(), "{ssh_launch:?}");
+    let ssh_stderr = String::from_utf8_lossy(&ssh_launch.stderr);
+    assert!(
+        ssh_stderr.contains("machine 'cloud-generic'"),
+        "{ssh_stderr}"
+    );
+    assert!(
+        ssh_stderr.contains("attached volume 'data'"),
+        "{ssh_stderr}"
+    );
+    assert!(ssh_stderr.contains("backend 'host-file'"), "{ssh_stderr}");
+    assert!(
+        ssh_stderr.contains(volume_path.to_string_lossy().as_ref()),
+        "{ssh_stderr}"
+    );
+    assert!(ssh_stderr.contains("ssh-managed-remote"), "{ssh_stderr}");
+    assert!(ssh_stderr.contains("ssh-remote-runtime"), "{ssh_stderr}");
+    assert!(
+        ssh_stderr.contains("ssh-remote-port-runtime"),
+        "{ssh_stderr}"
+    );
+    assert!(
+        ssh_stderr.contains("local Firecracker standard lane"),
+        "{ssh_stderr}"
+    );
 }
 
 #[test]
