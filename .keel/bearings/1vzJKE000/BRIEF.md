@@ -58,8 +58,6 @@ other.
 
 ## Success Criteria
 
-How will we know if this research was valuable?
-
 - [x] The research ends with a concrete keep/split recommendation for x86_64
   PVM, arm64 cost-control execution, and AVF.
 - [x] The outcome names the next epics or voyages needed to resume execution

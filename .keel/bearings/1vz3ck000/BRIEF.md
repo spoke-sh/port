@@ -59,8 +59,6 @@ implementation.
 
 ## Success Criteria
 
-How will we know if this research was valuable?
-
 - [x] Determine whether Firecracker/PVM should be kept for Port on x86_64 and
   whether arm64 remains implementation scope or research-only.
 - [x] Identify the concrete host, artifact, and runtime implications of a real

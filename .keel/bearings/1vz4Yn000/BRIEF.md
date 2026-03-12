@@ -48,8 +48,6 @@ smallest coherent hosted-control program that could become executable work.
 
 ## Success Criteria
 
-How will we know if this research was valuable?
-
 - [x] Identify the smallest coherent hosted-control epic that should come next
       instead of treating every missing Slicer feature as one story.
 - [x] Produce a recommendation that orders API/auth/inventory, guest
