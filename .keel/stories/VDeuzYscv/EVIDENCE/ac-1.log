@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-03-12T07:00:10.934542967-07:00
+command: cargo test -q --test machine_commands cli_ssh_machine_launch_status_and_stop_round_trip
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 3.20s
+

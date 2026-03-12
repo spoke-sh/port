@@ -22,3 +22,7 @@ Completed story VDeuzcDcL to add the SSH hybrid route contract, explicit SSH rou
 ## 2026-03-12T06:48:35
 
 Completed story VDeuzX5cO by adding SSH-specific doctor guidance, host auth/bootstrap checks, and regression coverage before moving to lifecycle routing.
+
+## 2026-03-12T07:01:02
+
+Completed story VDeuzYscv by routing machine launch, status, and stop through an ssh-managed remote lifecycle adapter with explicit host, provider, route, and ownership context plus CLI regression coverage.

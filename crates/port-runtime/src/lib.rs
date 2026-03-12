@@ -36,6 +36,7 @@ use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
     SecretPutRequest as HostedSecretPutRequest, ServiceApplyRequest as HostedServiceApplyRequest,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 mod hosted_control_plane;
@@ -483,6 +484,7 @@ pub enum MachineDriverKind {
     CloudHypervisorLocal,
     AvfLocal,
     HostedControlPlane,
+    SshManagedRemote,
 }
 
 trait MachineDriver {
@@ -541,6 +543,9 @@ struct AvfLocalDriver;
 
 #[derive(Debug, Default, Clone, Copy)]
 struct HostedControlPlaneDriver;
+
+#[derive(Debug, Default, Clone, Copy)]
+struct SshManagedDriver;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactAction {
@@ -5750,7 +5755,7 @@ fn ssh_connection_checks(
             ok: false,
             required: false,
             detail: format!(
-                "SSH-managed route '{}' expects inventory owner '{}' and lifecycle owner '{}' on host '{}' (provider '{}'). Remote bootstrap must install the Linux execution prerequisites and Port runtime on the remote host; Port will not fall back to local runtime or hosted control-plane ownership until the SSH lifecycle lane is implemented.",
+                "SSH-managed route '{}' expects inventory owner '{}' and lifecycle owner '{}' on host '{}' (provider '{}'). Remote bootstrap must install the Linux execution prerequisites and Port runtime on the remote host; the first SSH lifecycle slice now covers launch, status, and stop, but Port still will not fall back to local runtime or hosted control-plane ownership for the remaining SSH workflows.",
                 control.launch_route,
                 control.inventory_owner,
                 control.lifecycle_owner,
@@ -6536,6 +6541,318 @@ fn remote_launch_guidance(
     };
 
     format!("{detail}{hosted_route}")
+}
+
+#[derive(Debug, Clone)]
+struct SshMachineTarget {
+    machine_name: String,
+    host_name: String,
+    provider: HostProvider,
+    destination: String,
+    user: String,
+    port: u16,
+    control: MachineControlContract,
+}
+
+impl SshMachineTarget {
+    fn ssh_endpoint(&self) -> String {
+        format!("{}@{}:{}", self.user, self.destination, self.port)
+    }
+
+    fn route_context(&self, route: port_model::MachineCommandRoute) -> String {
+        format!(
+            "machine '{}' targets ssh-managed host '{}' (provider '{}') through {} with route '{}' and inventory or lifecycle owners '{}' and '{}'",
+            self.machine_name,
+            self.host_name,
+            host_provider_label(self.provider),
+            self.ssh_endpoint(),
+            route,
+            self.control.inventory_owner,
+            self.control.lifecycle_owner
+        )
+    }
+}
+
+fn ssh_machine_target(config: &PortConfig, machine_name: &str) -> Result<SshMachineTarget> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{machine_name}'"))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    let HostConnection::Ssh {
+        destination,
+        user,
+        port,
+    } = &host.connection
+    else {
+        bail!(
+            "machine '{}' does not target an ssh-managed host",
+            machine_name
+        );
+    };
+
+    let target = SshMachineTarget {
+        machine_name: machine_name.to_string(),
+        host_name: machine.host.clone(),
+        provider: host.provider,
+        destination: destination.clone(),
+        user: user.clone(),
+        port: *port,
+        control: MachineControlContract::ssh_managed_remote(),
+    };
+
+    if host.platform != HostPlatform::Linux {
+        bail!(
+            "{}; the first SSH lifecycle slice only supports remote Linux hosts",
+            target.route_context(target.control.launch_route)
+        );
+    }
+
+    match host.provider {
+        HostProvider::Local => bail!(
+            "{}; provider 'local' is reserved for direct local Linux launch",
+            target.route_context(target.control.launch_route)
+        ),
+        HostProvider::Azure => bail!(
+            "{}; Azure remains unsupported for the Firecracker MVP",
+            target.route_context(target.control.launch_route)
+        ),
+        HostProvider::GenericLinux | HostProvider::Aws | HostProvider::Gcp => {}
+    }
+
+    Ok(target)
+}
+
+fn ssh_machine_config_for_remote_execution(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<PortConfig> {
+    let mut remote = config.clone();
+    let host_name = remote
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{machine_name}'"))?
+        .host
+        .clone();
+    let host = remote
+        .hosts
+        .get_mut(&host_name)
+        .with_context(|| format!("unknown host '{host_name}'"))?;
+    if !matches!(host.connection, HostConnection::Ssh { .. }) {
+        bail!(
+            "machine '{}' does not target an ssh-managed host",
+            machine_name
+        );
+    }
+    host.connection = HostConnection::Local;
+    Ok(remote)
+}
+
+fn annotate_ssh_status(target: &SshMachineTarget, mut status: MachineStatus) -> MachineStatus {
+    status.control = target.control.clone();
+    status.detail = format!(
+        "{}; {}",
+        status.detail,
+        target.route_context(target.control.status_route)
+    );
+    status
+}
+
+fn annotate_ssh_stop_result(target: &SshMachineTarget, mut result: StopResult) -> StopResult {
+    result.control = target.control.clone();
+    result.detail = format!(
+        "{}; {}",
+        result.detail,
+        target.route_context(target.control.stop_route)
+    );
+    result
+}
+
+fn ssh_command_binary() -> Result<PathBuf> {
+    find_binary("ssh").context(
+        "ssh binary was not found on PATH; install OpenSSH client support to use ssh-managed remote lifecycle routing",
+    )
+}
+
+fn run_ssh_lifecycle_command<T: DeserializeOwned>(
+    config: &PortConfig,
+    target: &SshMachineTarget,
+    command_name: &str,
+    args: &[String],
+) -> Result<T> {
+    let ssh_binary = ssh_command_binary()?;
+    let mut command = Command::new(&ssh_binary);
+    command
+        .arg("-o")
+        .arg("BatchMode=yes")
+        .arg("-p")
+        .arg(target.port.to_string())
+        .arg(format!("{}@{}", target.user, target.destination));
+    for arg in args {
+        command.arg(arg);
+    }
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start ssh-managed lifecycle command '{}' for {} via '{}'",
+            command_name,
+            target.route_context(target.control.launch_route),
+            ssh_binary.display()
+        )
+    })?;
+    let encoded = serde_json::to_vec(config)
+        .context("failed to serialize Port config for remote ssh command")?;
+    child
+        .stdin
+        .take()
+        .context("ssh lifecycle command did not expose a stdin pipe")?
+        .write_all(&encoded)
+        .with_context(|| {
+            format!(
+                "failed to stream Port config to remote ssh command '{}' for {}",
+                command_name,
+                target.route_context(target.control.launch_route)
+            )
+        })?;
+    let output = child.wait_with_output().with_context(|| {
+        format!(
+            "failed to wait for remote ssh command '{}' for {}",
+            command_name,
+            target.route_context(target.control.launch_route)
+        )
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            format!("remote ssh command exited with status {}", output.status)
+        } else {
+            stderr
+        };
+        bail!(
+            "ssh-managed lifecycle command '{}' failed for {}: {}",
+            command_name,
+            target.route_context(target.control.launch_route),
+            detail
+        );
+    }
+
+    serde_json::from_slice(&output.stdout).with_context(|| {
+        format!(
+            "failed to decode remote ssh command '{}' response for {}",
+            command_name,
+            target.route_context(target.control.launch_route)
+        )
+    })
+}
+
+pub fn ssh_internal_launch_machine(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+) -> Result<LaunchMetadata> {
+    let _ = ssh_machine_target(config, request.machine_name)?;
+    let remote = ssh_machine_config_for_remote_execution(config, request.machine_name)?;
+    launch_local_machine(&remote, request)
+}
+
+pub fn ssh_internal_machine_status(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineStatus> {
+    let target = ssh_machine_target(config, machine_name)?;
+    let remote = ssh_machine_config_for_remote_execution(config, machine_name)?;
+    let status = machine_status(&remote, runtime_root, machine_name)?;
+    Ok(annotate_ssh_status(&target, status))
+}
+
+pub fn ssh_internal_stop_machine(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let target = ssh_machine_target(config, machine_name)?;
+    let remote = ssh_machine_config_for_remote_execution(config, machine_name)?;
+    let result = stop_machine(&remote, runtime_root, machine_name, timeout)?;
+    Ok(annotate_ssh_stop_result(&target, result))
+}
+
+fn ssh_managed_launch_machine(
+    config: &PortConfig,
+    request: &LaunchRequest<'_>,
+) -> Result<LaunchMetadata> {
+    let target = ssh_machine_target(config, request.machine_name)?;
+    run_ssh_lifecycle_command(
+        config,
+        &target,
+        "launch",
+        &[
+            String::from("port"),
+            String::from("internal"),
+            String::from("ssh-machine-launch"),
+            String::from("--machine"),
+            request.machine_name.to_string(),
+            String::from("--runtime-root"),
+            request.runtime_root.display().to_string(),
+            String::from("--boot-wait-secs"),
+            request.boot_wait.as_secs().to_string(),
+        ],
+    )
+}
+
+fn ssh_managed_machine_status(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineStatus> {
+    let target = ssh_machine_target(config, machine_name)?;
+    run_ssh_lifecycle_command(
+        config,
+        &target,
+        "status",
+        &[
+            String::from("port"),
+            String::from("internal"),
+            String::from("ssh-machine-status"),
+            String::from("--machine"),
+            machine_name.to_string(),
+            String::from("--runtime-root"),
+            runtime_root.display().to_string(),
+        ],
+    )
+}
+
+fn ssh_managed_stop_machine(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<StopResult> {
+    let target = ssh_machine_target(config, machine_name)?;
+    run_ssh_lifecycle_command(
+        config,
+        &target,
+        "stop",
+        &[
+            String::from("port"),
+            String::from("internal"),
+            String::from("ssh-machine-stop"),
+            String::from("--machine"),
+            machine_name.to_string(),
+            String::from("--runtime-root"),
+            runtime_root.display().to_string(),
+            String::from("--wait-secs"),
+            timeout.as_secs().to_string(),
+        ],
+    )
 }
 
 fn launch_preflight_checks(
@@ -8779,6 +9096,83 @@ impl MachineDriver for HostedControlPlaneDriver {
     }
 }
 
+impl MachineDriver for SshManagedDriver {
+    fn kind(&self) -> MachineDriverKind {
+        MachineDriverKind::SshManagedRemote
+    }
+
+    fn launch(&self, config: &PortConfig, request: &LaunchRequest<'_>) -> Result<LaunchMetadata> {
+        ssh_managed_launch_machine(config, request)
+    }
+
+    fn list_machines(
+        &self,
+        _config: &PortConfig,
+        _runtime_root: &Path,
+    ) -> Result<Vec<MachineStatus>> {
+        bail!(
+            "ssh-managed remote inventory listing is not implemented yet; use `port machine status --machine <name>` for the first bounded lifecycle slice"
+        )
+    }
+
+    fn machine_status(
+        &self,
+        config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineStatus> {
+        ssh_managed_machine_status(config, runtime_root, machine_name)
+    }
+
+    fn stop_machine(
+        &self,
+        config: &PortConfig,
+        runtime_root: &Path,
+        machine_name: &str,
+        timeout: Duration,
+    ) -> Result<StopResult> {
+        ssh_managed_stop_machine(config, runtime_root, machine_name, timeout)
+    }
+
+    fn machine_monitor(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineMonitorReport> {
+        let target = ssh_machine_target(config, machine_name)?;
+        bail!(
+            "{}; machine monitor is not implemented for the first ssh-managed lifecycle slice",
+            target.route_context(target.control.monitor_route)
+        )
+    }
+
+    fn machine_top(
+        &self,
+        config: &PortConfig,
+        _runtime_root: &Path,
+        machine_name: &str,
+    ) -> Result<MachineTopReport> {
+        let target = ssh_machine_target(config, machine_name)?;
+        bail!(
+            "{}; machine top is not implemented for the first ssh-managed lifecycle slice",
+            target.route_context(target.control.top_route)
+        )
+    }
+
+    fn guest_endpoint(
+        &self,
+        config: &PortConfig,
+        request: &GuestRequest<'_>,
+    ) -> Result<GuestEndpoint> {
+        let target = ssh_machine_target(config, request.machine_name)?;
+        bail!(
+            "{}; guest operations are not implemented for the first ssh-managed lifecycle slice",
+            target.route_context(target.control.guest_route)
+        )
+    }
+}
+
 fn local_runtime_driver() -> FirecrackerLocalDriver {
     FirecrackerLocalDriver
 }
@@ -8803,18 +9197,7 @@ fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<Box<dyn
             ExecutionSubstrate::CloudHypervisor => Ok(Box::new(CloudHypervisorLocalDriver)),
             ExecutionSubstrate::Avf => Ok(Box::new(AvfLocalDriver)),
         },
-        HostConnection::Ssh {
-            destination,
-            user,
-            port,
-        } => bail!(
-            "machine '{}' targets ssh-managed host '{}' through {}@{}:{} but ssh-managed drivers are not implemented yet",
-            machine_name,
-            machine.host,
-            user,
-            destination,
-            port
-        ),
+        HostConnection::Ssh { .. } => Ok(Box::new(SshManagedDriver)),
     }
 }
 
@@ -10659,6 +11042,14 @@ exec sleep 30
         let driver = driver_for_machine(&config, "demo-ch").expect("driver should resolve");
 
         assert_eq!(driver.kind(), MachineDriverKind::CloudHypervisorLocal);
+    }
+
+    #[test]
+    fn driver_selection_routes_ssh_machine_to_ssh_driver() {
+        let config = sample_ssh_doctor_config();
+        let driver = driver_for_machine(&config, "cloud-generic").expect("driver should resolve");
+
+        assert_eq!(driver.kind(), MachineDriverKind::SshManagedRemote);
     }
 
     #[test]

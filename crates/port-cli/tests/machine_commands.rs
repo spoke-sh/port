@@ -8,7 +8,10 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-use port_model::{ExecutionSubstrate, MachineArchitecture, PortConfig, ProtectionMode};
+use port_model::{
+    ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture, PortConfig,
+    ProtectionMode,
+};
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -452,6 +455,82 @@ fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
     path
 }
 
+fn write_fake_port_wrapper(root: &Path) -> PathBuf {
+    let path = root.join("port");
+    fs::write(
+        &path,
+        format!("#!/usr/bin/env bash\nexec '{}' \"$@\"\n", port_bin()),
+    )
+    .expect("fake port wrapper should write");
+    let mut permissions = fs::metadata(&path)
+        .expect("fake port wrapper metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions).expect("fake port wrapper permissions should update");
+    path
+}
+
+fn write_fake_ssh_binary(root: &Path) -> PathBuf {
+    let path = root.join("ssh");
+    fs::write(
+        &path,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|-o)
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "unexpected ssh option: $1" >&2
+      exit 64
+      ;;
+    *)
+      shift
+      break
+      ;;
+  esac
+done
+
+if [[ $# -eq 0 ]]; then
+  echo "missing remote command" >&2
+  exit 64
+fi
+
+exec "$@"
+"#,
+    )
+    .expect("fake ssh should write");
+    let mut permissions = fs::metadata(&path)
+        .expect("fake ssh metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions).expect("fake ssh permissions should update");
+    path
+}
+
+fn sample_ssh_machine_config(root: &Path) -> PortConfig {
+    let mut config = PortConfig::sample();
+    write_fake_standard_firecracker_artifacts(&mut config, root);
+    config.nodes.clear();
+    config.host_groups.clear();
+    config
+        .hosts
+        .get_mut("generic-linux")
+        .expect("generic-linux host should exist")
+        .connection = HostConnection::Ssh {
+        destination: String::from("builder.example.internal"),
+        user: String::from("ubuntu"),
+        port: 2222,
+    };
+    config
+}
+
 fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
     let kernel_path = root.join("standard-vmlinux");
     let guest_path = root.join("standard-rootfs.ext4");
@@ -740,6 +819,178 @@ fn cli_machine_launch_surfaces_missing_cloud_hypervisor_binary() {
     );
     assert!(stderr.contains("cloud-hypervisor"), "{stderr}");
     assert!(stderr.contains("demo-ch"), "{stderr}");
+}
+
+#[test]
+fn cli_ssh_machine_launch_status_and_stop_round_trip() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("remote-runtime");
+    let config = sample_ssh_machine_config(temp.path());
+    write_config(&config_path, &config);
+    write_fake_port_wrapper(temp.path());
+    write_fake_ssh_binary(temp.path());
+    write_fake_firecracker_binary(temp.path(), "firecracker");
+    let path_env = prepend_path_env(temp.path());
+
+    let launch = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(launch_stdout.contains("launched machine: cloud-generic"));
+    assert!(
+        launch_stdout.contains("host: generic-linux"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("provider: generic-linux"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("launch route: ssh-managed-remote"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("inventory owner: ssh-remote-runtime"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("lifecycle owner: ssh-remote-port-runtime"),
+        "{launch_stdout}"
+    );
+
+    let status = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("machine: cloud-generic"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("host: generic-linux"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("provider: generic-linux"),
+        "{status_stdout}"
+    );
+    assert!(status_stdout.contains("state: running"), "{status_stdout}");
+    assert!(
+        status_stdout.contains("status route: ssh-managed-remote"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("inventory owner: ssh-remote-runtime"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("lifecycle owner: ssh-remote-port-runtime"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("builder.example.internal"),
+        "{status_stdout}"
+    );
+
+    let stop = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(
+        stop_stdout.contains("machine: cloud-generic"),
+        "{stop_stdout}"
+    );
+    assert!(stop_stdout.contains("host: generic-linux"), "{stop_stdout}");
+    assert!(
+        stop_stdout.contains("provider: generic-linux"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("previous state: running"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("current state: stopped"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("stop route: ssh-managed-remote"),
+        "{stop_stdout}"
+    );
+}
+
+#[test]
+fn cli_ssh_machine_route_context() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("remote-runtime");
+    let mut config = sample_ssh_machine_config(temp.path());
+    config
+        .hosts
+        .get_mut("generic-linux")
+        .expect("generic-linux host should exist")
+        .provider = HostProvider::Local;
+    write_config(&config_path, &config);
+    write_fake_port_wrapper(temp.path());
+    write_fake_ssh_binary(temp.path());
+    write_fake_firecracker_binary(temp.path(), "firecracker");
+    let path_env = prepend_path_env(temp.path());
+
+    let launch = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-generic")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(!launch.status.success(), "{launch:?}");
+    let stderr = String::from_utf8_lossy(&launch.stderr);
+    assert!(stderr.contains("machine 'cloud-generic'"), "{stderr}");
+    assert!(stderr.contains("host 'generic-linux'"), "{stderr}");
+    assert!(stderr.contains("provider 'local'"), "{stderr}");
+    assert!(stderr.contains("ssh-managed-remote"), "{stderr}");
+    assert!(stderr.contains("ssh-remote-runtime"), "{stderr}");
+    assert!(stderr.contains("ssh-remote-port-runtime"), "{stderr}");
+    assert!(
+        stderr.contains("ubuntu@builder.example.internal:2222"),
+        "{stderr}"
+    );
 }
 
 #[test]

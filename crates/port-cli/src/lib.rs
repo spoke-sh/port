@@ -1,5 +1,6 @@
 use std::fmt::Write as _;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
@@ -556,6 +557,31 @@ pub enum InternalCommand {
         #[arg(long)]
         name: String,
     },
+    #[command(hide = true)]
+    SshMachineLaunch {
+        #[arg(long)]
+        machine: String,
+        #[arg(long)]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        boot_wait_secs: u64,
+    },
+    #[command(hide = true)]
+    SshMachineStatus {
+        #[arg(long)]
+        machine: String,
+        #[arg(long)]
+        runtime_root: PathBuf,
+    },
+    #[command(hide = true)]
+    SshMachineStop {
+        #[arg(long)]
+        machine: String,
+        #[arg(long)]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        wait_secs: u64,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -629,6 +655,60 @@ pub fn run(cli: Cli) -> Result<()> {
                     &manifest_path,
                     &name,
                 )
+            }
+            InternalCommand::SshMachineLaunch {
+                machine,
+                runtime_root,
+                boot_wait_secs,
+            } => {
+                let config = load_config_from_stdin()?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&port_runtime::ssh_internal_launch_machine(
+                        &config,
+                        &LaunchRequest {
+                            machine_name: &machine,
+                            runtime_root: &runtime_root,
+                            boot_wait: Duration::from_secs(boot_wait_secs),
+                        },
+                    )?)
+                    .context("failed to encode ssh launch metadata")?
+                );
+                Ok(())
+            }
+            InternalCommand::SshMachineStatus {
+                machine,
+                runtime_root,
+            } => {
+                let config = load_config_from_stdin()?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&port_runtime::ssh_internal_machine_status(
+                        &config,
+                        &runtime_root,
+                        &machine,
+                    )?)
+                    .context("failed to encode ssh machine status")?
+                );
+                Ok(())
+            }
+            InternalCommand::SshMachineStop {
+                machine,
+                runtime_root,
+                wait_secs,
+            } => {
+                let config = load_config_from_stdin()?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&port_runtime::ssh_internal_stop_machine(
+                        &config,
+                        &runtime_root,
+                        &machine,
+                        Duration::from_secs(wait_secs),
+                    )?)
+                    .context("failed to encode ssh stop result")?
+                );
+                Ok(())
             }
         },
     }
@@ -878,6 +958,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             runtime_root,
             boot_wait_secs,
         } => {
+            let ssh_context = ssh_machine_route_context(&config, &machine)?;
             let metadata = port_runtime::launch_local_machine(
                 &config,
                 &LaunchRequest {
@@ -898,6 +979,9 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("console stdout: {}", metadata.stdout_path.display());
             println!("console stderr: {}", metadata.stderr_path.display());
             println!("manifest: {}", metadata.manifest_path.display());
+            if let Some(context) = ssh_context.as_ref() {
+                print_ssh_machine_route_context(context, "launch route");
+            }
         }
         MachineCommand::List { runtime_root } => {
             let machines = port_runtime::list_machines(&config, &runtime_root)?;
@@ -932,7 +1016,11 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             machine,
             runtime_root,
         } => {
+            let ssh_context = ssh_machine_route_context(&config, &machine)?;
             let status = port_runtime::machine_status(&config, &runtime_root, &machine)?;
+            if let Some(context) = ssh_context.as_ref() {
+                print_ssh_machine_route_context(context, "status route");
+            }
             print!("{}", format_machine_status(&status));
         }
         MachineCommand::Monitor {
@@ -954,6 +1042,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             runtime_root,
             wait_secs,
         } => {
+            let ssh_context = ssh_machine_route_context(&config, &machine)?;
             let result = port_runtime::stop_machine(
                 &config,
                 &runtime_root,
@@ -961,6 +1050,9 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                 Duration::from_secs(wait_secs),
             )?;
             println!("machine: {}", result.machine_name);
+            if let Some(context) = ssh_context.as_ref() {
+                print_ssh_machine_route_context(context, "stop route");
+            }
             println!("previous state: {}", result.previous_state);
             println!("current state: {}", result.current_state);
             println!(
@@ -1821,6 +1913,71 @@ fn ensure_machine_exists(config: &PortConfig, machine: &str) -> Result<()> {
     }
 }
 
+#[derive(Debug, Clone)]
+struct SshMachineRouteContext {
+    host_name: String,
+    provider: port_model::HostProvider,
+    destination: String,
+    user: String,
+    port: u16,
+    control: port_model::MachineControlContract,
+}
+
+fn ssh_machine_route_context(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Option<SshMachineRouteContext>> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{machine_name}'"))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    let HostConnection::Ssh {
+        destination,
+        user,
+        port,
+    } = &host.connection
+    else {
+        return Ok(None);
+    };
+    Ok(Some(SshMachineRouteContext {
+        host_name: machine.host.clone(),
+        provider: host.provider,
+        destination: destination.clone(),
+        user: user.clone(),
+        port: *port,
+        control: config
+            .machine_control_contract(machine_name)
+            .map_err(anyhow::Error::from)
+            .context("failed to resolve machine control contract")?,
+    }))
+}
+
+fn render_host_provider(provider: port_model::HostProvider) -> &'static str {
+    match provider {
+        port_model::HostProvider::Local => "local",
+        port_model::HostProvider::GenericLinux => "generic-linux",
+        port_model::HostProvider::Aws => "aws",
+        port_model::HostProvider::Gcp => "gcp",
+        port_model::HostProvider::Azure => "azure",
+    }
+}
+
+fn print_ssh_machine_route_context(context: &SshMachineRouteContext, route_label: &str) {
+    println!("host: {}", context.host_name);
+    println!("provider: {}", render_host_provider(context.provider));
+    println!(
+        "ssh target: {}@{}:{}",
+        context.user, context.destination, context.port
+    );
+    println!("{}: {}", route_label, context.control.launch_route);
+    println!("inventory owner: {}", context.control.inventory_owner);
+    println!("lifecycle owner: {}", context.control.lifecycle_owner);
+}
+
 fn machine_uses_hosted_control_plane(config: &PortConfig, machine: &str) -> Result<bool> {
     let machine = config
         .machines
@@ -2102,6 +2259,16 @@ fn load_config_if_present(path: Option<&std::path::Path>) -> Result<Option<PortC
         .map_err(anyhow::Error::from)?
         .map(validate_config)
         .transpose()
+}
+
+fn load_config_from_stdin() -> Result<PortConfig> {
+    let mut encoded = String::new();
+    std::io::stdin()
+        .read_to_string(&mut encoded)
+        .context("failed to read Port config from stdin")?;
+    let config = serde_json::from_str::<PortConfig>(&encoded)
+        .context("failed to decode Port config JSON from stdin")?;
+    validate_config(config)
 }
 
 fn validate_config(config: PortConfig) -> Result<PortConfig> {
