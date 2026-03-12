@@ -2,11 +2,13 @@
 id: VDchsxHfp
 title: Publish Installable Support Matrix And Release Contract
 type: feat
-status: backlog
+status: done
 created_at: 2026-03-11T21:16:30
-updated_at: 2026-03-11T21:19:02
+updated_at: 2026-03-11T21:22:12
 scope: VDcT0vaPb/VDchK6xzs
 index: 3
+started_at: 2026-03-11T21:20:08
+completed_at: 2026-03-11T21:22:12
 ---
 
 # Publish Installable Support Matrix And Release Contract
@@ -20,4 +22,4 @@ validation path are explicit in the operator-facing docs.
 ## Acceptance Criteria
 
 <!-- verify: command, SRS-01:start:end, proof: ac-1.log -->
-- [ ] [SRS-01/AC-01] `README.md`, `RELEASE.md`, and the install-focused docs publish the first supported Linux and macOS targets, their canonical package artifact, and the unsupported-environment boundary for this slice. <!-- [SRS-01/AC-01] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "Supported Targets|canonical package|WSL|remote Linux host|macOS" README.md RELEASE.md docs', proof: ac-1.log -->
+- [x] [SRS-01/AC-01] `README.md`, `RELEASE.md`, and the install-focused docs publish the first supported Linux and macOS targets, their canonical package artifact, and the unsupported-environment boundary for this slice. <!-- [SRS-01/AC-01] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "Supported Targets|canonical package|WSL|remote Linux host|macOS" README.md RELEASE.md docs', proof: ac-1.log -->

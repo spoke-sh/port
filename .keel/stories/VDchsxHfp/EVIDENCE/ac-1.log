@@ -1,0 +1,31 @@
+---
+recorded_at: 2026-03-11T21:21:45.361076507-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "docs/install.md|x86_64-unknown-linux-gnu|x86_64-apple-darwin|aarch64-apple-darwin|WSL|remote Linux host|PORT_AVF_LAUNCHER" README.md RELEASE.md docs/install.md'
+---
+docs/install.md:26:| `x86_64-unknown-linux-gnu` | Primary CLI package for local Firecracker workflows and hosted control-plane demos on Linux. | Local Firecracker still requires a Linux host; Firecracker/PVM remains a dedicated prepared-node lane rather than a generic fallback. |
+docs/install.md:27:| `x86_64-apple-darwin` | macOS CLI package for the AVF local lane on Intel Macs. | AVF remains a local macOS workflow and still requires an external launcher helper via `PORT_AVF_LAUNCHER`. |
+docs/install.md:28:| `aarch64-apple-darwin` | macOS CLI package for the AVF local lane on Apple Silicon Macs. | Distributed targets still need Apple's virtualization entitlement; Rosetta convenience is not part of the core package contract. |
+docs/install.md:34:| Windows native install | Not shipped in the first installable slice. Use WSL or a remote Linux host for Linux-backed workflows. |
+README.md:35:[`docs/install.md`](docs/install.md).
+README.md:64:| [`docs/install.md`](docs/install.md) | Installable release contract, support matrix, and package boundaries |
+README.md:78:| Windows | Linux-backed workflow through WSL or a remote Linux host; no native install package in the first slice |
+README.md:80:Use [`docs/install.md`](docs/install.md) for the installable release contract,
+RELEASE.md:22:| `x86_64-unknown-linux-gnu` | Primary CLI package for local Firecracker workflows and hosted proof lanes on Linux. | Firecracker still requires a Linux host; PVM remains a prepared-node x86_64 lane rather than a generic local fallback. |
+RELEASE.md:23:| `x86_64-apple-darwin` | Intel macOS CLI package for the AVF local lane. | AVF requires a local macOS host plus an external launcher helper set through `PORT_AVF_LAUNCHER`. |
+RELEASE.md:24:| `aarch64-apple-darwin` | Apple Silicon macOS CLI package for the AVF local lane. | Distributed targets still need Apple's virtualization entitlement and related sandbox entitlements when applicable. |
+RELEASE.md:25:| Windows | No native install package in this slice. | Use WSL or a remote Linux host for Linux-backed workflows. |
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

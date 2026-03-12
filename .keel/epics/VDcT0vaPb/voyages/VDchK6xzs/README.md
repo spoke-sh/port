@@ -25,12 +25,12 @@ started_at: 2026-03-11T21:19:16
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Implement Canonical CLI Package Workflow](../../../../stories/VDchsvWfn/README.md) | feat | backlog |
 | [Surface AVF Distribution Boundary In Docs And Doctor](../../../../stories/VDchsw9fh/README.md) | feat | backlog |
 | [Add Install Proof For Packaged Port](../../../../stories/VDchsxHfm/README.md) | feat | backlog |
-| [Publish Installable Support Matrix And Release Contract](../../../../stories/VDchsxHfp/README.md) | feat | backlog |
+| [Publish Installable Support Matrix And Release Contract](../../../../stories/VDchsxHfp/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -31,6 +31,8 @@ port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /
 
 Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
+The first installable release contract and support matrix live in
+[`docs/install.md`](docs/install.md).
 
 ## Mission Report
 
@@ -59,6 +61,7 @@ achievements, and a human-facing artifact gallery for the active mission.
 | Document | Purpose |
 |----------|---------|
 | [`docs/operators.md`](docs/operators.md) | Operator-oriented overview and platform guidance |
+| [`docs/install.md`](docs/install.md) | Installable release contract, support matrix, and package boundaries |
 | [`docs/hosted.md`](docs/hosted.md) | Hosted control-plane, node-agent, and service workflows |
 | [`docs/cloud.md`](docs/cloud.md) | Cloud-provider and hosted-lane boundaries |
 | [`docs/artifacts.md`](docs/artifacts.md) | Artifact references, variants, and backends |
@@ -72,8 +75,9 @@ achievements, and a human-facing artifact gallery for the active mission.
 |-------------|--------------------------|
 | Linux | Full local Firecracker workflow plus hosted control-plane demos |
 | macOS | AVF local workflow through the canonical `machine` and `guest` verbs |
-| Windows | Linux-backed workflow through WSL or a remote Linux host |
+| Windows | Linux-backed workflow through WSL or a remote Linux host; no native install package in the first slice |
 
-Use [`docs/operators.md`](docs/operators.md) for the platform guide and
+Use [`docs/install.md`](docs/install.md) for the installable release contract,
+[`docs/operators.md`](docs/operators.md) for the platform guide, and
 [`CONFIGURATION.md`](CONFIGURATION.md) for the detailed configuration and
 workflow examples.

@@ -13,15 +13,30 @@ Port currently ships as a Rust workspace with:
 - board-managed verification evidence for major delivery work
 
 Distribution automation is still follow-on work. The release contract today is
-mostly about versioning, validation, and support boundaries.
+mostly about versioning, validation, package boundaries, and support surfaces.
 
-## Supported Targets
+## Supported Install Targets
 
-| Target | Current role |
-|--------|--------------|
-| Linux | Primary local Firecracker and hosted proof lane |
-| macOS | AVF local lane plus repo tooling |
-| Windows | Linux-backed operator workflow through WSL or a remote Linux host |
+| Target triple | Current role | Boundary |
+|---------------|--------------|----------|
+| `x86_64-unknown-linux-gnu` | Primary CLI package for local Firecracker workflows and hosted proof lanes on Linux. | Firecracker still requires a Linux host; PVM remains a prepared-node x86_64 lane rather than a generic local fallback. |
+| `x86_64-apple-darwin` | Intel macOS CLI package for the AVF local lane. | AVF requires a local macOS host plus an external launcher helper set through `PORT_AVF_LAUNCHER`. |
+| `aarch64-apple-darwin` | Apple Silicon macOS CLI package for the AVF local lane. | Distributed targets still need Apple's virtualization entitlement and related sandbox entitlements when applicable. |
+| Windows | No native install package in this slice. | Use WSL or a remote Linux host for Linux-backed workflows. |
+
+## First Package Contract
+
+The first installable Port package is a versioned tarball per supported target:
+
+- `port-<version>-<target-triple>.tar.gz`
+
+The package contract for this slice is:
+
+- ship the canonical `port` CLI binary
+- include release metadata and install guidance alongside the binary
+- keep `port doctor` as the first post-install verification step
+- leave native installers, Homebrew taps, and automated publication as
+  follow-on work
 
 ## Release Checklist
 
