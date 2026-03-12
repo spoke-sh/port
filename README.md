@@ -33,6 +33,10 @@ Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
 The first installable release contract and support matrix live in
 [`docs/install.md`](docs/install.md).
+Packaged macOS AVF workflows still use the canonical `port` CLI plus an
+external `PORT_AVF_LAUNCHER` helper; distributed macOS targets remain bounded
+by Apple's virtualization entitlement requirements described in
+[`docs/avf.md`](docs/avf.md).
 
 ## Mission Report
 

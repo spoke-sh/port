@@ -574,8 +574,11 @@ fn cli_help_stays_concise_and_links_lane_specific_docs() {
     assert!(stdout.contains("Examples:"));
     assert!(stdout.contains("port doctor"));
     assert!(stdout.contains("CONFIGURATION.md"));
+    assert!(stdout.contains("docs/install.md"));
+    assert!(stdout.contains("docs/avf.md"));
     assert!(stdout.contains("docs/operators.md"));
     assert!(stdout.contains("Apple Virtualization Framework"));
+    assert!(stdout.contains("PORT_AVF_LAUNCHER"));
     assert!(!stdout.contains("demo-avf"));
 }
 
@@ -596,6 +599,9 @@ fn cli_doctor_and_launch_surface_sample_avf_workflow_boundary() {
     let doctor_stdout = String::from_utf8_lossy(&doctor.stdout);
     assert!(doctor_stdout.contains("avf:demo-avf:host-platform"));
     assert!(doctor_stdout.contains("avf:demo-avf:runtime-availability"));
+    assert!(doctor_stdout.contains("PORT_AVF_LAUNCHER"));
+    assert!(doctor_stdout.contains("virtualization entitlement"));
+    assert!(doctor_stdout.contains("bundled macOS-only"));
 
     let launch = Command::new(port_bin())
         .arg("--config")
@@ -614,6 +620,7 @@ fn cli_doctor_and_launch_surface_sample_avf_workflow_boundary() {
     );
     let stderr = String::from_utf8_lossy(&launch.stderr);
     assert!(stderr.contains("AVF local launch requires running Port on macOS"));
+    assert!(!stderr.contains("fallback to Firecracker"));
 }
 
 #[test]

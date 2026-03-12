@@ -101,6 +101,20 @@ macOS distribution boundary:
 - sandboxed distributions also need the relevant network and file-access
   entitlements for the chosen operator workflow
 
+## Installable Package Boundary
+
+The installable macOS slice keeps one operator workflow:
+
+- the packaged artifact is still the canonical `port` CLI
+- local AVF launch still requires `PORT_AVF_LAUNCHER` to point at an external
+  launcher helper
+- distributed macOS targets remain bounded by Apple's virtualization
+  entitlement and the related sandbox entitlements when applicable
+- Port does not ship a bundled AVF launcher app, a macOS-only command tree, or
+  a fallback workflow that silently switches to another local substrate
+- unsupported hosts should fail fast with explicit macOS-only AVF guidance
+  rather than a generic launch or packaging fallback
+
 Rosetta boundary:
 
 - Rosetta support in Linux guests is an Apple-silicon-specific workflow

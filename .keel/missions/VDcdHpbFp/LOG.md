@@ -26,3 +26,7 @@ Hardened VDchsvWfn after review: removed duplicate tar members, normalized packa
 ## 2026-03-11T22:04:03
 
 Completed story VDchsxHfm: added repo-local package-proof workflow, proof test coverage, tracked VHS tape surface, and evidence for packaged --version/doctor install proof.
+
+## 2026-03-11T22:09:29
+
+Completed story VDchsw9fh: aligned AVF install boundary docs, CLI help, doctor messaging, and release validation checklist with launcher-helper, entitlement, and no-fallback guidance.

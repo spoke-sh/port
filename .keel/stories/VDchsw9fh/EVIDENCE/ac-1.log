@@ -1,0 +1,39 @@
+---
+recorded_at: 2026-03-11T22:08:41.236137135-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-runtime avf && rg -n "PORT_AVF_LAUNCHER|entitlement|distributed" README.md RELEASE.md docs/avf.md'
+---
+
+running 7 tests
+.......
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 110 filtered out; finished in 1.65s
+
+docs/avf.md:76:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+docs/avf.md:89:- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+docs/avf.md:100:- distributed macOS app targets need Apple's virtualization entitlement
+docs/avf.md:102:  entitlements for the chosen operator workflow
+docs/avf.md:109:- local AVF launch still requires `PORT_AVF_LAUNCHER` to point at an external
+docs/avf.md:111:- distributed macOS targets remain bounded by Apple's virtualization
+docs/avf.md:112:  entitlement and the related sandbox entitlements when applicable
+docs/avf.md:132:3. The build/distribution path is bounded by Apple's virtualization entitlement
+docs/avf.md:165:- Apple entitlement guidance:
+docs/avf.md:166:  <https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_security_virtualization>
+README.md:37:external `PORT_AVF_LAUNCHER` helper; distributed macOS targets remain bounded
+README.md:38:by Apple's virtualization entitlement requirements described in
+RELEASE.md:23:| `x86_64-apple-darwin` | Intel macOS CLI package for the AVF local lane. | AVF requires a local macOS host plus an external launcher helper set through `PORT_AVF_LAUNCHER`. |
+RELEASE.md:24:| `aarch64-apple-darwin` | Apple Silicon macOS CLI package for the AVF local lane. | Distributed targets still need Apple's virtualization entitlement and related sandbox entitlements when applicable. |
+RELEASE.md:39:  `PORT_AVF_LAUNCHER` helper rather than a bundled macOS-only launcher
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

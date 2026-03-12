@@ -36,10 +36,17 @@ Examples:
 
 Detailed examples:
   CONFIGURATION.md
+  docs/install.md
+  docs/avf.md
   docs/operators.md
   docs/hosted.md
   docs/cloud.md
-  docs/artifacts.md";
+  docs/artifacts.md
+
+macOS AVF install boundary:
+  Set PORT_AVF_LAUNCHER to an external launcher helper for local AVF workflows.
+  Distributed macOS targets need Apple's virtualization entitlement and related sandbox entitlements.
+  Port does not ship a bundled macOS-only fallback workflow in this slice.";
 
 #[derive(Debug, Parser)]
 #[command(

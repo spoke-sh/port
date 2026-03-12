@@ -1,0 +1,41 @@
+---
+recorded_at: 2026-03-11T22:08:31.124068874-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "just mission|just doctor|just test|port doctor|package-proof|just package" README.md RELEASE.md justfile .justfiles'
+---
+justfile:12:    '  just mission               Show mission artifact report' \
+justfile:14:    '  just doctor                Validate the Keel board' \
+justfile:16:    '  just test                  Run workspace tests' \
+justfile:18:    '  just package <target>      Build a canonical install tarball' \
+justfile:19:    '  just package-proof <tgt>   Prove packaged Port works from an installed path' \
+justfile:59:package-proof *args:
+justfile:60:  @just cli::package-proof "$@"
+RELEASE.md:37:- keep `port doctor` as the first post-install verification step
+RELEASE.md:52:just mission
+RELEASE.md:53:just test
+RELEASE.md:55:just package x86_64-unknown-linux-gnu
+RELEASE.md:56:just package-proof x86_64-unknown-linux-gnu
+RELEASE.md:63:artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
+RELEASE.md:69:just doctor
+RELEASE.md:80:- the canonical package and package-proof commands pass
+RELEASE.md:81:- the packaged `port doctor` check remains the post-install gate
+RELEASE.md:83:- the current mission signal is legible through `just mission`
+README.md:8:- `port doctor` for host and lane checks
+README.md:25:port doctor
+README.md:44:just mission
+.justfiles/cli.just:9:package-proof *args:
+.justfiles/cli.just:10:  if command -v nix >/dev/null 2>&1 && [ -f {{justfile_directory()}}/flake.nix ]; then cd {{justfile_directory()}} && nix develop -c bash scripts/package-proof.sh "$@"; else cd {{justfile_directory()}} && bash scripts/package-proof.sh "$@"; fi
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

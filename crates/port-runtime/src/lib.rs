@@ -730,6 +730,9 @@ fn collect_doctor_report_with_facts(
         notes.push(String::from(
             "Cloud Hypervisor readiness is reported through its own host-platform, architecture, protection-mode, and binary checks; Port does not silently fall back to Firecracker when that lane is selected.",
         ));
+        notes.push(String::from(
+            "AVF install and help surfaces stay on the canonical port CLI: set PORT_AVF_LAUNCHER to an external launcher helper for local macOS workflows, and do not expect a bundled macOS-only fallback workflow in this slice.",
+        ));
     }
 
     DoctorReport {
@@ -1698,7 +1701,7 @@ fn avf_local_launch_machine_with_host_os(
 
     let launcher = launcher_override.ok_or_else(|| {
         anyhow!(
-            "AVF local driver is configured, but no AVF launcher helper is set. Set PORT_AVF_LAUNCHER to a macOS AVF launcher binary."
+            "AVF local driver is configured, but no AVF launcher helper is set. Set PORT_AVF_LAUNCHER to a macOS AVF launcher binary; Port does not ship a bundled macOS-only helper in this slice."
         )
     })?;
     if !launcher.exists() {
@@ -5984,6 +5987,10 @@ fn avf_machine_checks(
         })
         .unwrap_or(false);
     let availability_ok = platform_ok;
+    let helper_boundary =
+        "Set PORT_AVF_LAUNCHER to an external launcher helper for local AVF workflows.";
+    let packaging_boundary =
+        "Port does not ship a bundled macOS-only launcher workflow or a silent fallback to another substrate in this slice.";
 
     vec![
         DoctorCheck {
@@ -6027,12 +6034,12 @@ fn avf_machine_checks(
             required: false,
             detail: if availability_ok {
                 format!(
-                    "AVF runtime can target Apple's Virtualization framework on this host. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. {}",
+                    "AVF runtime can target Apple's Virtualization framework on this host. {helper_boundary} {} {packaging_boundary}",
                     contract.operator_prerequisites[1]
                 )
             } else {
                 format!(
-                    "AVF runtime availability is bounded to local macOS hosts with Apple's Virtualization framework. Port does not yet verify distribution-time virtualization, network, or file-access entitlements automatically. {}",
+                    "AVF runtime availability is bounded to local macOS hosts with Apple's Virtualization framework. {helper_boundary} {} {packaging_boundary}",
                     contract.operator_prerequisites[1]
                 )
             },
@@ -10922,12 +10929,20 @@ exec sleep 30
         assert!(architecture.ok);
         assert!(architecture.detail.contains("x86_64"));
         assert!(!availability.ok);
+        assert!(availability.detail.contains("PORT_AVF_LAUNCHER"));
         assert!(availability.detail.contains("entitlement"));
+        assert!(availability.detail.contains("bundled macOS-only"));
         assert!(
             report
                 .notes
                 .iter()
                 .any(|note| note.contains("AVF lane locally"))
+        );
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains("PORT_AVF_LAUNCHER"))
         );
     }
 
@@ -10964,7 +10979,9 @@ exec sleep 30
         assert!(architecture.detail.contains("aarch64"));
         assert!(availability.ok);
         assert!(availability.detail.contains("Virtualization framework"));
+        assert!(availability.detail.contains("PORT_AVF_LAUNCHER"));
         assert!(availability.detail.contains("entitlement"));
+        assert!(availability.detail.contains("bundled macOS-only"));
     }
 
     #[test]
