@@ -1,11 +1,12 @@
 ---
 id: VDfEyGkVf
 title: Attached Volume Contract Foundations
-status: planned
+status: in-progress
 epic: VDcStQqlo
 created_at: 2026-03-12T07:40:27
 index: 1
 updated_at: 2026-03-12T07:44:09
+started_at: 2026-03-12T07:47:30
 ---
 
 # Attached Volume Contract Foundations

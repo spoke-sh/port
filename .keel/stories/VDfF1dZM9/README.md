@@ -2,12 +2,13 @@
 id: VDfF1dZM9
 title: Introduce Canonical Volume And Attachment Model
 type: feat
-status: backlog
+status: in-progress
 created_at: 2026-03-12T07:40:40
-updated_at: 2026-03-12T07:44:09
+updated_at: 2026-03-12T07:47:30
 operator-signal: 
 scope: VDcStQqlo/VDfEyGkVf
 index: 3
+started_at: 2026-03-12T07:47:30
 ---
 
 # Introduce Canonical Volume And Attachment Model
