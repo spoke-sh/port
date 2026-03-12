@@ -1,0 +1,48 @@
+---
+recorded_at: 2026-03-11T22:03:16.711305137-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && just package-proof x86_64-unknown-linux-gnu'
+---
+artifact: /home/alex/workspace/spoke-sh/port/artifacts/packages/port-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+target: x86_64-unknown-linux-gnu
+version: 0.1.0
+included-files:
+  - bin/port
+  - README.md
+  - RELEASE.md
+  - docs/install.md
+  - PACKAGE_METADATA.txt
+  - PACKAGE_MANIFEST.txt
+proof-root: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu
+prefix: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix
+binary: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port
+version-output: port 0.1.0
+doctor-command: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
+doctor-status: ok
+doctor-output:
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable
+if command -v nix >/dev/null 2>&1 && [ -f /home/alex/workspace/spoke-sh/port/flake.nix ]; then cd /home/alex/workspace/spoke-sh/port && nix develop -c bash scripts/package-proof.sh "$@"; else cd /home/alex/workspace/spoke-sh/port && bash scripts/package-proof.sh "$@"; fi
+    Finished `release` profile [optimized] target(s) in 0.09s

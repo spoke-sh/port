@@ -6,5 +6,9 @@ package *args:
   if command -v nix >/dev/null 2>&1 && [ -f {{justfile_directory()}}/flake.nix ]; then cd {{justfile_directory()}} && nix develop -c bash scripts/package-port.sh "$@"; else cd {{justfile_directory()}} && bash scripts/package-port.sh "$@"; fi
 
 [positional-arguments]
+package-proof *args:
+  if command -v nix >/dev/null 2>&1 && [ -f {{justfile_directory()}}/flake.nix ]; then cd {{justfile_directory()}} && nix develop -c bash scripts/package-proof.sh "$@"; else cd {{justfile_directory()}} && bash scripts/package-proof.sh "$@"; fi
+
+[positional-arguments]
 run *args:
   if command -v nix >/dev/null 2>&1 && [ -f {{justfile_directory()}}/flake.nix ]; then cd {{justfile_directory()}} && nix develop -c cargo run -p port-cli -- "$@"; else cd {{justfile_directory()}} && cargo run -p port-cli -- "$@"; fi

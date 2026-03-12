@@ -43,6 +43,7 @@
           pkgs.just
           pkgs.gnutar
           pkgs.gzip
+          pkgs.vhs
           pkgs.oras
           pkgs.cargo-nextest
           pkgs.cargo-llvm-cov

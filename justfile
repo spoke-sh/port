@@ -16,6 +16,7 @@ default:
     '  just test                  Run workspace tests' \
     '  just build                 Build the port CLI binary' \
     '  just package <target>      Build a canonical install tarball' \
+    '  just package-proof <tgt>   Prove packaged Port works from an installed path' \
     '  just port --help           Run the Port CLI in the dev shell' \
     '  just keel flow             Run arbitrary Keel commands' \
     '' \
@@ -53,6 +54,10 @@ build:
 [positional-arguments]
 package *args:
   @just cli::package "$@"
+
+[positional-arguments]
+package-proof *args:
+  @just cli::package-proof "$@"
 
 [positional-arguments]
 port *args:

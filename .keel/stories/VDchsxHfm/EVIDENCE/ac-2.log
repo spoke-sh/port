@@ -1,0 +1,20 @@
+---
+recorded_at: 2026-03-11T22:03:15.649117308-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && vhs validate artifacts/package-proof.tape && rg -n "bash scripts/package-proof.sh x86_64-unknown-linux-gnu" artifacts/package-proof.tape'
+---
+13:Type "bash scripts/package-proof.sh x86_64-unknown-linux-gnu"
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

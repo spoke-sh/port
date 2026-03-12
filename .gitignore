@@ -1,5 +1,7 @@
 /.direnv/
-/artifacts/
+/artifacts/*
+!/artifacts/
+!/artifacts/package-proof.tape
 /result
 /runtime/
 /target/
