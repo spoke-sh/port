@@ -135,11 +135,11 @@
 |--------|--------|
 | [Attached Volume Contract Foundations](epics/VDcStQqlo/voyages/VDfEyGkVf/) | done |
 
-### [K3s And Kubernetes Workloads](epics/VDcStSMlp/) (active)
+### [K3s And Kubernetes Workloads](epics/VDcStSMlp/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted Stateless K3s Foundations](epics/VDcStSMlp/voyages/VDfytSpPs/) | in-progress |
+| [Hosted Stateless K3s Foundations](epics/VDcStSMlp/voyages/VDfytSpPs/) | done |
 
 ### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 

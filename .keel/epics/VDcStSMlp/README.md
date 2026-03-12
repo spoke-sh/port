@@ -21,8 +21,8 @@ created_at: 2026-03-12T10:36:47
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted Stateless K3s Foundations](voyages/VDfytSpPs/) | in-progress | 2/4 |
+| [Hosted Stateless K3s Foundations](voyages/VDfytSpPs/) | done | 4/4 |
 <!-- END GENERATED -->
