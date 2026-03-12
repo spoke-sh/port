@@ -12,7 +12,7 @@
       inputs.flake-utils.follows = "flake-utils";
     };
     keel = {
-      url = "github:spoke-sh/keel?ref=main";
+      url = "github:spoke-sh/keel";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -37,7 +37,56 @@
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
         siftPkg = sift.packages.${system}.sift;
-        keelPkg = keel.packages.${system}.keel;
+        keelPkg = pkgs.callPackage (
+          {
+            lib,
+            rustPlatform,
+            pkg-config,
+            zstd,
+            git,
+            ...
+          }:
+            let
+              cargoToml = lib.importTOML "${keel}/Cargo.toml";
+            in
+              rustPlatform.buildRustPackage {
+                pname = "keel";
+                version = cargoToml.package.version;
+
+                src = keel;
+
+                cargoLock = {
+                  lockFile = "${keel}/Cargo.lock";
+                  outputHashes = {
+                    "txtplot-0.1.0" = "sha256-PXj4ntPJ1UXda++7gcE+yk2cCLy/CFBMBGxgfBGSH5c=";
+                  };
+                };
+
+                nativeBuildInputs = [
+                  pkg-config
+                ];
+
+                nativeCheckInputs = [
+                  git
+                ];
+
+                buildInputs = [
+                  zstd
+                ];
+
+                meta = with lib; {
+                  description = "Fast CLI for project board management";
+                  homepage = "https://github.com/spoke-sh/keel";
+                  license = licenses.mit;
+                  maintainers = [ ];
+                };
+              }
+        ) {
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust;
+            rustc = rust;
+          };
+        };
         sharedInputs = [
           rust
           pkgs.just

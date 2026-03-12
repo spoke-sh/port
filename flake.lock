@@ -31,16 +31,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1773316676,
-        "narHash": "sha256-KQLwVLQzJJ5jUQ6z6yI9mZjH7QRj9Ad1lfy2RArGhMk=",
+        "lastModified": 1773336579,
+        "narHash": "sha256-NckgHUHQDRA+zJTuZf6nc6Dbma6GjVaox81Q4+ledG0=",
         "owner": "spoke-sh",
         "repo": "keel",
-        "rev": "f39af4435a72fd0981c81916e8473fa0afb84fce",
+        "rev": "f6165091962a7265a08a809b92bca38812d05bb6",
         "type": "github"
       },
       "original": {
         "owner": "spoke-sh",
-        "ref": "main",
         "repo": "keel",
         "type": "github"
       }
