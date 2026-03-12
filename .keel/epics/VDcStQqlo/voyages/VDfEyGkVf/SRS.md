@@ -76,5 +76,5 @@
 |-------|----------|
 | [VDfF1dZM9](../../../../stories/VDfF1dZM9/README.md) Introduce Canonical Volume And Attachment Model | SRS-01, SRS-NFR-02 |
 | [VDfF1csOC](../../../../stories/VDfF1csOC/README.md) Implement Local Attached Volume Launch Path | SRS-02, SRS-03, SRS-NFR-02 |
-| [VDfF1cZOD](../../../../stories/VDfF1cZOD/README.md) Add Attached Volume Lane Guidance | SRS-03, SRS-NFR-01 |
-| [VDfF1dVOF](../../../../stories/VDfF1dVOF/README.md) Publish Attached Volume Operator Proof | SRS-04, SRS-NFR-03 |
+| [VDfF1cZOD](../../../../stories/VDfF1cZOD/README.md) Add Attached Volume Lane Guidance | SRS-04, SRS-NFR-01 |
+| [VDfF1dVOF](../../../../stories/VDfF1dVOF/README.md) Publish Attached Volume Operator Proof | SRS-05, SRS-NFR-03 |

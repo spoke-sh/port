@@ -30,3 +30,7 @@ Completed VDfF1csOC: attached one local Firecracker host-file volume with explic
 ## 2026-03-12T08:28:45
 
 Completed VDfF1cZOD: added attached-volume doctor and validation guidance, explicit hosted and ssh lane rejection, and operator docs for the first supported storage lane; submitted the story.
+
+## 2026-03-12T08:34:00
+
+Completed VDfF1dVOF: published the canonical attached-volume operator workflow, added a repo-local proof renderer, and submitted the story with a GIF-backed human-reviewable artifact.

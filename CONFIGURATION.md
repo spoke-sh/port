@@ -84,6 +84,15 @@ persistence = "persistent"
 path = "volumes/demo-data.ext4"
 ```
 
+Canonical direct-runtime workflow:
+
+```bash
+port --config /tmp/port-attached-volume.toml doctor
+port --config /tmp/port-attached-volume.toml machine launch --machine demo
+port --config /tmp/port-attached-volume.toml machine status --machine demo
+port --config /tmp/port-attached-volume.toml machine stop --machine demo
+```
+
 ## Environment Variables
 
 | Variable | Purpose |

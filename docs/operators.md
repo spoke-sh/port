@@ -89,6 +89,31 @@ Hosted-control-plane and SSH-managed machines reject attached volumes in this
 slice with explicit lane guidance. Port will not silently reroute the request
 or collapse the attached volume back into the guest image or rootfs contract.
 
+Canonical direct-runtime workflow:
+
+```bash
+port --config /tmp/port-attached-volume.toml doctor
+port --config /tmp/port-attached-volume.toml machine launch --machine demo
+port --config /tmp/port-attached-volume.toml machine status --machine demo
+port --config /tmp/port-attached-volume.toml machine stop --machine demo
+```
+
+The config for that workflow keeps the storage contract explicit:
+
+```toml
+[[machines.demo.volumes]]
+name = "data"
+backend = "host-file"
+persistence = "persistent"
+path = "/var/lib/port/volumes/demo-data.ext4"
+```
+
+Repo-local proof for this workflow:
+
+```bash
+./scripts/render-attached-volume-proof.sh .keel/stories/VDfF1dVOF/EVIDENCE
+```
+
 ## Repo-local Proof
 
 The checked-in proof command for this workflow is:

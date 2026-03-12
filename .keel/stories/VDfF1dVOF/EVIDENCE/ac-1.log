@@ -1,0 +1,34 @@
+---
+recorded_at: 2026-03-12T08:32:34.124922428-07:00
+command: sh -c 'cd /home/alex/workspace/spoke-sh/port && /home/alex/.nix-profile/bin/rg -n "volume|attachment|storage" README.md docs CONFIGURATION.md'
+---
+CONFIGURATION.md:69:The first storage slice adds one optional attached volume per machine:
+CONFIGURATION.md:80:[[machines.demo.volumes]]
+CONFIGURATION.md:84:path = "volumes/demo-data.ext4"
+CONFIGURATION.md:90:port --config /tmp/port-attached-volume.toml doctor
+CONFIGURATION.md:91:port --config /tmp/port-attached-volume.toml machine launch --machine demo
+CONFIGURATION.md:92:port --config /tmp/port-attached-volume.toml machine status --machine demo
+CONFIGURATION.md:93:port --config /tmp/port-attached-volume.toml machine stop --machine demo
+CONFIGURATION.md:136:Hosted and SSH-owned machines keep the attached-volume boundary explicit:
+CONFIGURATION.md:137:declaring an attached volume on those lanes fails validation before launch
+README.md:22:- Attached volume first slice: one persistent `host-file` attached volume on
+README.md:40:The first direct-runtime attached-volume workflow and proof command live in
+docs/artifacts.md:29:- hosted control-plane storage lives under `.port/hosted/<control-plane>/artifacts/`
+docs/cloud.md:49:Attached volume support is narrower than the remote execution story:
+docs/cloud.md:51:- the first attached volume slice supports one persistent `host-file`
+docs/cloud.md:52:  attachment only on the local Firecracker `standard` lane
+docs/cloud.md:53:- `port doctor` and config validation keep the attached volume backend, host
+docs/cloud.md:56:  attached volume; Port does not silently reroute the request onto another lane
+docs/cloud.md:199:  guest-transport attachment on execution hosts.
+docs/operators.md:73:Port now keeps one attached volume contract explicit instead of treating data
+docs/operators.md:76:- one persistent `host-file` attached volume per machine
+docs/operators.md:88:Hosted-control-plane and SSH-managed machines reject attached volumes in this
+docs/operators.md:90:or collapse the attached volume back into the guest image or rootfs contract.
+docs/operators.md:95:port --config /tmp/port-attached-volume.toml doctor
+docs/operators.md:96:port --config /tmp/port-attached-volume.toml machine launch --machine demo
+docs/operators.md:97:port --config /tmp/port-attached-volume.toml machine status --machine demo
+docs/operators.md:98:port --config /tmp/port-attached-volume.toml machine stop --machine demo
+docs/operators.md:101:The config for that workflow keeps the storage contract explicit:
+docs/operators.md:104:[[machines.demo.volumes]]
+docs/operators.md:108:path = "/var/lib/port/volumes/demo-data.ext4"
+docs/operators.md:114:./scripts/render-attached-volume-proof.sh .keel/stories/VDfF1dVOF/EVIDENCE

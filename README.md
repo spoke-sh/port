@@ -37,6 +37,8 @@ port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /
 
 Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
+The first direct-runtime attached-volume workflow and proof command live in
+[`docs/operators.md`](docs/operators.md).
 The first installable release contract and support matrix live in
 [`docs/install.md`](docs/install.md).
 Packaged macOS AVF workflows still use the canonical `port` CLI plus an
