@@ -1,9 +1,12 @@
 ---
 id: VDcStQqlo
 title: Cloud Block Storage Normalization
-status: exploring
+mission: VDfCa3q94
+status: laid
 created_at: 2026-03-11T20:16:56
 index: 8
+laid_at: 2026-03-12T07:35:31
+epic: VDcStQqlo
 ---
 
 # Cloud Block Storage Normalization

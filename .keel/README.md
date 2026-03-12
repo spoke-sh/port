@@ -14,7 +14,7 @@
 | [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | decision-ready | 3.42 | ✓ |
 | [GPU Execution Support](bearings/VDcStPNlr/) | exploring | ✓ | ✓ | decision-ready | 0.99 | - |
 | [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | laid | ✓ | ✓ | decision-ready | 3.47 | ✓ |
-| [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | exploring | ✓ | ✓ | decision-ready | 1.89 | - |
+| [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | laid | ✓ | ✓ | decision-ready | 1.89 | ✓ |
 | [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | exploring | ✓ | ✓ | resolve conflict | 1.55 | - |
 | [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.20 | ✓ |
 
@@ -128,6 +128,12 @@
 | Voyage | Status |
 |--------|--------|
 | [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | done |
+
+### [Cloud Block Storage Normalization](epics/VDcStQqlo/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Attached Volume Contract Foundations](epics/VDcStQqlo/voyages/VDfEyGkVf/) | planned |
 
 ### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 
