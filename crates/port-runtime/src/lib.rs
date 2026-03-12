@@ -27,7 +27,7 @@ use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
     HostedApiIdentityContract, HostedArtifactIdentityContract, HostedImportedNodeRecord,
-    HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy,
+    HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy, K3sClusterSpec,
     MachineArchitecture, MachineControlContract, MachineVolumeBackend, MachineVolumePersistence,
     MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode,
     PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
@@ -140,6 +140,28 @@ pub struct HostedK3sBootstrapResult {
     pub join_token: String,
     pub server_launch: LaunchMetadata,
     pub worker_launches: Vec<LaunchMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sMachineAccess {
+    pub role: String,
+    pub route: HostedRouteContext,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sClusterAccessReport {
+    pub cluster_name: String,
+    pub control_plane: String,
+    pub host_group: String,
+    pub server_machine: String,
+    pub worker_machines: Vec<String>,
+    pub kubeconfig_surface: String,
+    pub kubeconfig: String,
+    pub visibility_surface: String,
+    pub visibility_output: String,
+    pub machine_access: Vec<HostedK3sMachineAccess>,
+    pub boundary_notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1218,6 +1240,244 @@ fn validate_machine_runtime_launch_config(config: &PortConfig) -> Result<()> {
         .map_err(|error| anyhow!("invalid port config: {error}"))
 }
 
+fn hosted_k3s_boundary_notes() -> Vec<String> {
+    vec![
+        String::from(
+            "Hosted K3s requires one hosted control plane and one host group with live placement capacity in this slice.",
+        ),
+        String::from(
+            "Hosted K3s remains stateless in this slice; attached volumes, persistent storage, and CSI are out of scope.",
+        ),
+        String::from(
+            "Hosted K3s does not claim HA control planes, ingress, public service exposure, or non-hosted ownership routes in this slice.",
+        ),
+    ]
+}
+
+fn hosted_k3s_boundary_summary() -> String {
+    hosted_k3s_boundary_notes().join(" ")
+}
+
+fn load_hosted_k3s_cluster(config: &PortConfig, cluster_name: &str) -> Result<K3sClusterSpec> {
+    config.validate().map_err(|error| {
+        anyhow!(
+            "invalid hosted k3s cluster '{}': {} {}",
+            cluster_name,
+            error,
+            hosted_k3s_boundary_summary()
+        )
+    })?;
+    config
+        .k3s_clusters
+        .get(cluster_name)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow!(
+                "unknown hosted k3s cluster '{}'. {}",
+                cluster_name,
+                hosted_k3s_boundary_summary()
+            )
+        })
+}
+
+fn hosted_k3s_kubeconfig_surface(machine_name: &str) -> String {
+    format_guest_exec_surface(machine_name, &hosted_k3s_kubeconfig_command())
+}
+
+fn hosted_k3s_visibility_surface(machine_name: &str) -> String {
+    format_guest_exec_surface(machine_name, &hosted_k3s_visibility_command())
+}
+
+fn format_guest_exec_surface(machine_name: &str, command: &[String]) -> String {
+    let rendered = command
+        .iter()
+        .map(|part| shell_single_quote(part))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("port guest exec --machine {machine_name} -- {rendered}")
+}
+
+fn hosted_k3s_machine_access(
+    config: &PortConfig,
+    cluster_name: &str,
+    control_plane: &str,
+    host_group: &str,
+    machine_name: &str,
+    role: &str,
+) -> Result<HostedK3sMachineAccess> {
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let summary = effective_config
+        .hosted_machine_summary_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!(
+                "hosted k3s cluster '{}' {} machine '{}' does not resolve to a hosted machine summary. {}",
+                cluster_name,
+                role,
+                machine_name,
+                hosted_k3s_boundary_summary()
+            )
+        })?;
+
+    if summary.control_plane != control_plane {
+        bail!(
+            "hosted k3s cluster '{}' {} machine '{}' resolved control plane '{}' instead of '{}'. {}",
+            cluster_name,
+            role,
+            machine_name,
+            summary.control_plane,
+            control_plane,
+            hosted_k3s_boundary_summary()
+        );
+    }
+    if !summary.host_groups.iter().any(|group| group == host_group) {
+        bail!(
+            "hosted k3s cluster '{}' {} machine '{}' is not available through host group '{}'; available groups: {}. {}",
+            cluster_name,
+            role,
+            machine_name,
+            host_group,
+            if summary.host_groups.is_empty() {
+                String::from("(none)")
+            } else {
+                summary.host_groups.join(", ")
+            },
+            hosted_k3s_boundary_summary()
+        );
+    }
+    if summary.candidate_nodes.is_empty() {
+        bail!(
+            "hosted k3s cluster '{}' {} machine '{}' has no hosted placement capacity in host group '{}': {}. {}",
+            cluster_name,
+            role,
+            machine_name,
+            host_group,
+            summary.placement_detail,
+            hosted_k3s_boundary_summary()
+        );
+    }
+
+    let resolution = hosted_machine_resolution(config, machine_name)?;
+    let mut route = HostedRouteContext::from_machine_summary(&summary);
+    if let Some(node_name) = resolution.node_name.as_ref() {
+        route = route.with_selected_node(node_name.clone(), resolution.runtime_root.clone());
+    }
+    let detail = match resolution.node_name.as_ref() {
+        Some(node_name) => format!(
+            "{} host group '{}'; selected node '{}'. {}",
+            resolution.status.detail, host_group, node_name, summary.placement_detail
+        ),
+        None => format!(
+            "{} host group '{}'. {}",
+            resolution.status.detail, host_group, summary.placement_detail
+        ),
+    };
+
+    Ok(HostedK3sMachineAccess {
+        role: role.to_string(),
+        route,
+        detail,
+    })
+}
+
+pub fn hosted_k3s_kubeconfig_command() -> Vec<String> {
+    vec![
+        String::from("/bin/sh"),
+        String::from("-lc"),
+        String::from("cat /etc/rancher/k3s/k3s.yaml"),
+    ]
+}
+
+pub fn hosted_k3s_visibility_command() -> Vec<String> {
+    vec![
+        String::from("/bin/sh"),
+        String::from("-lc"),
+        String::from("k3s kubectl get nodes -o wide"),
+    ]
+}
+
+pub fn hosted_k3s_cluster_access(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+) -> Result<HostedK3sClusterAccessReport> {
+    let cluster = load_hosted_k3s_cluster(config, cluster_name)?;
+    let server_access = hosted_k3s_machine_access(
+        config,
+        cluster_name,
+        &cluster.control_plane,
+        &cluster.host_group,
+        &cluster.server_machine,
+        "server",
+    )?;
+    let mut machine_access = vec![server_access];
+    for worker_machine in &cluster.worker_machines {
+        machine_access.push(hosted_k3s_machine_access(
+            config,
+            cluster_name,
+            &cluster.control_plane,
+            &cluster.host_group,
+            worker_machine,
+            "worker",
+        )?);
+    }
+
+    let kubeconfig_command = hosted_k3s_kubeconfig_command();
+    let kubeconfig = execute_hosted_k3s_exec(
+        config,
+        runtime_root,
+        &cluster.server_machine,
+        kubeconfig_command,
+        "read the hosted K3s kubeconfig",
+        cluster_name,
+    )?
+    .stdout
+    .trim_end()
+    .to_string();
+    if kubeconfig.trim().is_empty() {
+        bail!(
+            "hosted k3s cluster '{}' returned an empty kubeconfig from server '{}'. {}",
+            cluster_name,
+            cluster.server_machine,
+            hosted_k3s_boundary_summary()
+        );
+    }
+
+    let visibility_command = hosted_k3s_visibility_command();
+    let visibility_output = execute_hosted_k3s_exec(
+        config,
+        runtime_root,
+        &cluster.server_machine,
+        visibility_command,
+        "inspect hosted K3s node visibility",
+        cluster_name,
+    )?
+    .stdout
+    .trim_end()
+    .to_string();
+    if visibility_output.trim().is_empty() {
+        bail!(
+            "hosted k3s cluster '{}' returned empty node visibility from server '{}'. {}",
+            cluster_name,
+            cluster.server_machine,
+            hosted_k3s_boundary_summary()
+        );
+    }
+
+    Ok(HostedK3sClusterAccessReport {
+        cluster_name: cluster_name.to_string(),
+        control_plane: cluster.control_plane,
+        host_group: cluster.host_group,
+        server_machine: cluster.server_machine.clone(),
+        worker_machines: cluster.worker_machines,
+        kubeconfig_surface: hosted_k3s_kubeconfig_surface(&cluster.server_machine),
+        kubeconfig,
+        visibility_surface: hosted_k3s_visibility_surface(&cluster.server_machine),
+        visibility_output,
+        machine_access,
+        boundary_notes: hosted_k3s_boundary_notes(),
+    })
+}
+
 pub fn bootstrap_hosted_k3s_cluster(
     config: &PortConfig,
     runtime_root: &Path,
@@ -1225,15 +1485,7 @@ pub fn bootstrap_hosted_k3s_cluster(
 ) -> Result<HostedK3sBootstrapResult> {
     const K3S_LAUNCH_WAIT: Duration = Duration::from_millis(50);
 
-    config
-        .validate()
-        .map_err(|error| anyhow!("invalid port config: {error}"))?;
-
-    let cluster = config
-        .k3s_clusters
-        .get(cluster_name)
-        .cloned()
-        .ok_or_else(|| anyhow!("unknown k3s cluster '{cluster_name}'"))?;
+    let cluster = load_hosted_k3s_cluster(config, cluster_name)?;
 
     let server_launch = launch_local_machine(
         config,
@@ -8763,6 +9015,24 @@ fn render_hosted_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(node_name) = &route.node_name {
         parts.push(format!("node={node_name}"));
     }
+    if !route.host_groups.is_empty() {
+        parts.push(format!("host-groups={}", route.host_groups.join(",")));
+    }
+    if !route.candidate_nodes.is_empty() {
+        parts.push(format!(
+            "candidate-nodes={}",
+            route.candidate_nodes.join(",")
+        ));
+    }
+    if !route.rejected_nodes.is_empty() {
+        let rejected = route
+            .rejected_nodes
+            .iter()
+            .map(|(node_name, reason)| format!("{node_name}({reason})"))
+            .collect::<Vec<_>>()
+            .join(",");
+        parts.push(format!("rejected-nodes={rejected}"));
+    }
     if let Some(runtime_root) = &route.runtime_root {
         parts.push(format!("runtime-root={}", runtime_root.display()));
     }
@@ -9859,14 +10129,15 @@ mod tests {
         cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
         cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
         copy_guest_file, delete_machine_secret, driver_for_machine, ensure_native_build_lane,
-        execute_guest_operation, hosted_placeholder_runtime_root, launch_local_machine,
+        execute_guest_operation, hosted_k3s_cluster_access, hosted_k3s_kubeconfig_command,
+        hosted_k3s_visibility_command, hosted_placeholder_runtime_root, launch_local_machine,
         list_machine_secrets, list_machine_services, list_machines, machine_monitor,
         machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
         prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
-        read_pid_file, repo_root, resolve_artifact_metadata, resolve_artifact_store_contract,
-        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
-        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
-        stop_machine, stop_machine_service,
+        read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
+        resolve_artifact_store_contract, resolve_machine_architecture, select_firecracker_binary,
+        serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
+        service_status_from_record, stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -9880,12 +10151,12 @@ mod tests {
         HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
     };
     use port_model::{
-        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostConnection, HostProvider,
-        HostedImportedNodeRecord, HostedSchedulerPolicy, MachineArchitecture, MachineVolumeBackend,
-        MachineVolumePersistence, MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport,
-        PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy, ServiceHealthState,
-        ServiceHealthcheck, ServiceRestartPolicy, ServiceSecretBackend,
-        ServiceSecretMaterialization,
+        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostConnection, HostPlatform,
+        HostProvider, HostedImportedNodeRecord, HostedNodeCapabilities, HostedNodeSpec,
+        HostedSchedulerPolicy, MachineArchitecture, MachineVolumeBackend, MachineVolumePersistence,
+        MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode,
+        PvmCapabilityState, ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck,
+        ServiceRestartPolicy, ServiceSecretBackend, ServiceSecretMaterialization,
     };
     use tokio::net::TcpListener;
 
@@ -10889,6 +11160,23 @@ exit 23
         machine.architecture = MachineArchitecture::X86_64;
         machine.protection_mode = ProtectionMode::Standard;
 
+        config
+    }
+
+    fn sample_hosted_k3s_config(root: &Path) -> PortConfig {
+        let mut config = sample_config_with_hosted_runtime_roots(root);
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("remote-linux"),
+                server_machine: String::from("cloud-generic"),
+                worker_machines: vec![String::from("cloud-aws")],
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: vec![String::from("--node-label=role=worker")],
+            },
+        );
         config
     }
 
@@ -13301,22 +13589,10 @@ exec sleep 30
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let tempdir = tempdir().expect("tempdir should exist");
-        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        let mut config = sample_hosted_k3s_config(tempdir.path());
         write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
         let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
         let _path_guard = ScopedPathEnv::prepend(tempdir.path());
-        config.k3s_clusters.insert(
-            String::from("demo"),
-            port_model::K3sClusterSpec {
-                control_plane: String::from("demo"),
-                host_group: String::from("remote-linux"),
-                server_machine: String::from("cloud-generic"),
-                worker_machines: vec![String::from("cloud-aws")],
-                version: String::from("v1.32.0+k3s1"),
-                server_args: vec![String::from("--disable=traefik")],
-                worker_args: vec![String::from("--node-label=role=worker")],
-            },
-        );
 
         let server_paths = RuntimePaths::for_machine(
             &config.nodes["generic-linux-node"].runtime_root,
@@ -13390,6 +13666,361 @@ exec sleep 30
             .arg(result.server_launch.pid.to_string())
             .status();
         for metadata in result.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+    }
+
+    #[test]
+    fn hosted_k3s_cluster_access_contract() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let server_paths = RuntimePaths::for_machine(
+            &config.nodes["generic-linux-node"].runtime_root,
+            "cloud-generic",
+        );
+        let worker_paths =
+            RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
+        let server_guest = spawn_hosted_exec_sequence_server(
+            server_paths,
+            vec![
+                (
+                    vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -",
+                        ),
+                    ],
+                    String::from("server bootstrapped\n"),
+                ),
+                (
+                    vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("cat /var/lib/rancher/k3s/server/node-token"),
+                    ],
+                    String::from("demo-join-token\n"),
+                ),
+                (
+                    hosted_k3s_kubeconfig_command(),
+                    String::from(
+                        "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-generic:6443\n",
+                    ),
+                ),
+                (
+                    hosted_k3s_visibility_command(),
+                    String::from(
+                        "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    ),
+                ),
+            ],
+        );
+        let worker_guest = spawn_hosted_exec_sequence_server(
+            worker_paths,
+            vec![(
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from(
+                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -",
+                    ),
+                ],
+                String::from("worker joined\n"),
+            )],
+        );
+
+        let config = start_named_live_hosted_servers_inner(
+            &config,
+            &["generic-linux-node", "aws-linux-node"],
+        )
+        .expect("hosted servers should start");
+
+        let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+        let report = hosted_k3s_cluster_access(&config, tempdir.path(), "demo")
+            .expect("hosted k3s access should succeed");
+
+        assert_eq!(report.cluster_name, "demo");
+        assert_eq!(report.control_plane, "demo");
+        assert_eq!(report.host_group, "remote-linux");
+        assert_eq!(report.server_machine, "cloud-generic");
+        assert_eq!(report.worker_machines, vec![String::from("cloud-aws")]);
+        assert!(
+            report
+                .kubeconfig_surface
+                .contains("port guest exec --machine cloud-generic"),
+            "{}",
+            report.kubeconfig_surface
+        );
+        assert!(report.kubeconfig.contains("apiVersion: v1"));
+        assert!(
+            report
+                .visibility_surface
+                .contains("k3s kubectl get nodes -o wide"),
+            "{}",
+            report.visibility_surface
+        );
+        assert!(report.visibility_output.contains("cloud-generic"));
+        assert!(report.visibility_output.contains("cloud-aws"));
+        assert_eq!(report.machine_access.len(), 2);
+        assert!(
+            report
+                .boundary_notes
+                .iter()
+                .any(|note| note.contains("stateless"))
+        );
+        assert!(report.boundary_notes.iter().any(|note| note.contains("HA")));
+        assert!(
+            report
+                .boundary_notes
+                .iter()
+                .any(|note| note.contains("ingress"))
+        );
+
+        let server = report
+            .machine_access
+            .iter()
+            .find(|machine| machine.role == "server")
+            .expect("server route should exist");
+        assert_eq!(server.route.control_plane.as_deref(), Some("demo"));
+        assert_eq!(server.route.machine_name.as_deref(), Some("cloud-generic"));
+        assert_eq!(
+            server.route.node_name.as_deref(),
+            Some("generic-linux-node")
+        );
+        assert_eq!(server.route.host_groups, vec![String::from("remote-linux")]);
+        assert_eq!(
+            server.route.candidate_nodes,
+            vec![String::from("generic-linux-node")]
+        );
+        assert!(server.detail.contains("host group 'remote-linux'"));
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(bootstrap.server_launch.pid.to_string())
+            .status();
+        for metadata in bootstrap.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+    }
+
+    #[test]
+    fn hosted_k3s_boundary_failures() {
+        let tempdir = tempdir().expect("tempdir should exist");
+
+        let mut local_route = sample_hosted_k3s_config(tempdir.path());
+        local_route
+            .k3s_clusters
+            .get_mut("demo")
+            .expect("demo cluster should exist")
+            .server_machine = String::from("demo");
+        let local_error = hosted_k3s_cluster_access(&local_route, tempdir.path(), "demo")
+            .expect_err("non-hosted K3s route should fail fast");
+        let local_message = local_error.to_string();
+        assert!(
+            local_message.contains("must target a hosted control plane"),
+            "{local_message}"
+        );
+        assert!(local_message.contains("HA"), "{local_message}");
+        assert!(local_message.contains("ingress"), "{local_message}");
+        assert!(
+            local_message.contains("non-hosted ownership routes"),
+            "{local_message}"
+        );
+
+        let mut persistent = sample_hosted_k3s_config(tempdir.path());
+        let volume_path = tempdir.path().join("k3s-data.ext4");
+        fs::write(&volume_path, b"k3s-data").expect("volume should write");
+        persistent
+            .machines
+            .get_mut("cloud-generic")
+            .expect("cloud-generic should exist")
+            .volumes = vec![MachineVolumeSpec {
+            name: String::from("data"),
+            backend: MachineVolumeBackend::HostFile,
+            persistence: MachineVolumePersistence::Persistent,
+            path: volume_path,
+        }];
+        let persistent_error = hosted_k3s_cluster_access(&persistent, tempdir.path(), "demo")
+            .expect_err("persistent K3s route should fail fast");
+        let persistent_message = persistent_error.to_string();
+        assert!(
+            persistent_message.contains("attached volumes are only supported"),
+            "{persistent_message}"
+        );
+        assert!(
+            persistent_message.contains("persistent"),
+            "{persistent_message}"
+        );
+
+        let mut no_capacity = sample_hosted_k3s_config(tempdir.path());
+        no_capacity
+            .nodes
+            .get_mut("generic-linux-node")
+            .expect("generic-linux-node should exist")
+            .capabilities
+            .substrates = vec![ExecutionSubstrate::CloudHypervisor];
+        let capacity_error = hosted_k3s_cluster_access(&no_capacity, tempdir.path(), "demo")
+            .expect_err("missing hosted K3s placement capacity should fail fast");
+        let capacity_message = capacity_error.to_string();
+        assert!(
+            capacity_message.contains("no hosted placement candidates"),
+            "{capacity_message}"
+        );
+        assert!(
+            capacity_message.contains("placement capacity"),
+            "{capacity_message}"
+        );
+        assert!(
+            capacity_message.contains("generic-linux-node"),
+            "{capacity_message}"
+        );
+    }
+
+    #[test]
+    fn hosted_k3s_route_context_visibility() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        config.nodes.insert(
+            String::from("generic-shadow-node"),
+            HostedNodeSpec {
+                host: String::from("generic-linux"),
+                runtime_root: tempdir.path().join("runtime/hosted/generic-shadow-node"),
+                capabilities: HostedNodeCapabilities {
+                    providers: vec![HostProvider::GenericLinux],
+                    platforms: vec![HostPlatform::Linux],
+                    substrates: vec![ExecutionSubstrate::CloudHypervisor],
+                    architectures: vec![MachineArchitecture::X86_64],
+                    protection_modes: vec![ProtectionMode::Standard],
+                    pvm_lanes: Vec::new(),
+                },
+                notes: vec![String::from(
+                    "Shadow hosted node exists to keep rejected-node detail visible in route rendering tests.",
+                )],
+            },
+        );
+        config
+            .host_groups
+            .get_mut("remote-linux")
+            .expect("remote-linux should exist")
+            .nodes
+            .push(String::from("generic-shadow-node"));
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let server_paths = RuntimePaths::for_machine(
+            &config.nodes["generic-linux-node"].runtime_root,
+            "cloud-generic",
+        );
+        let worker_paths =
+            RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
+        let server_guest = spawn_hosted_exec_sequence_server(
+            server_paths,
+            vec![
+                (
+                    vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -",
+                        ),
+                    ],
+                    String::from("server bootstrapped\n"),
+                ),
+                (
+                    vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("cat /var/lib/rancher/k3s/server/node-token"),
+                    ],
+                    String::from("demo-join-token\n"),
+                ),
+                (
+                    hosted_k3s_kubeconfig_command(),
+                    String::from(
+                        "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-generic:6443\n",
+                    ),
+                ),
+                (
+                    hosted_k3s_visibility_command(),
+                    String::from(
+                        "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    ),
+                ),
+            ],
+        );
+        let worker_guest = spawn_hosted_exec_sequence_server(
+            worker_paths,
+            vec![(
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from(
+                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -",
+                    ),
+                ],
+                String::from("worker joined\n"),
+            )],
+        );
+
+        let config = start_named_live_hosted_servers_inner(
+            &config,
+            &["generic-linux-node", "aws-linux-node"],
+        )
+        .expect("hosted servers should start");
+
+        let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+        let report = hosted_k3s_cluster_access(&config, tempdir.path(), "demo")
+            .expect("hosted k3s access should succeed");
+        let server = report
+            .machine_access
+            .iter()
+            .find(|machine| machine.role == "server")
+            .expect("server route should exist");
+        let rendered = render_hosted_route_context(Some(&server.route));
+        assert!(rendered.contains("control-plane=demo"), "{rendered}");
+        assert!(rendered.contains("machine=cloud-generic"), "{rendered}");
+        assert!(rendered.contains("node=generic-linux-node"), "{rendered}");
+        assert!(rendered.contains("host-groups=remote-linux"), "{rendered}");
+        assert!(
+            rendered.contains("candidate-nodes=generic-linux-node"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("rejected-nodes=generic-shadow-node"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("placement="), "{rendered}");
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(bootstrap.server_launch.pid.to_string())
+            .status();
+        for metadata in bootstrap.worker_launches {
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
     }

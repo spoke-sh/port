@@ -18,3 +18,7 @@ Reassessed bearing VDcStSMlp against shipped installable, hybrid, hosted, and st
 ## 2026-03-12T14:11:55
 
 Completed VDfzOEtFN with a hosted K3s bootstrap workflow that launches one server, reads the join token, and joins worker machines through canonical hosted machine and guest routes.
+
+## 2026-03-12T14:27:23
+
+Completed VDfzOEdFM with a hosted K3s access report that reuses canonical guest exec surfaces for kubeconfig and node visibility, adds first-slice boundary guidance, and keeps hosted route context explicit through control-plane, host-group, candidate, selected, and rejected node detail.

@@ -25,12 +25,12 @@ started_at: 2026-03-12T10:47:38
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/4 stories complete
+**Progress:** 2/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Introduce Hosted K3s Cluster Contract](../../../../stories/VDfzLrZ4e/README.md) | feat | done |
-| [Add Hosted K3s Access And Boundary Surfaces](../../../../stories/VDfzOEdFM/README.md) | feat | backlog |
+| [Add Hosted K3s Access And Boundary Surfaces](../../../../stories/VDfzOEdFM/README.md) | feat | in-progress |
 | [Publish Hosted K3s Operator Proof](../../../../stories/VDfzOEeFL/README.md) | feat | backlog |
-| [Implement Hosted K3s Bootstrap And Join Workflow](../../../../stories/VDfzOEtFN/README.md) | feat | in-progress |
+| [Implement Hosted K3s Bootstrap And Join Workflow](../../../../stories/VDfzOEtFN/README.md) | feat | done |
 <!-- END GENERATED -->
