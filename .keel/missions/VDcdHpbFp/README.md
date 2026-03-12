@@ -1,10 +1,12 @@
 ---
 id: VDcdHpbFp
 title: Ship Installable Linux And Mac Developer Experience
-status: active
+status: verified
 created_at: 2026-03-11T20:58:14
-updated_at: 2026-03-11T21:00:08
+updated_at: 2026-03-11T22:12:08
 activated_at: 2026-03-11T21:00:08
+achieved_at: 2026-03-11T22:12:00
+verified_at: 2026-03-11T22:12:08
 ---
 
 # Ship Installable Linux And Mac Developer Experience

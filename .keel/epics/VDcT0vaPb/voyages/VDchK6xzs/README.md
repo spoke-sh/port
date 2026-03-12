@@ -1,12 +1,13 @@
 ---
 id: VDchK6xzs
 title: Release Matrix And Packaging Foundations
-status: in-progress
+status: done
 epic: VDcT0vaPb
 created_at: 2026-03-11T21:14:16
 index: 1
 updated_at: 2026-03-11T21:19:02
 started_at: 2026-03-11T21:19:16
+completed_at: 2026-03-11T22:11:31
 ---
 
 # Release Matrix And Packaging Foundations
@@ -20,6 +21,8 @@ started_at: 2026-03-11T21:19:16
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories

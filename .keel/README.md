@@ -123,9 +123,9 @@
 | [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | done |
 | [Executable Avf Runtime Foundation](epics/1vzJKE000/voyages/1vzLYD000/) | done |
 
-### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (active)
+### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Release Matrix And Packaging Foundations](epics/VDcT0vaPb/voyages/VDchK6xzs/) | in-progress |
+| [Release Matrix And Packaging Foundations](epics/VDcT0vaPb/voyages/VDchK6xzs/) | done |
 
