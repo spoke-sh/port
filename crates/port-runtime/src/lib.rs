@@ -5989,8 +5989,7 @@ fn avf_machine_checks(
     let availability_ok = platform_ok;
     let helper_boundary =
         "Set PORT_AVF_LAUNCHER to an external launcher helper for local AVF workflows.";
-    let packaging_boundary =
-        "Port does not ship a bundled macOS-only launcher workflow or a silent fallback to another substrate in this slice.";
+    let packaging_boundary = "Port does not ship a bundled macOS-only launcher workflow or a silent fallback to another substrate in this slice.";
 
     vec![
         DoctorCheck {
@@ -11668,7 +11667,9 @@ exec sleep 30
             "local demo machine should still resolve to a local runtime state"
         );
         assert!(
-            machines.iter().all(|machine| machine.machine_name != "cloud-aws"),
+            machines
+                .iter()
+                .all(|machine| machine.machine_name != "cloud-aws"),
             "hosted machines should be skipped when hosted auth is unavailable"
         );
     }
