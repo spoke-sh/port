@@ -7,6 +7,7 @@ cd "$repo_root"
 frontmatter_value() {
   local key="$1"
   local file="$2"
+  [[ -f "$file" ]] || return 0
   sed -n "s/^${key}: //p" "$file" | head -n 1
 }
 
@@ -319,6 +320,11 @@ epic_progress_fields() {
   local epic_title voyage_readme voyage_status progress
   local total_voyages=0 done_voyages=0 total_stories=0 done_stories=0 status="planned"
 
+  if [[ ! -f "$epic_readme" ]]; then
+    printf '%s\tmissing\tmissing epic\t\n' "$epic_id"
+    return 0
+  fi
+
   epic_title="$(frontmatter_value title "$epic_readme")"
 
   shopt -s nullglob
@@ -352,19 +358,66 @@ epic_progress_fields() {
     "$total_stories"
 }
 
+bearing_progress_fields() {
+  local bearing_id="$1"
+  local bearing_readme=".keel/bearings/${bearing_id}/README.md"
+  local bearing_title bearing_status bearing_epic
+
+  if [[ ! -f "$bearing_readme" ]]; then
+    printf '%s\tmissing\tunknown board target\t\n' "$bearing_id"
+    return 0
+  fi
+
+  bearing_title="$(frontmatter_value title "$bearing_readme")"
+  bearing_status="$(frontmatter_value status "$bearing_readme")"
+  bearing_epic="$(frontmatter_value epic "$bearing_readme")"
+
+  if [[ -n "$bearing_epic" && -f ".keel/epics/${bearing_epic}/README.md" ]]; then
+    epic_progress_fields "$bearing_epic"
+    return 0
+  fi
+
+  printf '%s\t%s\t%s bearing\t\n' \
+    "${bearing_title:-$bearing_id}" \
+    "${bearing_status:-unknown}" \
+    "${bearing_status:-unknown}"
+}
+
+board_target_progress_fields() {
+  local target="$1"
+
+  if [[ -f ".keel/epics/${target}/README.md" ]]; then
+    epic_progress_fields "$target"
+    return 0
+  fi
+
+  if [[ -f ".keel/bearings/${target}/README.md" ]]; then
+    bearing_progress_fields "$target"
+    return 0
+  fi
+
+  printf '%s\tmissing\tunknown board target\t\n' "$target"
+}
+
 emit_mission_goals() {
   local charter_file="$1"
-  local goal_id description verification target epic_title epic_status voyage_progress story_progress
+  local goal_id description verification target board_title board_status detail_one detail_two
 
   while IFS=$'\t' read -r goal_id description verification; do
     [[ -n "$goal_id" ]] || continue
     case "$verification" in
       board:*)
         target="$(trim "${verification#board:}")"
-        IFS=$'\t' read -r epic_title epic_status voyage_progress story_progress < <(epic_progress_fields "$target")
+        IFS=$'\t' read -r board_title board_status detail_one detail_two < <(board_target_progress_fields "$target")
         description="$(normalize_human_text "$description")"
-        printf '  - %s [%s] %s\n' "$goal_id" "$epic_status" "$description"
-        printf '    board: %s (%s, %s, %s)\n' "$epic_title" "$target" "$voyage_progress" "$story_progress"
+        printf '  - %s [%s] %s\n' "$goal_id" "$board_status" "$description"
+        if [[ -n "$detail_two" ]]; then
+          printf '    board: %s (%s, %s, %s)\n' "$board_title" "$target" "$detail_one" "$detail_two"
+        elif [[ -n "$detail_one" ]]; then
+          printf '    board: %s (%s, %s)\n' "$board_title" "$target" "$detail_one"
+        else
+          printf '    board: %s (%s)\n' "$board_title" "$target"
+        fi
         ;;
       manual:*)
         description="$(normalize_human_text "$description")"
