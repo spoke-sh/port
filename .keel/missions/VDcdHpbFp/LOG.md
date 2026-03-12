@@ -14,3 +14,7 @@ Laid VDcT0vaPb into epic VDcT0vaPb, planned voyage VDchK6xzs, and decomposed fou
 ## 2026-03-11T21:22:25
 
 Completed story VDchsxHfp by publishing the first installable Linux/macOS support matrix and install contract across README, RELEASE.md, and docs/install.md.
+
+## 2026-03-11T21:41:15
+
+Completed story VDchsvWfn: added just package, deterministic package-port.sh, and package workflow tests/evidence for reporting, determinism, and fail-fast guidance.

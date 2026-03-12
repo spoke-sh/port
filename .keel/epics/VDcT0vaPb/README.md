@@ -21,8 +21,8 @@ created_at: 2026-03-11T21:12:35
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/4 stories done
+**Progress:** 0/1 voyages complete, 2/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Release Matrix And Packaging Foundations](voyages/VDchK6xzs/) | in-progress | 1/4 |
+| [Release Matrix And Packaging Foundations](voyages/VDchK6xzs/) | in-progress | 2/4 |
 <!-- END GENERATED -->

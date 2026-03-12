@@ -15,6 +15,7 @@ default:
     '  just flow                  Show workflow lane state' \
     '  just test                  Run workspace tests' \
     '  just build                 Build the port CLI binary' \
+    '  just package <target>      Build a canonical install tarball' \
     '  just port --help           Run the Port CLI in the dev shell' \
     '  just keel flow             Run arbitrary Keel commands' \
     '' \
@@ -48,6 +49,10 @@ flow:
 
 build:
   @just cli::build
+
+[positional-arguments]
+package *args:
+  @just cli::package "$@"
 
 [positional-arguments]
 port *args:
