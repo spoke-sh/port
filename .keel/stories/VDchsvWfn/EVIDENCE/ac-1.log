@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-11T21:39:35.494798259-07:00
+recorded_at: 2026-03-11T21:44:58.094719503-07:00
 command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q package_workflow'
 ---
 
@@ -40,7 +40,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; fin
 
 running 1 test
 .
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.07s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.08s
 
 
 running 0 tests

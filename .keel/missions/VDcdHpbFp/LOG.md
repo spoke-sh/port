@@ -18,3 +18,7 @@ Completed story VDchsxHfp by publishing the first installable Linux/macOS suppor
 ## 2026-03-11T21:41:15
 
 Completed story VDchsvWfn: added just package, deterministic package-port.sh, and package workflow tests/evidence for reporting, determinism, and fail-fast guidance.
+
+## 2026-03-11T21:45:09
+
+Hardened VDchsvWfn after review: removed duplicate tar members, normalized package timestamps/permissions, added GNU tar/gzip to the dev shell, and extended determinism coverage across TZ/umask differences.

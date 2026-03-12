@@ -41,6 +41,8 @@
         sharedInputs = [
           rust
           pkgs.just
+          pkgs.gnutar
+          pkgs.gzip
           pkgs.oras
           pkgs.cargo-nextest
           pkgs.cargo-llvm-cov

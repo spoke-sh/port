@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+umask 022
+export TZ=UTC
+export COPYFILE_DISABLE=1
+
 usage() {
   cat >&2 <<'EOF'
 usage: scripts/package-port.sh <target-triple> [output-dir]
@@ -15,10 +19,7 @@ fail() {
 }
 
 supported_targets_text() {
-  printf '%s\n' \
-    'x86_64-unknown-linux-gnu' \
-    'x86_64-apple-darwin' \
-    'aarch64-apple-darwin'
+  printf '%s\n' 'x86_64-unknown-linux-gnu, x86_64-apple-darwin, aarch64-apple-darwin'
 }
 
 is_supported_target() {
@@ -58,6 +59,17 @@ copy_package_file() {
   cp "$source_path" "$destination_path"
 }
 
+create_archive() {
+  (
+    cd "$staging_root"
+    if "$tar_cmd" --version 2>/dev/null | grep -q 'GNU tar'; then
+      "$tar_cmd" --format=ustar --owner=0 --group=0 --numeric-owner -cf - -T "$archive_members"
+    else
+      "$tar_cmd" -cf - -T "$archive_members"
+    fi
+  ) | "$gzip_cmd" -n > "$temporary_archive"
+}
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   usage
   exit 1
@@ -77,7 +89,7 @@ if [[ -z "$version" ]]; then
 fi
 
 if ! is_supported_target "$target"; then
-  fail "unsupported package target '$target'. Supported targets: $(supported_targets_text | paste -sd ', ' -). See docs/install.md for the first-slice support matrix."
+  fail "unsupported package target '$target'. Supported targets: $(supported_targets_text). See docs/install.md for the first-slice support matrix."
 fi
 
 require_tool tar "$tar_cmd"
@@ -118,6 +130,11 @@ chmod 755 "$stage_dir/bin/port"
 copy_package_file "$repo_root/README.md" "$stage_dir/README.md"
 copy_package_file "$repo_root/RELEASE.md" "$stage_dir/RELEASE.md"
 copy_package_file "$repo_root/docs/install.md" "$stage_dir/docs/install.md"
+chmod 755 "$stage_dir" "$stage_dir/bin" "$stage_dir/docs"
+chmod 644 \
+  "$stage_dir/README.md" \
+  "$stage_dir/RELEASE.md" \
+  "$stage_dir/docs/install.md"
 
 cat > "$stage_dir/PACKAGE_METADATA.txt" <<EOF
 package: $package_name
@@ -137,16 +154,15 @@ PACKAGE_MANIFEST.txt
 EOF
 
 cat > "$archive_members" <<EOF
-$package_name
-$package_name/PACKAGE_MANIFEST.txt
-$package_name/PACKAGE_METADATA.txt
+$package_name/bin/port
 $package_name/README.md
 $package_name/RELEASE.md
-$package_name/bin
-$package_name/bin/port
-$package_name/docs
 $package_name/docs/install.md
+$package_name/PACKAGE_METADATA.txt
+$package_name/PACKAGE_MANIFEST.txt
 EOF
+
+chmod 644 "$stage_dir/PACKAGE_METADATA.txt" "$stage_dir/PACKAGE_MANIFEST.txt"
 
 for path in \
   "$stage_dir" \
@@ -162,10 +178,7 @@ do
   touch -t "$normalized_timestamp" "$path"
 done
 
-(
-  cd "$staging_root"
-  "$tar_cmd" -cf - -T "$archive_members"
-) | "$gzip_cmd" -n > "$temporary_archive"
+create_archive
 mv "$temporary_archive" "$archive_path"
 
 printf 'artifact: %s\n' "$archive_path"

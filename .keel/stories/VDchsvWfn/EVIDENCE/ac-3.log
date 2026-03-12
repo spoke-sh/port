@@ -1,5 +1,5 @@
 ---
-recorded_at: 2026-03-11T21:39:35.574428248-07:00
+recorded_at: 2026-03-11T21:44:58.007679014-07:00
 command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q package_failure'
 ---
 

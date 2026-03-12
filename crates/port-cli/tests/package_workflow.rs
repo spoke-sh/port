@@ -25,6 +25,24 @@ fn package_command(target: &str, output_dir: &Path) -> Command {
     command
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn package_command_with_umask(target: &str, output_dir: &Path, umask: &str) -> Command {
+    let mut command = Command::new("bash");
+    let script = shell_quote(&package_script().to_string_lossy());
+    let target = shell_quote(target);
+    let output_dir = shell_quote(&output_dir.to_string_lossy());
+
+    command.arg("-lc");
+    command.arg(format!(
+        "umask {umask}; exec bash {script} {target} {output_dir}"
+    ));
+    command.current_dir(repo_root());
+    command
+}
+
 fn write_fake_port_binary(dir: &Path) -> PathBuf {
     let path = dir.join("port");
     fs::write(&path, "#!/bin/sh\nprintf 'port test binary\\n'\n")
@@ -70,6 +88,19 @@ fn extract_archive(archive: &Path, destination: &Path) {
     assert_success(&output);
 }
 
+fn archive_entries(archive: &Path) -> Vec<String> {
+    let output = Command::new("tar")
+        .arg("-tzf")
+        .arg(archive)
+        .output()
+        .expect("archive listing should run");
+    assert_success(&output);
+    output_text(&output.stdout)
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
 #[test]
 fn package_workflow_emits_versioned_artifact_and_reports_target_and_included_files() {
     let temp = tempdir().expect("tempdir should exist");
@@ -102,6 +133,17 @@ fn package_workflow_emits_versioned_artifact_and_reports_target_and_included_fil
         archive.exists(),
         "expected archive at {}",
         archive.display()
+    );
+    assert_eq!(
+        archive_entries(&archive),
+        vec![
+            format!("{package_name}/bin/port"),
+            format!("{package_name}/README.md"),
+            format!("{package_name}/RELEASE.md"),
+            format!("{package_name}/docs/install.md"),
+            format!("{package_name}/PACKAGE_METADATA.txt"),
+            format!("{package_name}/PACKAGE_MANIFEST.txt"),
+        ]
     );
 
     let extract_dir = temp.path().join("extract");
@@ -139,14 +181,16 @@ fn package_determinism_keeps_archive_bytes_stable_across_repeated_runs() {
     let first = package_command(target, &output_dir)
         .env("PORT_PACKAGE_BIN", &fake_bin)
         .env("PORT_PACKAGE_VERSION", version)
+        .env("TZ", "UTC")
         .output()
         .expect("first package run should execute");
     assert_success(&first);
     let first_bytes = fs::read(&archive).expect("first archive should exist");
 
-    let second = package_command(target, &output_dir)
+    let second = package_command_with_umask(target, &output_dir, "077")
         .env("PORT_PACKAGE_BIN", &fake_bin)
         .env("PORT_PACKAGE_VERSION", version)
+        .env("TZ", "Pacific/Auckland")
         .output()
         .expect("second package run should execute");
     assert_success(&second);
