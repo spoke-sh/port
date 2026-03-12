@@ -2,9 +2,11 @@
 id: VDcStPolu
 title: Hybrid Local Remote And SSH Execution
 mission: VDesj389j
-status: exploring
+status: laid
 created_at: 2026-03-11T20:16:56
 index: 7
+laid_at: 2026-03-12T06:15:49
+epic: VDcStPolu
 ---
 
 # Hybrid Local Remote And SSH Execution

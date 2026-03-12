@@ -13,7 +13,7 @@
 | [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | decision-ready | 2.63 | ✓ |
 | [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | decision-ready | 3.42 | ✓ |
 | [GPU Execution Support](bearings/VDcStPNlr/) | exploring | ✓ | ✓ | decision-ready | 0.99 | - |
-| [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | exploring | ✓ | ✓ | decision-ready | 3.47 | - |
+| [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | laid | ✓ | ✓ | decision-ready | 3.47 | ✓ |
 | [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | exploring | ✓ | ✓ | decision-ready | 1.89 | - |
 | [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | exploring | ✓ | ✓ | resolve conflict | 1.55 | - |
 | [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.20 | ✓ |
@@ -122,6 +122,12 @@
 |--------|--------|
 | [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | done |
 | [Executable Avf Runtime Foundation](epics/1vzJKE000/voyages/1vzLYD000/) | done |
+
+### [Hybrid Local Remote And SSH Execution](epics/VDcStPolu/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | planned |
 
 ### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 
