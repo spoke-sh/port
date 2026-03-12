@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-03-12T10:56:17.504091791-07:00
+command: cargo test -q -p port-model hosted_k3s_cluster_contract
+---
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 0.02s
+

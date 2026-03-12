@@ -8,10 +8,10 @@ id: VDcStSMlp
 
 | Factor | Score | Rationale |
 |--------|-------|-----------|
-| Impact | 4 | A strong k3s lane would make Port much easier for humans to understand and evaluate. |
-| Confidence | 3 | The outcome is clear, but the exact bootstrap and lifecycle design still depends on hybrid remote work. |
-| Effort | 5 | This spans cluster bootstrap, node lifecycle, demo flows, and clear operator proof. |
-| Risk | 4 | Kubernetes scope can expand quickly unless the first slice stays narrow. |
+| Impact | 4 | A strong K3s lane would make Port much easier for humans to understand and evaluate. |
+| Confidence | 4 | The old sequencing blockers are now verified, and the repo has explicit hosted, installable, and proof-backed primitives to build on. |
+| Effort | 4 | This still spans bootstrap, node lifecycle, and operator proof work, but the first slice can stay narrower than a full cluster platform. |
+| Risk | 3 | Scope can still sprawl, but the current hosted, SSH, and storage boundaries make the first slice easier to contain. |
 
 *Scores range from 1-5:*
 - 1 = Very Low
@@ -24,35 +24,46 @@ id: VDcStSMlp
 
 ### Findings
 
-- HA k3s is one of the best human-readable platform outcomes available [SRC-01].
-- Port already has fleet and scheduler primitives that can be reused [SRC-03][SRC-04].
-- The first slice should be a tightly scoped k3s workflow, not a generic
-  Kubernetes product promise [SRC-01][SRC-02].
+- The earlier reasons to park K3s were sequencing objections, and the
+  installable, hybrid-execution, and storage-foundation missions are now
+  reflected in shipped install, operator, and hosted contracts [SRC-03][SRC-04][SRC-05].
+- Port now has explicit hosted node, host-group, placement, and service
+  contracts plus repo-local proofs that a first K3s lane can reuse [SRC-03][SRC-04][SRC-07].
+- The first slice should be a hosted, stateless, tightly scoped K3s workflow,
+  not an HA cluster or generic Kubernetes platform promise [SRC-01][SRC-02][SRC-05].
 
 ### Opportunity Cost
 
-Choosing k3s too early could pull attention away from developer experience and
-hybrid remote foundations. That risk is acceptable only if the first cluster
-slice deliberately builds on those foundations instead of replacing them
-[SRC-03][SRC-04].
+Continuing to park K3s would leave one of the clearest human-readable platform
+outcomes unexplored even though the enabling substrate is now present. The real
+trade is not "K3s or foundations" anymore; it is whether the first slice stays
+narrow enough to defer HA control planes, persistent volumes, ingress, and SSH
+parity while still proving Port can orchestrate a recognizable cluster outcome
+[SRC-03][SRC-04][SRC-05].
 
 ### Dependencies
 
-- Hosted-fleet and placement groundwork [SRC-03]
-- Host-group and scheduler vocabulary [SRC-04]
+- Explicit installable, hybrid, and storage boundaries in the current product
+  surface [SRC-03][SRC-04][SRC-05]
+- Hosted node, host-group, placement, and service contracts with executable
+  proof [SRC-04][SRC-07]
 - Human-facing cluster examples that define the expected outcome [SRC-01][SRC-02]
 
 ### Alternatives Considered
 
-- Keep Kubernetes out of scope entirely. Rejected because the user explicitly
-  wants first-class k3s support and external precedent shows it is a compelling
-  outcome for VM platforms [SRC-01].
-- Treat Kubernetes as just another service template. Rejected because HA k3s
-  needs cluster lifecycle, node join, and operator proof work that is broader
-  than one service definition [SRC-01][SRC-03].
+- Keep K3s parked until HA storage and SSH guest or service parity exist.
+  Rejected because the first slice can target a hosted, stateless cluster proof
+  without those dependencies [SRC-04][SRC-05][SRC-07].
+- Treat Kubernetes as just another service template. Rejected because even a
+  narrow K3s slice needs cluster bootstrap, node join, kubeconfig or API
+  exposure, and operator proof work that is broader than one service definition
+  [SRC-01][SRC-04].
+- Jump directly to HA or multi-provider K3s. Rejected because that would pull
+  storage, ingress, and broader lifecycle work into the first slice before the
+  narrower hosted contract is proven [SRC-02][SRC-05][SRC-07].
 
 ## Recommendation
 
-[ ] Proceed → convert to epic [SRC-01]
-[x] Park → revisit later [SRC-01]
+[x] Proceed → convert to epic [SRC-01][SRC-03][SRC-04][SRC-05][SRC-07]
+[ ] Park → revisit later [SRC-01]
 [ ] Decline → document learnings [SRC-01]

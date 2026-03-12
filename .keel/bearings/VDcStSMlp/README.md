@@ -1,9 +1,12 @@
 ---
 id: VDcStSMlp
 title: K3s And Kubernetes Workloads
-status: exploring
+mission: VDfqti68W
+status: laid
 created_at: 2026-03-11T20:16:57
 index: 9
+laid_at: 2026-03-12T10:36:47
+epic: VDcStSMlp
 ---
 
 # K3s And Kubernetes Workloads

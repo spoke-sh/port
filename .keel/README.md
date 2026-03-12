@@ -15,7 +15,7 @@
 | [GPU Execution Support](bearings/VDcStPNlr/) | exploring | ✓ | ✓ | decision-ready | 0.99 | - |
 | [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | laid | ✓ | ✓ | decision-ready | 3.47 | ✓ |
 | [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | laid | ✓ | ✓ | decision-ready | 1.89 | ✓ |
-| [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | exploring | ✓ | ✓ | resolve conflict | 1.55 | - |
+| [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | laid | ✓ | ✓ | decision-ready | 2.73 | ✓ |
 | [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.20 | ✓ |
 
 ## Epics
@@ -129,11 +129,17 @@
 |--------|--------|
 | [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | done |
 
-### [Cloud Block Storage Normalization](epics/VDcStQqlo/) (active)
+### [Cloud Block Storage Normalization](epics/VDcStQqlo/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Attached Volume Contract Foundations](epics/VDcStQqlo/voyages/VDfEyGkVf/) | in-progress |
+| [Attached Volume Contract Foundations](epics/VDcStQqlo/voyages/VDfEyGkVf/) | done |
+
+### [K3s And Kubernetes Workloads](epics/VDcStSMlp/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted Stateless K3s Foundations](epics/VDcStSMlp/voyages/VDfytSpPs/) | in-progress |
 
 ### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 

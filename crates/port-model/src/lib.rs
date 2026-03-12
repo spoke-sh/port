@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,8 @@ pub struct PortConfig {
     #[serde(default)]
     pub host_groups: BTreeMap<String, HostedHostGroupSpec>,
     pub machines: BTreeMap<String, MachineSpec>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub k3s_clusters: BTreeMap<String, K3sClusterSpec>,
 }
 
 impl PortConfig {
@@ -380,6 +382,7 @@ impl PortConfig {
             nodes,
             host_groups,
             machines,
+            k3s_clusters: BTreeMap::new(),
         }
     }
 
@@ -953,6 +956,9 @@ impl PortConfig {
                     issues.join(" ")
                 )));
             }
+        }
+        for (cluster_name, cluster) in &self.k3s_clusters {
+            validate_k3s_cluster(self, cluster_name, cluster)?;
         }
 
         Ok(())
@@ -1834,6 +1840,19 @@ pub struct GuestControl {
     pub vsock_cid: u32,
     pub control_port: u16,
     pub console_log: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct K3sClusterSpec {
+    pub control_plane: String,
+    pub host_group: String,
+    pub server_machine: String,
+    pub worker_machines: Vec<String>,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub server_args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worker_args: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -3021,6 +3040,248 @@ fn validate_hosted_host_group(
     Ok(())
 }
 
+fn validate_k3s_cluster(
+    config: &PortConfig,
+    cluster_name: &str,
+    cluster: &K3sClusterSpec,
+) -> Result<(), ValidationError> {
+    if cluster.control_plane.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' must declare a non-empty control plane",
+            cluster_name
+        )));
+    }
+    if !config.control_planes.contains_key(&cluster.control_plane) {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' references unknown control plane '{}'",
+            cluster_name, cluster.control_plane
+        )));
+    }
+    if cluster.host_group.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' must declare a non-empty host group",
+            cluster_name
+        )));
+    }
+    let group = config.host_groups.get(&cluster.host_group).ok_or_else(|| {
+        ValidationError::new(format!(
+            "k3s cluster '{}' references unknown host group '{}'",
+            cluster_name, cluster.host_group
+        ))
+    })?;
+    let group_control_plane = group_control_plane_name(config, &cluster.host_group, group)?;
+    if group_control_plane != cluster.control_plane {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' binds control plane '{}' but host group '{}' resolves through '{}'",
+            cluster_name, cluster.control_plane, cluster.host_group, group_control_plane
+        )));
+    }
+    if cluster.server_machine.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' must declare a non-empty server machine",
+            cluster_name
+        )));
+    }
+    if cluster.worker_machines.is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' must declare at least one worker machine",
+            cluster_name
+        )));
+    }
+    if cluster.version.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' must declare a non-empty version",
+            cluster_name
+        )));
+    }
+    if cluster.server_args.iter().any(|arg| arg.trim().is_empty()) {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' server args must not contain empty values",
+            cluster_name
+        )));
+    }
+    if cluster.worker_args.iter().any(|arg| arg.trim().is_empty()) {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' worker args must not contain empty values",
+            cluster_name
+        )));
+    }
+
+    let mut seen = BTreeSet::new();
+    validate_k3s_cluster_machine(
+        config,
+        cluster_name,
+        &cluster.control_plane,
+        &cluster.host_group,
+        &cluster.server_machine,
+        "server",
+    )?;
+    seen.insert(cluster.server_machine.clone());
+
+    for worker_machine in &cluster.worker_machines {
+        if worker_machine.trim().is_empty() {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' worker machines must not contain empty names",
+                cluster_name
+            )));
+        }
+        if !seen.insert(worker_machine.clone()) {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' reuses machine '{}' across K3s node roles",
+                cluster_name, worker_machine
+            )));
+        }
+        validate_k3s_cluster_machine(
+            config,
+            cluster_name,
+            &cluster.control_plane,
+            &cluster.host_group,
+            worker_machine,
+            "worker",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn group_control_plane_name(
+    config: &PortConfig,
+    group_name: &str,
+    group: &HostedHostGroupSpec,
+) -> Result<String, ValidationError> {
+    let node_name = group.nodes.first().ok_or_else(|| {
+        ValidationError::new(format!(
+            "host group '{}' must declare at least one node",
+            group_name
+        ))
+    })?;
+    let node = config.nodes.get(node_name).ok_or_else(|| {
+        ValidationError::new(format!(
+            "host group '{}' references unknown node '{}'",
+            group_name, node_name
+        ))
+    })?;
+    let host = config.hosts.get(&node.host).ok_or_else(|| {
+        ValidationError::new(format!(
+            "node '{}' references unknown host '{}'",
+            node_name, node.host
+        ))
+    })?;
+    match &host.connection {
+        HostConnection::HostedControlPlane { control_plane } => Ok(control_plane.clone()),
+        HostConnection::Local => Err(ValidationError::new(format!(
+            "host group '{}' references node '{}' on local host '{}'",
+            group_name, node_name, node.host
+        ))),
+        HostConnection::Ssh { .. } => Err(ValidationError::new(format!(
+            "host group '{}' references node '{}' on ssh-managed host '{}'",
+            group_name, node_name, node.host
+        ))),
+    }
+}
+
+fn validate_k3s_cluster_machine(
+    config: &PortConfig,
+    cluster_name: &str,
+    control_plane: &str,
+    host_group: &str,
+    machine_name: &str,
+    role: &str,
+) -> Result<(), ValidationError> {
+    let machine = config.machines.get(machine_name).ok_or_else(|| {
+        ValidationError::new(format!(
+            "k3s cluster '{}' references unknown {} machine '{}'",
+            cluster_name, role, machine_name
+        ))
+    })?;
+    if !machine.volumes.is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' {} machine '{}' must remain stateless; attached volumes are out of scope",
+            cluster_name, role, machine_name
+        )));
+    }
+    if machine.substrate != ExecutionSubstrate::Firecracker {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' {} machine '{}' must use Firecracker for the first slice",
+            cluster_name, role, machine_name
+        )));
+    }
+    if machine.protection_mode != ProtectionMode::Standard {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' {} machine '{}' must use protection mode 'standard' for the first slice",
+            cluster_name, role, machine_name
+        )));
+    }
+
+    let host = config.hosts.get(&machine.host).ok_or_else(|| {
+        ValidationError::new(format!(
+            "machine '{}' references unknown host '{}'",
+            machine_name, machine.host
+        ))
+    })?;
+    if host.platform != HostPlatform::Linux {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' {} machine '{}' must target a Linux host",
+            cluster_name, role, machine_name
+        )));
+    }
+    match &host.connection {
+        HostConnection::HostedControlPlane {
+            control_plane: machine_control_plane,
+        } => {
+            if machine_control_plane != control_plane {
+                return Err(ValidationError::new(format!(
+                    "k3s cluster '{}' {} machine '{}' resolves through control plane '{}' instead of '{}'",
+                    cluster_name, role, machine_name, machine_control_plane, control_plane
+                )));
+            }
+        }
+        HostConnection::Local => {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' {} machine '{}' must target a hosted control plane, not local host '{}'",
+                cluster_name, role, machine_name, machine.host
+            )));
+        }
+        HostConnection::Ssh { .. } => {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' {} machine '{}' must target a hosted control plane, not ssh-managed host '{}'",
+                cluster_name, role, machine_name, machine.host
+            )));
+        }
+    }
+
+    let summary = config
+        .hosted_machine_summary_contract(machine_name)?
+        .ok_or_else(|| {
+            ValidationError::new(format!(
+                "k3s cluster '{}' {} machine '{}' must resolve to a hosted machine summary",
+                cluster_name, role, machine_name
+            ))
+        })?;
+    if !summary.host_groups.iter().any(|group| group == host_group) {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' {} machine '{}' must belong to host group '{}'; available groups: {}",
+            cluster_name,
+            role,
+            machine_name,
+            host_group,
+            if summary.host_groups.is_empty() {
+                String::from("(none)")
+            } else {
+                summary.host_groups.join(", ")
+            }
+        )));
+    }
+    if summary.candidate_nodes.is_empty() {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' {} machine '{}' has no hosted placement candidates: {}",
+            cluster_name, role, machine_name, summary.placement_detail
+        )));
+    }
+
+    Ok(())
+}
+
 fn hosted_node_rejection_reason(
     machine_name: &str,
     machine: &MachineSpec,
@@ -3195,7 +3456,7 @@ mod tests {
         AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ExecutionSubstrate,
         FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
         HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
-        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy,
+        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy, K3sClusterSpec,
         MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
         MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
         OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
@@ -3316,6 +3577,110 @@ mod tests {
         assert!(machine.volumes.is_empty());
         assert_eq!(machine.guest_image, "demo-guest");
         assert!(!machine.rootfs_read_only);
+    }
+
+    #[test]
+    fn hosted_k3s_cluster_contract() {
+        let mut sample = PortConfig::sample();
+        sample.k3s_clusters.insert(
+            String::from("demo"),
+            K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("remote-linux"),
+                server_machine: String::from("cloud-generic"),
+                worker_machines: vec![String::from("cloud-aws")],
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        sample
+            .validate()
+            .expect("sample config with hosted k3s cluster should validate");
+
+        let cluster = sample
+            .k3s_clusters
+            .get("demo")
+            .expect("sample hosted k3s cluster should exist");
+        assert_eq!(
+            cluster,
+            &K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("remote-linux"),
+                server_machine: String::from("cloud-generic"),
+                worker_machines: vec![String::from("cloud-aws")],
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            }
+        );
+
+        let encoded = sample.to_toml_string().expect("sample should encode");
+        assert!(encoded.contains("[k3s_clusters.demo]"));
+        assert!(encoded.contains("host_group = \"remote-linux\""));
+        assert!(encoded.contains("server_machine = \"cloud-generic\""));
+        assert!(encoded.contains("worker_machines = [\"cloud-aws\"]"));
+        assert!(encoded.contains("version = \"v1.32.0+k3s1\""));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
+        assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn hosted_k3s_cluster_contract_regression_existing_routes() {
+        let mut config = PortConfig::sample();
+        config.k3s_clusters.clear();
+
+        config
+            .validate()
+            .expect("sample config without hosted k3s clusters should remain valid");
+        assert!(config.k3s_clusters.is_empty());
+
+        let encoded = config.to_toml_string().expect("sample should encode");
+        assert!(!encoded.contains("[k3s_clusters.demo]"));
+
+        assert_eq!(
+            config
+                .machine_control_contract("demo")
+                .expect("local machine contract should resolve"),
+            MachineControlContract::local_runtime_root()
+        );
+        assert_eq!(
+            config
+                .machine_control_contract("cloud-aws")
+                .expect("hosted machine contract should resolve"),
+            MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            config
+                .hosted_guest_attach_contract("cloud-aws")
+                .expect("hosted guest attach contract should resolve")
+                .is_some(),
+            "hosted guest contract should remain available without k3s clusters"
+        );
+
+        config.nodes.clear();
+        config.host_groups.clear();
+        config
+            .hosts
+            .get_mut("generic-linux")
+            .expect("generic-linux host should exist")
+            .connection = HostConnection::Ssh {
+            destination: String::from("builder.example.internal"),
+            user: String::from("ubuntu"),
+            port: 2222,
+        };
+
+        config
+            .validate()
+            .expect("ssh route regression config without k3s clusters should validate");
+        assert_eq!(
+            config
+                .machine_control_contract("cloud-generic")
+                .expect("ssh-backed machine contract should resolve"),
+            MachineControlContract::ssh_managed_remote()
+        );
     }
 
     #[test]

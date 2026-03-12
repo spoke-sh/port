@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-03-12T10:56:17.486151846-07:00
+command: cargo test -q -p port-model hosted_k3s_cluster_contract_regression_existing_routes
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 49 filtered out; finished in 0.00s
+
