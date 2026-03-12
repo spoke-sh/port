@@ -25,12 +25,12 @@ started_at: 2026-03-12T06:25:27
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Add SSH Remote Doctor Guidance](../../../../stories/VDeuzX5cO/README.md) | feat | backlog |
+| [Add SSH Remote Doctor Guidance](../../../../stories/VDeuzX5cO/README.md) | feat | in-progress |
 | [Implement SSH Machine Lifecycle Routing](../../../../stories/VDeuzYscv/README.md) | feat | backlog |
 | [Publish Hybrid Execution Operator Proof](../../../../stories/VDeuzbve3/README.md) | feat | backlog |
-| [Introduce SSH Hybrid Route Contract](../../../../stories/VDeuzcDcL/README.md) | feat | in-progress |
+| [Introduce SSH Hybrid Route Contract](../../../../stories/VDeuzcDcL/README.md) | feat | done |
 <!-- END GENERATED -->

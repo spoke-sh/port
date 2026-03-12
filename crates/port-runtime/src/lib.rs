@@ -681,6 +681,7 @@ fn collect_doctor_report_with_facts(
             if let Some(check) = provider_check(name, host.provider, &host.connection) {
                 checks.push(check);
             }
+            checks.extend(ssh_connection_checks(name, host.provider, &host.connection));
             checks.extend(local_pvm_lane_checks(name, host, facts));
         }
         checks.extend(hosted_pvm_lane_checks(config));
@@ -718,6 +719,9 @@ fn collect_doctor_report_with_facts(
         ),
         String::from(
             "Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.",
+        ),
+        String::from(
+            "SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.",
         ),
     ];
     if config.is_some() {
@@ -5692,13 +5696,79 @@ fn provider_check(
                 user,
                 port,
             } => {
+                let control = MachineControlContract::ssh_managed_remote();
                 format!(
-                    "{detail} SSH-managed routing is modeled through {}@{}:{}.",
-                    user, destination, port
+                    "{detail} SSH-managed routing is modeled for host '{}' through {}@{}:{} with route '{}' and inventory or lifecycle owners '{}' and '{}'.",
+                    host_name,
+                    user,
+                    destination,
+                    port,
+                    control.launch_route,
+                    control.inventory_owner,
+                    control.lifecycle_owner
                 )
             }
         },
     })
+}
+
+fn ssh_connection_checks(
+    host_name: &str,
+    provider: HostProvider,
+    connection: &HostConnection,
+) -> Vec<DoctorCheck> {
+    let HostConnection::Ssh {
+        destination,
+        user,
+        port,
+    } = connection
+    else {
+        return Vec::new();
+    };
+
+    let control = MachineControlContract::ssh_managed_remote();
+    let provider = host_provider_label(provider);
+
+    vec![
+        DoctorCheck {
+            name: format!("host:{host_name}:ssh-auth"),
+            ok: true,
+            required: false,
+            detail: format!(
+                "SSH-managed route '{}' targets host '{}' (provider '{}') via {}@{}:{} with lifecycle owner '{}'. Supply SSH auth material through the operator SSH environment; this lane does not use hosted control-plane bearer tokens.",
+                control.launch_route,
+                host_name,
+                provider,
+                user,
+                destination,
+                port,
+                control.lifecycle_owner
+            ),
+        },
+        DoctorCheck {
+            name: format!("host:{host_name}:ssh-bootstrap"),
+            ok: false,
+            required: false,
+            detail: format!(
+                "SSH-managed route '{}' expects inventory owner '{}' and lifecycle owner '{}' on host '{}' (provider '{}'). Remote bootstrap must install the Linux execution prerequisites and Port runtime on the remote host; Port will not fall back to local runtime or hosted control-plane ownership until the SSH lifecycle lane is implemented.",
+                control.launch_route,
+                control.inventory_owner,
+                control.lifecycle_owner,
+                host_name,
+                provider
+            ),
+        },
+    ]
+}
+
+fn host_provider_label(provider: HostProvider) -> &'static str {
+    match provider {
+        HostProvider::Local => "local",
+        HostProvider::GenericLinux => "generic-linux",
+        HostProvider::Aws => "aws",
+        HostProvider::Gcp => "gcp",
+        HostProvider::Azure => "azure",
+    }
 }
 
 fn control_plane_check(
@@ -8992,10 +9062,10 @@ mod tests {
         HostedDetachedForwardStopResult, HostedError, HostedRouteContext, HostedSuccess,
     };
     use port_model::{
-        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostProvider, HostedImportedNodeRecord,
-        HostedSchedulerPolicy, MachineArchitecture, OciRegistryAuth, OciRegistryTransport,
-        PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy, ServiceHealthState,
-        ServiceHealthcheck, ServiceRestartPolicy, ServiceSecretBackend,
+        ArtifactKind, ArtifactStore, ExecutionSubstrate, HostConnection, HostProvider,
+        HostedImportedNodeRecord, HostedSchedulerPolicy, MachineArchitecture, OciRegistryAuth,
+        OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState, ServiceHealthPolicy,
+        ServiceHealthState, ServiceHealthcheck, ServiceRestartPolicy, ServiceSecretBackend,
         ServiceSecretMaterialization,
     };
     use tokio::net::TcpListener;
@@ -10964,6 +11034,80 @@ exec sleep 30
                 .iter()
                 .any(|note| note.contains("local Linux only"))
         );
+    }
+
+    fn sample_ssh_doctor_config() -> PortConfig {
+        let mut config = PortConfig::sample();
+        config.nodes.clear();
+        config.host_groups.clear();
+        config
+            .hosts
+            .get_mut("generic-linux")
+            .expect("generic-linux host should exist")
+            .connection = HostConnection::Ssh {
+            destination: String::from("builder.example.internal"),
+            user: String::from("ubuntu"),
+            port: 2222,
+        };
+        config
+    }
+
+    #[test]
+    fn doctor_ssh_remote_guidance() {
+        let report = collect_doctor_report(Some(&sample_ssh_doctor_config()));
+
+        let auth = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:generic-linux:ssh-auth")
+            .expect("ssh auth guidance should exist");
+        let bootstrap = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:generic-linux:ssh-bootstrap")
+            .expect("ssh bootstrap guidance should exist");
+
+        assert!(auth.ok);
+        assert!(auth.detail.contains("ssh-managed-remote"));
+        assert!(auth.detail.contains("ubuntu@builder.example.internal:2222"));
+        assert!(auth.detail.contains("SSH auth material"));
+        assert!(auth.detail.contains("hosted control-plane bearer tokens"));
+
+        assert!(!bootstrap.ok);
+        assert!(bootstrap.detail.contains("bootstrap"));
+        assert!(bootstrap.detail.contains("ssh-remote-runtime"));
+        assert!(bootstrap.detail.contains("ssh-remote-port-runtime"));
+        assert!(bootstrap.detail.contains("generic-linux"));
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains("SSH-managed remote hosts surface separate auth"))
+        );
+    }
+
+    #[test]
+    fn doctor_ssh_remote_failure_guidance() {
+        let mut config = sample_ssh_doctor_config();
+        config
+            .hosts
+            .get_mut("generic-linux")
+            .expect("generic-linux host should exist")
+            .provider = HostProvider::Local;
+
+        let report = collect_doctor_report(Some(&config));
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.name == "host:generic-linux")
+            .expect("ssh provider failure guidance should exist");
+
+        assert!(!check.ok);
+        assert!(check.detail.contains("provider 'local'"));
+        assert!(check.detail.contains("generic-linux"));
+        assert!(check.detail.contains("ssh-managed-remote"));
+        assert!(check.detail.contains("ssh-remote-runtime"));
+        assert!(check.detail.contains("ssh-remote-port-runtime"));
     }
 
     #[test]

@@ -18,3 +18,7 @@ Authored epic VDcStPolu, created and planned voyage VDeuazAgk, and thawed four b
 ## 2026-03-12T06:40:36
 
 Completed story VDeuzcDcL to add the SSH hybrid route contract, explicit SSH route/ownership semantics, and defensive runtime handling that prevents SSH hosts from falling through hosted paths.
+
+## 2026-03-12T06:48:35
+
+Completed story VDeuzX5cO by adding SSH-specific doctor guidance, host auth/bootstrap checks, and regression coverage before moving to lifecycle routing.
