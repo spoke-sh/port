@@ -21,8 +21,8 @@ created_at: 2026-03-12T07:35:31
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/4 stories done
+**Progress:** 0/1 voyages complete, 1/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Attached Volume Contract Foundations](voyages/VDfEyGkVf/) | in-progress | 0/4 |
+| [Attached Volume Contract Foundations](voyages/VDfEyGkVf/) | in-progress | 1/4 |
 <!-- END GENERATED -->

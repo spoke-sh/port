@@ -12,8 +12,9 @@ use port_agent_protocol::{
     PtyRequest,
 };
 use port_model::{
-    ExecutionSubstrate, HostConnection, HostedSchedulerPolicy, MachineArchitecture, PortConfig,
-    ProtectionMode, PvmHostKitPackage,
+    ExecutionSubstrate, HostConnection, HostedSchedulerPolicy, MachineArchitecture,
+    MachineControlContract, MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec,
+    PortConfig, ProtectionMode, PvmHostKitPackage,
 };
 use port_runtime::{
     ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
@@ -959,6 +960,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             boot_wait_secs,
         } => {
             let ssh_context = ssh_machine_route_context(&config, &machine)?;
+            let control = machine_control_contract(&config, &machine)?;
             let metadata = port_runtime::launch_local_machine(
                 &config,
                 &LaunchRequest {
@@ -979,6 +981,11 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("console stdout: {}", metadata.stdout_path.display());
             println!("console stderr: {}", metadata.stderr_path.display());
             println!("manifest: {}", metadata.manifest_path.display());
+            if !metadata.attached_volumes.is_empty() {
+                println!("inventory owner: {}", control.inventory_owner);
+                println!("lifecycle owner: {}", control.lifecycle_owner);
+                print!("{}", format_attached_volumes(&metadata.attached_volumes));
+            }
             if let Some(context) = ssh_context.as_ref() {
                 print_ssh_machine_route_context(context, "launch route");
             }
@@ -1062,15 +1069,36 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                     .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
             );
             println!("inventory scope: {}", result.control.inventory_scope);
+            if !result.attached_volumes.is_empty() {
+                println!("inventory owner: {}", result.control.inventory_owner);
+            }
             println!("lifecycle owner: {}", result.control.lifecycle_owner);
             println!("status source: {}", result.control.status_source);
             println!("stop route: {}", result.control.stop_route);
             println!("runtime dir: {}", result.runtime_dir.display());
+            if !result.attached_volumes.is_empty() {
+                print!("{}", format_attached_volumes(&result.attached_volumes));
+            }
             println!("detail: {}", result.detail);
         }
     }
 
     Ok(())
+}
+
+fn machine_control_contract(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<MachineControlContract> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{}'", machine_name))?;
+    let host = config
+        .hosts
+        .get(&machine.host)
+        .with_context(|| format!("unknown host '{}'", machine.host))?;
+    Ok(MachineControlContract::for_connection(&host.connection))
 }
 
 fn print_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) {
@@ -1131,6 +1159,7 @@ fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
         .expect("write should succeed");
     writeln!(&mut output, "stop route: {}", status.control.stop_route)
         .expect("write should succeed");
+    output.push_str(&format_attached_volumes(&status.attached_volumes));
     writeln!(&mut output, "guest route: {}", status.control.guest_route)
         .expect("write should succeed");
     writeln!(&mut output, "runtime dir: {}", status.runtime_dir.display())
@@ -1160,6 +1189,32 @@ fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
     .expect("write should succeed");
     output.push_str(&format_hosted_fleet_nodes(&status.hosted_fleet_nodes));
     writeln!(&mut output, "detail: {}", status.detail).expect("write should succeed");
+    output
+}
+
+fn format_attached_volumes(volumes: &[MachineVolumeSpec]) -> String {
+    let mut output = String::new();
+    for volume in volumes {
+        writeln!(&mut output, "attached volume: {}", volume.name).expect("write should succeed");
+        writeln!(
+            &mut output,
+            "backend: {}",
+            match volume.backend {
+                MachineVolumeBackend::HostFile => "host-file",
+            }
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
+            "persistence: {}",
+            match volume.persistence {
+                MachineVolumePersistence::Persistent => "persistent",
+            }
+        )
+        .expect("write should succeed");
+        writeln!(&mut output, "host path: {}", volume.path.display())
+            .expect("write should succeed");
+    }
     output
 }
 
@@ -2330,6 +2385,7 @@ mod tests {
             firecracker_log: PathBuf::from("/tmp/runtime/cloud-aws/firecracker.log"),
             stdout_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stdout.log"),
             stderr_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stderr.log"),
+            attached_volumes: Vec::new(),
             hosted_fleet_nodes,
             detail: detail.to_string(),
         }

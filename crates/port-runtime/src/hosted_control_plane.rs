@@ -3456,6 +3456,7 @@ fn malformed_machine_status(
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
     }
@@ -3658,6 +3659,7 @@ fn malformed_stop_result(
         pid: status.pid,
         control: status.control,
         runtime_dir: status.runtime_dir,
+        attached_volumes: status.attached_volumes,
         detail: status.detail,
     }
 }
@@ -6879,6 +6881,7 @@ mod tests {
                     firecracker_log: state.runtime_root.join("cloud-aws/firecracker.log"),
                     stdout_log: state.runtime_root.join("cloud-aws/console.stdout.log"),
                     stderr_log: state.runtime_root.join("cloud-aws/console.stderr.log"),
+                    attached_volumes: Vec::new(),
                     hosted_fleet_nodes: Vec::new(),
                     detail: String::from("mock status"),
                 },
@@ -6950,6 +6953,7 @@ mod tests {
                     stdout_path: state.runtime_root.join("cloud-aws/console.stdout.log"),
                     stderr_path: state.runtime_root.join("cloud-aws/console.stderr.log"),
                     manifest_path: state.runtime_root.join("cloud-aws/manifest.json"),
+                    attached_volumes: Vec::new(),
                 },
             })
         }
@@ -7109,6 +7113,7 @@ mod tests {
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            attached_volumes: Vec::new(),
         };
         std::fs::write(
             &paths.manifest_path,

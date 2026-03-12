@@ -60,6 +60,7 @@ fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) {
         "stdout_path": runtime_dir.join("console.stdout.log"),
         "stderr_path": runtime_dir.join("console.stderr.log"),
         "manifest_path": manifest_path,
+        "attached_volumes": [],
     });
     fs::write(
         &manifest_path,

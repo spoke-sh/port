@@ -28,8 +28,9 @@ use port_model::{
     AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
     HostedApiIdentityContract, HostedArtifactIdentityContract, HostedImportedNodeRecord,
     HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy,
-    MachineArchitecture, MachineControlContract, OciRegistryAuth, OciRegistryTransport, PortConfig,
-    ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
+    MachineArchitecture, MachineControlContract, MachineVolumeBackend, MachineVolumePersistence,
+    MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode,
+    PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
     ServiceSecretSourceStatus,
 };
 use port_sdk::{
@@ -124,6 +125,7 @@ pub struct LaunchMetadata {
     pub stdout_path: PathBuf,
     pub stderr_path: PathBuf,
     pub manifest_path: PathBuf,
+    pub attached_volumes: Vec<MachineVolumeSpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +162,7 @@ pub struct MachineStatus {
     pub firecracker_log: PathBuf,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
+    pub attached_volumes: Vec<MachineVolumeSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosted_fleet_nodes: Vec<HostedFleetNodeStatus>,
     pub detail: String,
@@ -233,6 +236,7 @@ pub struct StopResult {
     pub pid: Option<u32>,
     pub control: MachineControlContract,
     pub runtime_dir: PathBuf,
+    pub attached_volumes: Vec<MachineVolumeSpec>,
     pub detail: String,
 }
 
@@ -1232,6 +1236,7 @@ fn firecracker_local_launch_machine(
             )
         );
     }
+    let control = MachineControlContract::local_runtime_root();
 
     let kernel = config
         .artifact(&machine.kernel)
@@ -1293,6 +1298,11 @@ fn firecracker_local_launch_machine(
 
     let failures = launch_preflight_checks(machine, &kernel_variant.path, &guest_variant.path)
         .into_iter()
+        .chain(attached_volume_preflight_checks(
+            request.machine_name,
+            &machine.volumes,
+            &control,
+        ))
         .filter(|check| check.required && !check.ok)
         .collect::<Vec<_>>();
     if !failures.is_empty() {
@@ -1331,6 +1341,7 @@ fn firecracker_local_launch_machine(
     let config_payload = build_firecracker_config(
         kernel_variant.path.clone(),
         guest_variant.path.clone(),
+        &machine.volumes,
         machine.vcpu_count,
         machine.memory_mib,
         machine.kernel_args.clone(),
@@ -1398,6 +1409,7 @@ fn firecracker_local_launch_machine(
         stdout_path: paths.stdout_log.clone(),
         stderr_path: paths.stderr_log.clone(),
         manifest_path: paths.manifest_path.clone(),
+        attached_volumes: machine.volumes.clone(),
     };
 
     let manifest = serde_json::to_string_pretty(&metadata).context("failed to encode manifest")?;
@@ -1643,6 +1655,7 @@ fn cloud_hypervisor_local_launch_machine(
         stdout_path: paths.stdout_log.clone(),
         stderr_path: paths.stderr_log.clone(),
         manifest_path: paths.manifest_path.clone(),
+        attached_volumes: Vec::new(),
     };
     write_json_file(&paths.manifest_path, &metadata)?;
 
@@ -1839,6 +1852,7 @@ fn avf_local_launch_machine_with_host_os(
         stdout_path: paths.stdout_log.clone(),
         stderr_path: paths.stderr_log.clone(),
         manifest_path: paths.manifest_path.clone(),
+        attached_volumes: Vec::new(),
     };
     write_json_file(&paths.manifest_path, &metadata)?;
 
@@ -2087,6 +2101,7 @@ fn avf_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<M
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
     })
@@ -2203,6 +2218,7 @@ fn cloud_hypervisor_local_machine_status(
         firecracker_log: metadata.console_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
     })
@@ -3021,6 +3037,7 @@ fn firecracker_local_stop_machine(
                 pid: Some(pid),
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: status.attached_volumes.clone(),
                 detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
             })
         }
@@ -3033,6 +3050,7 @@ fn firecracker_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: status.attached_volumes.clone(),
                 detail: String::from("machine was already stopped"),
             })
         }
@@ -3045,6 +3063,7 @@ fn firecracker_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: status.attached_volumes.clone(),
                 detail: String::from("cleaned stale runtime sockets for already-stopped machine"),
             })
         }
@@ -3111,6 +3130,7 @@ fn avf_local_stop_machine(
                 pid: Some(pid),
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: Vec::new(),
                 detail: String::from(
                     "sent SIGTERM to AVF launcher pid and cleaned transient runtime paths",
                 ),
@@ -3126,6 +3146,7 @@ fn avf_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: Vec::new(),
                 detail: String::from("AVF machine was already stopped"),
             })
         }
@@ -3139,6 +3160,7 @@ fn avf_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: Vec::new(),
                 detail: String::from("removed stale AVF runtime pid and transient paths"),
             })
         }
@@ -3189,6 +3211,7 @@ fn cloud_hypervisor_local_stop_machine(
                 pid: Some(pid),
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: Vec::new(),
                 detail: String::from(
                     "sent SIGTERM to Cloud Hypervisor pid and cleaned transient runtime paths",
                 ),
@@ -3204,6 +3227,7 @@ fn cloud_hypervisor_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: Vec::new(),
                 detail: String::from("Cloud Hypervisor machine was already stopped"),
             })
         }
@@ -3217,6 +3241,7 @@ fn cloud_hypervisor_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                attached_volumes: Vec::new(),
                 detail: String::from(
                     "cleaned stale Cloud Hypervisor runtime state for already-stopped machine",
                 ),
@@ -3408,6 +3433,7 @@ fn inspect_machine(
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        attached_volumes: manifest.attached_volumes,
         hosted_fleet_nodes: Vec::new(),
         detail,
     })
@@ -3599,6 +3625,7 @@ fn cloud_hypervisor_malformed_machine_status(
         firecracker_log: cloud_hypervisor_log_path(paths),
         stdout_log: paths.stdout_log.clone(),
         stderr_log: paths.stderr_log.clone(),
+        attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
     }
@@ -3623,6 +3650,7 @@ fn synthetic_machine_status(
         firecracker_log: paths.firecracker_log.clone(),
         stdout_log: paths.stdout_log.clone(),
         stderr_log: paths.stderr_log.clone(),
+        attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
     }
@@ -5774,6 +5802,77 @@ fn host_provider_label(provider: HostProvider) -> &'static str {
         HostProvider::Gcp => "gcp",
         HostProvider::Azure => "azure",
     }
+}
+
+fn volume_backend_label(backend: MachineVolumeBackend) -> &'static str {
+    match backend {
+        MachineVolumeBackend::HostFile => "host-file",
+    }
+}
+
+fn volume_persistence_label(persistence: MachineVolumePersistence) -> &'static str {
+    match persistence {
+        MachineVolumePersistence::Persistent => "persistent",
+    }
+}
+
+fn attached_volume_preflight_checks(
+    machine_name: &str,
+    volumes: &[MachineVolumeSpec],
+    control: &MachineControlContract,
+) -> Vec<DoctorCheck> {
+    volumes
+        .iter()
+        .map(|volume| {
+            let exists = volume.path.exists();
+            let is_file = exists
+                && fs::metadata(&volume.path)
+                    .map(|metadata| metadata.is_file())
+                    .unwrap_or(false);
+            let backend = volume_backend_label(volume.backend);
+            let persistence = volume_persistence_label(volume.persistence);
+
+            DoctorCheck {
+                name: format!("machine:{machine_name}:volume:{}:host-path", volume.name),
+                ok: exists && is_file,
+                required: true,
+                detail: if exists && is_file {
+                    format!(
+                        "machine '{machine_name}' volume '{}' backend '{}' persistence '{}' host path '{}' is ready for route '{}' with inventory owner '{}' and lifecycle owner '{}'.",
+                        volume.name,
+                        backend,
+                        persistence,
+                        volume.path.display(),
+                        control.launch_route,
+                        control.inventory_owner,
+                        control.lifecycle_owner
+                    )
+                } else if exists {
+                    format!(
+                        "machine '{machine_name}' volume '{}' backend '{}' persistence '{}' host path '{}' exists but is not a regular file; route '{}' requires a regular host file with inventory owner '{}' and lifecycle owner '{}'.",
+                        volume.name,
+                        backend,
+                        persistence,
+                        volume.path.display(),
+                        control.launch_route,
+                        control.inventory_owner,
+                        control.lifecycle_owner
+                    )
+                } else {
+                    format!(
+                        "machine '{machine_name}' volume '{}' backend '{}' persistence '{}' host path '{}' is missing; route '{}' requires a regular host file with inventory owner '{}' and lifecycle owner '{}'.",
+                        volume.name,
+                        backend,
+                        persistence,
+                        volume.path.display(),
+                        control.launch_route,
+                        control.inventory_owner,
+                        control.lifecycle_owner
+                    )
+                },
+            }
+        })
+        .collect()
 }
 
 fn control_plane_check(
@@ -9257,6 +9356,7 @@ fn connect_vsock_tunnel(
 fn build_firecracker_config(
     kernel_image_path: PathBuf,
     rootfs_path: PathBuf,
+    attached_volumes: &[MachineVolumeSpec],
     vcpu_count: u8,
     mem_size_mib: u32,
     boot_args: String,
@@ -9266,18 +9366,25 @@ fn build_firecracker_config(
     uds_path: PathBuf,
 ) -> FirecrackerConfig {
     let boot_args = format!("{boot_args} init=/init port.guest_control_port={guest_control_port}");
+    let mut drives = vec![DriveConfig {
+        drive_id: String::from("rootfs"),
+        path_on_host: rootfs_path,
+        is_root_device: true,
+        is_read_only: rootfs_read_only,
+    }];
+    drives.extend(attached_volumes.iter().map(|volume| DriveConfig {
+        drive_id: volume.name.clone(),
+        path_on_host: volume.path.clone(),
+        is_root_device: false,
+        is_read_only: false,
+    }));
 
     FirecrackerConfig {
         boot_source: BootSourceConfig {
             kernel_image_path,
             boot_args,
         },
-        drives: vec![DriveConfig {
-            drive_id: String::from("rootfs"),
-            path_on_host: rootfs_path,
-            is_root_device: true,
-            is_read_only: rootfs_read_only,
-        }],
+        drives,
         machine_config: MachineConfig {
             vcpu_count,
             mem_size_mib,
@@ -10976,6 +11083,7 @@ exec sleep 30
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            attached_volumes: Vec::new(),
         };
         fs::write(
             &paths.manifest_path,
@@ -11072,6 +11180,7 @@ exec sleep 30
         let config = build_firecracker_config(
             "/tmp/vmlinux".into(),
             "/tmp/rootfs.ext4".into(),
+            &[],
             2,
             512,
             String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
@@ -11928,6 +12037,7 @@ exec sleep 30
             stdout_path: running_paths.stdout_log.clone(),
             stderr_path: running_paths.stderr_log.clone(),
             manifest_path: running_paths.manifest_path.clone(),
+            attached_volumes: Vec::new(),
         };
         fs::write(
             &running_paths.manifest_path,
@@ -11948,6 +12058,7 @@ exec sleep 30
             stdout_path: stale_paths.stdout_log.clone(),
             stderr_path: stale_paths.stderr_log.clone(),
             manifest_path: stale_paths.manifest_path.clone(),
+            attached_volumes: Vec::new(),
         };
         fs::write(
             &stale_paths.manifest_path,
@@ -12007,6 +12118,7 @@ exec sleep 30
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            attached_volumes: Vec::new(),
         };
         fs::write(
             &paths.manifest_path,
@@ -12061,6 +12173,7 @@ exec sleep 30
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            attached_volumes: Vec::new(),
         };
         fs::write(
             &paths.manifest_path,
@@ -12085,6 +12198,7 @@ exec sleep 30
                 pid: Some(child.id()),
                 control: port_model::MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir.clone(),
+                attached_volumes: Vec::new(),
                 detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
             }
         );
@@ -15246,6 +15360,7 @@ exec sleep 30
         );
         assert_eq!(healthy_local.runtime.health_detail, None);
 
+        let _guard = hosted_server_lock().lock().expect("lock should work");
         let mut hosted_config = sample_config_with_hosted_runtime_roots(tempdir.path());
         hosted_config.machines.retain(|name, _| name == "cloud-aws");
         unsafe {
@@ -15271,8 +15386,8 @@ exec sleep 30
             thread::sleep(Duration::from_millis(20));
         }
 
-        let hosted_config =
-            start_live_hosted_servers(&hosted_config, true).expect("hosted servers should start");
+        let hosted_config = start_live_hosted_servers_inner(&hosted_config, true)
+            .expect("hosted servers should start");
         let _hosted_applied = apply_machine_service(
             &hosted_config,
             ServiceApplyRequest {

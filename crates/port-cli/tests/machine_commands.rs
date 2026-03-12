@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use port_model::{
-    ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture, PortConfig,
-    ProtectionMode,
+    ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture, MachineVolumeBackend,
+    MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -311,6 +311,7 @@ fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) -> PathB
         "stdout_path": runtime_dir.join("console.stdout.log"),
         "stderr_path": runtime_dir.join("console.stderr.log"),
         "manifest_path": manifest_path,
+        "attached_volumes": [],
     });
     fs::write(
         &manifest_path,
@@ -567,6 +568,22 @@ fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Pat
         .path = guest_path;
 }
 
+fn write_fake_attached_volume(config: &mut PortConfig, root: &Path, file_name: &str) -> PathBuf {
+    let volume_path = root.join(file_name);
+    fs::write(&volume_path, b"fake-attached-volume").expect("attached volume should write");
+    config
+        .machines
+        .get_mut("demo")
+        .expect("demo machine should exist")
+        .volumes = vec![MachineVolumeSpec {
+        name: String::from("data"),
+        backend: MachineVolumeBackend::HostFile,
+        persistence: MachineVolumePersistence::Persistent,
+        path: volume_path.clone(),
+    }];
+    volume_path
+}
+
 fn write_fake_cloud_hypervisor_artifacts(config: &mut PortConfig, root: &Path) {
     let kernel_path = root.join("cloud-hypervisor-vmlinux");
     let guest_path = root.join("cloud-hypervisor-rootfs.ext4");
@@ -789,6 +806,284 @@ fn cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally() {
         stop_stdout.contains("current state: stopped"),
         "{stop_stdout}"
     );
+}
+
+#[test]
+fn cli_machine_launch_status_and_stop_round_trip() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("runtime");
+    let mut config = PortConfig::sample();
+    write_fake_standard_firecracker_artifacts(&mut config, temp.path());
+    write_config(&config_path, &config);
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
+    let path_env = prepend_path_env(temp.path());
+
+    let launch = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(
+        launch_stdout.contains("launched machine: demo"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("hypervisor binary:"),
+        "{launch_stdout}"
+    );
+    assert!(launch_stdout.contains("hypervisor log:"), "{launch_stdout}");
+    assert!(
+        launch_stdout.contains(fake_binary.to_string_lossy().as_ref()),
+        "{launch_stdout}"
+    );
+
+    let status = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("machine: demo"), "{status_stdout}");
+    assert!(status_stdout.contains("state: running"), "{status_stdout}");
+    assert!(
+        status_stdout.contains("inventory owner: local-runtime-root"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("lifecycle owner: local-port-runtime"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("launch route: direct-local-runtime"),
+        "{status_stdout}"
+    );
+
+    let stop = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop_stdout.contains("machine: demo"), "{stop_stdout}");
+    assert!(
+        stop_stdout.contains("previous state: running"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("current state: stopped"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("lifecycle owner: local-port-runtime"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("stop route: direct-local-runtime"),
+        "{stop_stdout}"
+    );
+}
+
+#[test]
+fn cli_machine_launch_status_and_stop_with_attached_volume() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("runtime");
+    let mut config = PortConfig::sample();
+    write_fake_standard_firecracker_artifacts(&mut config, temp.path());
+    let volume_path = write_fake_attached_volume(&mut config, temp.path(), "demo-data.ext4");
+    write_config(&config_path, &config);
+    let _fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
+    let path_env = prepend_path_env(temp.path());
+
+    let launch = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(
+        launch_stdout.contains("launched machine: demo"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("attached volume: data"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("backend: host-file"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains(volume_path.to_string_lossy().as_ref()),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("inventory owner: local-runtime-root"),
+        "{launch_stdout}"
+    );
+    assert!(
+        launch_stdout.contains("lifecycle owner: local-port-runtime"),
+        "{launch_stdout}"
+    );
+
+    let config_json = fs::read_to_string(runtime_root.join("demo/firecracker-config.json"))
+        .expect("firecracker config should exist");
+    assert!(
+        config_json.contains("\"drive_id\": \"rootfs\""),
+        "{config_json}"
+    );
+    assert!(
+        config_json.contains("\"drive_id\": \"data\""),
+        "{config_json}"
+    );
+    assert!(
+        config_json.contains(volume_path.to_string_lossy().as_ref()),
+        "{config_json}"
+    );
+
+    let status = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("machine: demo"), "{status_stdout}");
+    assert!(status_stdout.contains("state: running"), "{status_stdout}");
+    assert!(
+        status_stdout.contains("attached volume: data"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("backend: host-file"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains(volume_path.to_string_lossy().as_ref()),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("launch route: direct-local-runtime"),
+        "{status_stdout}"
+    );
+
+    let stop = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop_stdout.contains("machine: demo"), "{stop_stdout}");
+    assert!(
+        stop_stdout.contains("attached volume: data"),
+        "{stop_stdout}"
+    );
+    assert!(stop_stdout.contains("backend: host-file"), "{stop_stdout}");
+    assert!(
+        stop_stdout.contains(volume_path.to_string_lossy().as_ref()),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("stop route: direct-local-runtime"),
+        "{stop_stdout}"
+    );
+}
+
+#[test]
+fn cli_attached_volume_route_context() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let runtime_root = temp.path().join("runtime");
+    let mut config = PortConfig::sample();
+    write_fake_standard_firecracker_artifacts(&mut config, temp.path());
+    let missing_volume_path = temp.path().join("missing-data.ext4");
+    config
+        .machines
+        .get_mut("demo")
+        .expect("demo machine should exist")
+        .volumes = vec![MachineVolumeSpec {
+        name: String::from("data"),
+        backend: MachineVolumeBackend::HostFile,
+        persistence: MachineVolumePersistence::Persistent,
+        path: missing_volume_path.clone(),
+    }];
+    write_config(&config_path, &config);
+    let _fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
+    let path_env = prepend_path_env(temp.path());
+
+    let launch = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("launch command should run");
+    assert!(!launch.status.success(), "{launch:?}");
+    let stderr = String::from_utf8_lossy(&launch.stderr);
+    assert!(stderr.contains("machine 'demo'"), "{stderr}");
+    assert!(stderr.contains("volume 'data'"), "{stderr}");
+    assert!(stderr.contains("backend 'host-file'"), "{stderr}");
+    assert!(
+        stderr.contains(missing_volume_path.to_string_lossy().as_ref()),
+        "{stderr}"
+    );
+    assert!(stderr.contains("local-runtime-root"), "{stderr}");
+    assert!(stderr.contains("local-port-runtime"), "{stderr}");
+    assert!(stderr.contains("direct-local-runtime"), "{stderr}");
 }
 
 #[test]

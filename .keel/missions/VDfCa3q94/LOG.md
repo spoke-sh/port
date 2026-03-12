@@ -18,3 +18,11 @@ Laid bearing VDcStQqlo into epic VDcStQqlo, authored the storage PRD, planned vo
 ## 2026-03-12T07:45:02
 
 Authored epic VDcStQqlo, reused and completed planned voyage VDfEyGkVf, and decomposed the first direct-runtime attached-volume slice into four scoped stories with traceable verification.
+
+## 2026-03-12T07:56:34
+
+Completed VDfF1dZM9: added canonical machine volume model, recorded proof for the contract and attachment-free regression, and submitted the story.
+
+## 2026-03-12T08:17:16
+
+Completed VDfF1csOC: attached one local Firecracker host-file volume with explicit runtime metadata, CLI context, and regression coverage; submitted the story.
