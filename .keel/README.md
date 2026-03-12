@@ -16,7 +16,7 @@
 | [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | exploring | ✓ | ✓ | decision-ready | 3.47 | - |
 | [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | exploring | ✓ | ✓ | decision-ready | 1.89 | - |
 | [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | exploring | ✓ | ✓ | resolve conflict | 1.55 | - |
-| [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | exploring | ✓ | ✓ | decision-ready | 4.20 | - |
+| [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.20 | ✓ |
 
 ## Epics
 
@@ -122,4 +122,10 @@
 |--------|--------|
 | [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | done |
 | [Executable Avf Runtime Foundation](epics/1vzJKE000/voyages/1vzLYD000/) | done |
+
+### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Release Matrix And Packaging Foundations](epics/VDcT0vaPb/voyages/VDchK6xzs/) | in-progress |
 
