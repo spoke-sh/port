@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-12T14:45:44.334209387-07:00
+command: rg -q 'Hosted Stateless K3s First Slice' /home/alex/workspace/spoke-sh/port/docs/operators.md && rg -q '\[k3s_clusters\.demo\]' /home/alex/workspace/spoke-sh/port/CONFIGURATION.md && rg -q 'hosted stateless K3s workflow' /home/alex/workspace/spoke-sh/port/README.md && printf 'hosted-k3s-docs-ok\n'
+---
+hosted-k3s-docs-ok

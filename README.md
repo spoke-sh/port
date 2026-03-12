@@ -22,6 +22,10 @@ It keeps one operator vocabulary across lanes:
 - Attached volume first slice: one persistent `host-file` attached volume on
   the local Firecracker `standard` lane with explicit host path and ownership
   output
+- Hosted stateless K3s first slice: one hosted control plane, one host group,
+  one server machine, one or more worker machines, and cluster access through
+  the canonical `machine` and `guest` verbs instead of a second Kubernetes-only
+  command family
 - Additional proof-backed lanes: Cloud Hypervisor `standard`, AVF `standard`,
   and prepared-node Firecracker/PVM on `x86_64`
 
@@ -37,6 +41,8 @@ port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /
 
 Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
+The first hosted stateless K3s workflow, boundaries, and proof command live in
+[`docs/operators.md`](docs/operators.md).
 The first direct-runtime attached-volume workflow and proof command live in
 [`docs/operators.md`](docs/operators.md).
 The first installable release contract and support matrix live in

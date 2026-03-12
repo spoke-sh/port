@@ -22,6 +22,7 @@ For repo-local workflows, start from
 | `[hosts.*]` | Host platform/provider capabilities and local substrate contracts |
 | `[nodes.*]` | Hosted node-agent inventory, capabilities, and runtime roots |
 | `[machines.*]` | Operator-visible machine definitions and lane selection |
+| `[k3s_clusters.*]` | Hosted stateless K3s cluster contract bound to canonical Port machines |
 
 ## Key Concepts
 
@@ -63,6 +64,39 @@ Each machine picks:
 - an artifact selector
 - a substrate/protection combination
 - any lane-specific routing detail
+
+### Hosted K3s Clusters
+
+The first K3s slice adds one explicit hosted cluster catalog instead of a new
+`port k3s` command family:
+
+- one control plane
+- one host group
+- one server machine
+- one or more worker machines
+- one K3s version plus optional server and worker install arguments
+
+Example:
+
+```toml
+[k3s_clusters.demo]
+control_plane = "demo"
+host_group = "remote-linux"
+server_machine = "cloud-generic"
+worker_machines = ["cloud-aws"]
+version = "v1.32.0+k3s1"
+server_args = ["--disable=traefik"]
+worker_args = ["--node-label=role=worker"]
+```
+
+The first hosted K3s slice stays explicit about its boundary:
+
+- hosted control-plane ownership only
+- Firecracker with `standard` protection only
+- stateless machines only
+- no HA, ingress, load balancers, CSI, or attached volumes
+- cluster bring-up, kubeconfig handoff, and node visibility stay on
+  `port machine ...` plus `port guest exec ...`
 
 ### Attached Volumes
 
@@ -137,7 +171,72 @@ Hosted and SSH-owned machines keep the attached-volume boundary explicit:
 declaring an attached volume on those lanes fails validation before launch
 instead of rerouting the request or collapsing it back into the rootfs story.
 
-### 3. Cloud Hypervisor Override
+### 3. Hosted Stateless K3s First Slice
+
+Start from a copy of `examples/port.toml` and keep the hosted control plane on
+the canonical demo lane:
+
+1. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
+2. Point `nodes.generic-linux-node.runtime_root` and
+   `nodes.aws-linux-node.runtime_root` at the real runtime roots owned by the
+   two node agents.
+3. Add a hosted K3s cluster contract:
+
+   ```toml
+   [k3s_clusters.demo]
+   control_plane = "demo"
+   host_group = "remote-linux"
+   server_machine = "cloud-generic"
+   worker_machines = ["cloud-aws"]
+   version = "v1.32.0+k3s1"
+   server_args = ["--disable=traefik"]
+   worker_args = ["--node-label=role=worker"]
+   ```
+
+4. Start the hosted server processes:
+
+   ```bash
+   export PORT_DEMO_TOKEN=demo-token
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9235 --token node-secret
+   ```
+
+5. Launch the two hosted machines through the same machine lifecycle surface:
+
+   ```bash
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-generic
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-aws
+   ```
+
+6. Bootstrap K3s through canonical guest execution rather than a second
+   Kubernetes-only toolchain:
+
+   ```bash
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -"
+   JOIN_TOKEN="$(PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /var/lib/rancher/k3s/server/node-token')"
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-aws -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='${JOIN_TOKEN}' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -"
+   ```
+
+7. Review cluster access through the same guest surface:
+
+   ```bash
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /etc/rancher/k3s/k3s.yaml'
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'k3s kubectl get nodes -o wide'
+   ```
+
+8. Stop the worker and server through the same canonical lifecycle commands:
+
+   ```bash
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-aws
+   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-generic
+   ```
+
+The K3s lane remains explicit about what it does not do yet: no HA, no
+attached volumes or persistence, no ingress, and no SSH-owned or multi-group
+cluster routing.
+
+### 4. Cloud Hypervisor Override
 
 Start from a copy of `examples/port.toml` and make these changes:
 
@@ -156,7 +255,7 @@ PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml guest e
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-cloud-hypervisor.toml machine stop --machine cloud-aws
 ```
 
-### 4. Prepared-Node Firecracker/PVM
+### 5. Prepared-Node Firecracker/PVM
 
 Start from a copy of `examples/port.toml` and make these changes:
 
@@ -176,7 +275,7 @@ PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --mac
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
 ```
 
-### 5. Service Secrets, Restart, And Health
+### 6. Service Secrets, Restart, And Health
 
 The checked-in sample already models hosted service nodes and groups. A typical
 service workflow is:
@@ -188,7 +287,7 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service status --mac
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml service stop --machine cloud-aws --name api
 ```
 
-### 6. Artifact Backend Switching
+### 7. Artifact Backend Switching
 
 The sample config defaults to file-backed distribution:
 

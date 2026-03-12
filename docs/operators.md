@@ -114,7 +114,65 @@ Repo-local proof for this workflow:
 ./scripts/render-attached-volume-proof.sh .keel/stories/VDfF1dVOF/EVIDENCE
 ```
 
-## Repo-local Proof
+## Hosted Stateless K3s First Slice
+
+Port's first K3s lane is intentionally narrow and stays on the hosted control
+plane plus node-agent path. It does not introduce `port k3s` or a second
+Kubernetes-only operator toolchain.
+
+The contract is:
+
+- one hosted control plane
+- one host group
+- one K3s server machine
+- one or more worker machines
+- stateless Firecracker `standard` machines only
+
+Config shape:
+
+```toml
+[k3s_clusters.demo]
+control_plane = "demo"
+host_group = "remote-linux"
+server_machine = "cloud-generic"
+worker_machines = ["cloud-aws"]
+version = "v1.32.0+k3s1"
+server_args = ["--disable=traefik"]
+worker_args = ["--node-label=role=worker"]
+```
+
+Canonical hosted workflow:
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9235 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-generic
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -"
+JOIN_TOKEN="$(PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /var/lib/rancher/k3s/server/node-token')"
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-aws -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='${JOIN_TOKEN}' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -"
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /etc/rancher/k3s/k3s.yaml'
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'k3s kubectl get nodes -o wide'
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-generic
+```
+
+First-slice boundaries stay explicit:
+
+- no HA or multi-server control planes
+- no attached volumes, persistent storage, or CSI
+- no ingress, load balancers, or public service exposure
+- no SSH-owned or multi-group cluster routing
+
+Repo-local proof for this workflow:
+
+```bash
+./scripts/render-hosted-k3s-proof.sh .keel/stories/VDfzOEeFL/EVIDENCE
+```
+
+## SSH Repo-local Proof
 
 The checked-in proof command for this workflow is:
 
