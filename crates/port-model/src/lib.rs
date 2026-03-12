@@ -458,6 +458,7 @@ impl PortConfig {
                     route: MachineCommandRoute::HostedControlPlane,
                 }))
             }
+            HostConnection::Ssh { .. } => Ok(None),
         }
     }
 
@@ -514,6 +515,12 @@ impl PortConfig {
                     )));
                 }
                 HostConnection::HostedControlPlane { control_plane } => control_plane.clone(),
+                HostConnection::Ssh { .. } => {
+                    return Err(ValidationError::new(format!(
+                        "node '{}' references ssh-managed host '{}' but hosted nodes must target a hosted control plane",
+                        node_name, node.host
+                    )));
+                }
             };
             nodes.insert(
                 node_name.clone(),
@@ -964,6 +971,10 @@ fn sample_artifact_variant(
         },
         path: PathBuf::from(path),
     }
+}
+
+const fn default_ssh_port() -> u16 {
+    22
 }
 
 fn hosted_host(provider: HostProvider, control_plane: &str, notes: Vec<String>) -> HostSpec {
@@ -1743,7 +1754,15 @@ pub struct HostSpec {
 #[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum HostConnection {
     Local,
-    HostedControlPlane { control_plane: String },
+    HostedControlPlane {
+        control_plane: String,
+    },
+    Ssh {
+        destination: String,
+        user: String,
+        #[serde(default = "default_ssh_port")]
+        port: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1982,6 +2001,7 @@ impl MachineControlContract {
         match connection {
             HostConnection::Local => Self::local_runtime_root(),
             HostConnection::HostedControlPlane { .. } => Self::hosted_control_plane(),
+            HostConnection::Ssh { .. } => Self::ssh_managed_remote(),
         }
     }
 
@@ -2020,6 +2040,25 @@ impl MachineControlContract {
             top_route: MachineCommandRoute::HostedControlPlane,
             service_route: MachineCommandRoute::HostedControlPlane,
             guest_route: MachineCommandRoute::HostedControlPlane,
+        }
+    }
+
+    #[must_use]
+    pub fn ssh_managed_remote() -> Self {
+        Self {
+            inventory_scope: MachineInventoryScope::SshRuntimeRoot,
+            inventory_owner: MachineInventoryOwner::SshRemoteRuntime,
+            lifecycle_owner: MachineLifecycleOwner::SshRemotePortRuntime,
+            guest_broker: MachineGuestBroker::SshRemoteRuntimeTransport,
+            status_source: MachineStatusSource::SshRuntimeManifestAndHostProcess,
+            launch_route: MachineCommandRoute::SshManagedRemote,
+            inventory_route: MachineCommandRoute::SshManagedRemote,
+            status_route: MachineCommandRoute::SshManagedRemote,
+            stop_route: MachineCommandRoute::SshManagedRemote,
+            monitor_route: MachineCommandRoute::SshManagedRemote,
+            top_route: MachineCommandRoute::SshManagedRemote,
+            service_route: MachineCommandRoute::SshManagedRemote,
+            guest_route: MachineCommandRoute::SshManagedRemote,
         }
     }
 }
@@ -2288,6 +2327,7 @@ pub struct AvfDirectoryShareContract {
 pub enum MachineInventoryScope {
     LocalRuntimeRoot,
     HostedFleet,
+    SshRuntimeRoot,
 }
 
 impl std::fmt::Display for MachineInventoryScope {
@@ -2295,6 +2335,7 @@ impl std::fmt::Display for MachineInventoryScope {
         let label = match self {
             Self::LocalRuntimeRoot => "local-runtime-root",
             Self::HostedFleet => "hosted-fleet",
+            Self::SshRuntimeRoot => "ssh-runtime-root",
         };
         f.write_str(label)
     }
@@ -2305,6 +2346,7 @@ impl std::fmt::Display for MachineInventoryScope {
 pub enum MachineInventoryOwner {
     LocalRuntimeRoot,
     HostedControlPlane,
+    SshRemoteRuntime,
 }
 
 impl std::fmt::Display for MachineInventoryOwner {
@@ -2312,6 +2354,7 @@ impl std::fmt::Display for MachineInventoryOwner {
         let label = match self {
             Self::LocalRuntimeRoot => "local-runtime-root",
             Self::HostedControlPlane => "hosted-control-plane",
+            Self::SshRemoteRuntime => "ssh-remote-runtime",
         };
         f.write_str(label)
     }
@@ -2322,6 +2365,7 @@ impl std::fmt::Display for MachineInventoryOwner {
 pub enum MachineLifecycleOwner {
     LocalPortRuntime,
     HostedNodeAgent,
+    SshRemotePortRuntime,
 }
 
 impl std::fmt::Display for MachineLifecycleOwner {
@@ -2329,6 +2373,7 @@ impl std::fmt::Display for MachineLifecycleOwner {
         let label = match self {
             Self::LocalPortRuntime => "local-port-runtime",
             Self::HostedNodeAgent => "hosted-node-agent",
+            Self::SshRemotePortRuntime => "ssh-remote-port-runtime",
         };
         f.write_str(label)
     }
@@ -2339,6 +2384,7 @@ impl std::fmt::Display for MachineLifecycleOwner {
 pub enum MachineGuestBroker {
     LocalRuntimeTransport,
     ControlPlaneNodeAgentTunnel,
+    SshRemoteRuntimeTransport,
 }
 
 impl std::fmt::Display for MachineGuestBroker {
@@ -2346,6 +2392,7 @@ impl std::fmt::Display for MachineGuestBroker {
         let label = match self {
             Self::LocalRuntimeTransport => "local-runtime-transport",
             Self::ControlPlaneNodeAgentTunnel => "control-plane-node-agent-tunnel",
+            Self::SshRemoteRuntimeTransport => "ssh-remote-runtime-transport",
         };
         f.write_str(label)
     }
@@ -2356,6 +2403,7 @@ impl std::fmt::Display for MachineGuestBroker {
 pub enum MachineStatusSource {
     RuntimeManifestAndHostProcess,
     ControlPlaneInventoryAndNodeAgentRuntime,
+    SshRuntimeManifestAndHostProcess,
 }
 
 impl std::fmt::Display for MachineStatusSource {
@@ -2365,6 +2413,7 @@ impl std::fmt::Display for MachineStatusSource {
             Self::ControlPlaneInventoryAndNodeAgentRuntime => {
                 "control-plane-inventory-and-node-agent-runtime"
             }
+            Self::SshRuntimeManifestAndHostProcess => "ssh-runtime-manifest-and-host-process",
         };
         f.write_str(label)
     }
@@ -2375,6 +2424,7 @@ impl std::fmt::Display for MachineStatusSource {
 pub enum MachineCommandRoute {
     DirectLocalRuntime,
     HostedControlPlane,
+    SshManagedRemote,
 }
 
 impl std::fmt::Display for MachineCommandRoute {
@@ -2382,6 +2432,7 @@ impl std::fmt::Display for MachineCommandRoute {
         let label = match self {
             Self::DirectLocalRuntime => "direct-local-runtime",
             Self::HostedControlPlane => "hosted-control-plane",
+            Self::SshManagedRemote => "ssh-managed-remote",
         };
         f.write_str(label)
     }
@@ -2535,6 +2586,42 @@ fn validate_host(host_name: &str, host: &HostSpec) -> Result<(), ValidationError
         validate_firecracker_pvm_lane(host_name, lane)?;
     }
 
+    match &host.connection {
+        HostConnection::Local => {}
+        HostConnection::HostedControlPlane { control_plane } => {
+            if control_plane.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "host '{}' must declare a non-empty hosted control plane name",
+                    host_name
+                )));
+            }
+        }
+        HostConnection::Ssh {
+            destination,
+            user,
+            port,
+        } => {
+            if destination.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "host '{}' ssh connection must declare a non-empty destination",
+                    host_name
+                )));
+            }
+            if user.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "host '{}' ssh connection must declare a non-empty user",
+                    host_name
+                )));
+            }
+            if *port == 0 {
+                return Err(ValidationError::new(format!(
+                    "host '{}' ssh connection must declare a non-zero port",
+                    host_name
+                )));
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -2549,11 +2636,20 @@ fn validate_hosted_node(
             node_name, node.host
         ))
     })?;
-    if matches!(host.connection, HostConnection::Local) {
-        return Err(ValidationError::new(format!(
-            "node '{}' references local host '{}' but hosted nodes must resolve through a hosted control plane",
-            node_name, node.host
-        )));
+    match &host.connection {
+        HostConnection::Local => {
+            return Err(ValidationError::new(format!(
+                "node '{}' references local host '{}' but hosted nodes must resolve through a hosted control plane",
+                node_name, node.host
+            )));
+        }
+        HostConnection::HostedControlPlane { .. } => {}
+        HostConnection::Ssh { .. } => {
+            return Err(ValidationError::new(format!(
+                "node '{}' references ssh-managed host '{}' but hosted nodes must resolve through a hosted control plane",
+                node_name, node.host
+            )));
+        }
     }
     if node.runtime_root.as_os_str().is_empty() {
         return Err(ValidationError::new(format!(
@@ -2787,6 +2883,12 @@ fn validate_hosted_host_group(
                 )));
             }
             HostConnection::HostedControlPlane { control_plane } => control_plane.clone(),
+            HostConnection::Ssh { .. } => {
+                return Err(ValidationError::new(format!(
+                    "host group '{}' references node '{}' on ssh-managed host '{}'",
+                    group_name, node_name, node.host
+                )));
+            }
         };
         if let Some(current) = &control_plane {
             if current != &node_control_plane {
@@ -3274,6 +3376,97 @@ mod tests {
         assert_eq!(
             contract.service_route,
             MachineCommandRoute::HostedControlPlane
+        );
+    }
+
+    #[test]
+    fn ssh_host_connection_contract() {
+        let mut config = PortConfig::sample();
+        config.nodes.clear();
+        config.host_groups.clear();
+        config
+            .hosts
+            .get_mut("generic-linux")
+            .expect("generic-linux host should exist")
+            .connection = HostConnection::Ssh {
+            destination: String::from("builder.example.internal"),
+            user: String::from("ubuntu"),
+            port: 2222,
+        };
+
+        let encoded = config.to_toml_string().expect("config should encode");
+        assert!(encoded.contains("mode = \"ssh\""));
+        assert!(encoded.contains("destination = \"builder.example.internal\""));
+        assert!(encoded.contains("user = \"ubuntu\""));
+        assert!(encoded.contains("port = 2222"));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("config should decode");
+        assert_eq!(
+            decoded.hosts["generic-linux"].connection,
+            HostConnection::Ssh {
+                destination: String::from("builder.example.internal"),
+                user: String::from("ubuntu"),
+                port: 2222,
+            }
+        );
+
+        let contract = decoded
+            .machine_control_contract("cloud-generic")
+            .expect("ssh-backed machine contract should resolve");
+        assert_eq!(contract, MachineControlContract::ssh_managed_remote());
+        assert_eq!(
+            contract.inventory_scope,
+            MachineInventoryScope::SshRuntimeRoot
+        );
+        assert_eq!(
+            contract.inventory_owner,
+            MachineInventoryOwner::SshRemoteRuntime
+        );
+        assert_eq!(
+            contract.lifecycle_owner,
+            MachineLifecycleOwner::SshRemotePortRuntime
+        );
+        assert_eq!(
+            contract.guest_broker,
+            MachineGuestBroker::SshRemoteRuntimeTransport
+        );
+        assert_eq!(
+            contract.status_source,
+            MachineStatusSource::SshRuntimeManifestAndHostProcess
+        );
+        assert_eq!(contract.launch_route, MachineCommandRoute::SshManagedRemote);
+        assert_eq!(contract.status_route, MachineCommandRoute::SshManagedRemote);
+        assert_eq!(contract.stop_route, MachineCommandRoute::SshManagedRemote);
+    }
+
+    #[test]
+    fn hybrid_route_regression_local_and_hosted() {
+        let config = PortConfig::sample();
+
+        assert_eq!(
+            config
+                .machine_control_contract("demo")
+                .expect("local contract should resolve"),
+            MachineControlContract::local_runtime_root()
+        );
+        assert_eq!(
+            config
+                .machine_control_contract("cloud-aws")
+                .expect("hosted contract should resolve"),
+            MachineControlContract::hosted_control_plane()
+        );
+        assert_eq!(
+            config
+                .hosted_api_identity_contract("demo")
+                .expect("local identity should resolve"),
+            None
+        );
+        assert!(
+            config
+                .hosted_api_identity_contract("cloud-aws")
+                .expect("hosted identity should resolve")
+                .is_some(),
+            "hosted machines should continue to resolve hosted API identity"
         );
     }
 

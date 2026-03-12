@@ -14,3 +14,7 @@ Laid bearing VDcStPolu into epic VDcStPolu to begin executable hybrid-execution 
 ## 2026-03-12T06:24:30
 
 Authored epic VDcStPolu, created and planned voyage VDeuazAgk, and thawed four backlog stories for the first SSH-first hybrid execution slice.
+
+## 2026-03-12T06:40:36
+
+Completed story VDeuzcDcL to add the SSH hybrid route contract, explicit SSH route/ownership semantics, and defensive runtime handling that prevents SSH hosts from falling through hosted paths.

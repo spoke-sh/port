@@ -127,7 +127,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | planned |
+| [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | in-progress |
 
 ### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 

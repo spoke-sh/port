@@ -25,5 +25,5 @@ created_at: 2026-03-12T06:15:49
 **Progress:** 0/1 voyages complete, 0/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [SSH-First Hybrid Execution Foundations](voyages/VDeuazAgk/) | planned | 0/4 |
+| [SSH-First Hybrid Execution Foundations](voyages/VDeuazAgk/) | in-progress | 0/4 |
 <!-- END GENERATED -->

@@ -3875,6 +3875,12 @@ fn build_node_agent_registration_target(
                 state.inner.node_name
             )
         }
+        HostConnection::Ssh { .. } => {
+            bail!(
+                "node '{}' targets an ssh-managed host, not a hosted control plane",
+                state.inner.node_name
+            )
+        }
     };
     let spec = state
         .inner

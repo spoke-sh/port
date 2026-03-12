@@ -1218,6 +1218,7 @@ fn firecracker_local_launch_machine(
                 request.machine_name,
                 &machine.host,
                 host.provider,
+                &host.connection,
                 hosted_identity.as_ref(),
             )
         );
@@ -1446,6 +1447,7 @@ fn cloud_hypervisor_local_launch_machine(
                 request.machine_name,
                 &machine.host,
                 host.provider,
+                &host.connection,
                 hosted_identity.as_ref(),
             )
         );
@@ -4266,6 +4268,20 @@ fn resolve_machine_runtime(
                     scheduler: None,
                 })
             }
+            HostConnection::Ssh {
+                destination,
+                user,
+                port,
+            } => {
+                bail!(
+                    "machine '{}' targets ssh-managed host '{}' through {}@{}:{} but ssh-managed lifecycle is not implemented yet",
+                    machine_name,
+                    machine.host,
+                    user,
+                    destination,
+                    port
+                )
+            }
         };
     }
 
@@ -4702,6 +4718,7 @@ fn hosted_control_plane_for_node<'a>(config: &'a PortConfig, node_name: &str) ->
     match &host.connection {
         HostConnection::HostedControlPlane { control_plane } => Some(control_plane.as_str()),
         HostConnection::Local => None,
+        HostConnection::Ssh { .. } => None,
     }
 }
 
@@ -5235,6 +5252,7 @@ fn hosted_control_plane_names(config: &PortConfig) -> Vec<String> {
                         Some(control_plane.clone())
                     }
                     HostConnection::Local => None,
+                    HostConnection::Ssh { .. } => None,
                 })
         })
         .collect::<Vec<_>>();
@@ -5667,6 +5685,16 @@ fn provider_check(
             HostConnection::HostedControlPlane { control_plane } => {
                 format!(
                     "{detail} Hosted routing is modeled through control plane '{control_plane}'."
+                )
+            }
+            HostConnection::Ssh {
+                destination,
+                user,
+                port,
+            } => {
+                format!(
+                    "{detail} SSH-managed routing is modeled through {}@{}:{}.",
+                    user, destination, port
                 )
             }
         },
@@ -6373,6 +6401,7 @@ fn remote_launch_guidance(
     machine_name: &str,
     host_name: &str,
     provider: HostProvider,
+    connection: &HostConnection,
     hosted_identity: Option<&HostedApiIdentityContract>,
 ) -> String {
     let hosted_route = hosted_identity
@@ -6387,22 +6416,53 @@ fn remote_launch_guidance(
         })
         .unwrap_or_default();
 
-    let detail = match provider {
-        HostProvider::Local => format!(
+    let detail = match connection {
+        HostConnection::Local => format!(
             "machine '{machine_name}' targets host '{host_name}' through a remote connection, but provider 'local' is reserved for direct local Linux launch"
         ),
-        HostProvider::GenericLinux => format!(
-            "machine '{machine_name}' targets remote Linux host '{host_name}' (provider 'generic-linux'); the MVP only launches locally. Run Port on that Linux host directly or wait for the remote control lane."
-        ),
-        HostProvider::Aws => format!(
-            "machine '{machine_name}' targets AWS host '{host_name}'; AWS remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the AWS Linux host itself."
-        ),
-        HostProvider::Gcp => format!(
-            "machine '{machine_name}' targets GCP host '{host_name}'; GCP remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the GCP Linux host itself."
-        ),
-        HostProvider::Azure => format!(
-            "machine '{machine_name}' targets Azure host '{host_name}'; Azure is explicitly unsupported for the Firecracker MVP. Move the workload to a generic Linux, AWS, or GCP host."
-        ),
+        HostConnection::HostedControlPlane { .. } => match provider {
+            HostProvider::Local => format!(
+                "machine '{machine_name}' targets host '{host_name}' through a remote connection, but provider 'local' is reserved for direct local Linux launch"
+            ),
+            HostProvider::GenericLinux => format!(
+                "machine '{machine_name}' targets remote Linux host '{host_name}' (provider 'generic-linux'); the MVP only launches locally. Run Port on that Linux host directly or wait for the remote control lane."
+            ),
+            HostProvider::Aws => format!(
+                "machine '{machine_name}' targets AWS host '{host_name}'; AWS remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the AWS Linux host itself."
+            ),
+            HostProvider::Gcp => format!(
+                "machine '{machine_name}' targets GCP host '{host_name}'; GCP remains a justified future Firecracker lane, but remote launch is not implemented in the MVP. Run Port on the GCP Linux host itself."
+            ),
+            HostProvider::Azure => format!(
+                "machine '{machine_name}' targets Azure host '{host_name}'; Azure is explicitly unsupported for the Firecracker MVP. Move the workload to a generic Linux, AWS, or GCP host."
+            ),
+        },
+        HostConnection::Ssh {
+            destination,
+            user,
+            port,
+        } => match provider {
+            HostProvider::Local => format!(
+                "machine '{machine_name}' targets ssh-managed host '{host_name}' through {}@{}:{} but provider 'local' is reserved for direct local Linux launch",
+                user, destination, port
+            ),
+            HostProvider::GenericLinux => format!(
+                "machine '{machine_name}' targets ssh-managed Linux host '{host_name}' through {}@{}:{}; the SSH ownership lane is now modeled but lifecycle execution is not implemented yet.",
+                user, destination, port
+            ),
+            HostProvider::Aws => format!(
+                "machine '{machine_name}' targets ssh-managed AWS host '{host_name}' through {}@{}:{}; AWS remains a justified remote lane, but SSH-managed lifecycle execution is not implemented yet.",
+                user, destination, port
+            ),
+            HostProvider::Gcp => format!(
+                "machine '{machine_name}' targets ssh-managed GCP host '{host_name}' through {}@{}:{}; GCP remains a justified remote lane, but SSH-managed lifecycle execution is not implemented yet.",
+                user, destination, port
+            ),
+            HostProvider::Azure => format!(
+                "machine '{machine_name}' targets ssh-managed Azure host '{host_name}' through {}@{}:{}; Azure remains unsupported for the Firecracker MVP.",
+                user, destination, port
+            ),
+        },
     };
 
     format!("{detail}{hosted_route}")
@@ -8074,6 +8134,20 @@ fn resolve_guest_runtime_root(
             let _ = node_name;
             Ok(resolution.runtime_root)
         }
+        HostConnection::Ssh {
+            destination,
+            user,
+            port,
+        } => {
+            bail!(
+                "machine '{}' targets ssh-managed host '{}' through {}@{}:{} but guest runtime-root resolution is not implemented yet",
+                machine_name,
+                machine.host,
+                user,
+                destination,
+                port
+            )
+        }
     }
 }
 
@@ -8659,6 +8733,18 @@ fn driver_for_machine(config: &PortConfig, machine_name: &str) -> Result<Box<dyn
             ExecutionSubstrate::CloudHypervisor => Ok(Box::new(CloudHypervisorLocalDriver)),
             ExecutionSubstrate::Avf => Ok(Box::new(AvfLocalDriver)),
         },
+        HostConnection::Ssh {
+            destination,
+            user,
+            port,
+        } => bail!(
+            "machine '{}' targets ssh-managed host '{}' through {}@{}:{} but ssh-managed drivers are not implemented yet",
+            machine_name,
+            machine.host,
+            user,
+            destination,
+            port
+        ),
     }
 }
 
