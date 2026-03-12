@@ -26,3 +26,7 @@ Completed story VDeuzX5cO by adding SSH-specific doctor guidance, host auth/boot
 ## 2026-03-12T07:01:02
 
 Completed story VDeuzYscv by routing machine launch, status, and stop through an ssh-managed remote lifecycle adapter with explicit host, provider, route, and ownership context plus CLI regression coverage.
+
+## 2026-03-12T07:11:00
+
+Completed story VDeuzbve3 by publishing the hybrid execution contract in README/docs, adding a deterministic SSH workflow proof renderer, and recording a GIF-backed human review artifact for just mission surfaces.

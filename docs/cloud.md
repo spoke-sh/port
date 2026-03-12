@@ -1,10 +1,11 @@
 # Cloud Linux Support
 
 Port's cloud Linux story is now split across provider identity and execution
-lane. The current shipped Linux execution surface spans three proof-backed
-paths: Firecracker with `standard` protection, prepared-node Firecracker/PVM on
-`x86_64`, and Cloud Hypervisor with `standard` protection. The shared model
-still represents follow-on or research-backed lanes beyond that shipped set.
+lane. The current shipped Linux execution surface spans four proof-backed
+paths: Firecracker with `standard` protection, the first SSH-managed remote
+Linux lifecycle slice, prepared-node Firecracker/PVM on `x86_64`, and Cloud
+Hypervisor with `standard` protection. The shared model still represents
+follow-on or research-backed lanes beyond that shipped set.
 
 The hosted control-plane split that will eventually carry these remote lanes is
 defined in [`docs/hosted.md`](hosted.md).
@@ -14,6 +15,34 @@ The dedicated AVF macOS contract lives in [`avf.md`](avf.md).
 `port doctor` reports both provider-aware and lane-aware support boundaries, and
 `port machine launch` fails fast only when you target a lane that Port still
 models but does not execute yet.
+
+## SSH-Managed Remote Linux Workflow
+
+The first direct remote Linux lane now keeps the same machine command family
+while switching the host connection to SSH:
+
+```toml
+[hosts.generic-linux.connection]
+mode = "ssh"
+destination = "builder.example.internal"
+user = "ubuntu"
+port = 2222
+```
+
+Once the remote host already has Port, Firecracker, and the selected artifact
+paths installed, the operator workflow stays canonical:
+
+```bash
+port --config /tmp/port-ssh.toml doctor
+port --config /tmp/port-ssh.toml machine launch --machine cloud-generic --runtime-root /var/lib/port/runtime
+port --config /tmp/port-ssh.toml machine status --machine cloud-generic --runtime-root /var/lib/port/runtime
+port --config /tmp/port-ssh.toml machine stop --machine cloud-generic --runtime-root /var/lib/port/runtime
+```
+
+Port makes the SSH lane explicit in output with route and ownership fields such
+as `ssh-managed-remote`, `ssh-remote-runtime`, and
+`ssh-remote-port-runtime`. The first SSH slice does not add a second command
+family and does not yet cover guest or service workflows.
 
 ## Execution Lane Matrix
 

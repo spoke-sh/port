@@ -123,11 +123,11 @@
 | [Prepared Linux Pvm Runtime](epics/1vzJKE000/voyages/1vzJP2000/) | done |
 | [Executable Avf Runtime Foundation](epics/1vzJKE000/voyages/1vzLYD000/) | done |
 
-### [Hybrid Local Remote And SSH Execution](epics/VDcStPolu/) (active)
+### [Hybrid Local Remote And SSH Execution](epics/VDcStPolu/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | in-progress |
+| [SSH-First Hybrid Execution Foundations](epics/VDcStPolu/voyages/VDeuazAgk/) | done |
 
 ### [Installable Linux And Mac Developer Experience](epics/VDcT0vaPb/) (done)
 

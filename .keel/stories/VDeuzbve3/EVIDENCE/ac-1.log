@@ -1,0 +1,55 @@
+---
+recorded_at: 2026-03-12T07:07:24.717732123-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && rg -n "ssh|hosted-control-plane|hybrid" README.md docs CONFIGURATION.md'
+---
+README.md:20:  launch`, `status`, and `stop` through `mode = "ssh"` with explicit route and
+docs/hosted.md:163:mode = "hosted-control-plane"
+docs/hosted.md:242:- keeps `inventory_owner = "hosted-control-plane"`
+docs/hosted.md:303:- `status_route = "hosted-control-plane"`
+docs/hosted.md:304:- `monitor_route = "hosted-control-plane"`
+docs/hosted.md:305:- `top_route = "hosted-control-plane"`
+docs/hosted.md:306:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:540:- `inventory_owner = "hosted-control-plane"`
+docs/hosted.md:544:- `launch_route = "hosted-control-plane"`
+docs/hosted.md:545:- `inventory_route = "hosted-control-plane"`
+docs/hosted.md:546:- `status_route = "hosted-control-plane"`
+docs/hosted.md:547:- `stop_route = "hosted-control-plane"`
+docs/hosted.md:548:- `monitor_route = "hosted-control-plane"`
+docs/hosted.md:549:- `top_route = "hosted-control-plane"`
+docs/hosted.md:550:- `service_route = "hosted-control-plane"`
+docs/hosted.md:551:- `guest_route = "hosted-control-plane"`
+docs/hosted.md:566:- `guest_route = "hosted-control-plane"`
+docs/cloud.md:26:mode = "ssh"
+docs/cloud.md:36:port --config /tmp/port-ssh.toml doctor
+docs/cloud.md:37:port --config /tmp/port-ssh.toml machine launch --machine cloud-generic --runtime-root /var/lib/port/runtime
+docs/cloud.md:38:port --config /tmp/port-ssh.toml machine status --machine cloud-generic --runtime-root /var/lib/port/runtime
+docs/cloud.md:39:port --config /tmp/port-ssh.toml machine stop --machine cloud-generic --runtime-root /var/lib/port/runtime
+docs/cloud.md:43:as `ssh-managed-remote`, `ssh-remote-runtime`, and
+docs/cloud.md:44:`ssh-remote-port-runtime`. The first SSH slice does not add a second command
+docs/cloud.md:71:1. Keep the canonical config explicit about provider identity, for example `provider = "aws"` on `hosts.aws-linux`. Remote/cloud hosts point at the named hosted control plane with `mode = "hosted-control-plane"` plus `control_plane = "demo"`.
+docs/operators.md:21:| `mode = "hosted-control-plane"` | `hosted-control-plane`, `hosted-control-plane`, `hosted-node-agent` | Keep the same `port machine ...`, `guest ...`, and `service ...` verbs, but route them through the hosted control plane plus node agent |
+docs/operators.md:22:| `mode = "ssh"` | `ssh-managed-remote`, `ssh-remote-runtime`, `ssh-remote-port-runtime` | Keep the same `port machine launch`, `status`, and `stop` verbs while Port shells into one remote Linux host that already exposes Port, Firecracker, and the selected artifact paths |
+docs/operators.md:38:mode = "ssh"
+docs/operators.md:51:port --config /tmp/port-ssh.toml doctor
+docs/operators.md:52:port --config /tmp/port-ssh.toml machine launch --machine cloud-generic --runtime-root /var/lib/port/runtime
+docs/operators.md:53:port --config /tmp/port-ssh.toml machine status --machine cloud-generic --runtime-root /var/lib/port/runtime
+docs/operators.md:54:port --config /tmp/port-ssh.toml machine stop --machine cloud-generic --runtime-root /var/lib/port/runtime
+docs/operators.md:59:- `launch route: ssh-managed-remote`
+docs/operators.md:60:- `inventory owner: ssh-remote-runtime`
+docs/operators.md:61:- `lifecycle owner: ssh-remote-port-runtime`
+docs/operators.md:76:./scripts/render-hybrid-ssh-proof.sh .keel/stories/VDeuzbve3/EVIDENCE
+
+--- stderr ---
+run-parts: unrecognized option '--regex'
+BusyBox v1.37.0 () multi-call binary.
+
+Usage: run-parts [-a ARG]... [-u UMASK] [--reverse] [--test] [--exit-on-error] [--list] DIRECTORY
+
+Run a bunch of scripts in DIRECTORY
+
+	-a ARG		Pass ARG as argument to scripts
+	-u UMASK	Set UMASK before running scripts
+	--reverse	Reverse execution order
+	--test		Dry run
+	--exit-on-error	Exit if a script exits with non-zero
+	--list		Print names of matching files even if they are not executable

@@ -16,6 +16,9 @@ It keeps one operator vocabulary across lanes:
 - Default local lane: Firecracker with `standard` protection on Linux
 - Hosted lane: control plane plus node agent with the same `machine`, `guest`,
   and `service` verbs
+- SSH-managed remote lane: one bounded Linux lifecycle slice for `machine
+  launch`, `status`, and `stop` through `mode = "ssh"` with explicit route and
+  ownership output
 - Additional proof-backed lanes: Cloud Hypervisor `standard`, AVF `standard`,
   and prepared-node Firecracker/PVM on `x86_64`
 
