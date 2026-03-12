@@ -8,14 +8,14 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    ForwardEndpoint, GuestOperation, LogsResult, ManagedServiceOperation, ManagedServiceRequest,
-    ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult,
-    PtyResult, RequestEnvelope, ResponseEnvelope, StreamRequestFrame, StreamResponseFrame,
-    parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
+    ExecRequest, ExecResult, ForwardEndpoint, GuestOperation, LogsResult, ManagedServiceOperation,
+    ManagedServiceRequest, ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus,
+    OperationResult, PtyResult, RequestEnvelope, ResponseEnvelope, StreamRequestFrame,
+    StreamResponseFrame, parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::{
     HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedDetachedForwardStartRequest,
@@ -126,6 +126,20 @@ pub struct LaunchMetadata {
     pub stderr_path: PathBuf,
     pub manifest_path: PathBuf,
     pub attached_volumes: Vec<MachineVolumeSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sBootstrapResult {
+    pub cluster_name: String,
+    pub control_plane: String,
+    pub host_group: String,
+    pub server_machine: String,
+    pub worker_machines: Vec<String>,
+    pub version: String,
+    pub server_endpoint: String,
+    pub join_token: String,
+    pub server_launch: LaunchMetadata,
+    pub worker_launches: Vec<LaunchMetadata>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1196,13 +1210,219 @@ pub fn launch_local_machine(
     driver_for_machine(config, request.machine_name)?.launch(config, request)
 }
 
+fn validate_machine_runtime_launch_config(config: &PortConfig) -> Result<()> {
+    let mut effective = config.clone();
+    effective.k3s_clusters.clear();
+    effective
+        .validate()
+        .map_err(|error| anyhow!("invalid port config: {error}"))
+}
+
+pub fn bootstrap_hosted_k3s_cluster(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+) -> Result<HostedK3sBootstrapResult> {
+    const K3S_LAUNCH_WAIT: Duration = Duration::from_millis(50);
+
+    config
+        .validate()
+        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+
+    let cluster = config
+        .k3s_clusters
+        .get(cluster_name)
+        .cloned()
+        .ok_or_else(|| anyhow!("unknown k3s cluster '{cluster_name}'"))?;
+
+    let server_launch = launch_local_machine(
+        config,
+        &LaunchRequest {
+            machine_name: &cluster.server_machine,
+            runtime_root,
+            boot_wait: K3S_LAUNCH_WAIT,
+        },
+    )
+    .with_context(|| {
+        format!(
+            "failed to launch hosted k3s server machine '{}' for cluster '{}'",
+            cluster.server_machine, cluster_name
+        )
+    })?;
+
+    execute_hosted_k3s_exec(
+        config,
+        runtime_root,
+        &cluster.server_machine,
+        k3s_install_command(&cluster.version, "server", &cluster.server_args, None, None),
+        "bootstrap the K3s server",
+        cluster_name,
+    )?;
+
+    let join_token = execute_hosted_k3s_exec(
+        config,
+        runtime_root,
+        &cluster.server_machine,
+        vec![
+            String::from("/bin/sh"),
+            String::from("-lc"),
+            String::from("cat /var/lib/rancher/k3s/server/node-token"),
+        ],
+        "read the K3s join token",
+        cluster_name,
+    )?
+    .stdout
+    .trim()
+    .to_string();
+    if join_token.is_empty() {
+        bail!(
+            "hosted k3s cluster '{}' returned an empty join token from server '{}'",
+            cluster_name,
+            cluster.server_machine
+        );
+    }
+
+    let server_endpoint = format!("https://{}:6443", cluster.server_machine);
+    let mut worker_launches = Vec::with_capacity(cluster.worker_machines.len());
+    for worker_machine in &cluster.worker_machines {
+        let launch = launch_local_machine(
+            config,
+            &LaunchRequest {
+                machine_name: worker_machine,
+                runtime_root,
+                boot_wait: K3S_LAUNCH_WAIT,
+            },
+        )
+        .with_context(|| {
+            format!(
+                "failed to launch hosted k3s worker machine '{}' for cluster '{}'",
+                worker_machine, cluster_name
+            )
+        })?;
+        execute_hosted_k3s_exec(
+            config,
+            runtime_root,
+            worker_machine,
+            k3s_install_command(
+                &cluster.version,
+                "agent",
+                &cluster.worker_args,
+                Some(&server_endpoint),
+                Some(&join_token),
+            ),
+            "join the K3s worker",
+            cluster_name,
+        )?;
+        worker_launches.push(launch);
+    }
+
+    Ok(HostedK3sBootstrapResult {
+        cluster_name: cluster_name.to_string(),
+        control_plane: cluster.control_plane,
+        host_group: cluster.host_group,
+        server_machine: cluster.server_machine,
+        worker_machines: cluster.worker_machines,
+        version: cluster.version,
+        server_endpoint,
+        join_token,
+        server_launch,
+        worker_launches,
+    })
+}
+
+fn execute_hosted_k3s_exec(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    command: Vec<String>,
+    action: &str,
+    cluster_name: &str,
+) -> Result<ExecResult> {
+    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(2);
+    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+
+    let request = ExecRequest {
+        command,
+        cwd: None,
+        env: Default::default(),
+    };
+    let started = Instant::now();
+    let last_error = loop {
+        match execute_guest_operation(
+            config,
+            GuestRequest {
+                machine_name,
+                runtime_root,
+                operation: GuestOperation::Exec(request.clone()),
+            },
+        ) {
+            Ok(OperationResult::Exec(result)) => return Ok(result),
+            Ok(other) => {
+                bail!(
+                    "hosted k3s cluster '{}' expected exec result from machine '{}' while trying to {}, received {other:?}",
+                    cluster_name,
+                    machine_name,
+                    action
+                );
+            }
+            Err(error) => {
+                if started.elapsed() >= GUEST_RETRY_TIMEOUT {
+                    break error;
+                }
+                thread::sleep(GUEST_RETRY_INTERVAL);
+            }
+        }
+    };
+
+    Err(last_error).with_context(|| {
+        format!(
+            "failed to {} on machine '{}' for hosted k3s cluster '{}'",
+            action, machine_name, cluster_name
+        )
+    })
+}
+
+fn k3s_install_command(
+    version: &str,
+    role: &str,
+    args: &[String],
+    server_url: Option<&str>,
+    join_token: Option<&str>,
+) -> Vec<String> {
+    let mut script = String::from("curl -sfL https://get.k3s.io | ");
+    script.push_str(&format!(
+        "INSTALL_K3S_VERSION={} ",
+        shell_single_quote(version)
+    ));
+    if let Some(server_url) = server_url {
+        script.push_str(&format!("K3S_URL={} ", shell_single_quote(server_url)));
+    }
+    if let Some(join_token) = join_token {
+        script.push_str(&format!("K3S_TOKEN={} ", shell_single_quote(join_token)));
+    }
+
+    let mut install_exec = role.to_string();
+    if !args.is_empty() {
+        install_exec.push(' ');
+        install_exec.push_str(&args.join(" "));
+    }
+    script.push_str(&format!(
+        "INSTALL_K3S_EXEC={} sh -",
+        shell_single_quote(&install_exec)
+    ));
+
+    vec![String::from("/bin/sh"), String::from("-lc"), script]
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn firecracker_local_launch_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
 ) -> Result<LaunchMetadata> {
-    config
-        .validate()
-        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+    validate_machine_runtime_launch_config(config)?;
 
     let machine = config
         .machines
@@ -1437,9 +1657,7 @@ fn cloud_hypervisor_local_launch_machine(
     config: &PortConfig,
     request: &LaunchRequest<'_>,
 ) -> Result<LaunchMetadata> {
-    config
-        .validate()
-        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+    validate_machine_runtime_launch_config(config)?;
 
     let machine = config
         .machines
@@ -1699,9 +1917,7 @@ fn avf_local_launch_machine_with_host_os(
     host_os: &str,
     launcher_override: Option<PathBuf>,
 ) -> Result<LaunchMetadata> {
-    config
-        .validate()
-        .map_err(|error| anyhow!("invalid port config: {error}"))?;
+    validate_machine_runtime_launch_config(config)?;
 
     let machine = config
         .machines
@@ -9639,17 +9855,18 @@ mod tests {
         ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
         ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
         apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
-        build_firecracker_config, cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
-        cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
-        collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
-        driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        hosted_placeholder_runtime_root, launch_local_machine, list_machine_secrets,
-        list_machine_services, list_machines, machine_monitor, machine_service_status,
-        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
-        pull_artifact, push_artifact, put_machine_secret, read_json_file, read_pid_file, repo_root,
-        resolve_artifact_metadata, resolve_artifact_store_contract, resolve_machine_architecture,
-        select_firecracker_binary, serve_control_plane, serve_node_agent, service_definition_dir,
-        service_runtime_dir, service_status_from_record, stop_machine, stop_machine_service,
+        bootstrap_hosted_k3s_cluster, build_firecracker_config, cloud_hypervisor_api_socket_path,
+        cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
+        cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
+        copy_guest_file, delete_machine_secret, driver_for_machine, ensure_native_build_lane,
+        execute_guest_operation, hosted_placeholder_runtime_root, launch_local_machine,
+        list_machine_secrets, list_machine_services, list_machines, machine_monitor,
+        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
+        read_pid_file, repo_root, resolve_artifact_metadata, resolve_artifact_store_contract,
+        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
+        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
+        stop_machine, stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -11202,6 +11419,64 @@ exec sleep 30
             serde_json::to_vec_pretty(&manifest).expect("manifest should serialize"),
         )
         .expect("manifest should write");
+    }
+
+    fn spawn_hosted_exec_sequence_server(
+        paths: RuntimePaths,
+        expected: Vec<(Vec<String>, String)>,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            for _ in 0..1000 {
+                if paths.manifest_path.exists() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                paths.manifest_path.exists(),
+                "machine manifest should exist before binding guest transport at {}",
+                paths.manifest_path.display()
+            );
+            fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+            let listener =
+                UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
+
+            for (expected_command, stdout) in expected {
+                let (mut stream, _) = listener
+                    .accept()
+                    .expect("should accept hosted guest transport");
+                let reader_stream = stream.try_clone().expect("stream should clone");
+                let mut reader = BufReader::new(reader_stream);
+                let mut handshake = String::new();
+                reader
+                    .read_line(&mut handshake)
+                    .expect("handshake should decode");
+                assert!(
+                    handshake.starts_with("CONNECT "),
+                    "unexpected guest transport handshake: {handshake:?}"
+                );
+                stream.write_all(b"OK\n").expect("handshake should ack");
+                stream.flush().expect("handshake should flush");
+                let request: RequestEnvelope =
+                    read_frame(&mut reader).expect("request should decode");
+                match request.operation {
+                    GuestOperation::Exec(request) => assert_eq!(request.command, expected_command),
+                    other => panic!("unexpected hosted guest operation: {other:?}"),
+                }
+                write_frame(
+                    &mut stream,
+                    &ResponseEnvelope::Completed {
+                        id: request.id,
+                        exit_code: 0,
+                        result: OperationResult::Exec(ExecResult {
+                            stdout,
+                            stderr: String::new(),
+                        }),
+                    },
+                )
+                .expect("response should encode");
+            }
+        })
     }
 
     fn write_detached_forward_manifest(
@@ -13018,6 +13293,105 @@ exec sleep 30
         );
         assert!(message.contains("cloud-azure"));
         assert!(message.contains("no hosted node inventory record matches that host"));
+    }
+
+    #[test]
+    fn hosted_k3s_bootstrap_and_join_workflow() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("remote-linux"),
+                server_machine: String::from("cloud-generic"),
+                worker_machines: vec![String::from("cloud-aws")],
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: vec![String::from("--node-label=role=worker")],
+            },
+        );
+
+        let server_paths = RuntimePaths::for_machine(
+            &config.nodes["generic-linux-node"].runtime_root,
+            "cloud-generic",
+        );
+        let worker_paths =
+            RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
+        let server_guest = spawn_hosted_exec_sequence_server(
+            server_paths,
+            vec![
+                (
+                    vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -",
+                        ),
+                    ],
+                    String::from("server bootstrapped\n"),
+                ),
+                (
+                    vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("cat /var/lib/rancher/k3s/server/node-token"),
+                    ],
+                    String::from("demo-join-token\n"),
+                ),
+            ],
+        );
+        let worker_guest = spawn_hosted_exec_sequence_server(
+            worker_paths,
+            vec![(
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from(
+                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -",
+                    ),
+                ],
+                String::from("worker joined\n"),
+            )],
+        );
+
+        let config = start_named_live_hosted_servers_inner(
+            &config,
+            &["generic-linux-node", "aws-linux-node"],
+        )
+        .expect("hosted servers should start");
+
+        let result = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+
+        assert_eq!(result.cluster_name, "demo");
+        assert_eq!(result.control_plane, "demo");
+        assert_eq!(result.host_group, "remote-linux");
+        assert_eq!(result.server_machine, "cloud-generic");
+        assert_eq!(result.worker_machines, vec![String::from("cloud-aws")]);
+        assert_eq!(result.server_endpoint, "https://cloud-generic:6443");
+        assert_eq!(result.join_token, "demo-join-token");
+        assert_eq!(result.worker_launches.len(), 1);
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(result.server_launch.pid.to_string())
+            .status();
+        for metadata in result.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
     }
 
     #[test]

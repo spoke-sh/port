@@ -2,12 +2,14 @@
 id: VDfzOEtFN
 title: Implement Hosted K3s Bootstrap And Join Workflow
 type: feat
-status: backlog
+status: done
 created_at: 2026-03-12T10:44:50
-updated_at: 2026-03-12T10:46:00
+updated_at: 2026-03-12T14:11:03
 operator-signal: 
 scope: VDcStSMlp/VDfytSpPs
 index: 3
+started_at: 2026-03-12T13:56:27
+completed_at: 2026-03-12T14:11:03
 ---
 
 # Implement Hosted K3s Bootstrap And Join Workflow
@@ -21,4 +23,4 @@ canonical hosted machine and guest path.
 ## Acceptance Criteria
 
 <!-- verify: command, SRS-02:start:end, proof: ac-1.log -->
-- [ ] [SRS-02/AC-01] The hosted K3s workflow bootstraps one server machine and joins at least one worker machine through canonical machine lifecycle and guest-control surfaces. <!-- [SRS-02/AC-01] verify: cargo test -q hosted_k3s_bootstrap_and_join_workflow, proof: ac-1.log -->
+- [x] [SRS-02/AC-01] The hosted K3s workflow bootstraps one server machine and joins at least one worker machine through canonical machine lifecycle and guest-control surfaces. <!-- [SRS-02/AC-01] verify: cargo test -q hosted_k3s_bootstrap_and_join_workflow, proof: ac-1.log -->

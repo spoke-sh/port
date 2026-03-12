@@ -14,3 +14,7 @@ Reassessed bearing VDcStSMlp against the shipped install, hosted, SSH, and stora
 ## 2026-03-12T10:52:00
 
 Reassessed bearing VDcStSMlp against shipped installable, hybrid, hosted, and storage foundations, laid it into epic VDcStSMlp, planned voyage VDfytSpPs for a hosted stateless K3s slice, and completed story VDfzLrZ4e to add the initial K3s cluster contract in port-model.
+
+## 2026-03-12T14:11:55
+
+Completed VDfzOEtFN with a hosted K3s bootstrap workflow that launches one server, reads the join token, and joins worker machines through canonical hosted machine and guest routes.
