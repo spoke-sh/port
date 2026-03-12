@@ -26,13 +26,15 @@ carrying one mixed context across planning, research, and execution.
 
 1. **Keep One Mission Steward**: The top-level harness/session owns mission
    scope, charter integrity, `just keel mission show <id>`, `just flow`,
-   `just keel mission next <id>`, mission logging, phase switching, and final
-   mission lifecycle transitions.
+   `just keel mission next [<id>]`, mission logging, phase switching, and
+   final mission lifecycle transitions. Omit the ID to auto-select the
+   highest-priority actionable mission.
 2. **Delegate By Workflow Type**: Hand one concrete work unit to a dedicated
    worker context:
    - **Operator**: one primary implementation slice at a time, usually one
      story plus any directly coupled lifecycle work required to finish that
-     slice cleanly.
+     slice cleanly, for example `story submit`, evidence capture, or
+     `voyage done` when closing the final scoped story.
    - **Manager**: one planning unit at a time, including authored artifacts and
      downstream story decomposition needed to seal that unit cleanly.
    - **Explorer**: exactly one bearing research package, one lifecycle
@@ -47,12 +49,18 @@ carrying one mixed context across planning, research, and execution.
    commands before choosing the next phase.
 5. **Do Not Mix Phases In One Worker**: If the work changes from execution to
    planning or research, stop and hand off to the matching workflow context
-   instead of continuing in the old one. Only parallelize workers when their
-   artifacts and ownership do not overlap.
+   instead of continuing in the old one. Parent context reads and directly
+   coupled closure steps are fine; silent mission re-scoping is not. Only
+   parallelize workers when their artifacts and ownership do not overlap.
 
 ## Delivery Workflow (Operator)
 
 **Operational Contract**: Focused operator for evidence-backed delivery.
+
+Use this workflow inside a dedicated operator context. When operating under a
+mission, the mission steward should hand one primary story slice at a time to
+this workflow, along with any directly coupled parent context or closure work
+needed to finish that slice cleanly.
 
 1. **Pull Context**: Read current board health and identify bottlenecks with
    `just flow`.
@@ -71,11 +79,15 @@ carrying one mixed context across planning, research, and execution.
      progress, and rendered artifact paths.
    - `just keel epic show <epic-id>` for the problem statement, goals,
      requirement coverage, scope drift, and rendered artifact paths.
+   - When you need full authored detail, follow the document paths shown in
+     these views (`README.md`, `PRD.md`, `SRS.md`, `SDD.md`, and related
+     artifacts) instead of guessing from summaries.
 4. **Check Story Coherence Before Coding**: Confirm acceptance criteria are
    traceable and verifiable.
    - Acceptance criteria are linked to source requirements, for example
      `[SRS-XX/AC-YY]`.
-   - Evidence strategy is clear for each criterion.
+   - Evidence strategy is clear for each criterion, for example test, CLI
+     proof, or manual proof.
    - If requirements are ambiguous, loop back to the relevant `show` command
      and the linked planning artifacts before implementation.
 5. **Execute (TDD)**: Follow test-driven development.
@@ -86,11 +98,22 @@ carrying one mixed context across planning, research, and execution.
    acceptance criterion:
    - `just keel story record <ID> --ac <NUM> --cmd "<command>"`
    - For manual proofs, use `--msg`.
+   - Use `--file` when the proof already exists as a human-reviewable artifact.
 7. **Reflect Selectively (Optional)**: Use `just keel story reflect <ID>` only
    when the work uncovered a novel, reusable insight that is likely to help
    future stories. Reflection is optional and is no longer a mandatory gate for
    submission.
-   - Prefer linking existing knowledge over creating new low-signal knowledge.
+   - Start from the similar knowledge surfaced by the command. Prefer linking
+     an existing knowledge file over creating a new one when the insight is
+     already covered.
+   - Capture only durable guidance another agent can reuse: a decision rule,
+     failure mode, parser/rendering trap, verification lesson, or workflow
+     guardrail.
+   - Include the trigger or context, the reusable takeaway, and where it
+     applies.
+   - Do not record story recap, commit summary, obvious implementation steps,
+     or one-off cleanup details already visible in the diff, proofs, or
+     authored artifacts.
    - If there is no durable reusable insight, skip reflection.
 8. **Submit**: Move to the human queue for review with
    `just keel story submit <ID>`. This triggers automated verification and
@@ -99,17 +122,27 @@ carrying one mixed context across planning, research, and execution.
 9. **Commit (Required)**: Create exactly one atomic
    [Conventional Commit](https://www.conventionalcommits.org/) for this story
    after `submit`, not before. Include the resulting `.keel` changes from
-   submission in the same commit.
+   submission in the same commit, for example story status updates, manifests,
+   synthesized knowledge, and board projections. Do not batch multiple stories
+   into one commit.
 
 ## Management Workflow (Manager)
 
 **Operational Contract**: Scope, requirements, and decomposition steward.
 
+Use this workflow inside a dedicated manager context. When operating under a
+mission, enter this workflow only for a concrete planning unit that is blocked
+on requirements, design, or decomposition.
+
 1. **Identify Gaps & Maintain Architectural Integrity**: Use `just flow`
    to find epics needing tactical decomposition and to detect when delivery is
    starved by missing planning work.
+   - When you need the management pull surface directly, use
+     `just keel next --role manager`. Do not rely on `just keel next`; the
+     role is required.
 2. **Scaffold Planning Unit (Atomic Planning)**: Focus on one strategic or
-   tactical unit at a time.
+   tactical unit at a time. Do not batch-create epics or voyages. Ensure one
+   unit is fully authored and coherent before scaffolding the next.
    - For new strategic work, create an Epic:
      `just keel epic new "<Title>" --problem "<Problem>"`
    - For tactical decomposition, create a Voyage:
@@ -117,27 +150,63 @@ carrying one mixed context across planning, research, and execution.
 3. **Author Epic PRD Immediately After Creation**: Before decomposing into
    voyages or stories, fill out `PRD.md` with authored content for every
    required section.
+   - At minimum include problem statement, goals and objectives, users, scope,
+     requirements, verification strategy, assumptions, open questions and
+     risks, and success criteria.
+   - Author goals with canonical `GOAL-*` rows.
+   - Author scope with canonical `[SCOPE-*]` bullets.
+   - Keep every PRD requirement linked to one or more valid `GOAL-*` IDs so
+     goal coverage is explicit.
 4. **Define Scope + Requirements (SRS)**: Fill out the voyage `SRS.md`.
-   Requirements must be atomic, uniquely identified, and directly traceable to
-   story acceptance criteria.
+   - In `## Scope`, map the parent epic scope with canonical `[SCOPE-*]`
+     bullets so the voyage explicitly states what it takes on and what it
+     defers.
+   - Keep requirements atomic and uniquely identified, for example `SRS-01`.
+   - The `Scope` column should use canonical `SCOPE-*` IDs declared by the
+     voyage scope mapping.
+   - The `Source` column should use exactly one parent PRD requirement ID
+     (`FR-*` or `NFR-*`).
+   - Write requirements so they map directly to story acceptance criteria and
+     verification evidence.
 5. **Detail Design (SDD)**: Fill out `SDD.md` with the architectural approach
-   and component changes.
+   and component changes, with enough specificity that implementers can produce
+   objective proofs.
 6. **Decompose Stories**: Break the design into implementable units:
    - `just keel story new "<Title>" --type feat --epic <epic-id> --voyage <voyage-id>`
    - `--voyage` requires `--epic`. Omit both flags for unscoped stories, or
      pass only `--epic` for epic-scoped stories.
+   - Link stories to SRS requirements using `[SRS-XX/AC-YY]` markers in the
+     acceptance criteria.
 7. **Align Verification Techniques From Config**: Run `just keel config show`,
    `just keel verify detect`, and `just keel verify recommend` before
    finalizing verification planning.
+   - Use `just keel config show` as the full technique inventory and review
+     each option's `detected`, `disabled`, and `active` flags.
+   - Use `just keel verify detect` to review project signal detection inputs
+     and per-technique detected and active status.
+   - Use `just keel verify recommend` to plan against detected and active
+     options for the current project.
+   - If needed techniques are missing or disabled, update `keel.toml` first,
+     then continue decomposition.
 8. **Run Coherence Review**: Before planning is sealed, ensure:
-   - Every parent requirement has downstream coverage.
+   - Every PRD requirement row has valid goal links, and every authored
+     `GOAL-*` is covered by at least one PRD requirement.
+   - Voyage scope bullets and SRS `Scope` cells use canonical parent
+     `SCOPE-*` IDs consistently.
+   - Every SRS requirement has exactly one valid parent PRD source and at least
+     one linked story acceptance criterion.
    - Every acceptance criterion has a concrete verification path.
-   - Verification commands align with detected and recommended techniques unless
-     explicitly justified.
+   - Verification commands align with detected and recommended techniques
+     unless explicitly justified.
+   - CLI options and authored entity content are explicit enough for downstream
+     automation and lifecycle transitions.
 9. **Loop Back Upstream if Needed**: If decomposition exposes ambiguity, update
    PRD, SRS, or SDD first, then re-check story acceptance criteria.
 10. **Generate Planning Summary In Chat (Required)**: Publish a terse planning
     summary in the harness response for every newly planned Epic or Voyage.
+    Include objective and scope boundaries, requirement-to-story coverage
+    status, verification strategy summary, key risks or assumptions, and the
+    canonical next-step command.
 11. **Seal Planning**: Promote the voyage from `draft` to `planned` with
     `just keel voyage plan <id>`.
 12. **Commit (Required)**: Create exactly one atomic Conventional Commit for
@@ -152,9 +221,15 @@ carrying one mixed context across planning, research, and execution.
 **Operational Contract**: Hypothesis-driven researcher for technical discovery
 and fog reduction.
 
+Use this workflow inside a dedicated explorer context. When operating under a
+mission, enter this workflow only when ambiguity or missing evidence blocks
+planning or execution.
+
 1. **Identify Fog**: Create a bearing when ambiguity or missing evidence blocks
    planning or execution:
    - `just keel bearing new "<Name>"`
+   - Always use the CLI scaffold. A bearing should include `README.md`,
+     `BRIEF.md`, `EVIDENCE.md`, and `ASSESSMENT.md`.
 2. **Discovery (Play)**: Use `just keel play <id>` to explore the problem space
    through different perspectives.
 3. **Draft Brief**: Fill out `BRIEF.md`. The sections `Hypothesis`,
@@ -176,8 +251,12 @@ and fog reduction.
 
 ## Mission Workflow (Autonomous Harness / Mission Steward)
 
-Missions are the top-level steering loop for broad objectives. If the request
-is broad and no mission covers it yet, create one first.
+Missions are the top-level steering loop for broad objectives. Once a mission
+exists, the harness should keep working the mission until its halting rules are
+met or a real external blocker is reached.
+
+Broad product or feature goals should always run inside an active mission. If
+the request is broad and no mission covers it yet, create one first.
 
 1. **Bootstrap Mission**: If no active mission covers the current user request,
    create one:
@@ -189,29 +268,37 @@ is broad and no mission covers it yet, create one first.
    - Use `just keel mission refine <id>` to see the next question.
    - Use `just keel mission refine <id> --answer "<text>"` to record each
      answer.
+   - Do not activate the mission until refinement reports that the charter is
+     ready and every authored goal has an explicit verification path.
 3. **Activate**: Once the charter is ready and the mission has actionable
    board-linked goals, activate it:
    - `just keel mission activate <id>`
 4. **Refresh State At The Start Of Every Cycle**:
    - `just keel mission show <id>`
    - `just flow`
-   - `just keel mission next <id>`
+   - `just keel mission next [<id>]` to resolve indecision points across all
+     roles. Omit the ID to auto-select the highest-priority actionable mission.
 5. **Choose The Correct Phase And Hand Off To The Matching Workflow**:
-   - Use `just keel mission next <id>` to see the immediate priority for all
-     role families.
-   - If a story is ready, use the Delivery Workflow in an operator context.
-   - If no story is ready and the next step is decomposition or authored
-     planning work, use the Management Workflow in a manager context.
-   - If planning or execution is blocked by ambiguity or missing evidence, use
-     the Research Workflow in an explorer context.
-   - If `just keel mission next <id>` reports no ready work but mission goals
-     remain unmet, create the next bearing, epic, voyage, or story instead of
-     stopping.
+   - Use `just keel mission next [<id>]` to see the immediate priority for all
+     role families. Omit the ID to auto-select the highest-priority actionable
+     mission.
+   - If a story is ready or the next step is a concrete implementation slice,
+     use the Delivery Workflow in a dedicated operator context.
+   - If no story is ready and the next step is decomposition, scoping, or
+     requirements or design authoring, use the Management Workflow in a
+     dedicated manager context.
+   - If planning or execution is blocked by ambiguity, missing evidence, or
+     external research, use the Research Workflow in a dedicated explorer
+     context.
+   - If `just keel mission next [<id>]` reports no ready work but mission
+     goals remain unmet, create the next bearing, epic, voyage, or story
+     instead of stopping.
 6. **Rejoin The Mission Loop After Every Worker Result**:
    - Review the resulting board state and changed artifacts.
-   - Record the outcome with
+   - Record the decision, evidence, blocker, and next phase with
      `just keel mission log <id> --entry "<text>"`.
-   - Return to the mission loop and choose the next phase again.
+   - Return to step 4 and choose the next phase again. Do not let one
+     long-lived worker drift across multiple workflow types.
 7. **Digest Regularly**: When `LOG.md` grows large, compress older entries:
    - `just keel mission digest <id>`
 8. **Achieve**: Once all board-verifiable goals are satisfied:
@@ -236,7 +323,8 @@ Apply these checks to every change before finalizing work:
 4. **Lifecycle Before Commit**: Run board-mutating lifecycle commands before
    the atomic commit when they generate or rewrite `.keel` artifacts, for
    example `story submit`, `voyage plan`, `voyage done`, `bearing assess`, or
-   `bearing lay`.
+   `bearing lay`. After the transition, inspect `git status` and include the
+   resulting `.keel` churn in the same commit.
 5. **Atomic Commits**: Commit once per logical unit of work using
    [Conventional Commits](https://www.conventionalcommits.org/).
 6. **Mission Loop Discipline**: For mission-driven work, return to the mission
@@ -305,6 +393,7 @@ A `.keel/` directory is the runtime data directory that `keel` operates on.
 | `.keel/adrs/` | Architecture decision records |
 | `.keel/epics/` | Epic-level planning artifacts |
 | `.keel/epics/<epic-id>/voyages/` | Voyage planning artifacts |
+| `.keel/routines/` | Recurring routine bundles |
 | `.keel/stories/` | Implementable work items |
 | `.keel/README.md` | Board state overview |
 
@@ -340,10 +429,11 @@ Run `just keel --help` for the full command tree. Common commands:
 
 | Category | Commands |
 |----------|----------|
-| Discovery | `just keel bearing new <name>` `just keel bearing research <id>` `just keel bearing assess <id>` `just keel bearing list` |
+| Discovery | `just keel bearing new <name>` `just keel play <id>` `just keel bearing research <id>` `just keel bearing assess <id>` `just keel bearing list` |
 | Planning | `just keel epic new "<name>" --problem "<problem>"` `just keel voyage new "<name>" --epic <epic-id> --goal "<goal>"` |
 | Execution | `just keel next --role operator` `just keel story new "<title>" [--type <type>] [--epic <epic-id> [--voyage <voyage-id>]]` |
-| Board Ops | `just keel mission next <id>` `just flow` `just doctor` `just keel generate` `just keel config show` `just keel mission show <id>` |
+| Board Ops | `just keel mission next [<id>]` `just keel next --role manager` `just flow` `just doctor` `just keel generate` `just keel config show` `just keel mission show <id>` |
+| Routines | `just keel routine new "<name>"` `just keel routine list` `just keel routine show <id>` `just keel pulse` |
 | Verification | `just keel verify run <id>` `just keel verify detect` `just keel verify recommend` |
 
 ## Story and Milestone State Changes
