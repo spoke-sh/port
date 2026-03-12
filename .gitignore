@@ -1,4 +1,5 @@
 /.direnv/
+.port/
 /artifacts/*
 !/artifacts/
 !/artifacts/package-proof.tape
