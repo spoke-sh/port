@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-03-12T07:52:48.545845891-07:00
+command: cargo test -q -p port-model machine_contract_without_attachments_regression
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 47 filtered out; finished in 0.01s
+

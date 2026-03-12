@@ -943,6 +943,7 @@ impl PortConfig {
                 guest_image,
             )
             .map_err(|message| ValidationError::new(message))?;
+            validate_machine_volumes(machine_name, machine)?;
 
             if !issues.is_empty() {
                 return Err(ValidationError::new(format!(
@@ -1061,6 +1062,7 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
         memory_mib: 512,
         kernel_args: String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
         rootfs_read_only: false,
+        volumes: Vec::new(),
         guest: GuestControl {
             vsock_cid,
             control_port: 7000,
@@ -1801,7 +1803,29 @@ pub struct MachineSpec {
     pub memory_mib: u32,
     pub kernel_args: String,
     pub rootfs_read_only: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<MachineVolumeSpec>,
     pub guest: GuestControl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineVolumeBackend {
+    HostFile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineVolumePersistence {
+    Persistent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineVolumeSpec {
+    pub name: String,
+    pub backend: MachineVolumeBackend,
+    pub persistence: MachineVolumePersistence,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2546,6 +2570,43 @@ fn validate_artifact_store(
     }
 }
 
+fn validate_machine_volumes(
+    machine_name: &str,
+    machine: &MachineSpec,
+) -> Result<(), ValidationError> {
+    if machine.volumes.len() > 1 {
+        return Err(ValidationError::new(format!(
+            "machine '{}' currently supports at most one attached volume in the first storage slice",
+            machine_name
+        )));
+    }
+
+    let mut seen_names = Vec::new();
+    for volume in &machine.volumes {
+        if volume.name.trim().is_empty() {
+            return Err(ValidationError::new(format!(
+                "machine '{}' volume name must be non-empty",
+                machine_name
+            )));
+        }
+        if volume.path.as_os_str().is_empty() {
+            return Err(ValidationError::new(format!(
+                "machine '{}' volume '{}' must declare a non-empty path",
+                machine_name, volume.name
+            )));
+        }
+        if seen_names.iter().any(|seen| seen == &volume.name) {
+            return Err(ValidationError::new(format!(
+                "machine '{}' declares duplicate volume '{}'",
+                machine_name, volume.name
+            )));
+        }
+        seen_names.push(volume.name.clone());
+    }
+
+    Ok(())
+}
+
 fn validate_hosted_control_plane(
     control_plane_name: &str,
     control_plane: &HostedControlPlaneSpec,
@@ -3143,6 +3204,63 @@ mod tests {
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.distribution.push]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.variants]"));
+    }
+
+    #[test]
+    fn volume_attachment_contract() {
+        let mut sample = PortConfig::sample();
+        sample
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist")
+            .volumes
+            .push(super::MachineVolumeSpec {
+                name: String::from("data"),
+                backend: super::MachineVolumeBackend::HostFile,
+                persistence: super::MachineVolumePersistence::Persistent,
+                path: std::path::PathBuf::from("volumes/demo-data.ext4"),
+            });
+
+        sample
+            .validate()
+            .expect("attached-volume machine contract should validate");
+
+        let encoded = sample.to_toml_string().expect("sample should encode");
+        assert!(encoded.contains("[[machines.demo.volumes]]"));
+        assert!(encoded.contains("backend = \"host-file\""));
+        assert!(encoded.contains("persistence = \"persistent\""));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
+        assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn machine_contract_without_attachments_regression() {
+        let sample = PortConfig::sample();
+
+        sample
+            .validate()
+            .expect("attachment-free sample config should remain valid");
+        assert!(
+            sample
+                .machines
+                .get("demo")
+                .expect("sample machine should exist")
+                .volumes
+                .is_empty()
+        );
+
+        let encoded = sample.to_toml_string().expect("sample should encode");
+        assert!(!encoded.contains("[[machines.demo.volumes]]"));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
+        let machine = decoded
+            .machines
+            .get("demo")
+            .expect("sample machine should exist");
+        assert!(machine.volumes.is_empty());
+        assert_eq!(machine.guest_image, "demo-guest");
+        assert!(!machine.rootfs_read_only);
     }
 
     #[test]
