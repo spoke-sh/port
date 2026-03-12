@@ -101,7 +101,7 @@ The voyage touches three layers:
 
 - Purpose: present a fast-scanning entrypoint for new operators.
 - Interface: `port --help`.
-- Behavior: retain the command tree and 2-3 useful examples, then link to
+- Behavior: retain the command tree and a compact 5-step quick start, then link to
   `CONFIGURATION.md` and focused docs for long-form workflows.
 
 ## Interfaces

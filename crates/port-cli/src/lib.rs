@@ -31,6 +31,8 @@ Examples:
   port doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
   port --config examples/port.toml machine launch --machine demo
+  port --config examples/port.toml machine list
+  port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'
 
 Detailed examples:
   CONFIGURATION.md
@@ -2179,8 +2181,10 @@ mod tests {
             "docs/cloud.md",
             "docs/artifacts.md",
             "port doctor",
+            "machine list",
             "artifacts build --artifact demo-kernel",
             "machine launch --machine demo",
+            "guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

@@ -1863,6 +1863,14 @@ pub fn list_machines(config: &PortConfig, runtime_root: &Path) -> Result<Vec<Mac
     Ok(machines.into_values().collect())
 }
 
+fn is_missing_hosted_auth_token(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .to_string()
+            .contains("hosted auth token is missing from environment variable")
+    })
+}
+
 fn firecracker_local_list_machines(runtime_root: &Path) -> Result<Vec<MachineStatus>> {
     if !runtime_root.exists() {
         return Ok(Vec::new());
@@ -5235,7 +5243,11 @@ fn hosted_control_plane_names(config: &PortConfig) -> Vec<String> {
 fn hosted_control_plane_list_machines(config: &PortConfig) -> Result<Vec<MachineStatus>> {
     let mut machines = Vec::new();
     for control_plane_name in hosted_control_plane_names(config) {
-        let client = hosted_client_for_control_plane(config, &control_plane_name)?;
+        let client = match hosted_client_for_control_plane(config, &control_plane_name) {
+            Ok(client) => client,
+            Err(error) if is_missing_hosted_auth_token(&error) => continue,
+            Err(error) => return Err(error),
+        };
         let response: HostedSuccess<Vec<MachineStatus>> = client
             .execute_json(client.machines().list())
             .map_err(|error| {
@@ -11597,6 +11609,50 @@ exec sleep 30
         assert_eq!(
             hosted.hosted_fleet_nodes[0].routing_eligibility,
             crate::HostedFleetRoutingEligibility::Eligible
+        );
+    }
+
+    #[test]
+    fn list_machines_skips_hosted_control_planes_when_auth_env_is_missing() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let local_paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        write_manifest(&local_paths, "demo", 424242);
+
+        let previous = std::env::var_os("PORT_DEMO_TOKEN");
+        unsafe {
+            std::env::remove_var("PORT_DEMO_TOKEN");
+        }
+        let machines = list_machines(&config, tempdir.path())
+            .expect("machine list should still load local machines without hosted auth");
+        match previous {
+            Some(value) => unsafe {
+                std::env::set_var("PORT_DEMO_TOKEN", value);
+            },
+            None => unsafe {
+                std::env::remove_var("PORT_DEMO_TOKEN");
+            },
+        }
+
+        let demo = machines
+            .iter()
+            .find(|machine| machine.machine_name == "demo")
+            .expect("local demo machine should still be listed");
+        assert!(
+            matches!(
+                demo.state,
+                MachineRuntimeState::Running | MachineRuntimeState::Stopped
+            ),
+            "local demo machine should still resolve to a local runtime state"
+        );
+        assert!(
+            machines.iter().all(|machine| machine.machine_name != "cloud-aws"),
+            "hosted machines should be skipped when hosted auth is unavailable"
         );
     }
 

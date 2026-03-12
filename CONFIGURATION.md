@@ -85,6 +85,8 @@ port --config examples/port.toml doctor
 port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
 port --config examples/port.toml artifacts build --artifact demo-guest --architecture native
 port --config examples/port.toml machine launch --machine demo
+port --config examples/port.toml machine list
+port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'
 port --config examples/port.toml machine status --machine demo
 port --config examples/port.toml machine stop --machine demo
 ```

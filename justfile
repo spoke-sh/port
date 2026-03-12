@@ -49,5 +49,6 @@ flow:
 build:
   @just cli::build
 
+[positional-arguments]
 port *args:
-  @just cli::run {{args}}
+  @just cli::run "$@"

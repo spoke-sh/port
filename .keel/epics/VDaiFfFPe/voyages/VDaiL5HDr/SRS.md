@@ -45,7 +45,7 @@
 | SRS-01 | `just mission` must present the mission report and finish with a compact summary that shows mission status, child progress, next step, recent achievements, and a human-facing artifact gallery. | SCOPE-01 | FR-01 | command proof + inspection |
 | SRS-02 | The repository must split `just` into logical modules and keep the default root help focused on common workflows while keeping demo tasks available outside the default list. | SCOPE-02 | FR-02 | command proof |
 | SRS-03 | Port must publish root-level `CONSTITUTION.md`, `ARCHITECTURE.md`, `CONFIGURATION.md`, `RELEASE.md`, and `EVALUATIONS.md` documents that reflect the real current product contract. | SCOPE-03 | FR-03 | inspection + doc audit |
-| SRS-04 | `port --help` and the README must keep only 2-3 useful examples and point detailed workflow examples and config edits to `CONFIGURATION.md` and focused docs. | SCOPE-04 | FR-04 | automated help test + command proof + inspection |
+| SRS-04 | `port --help` and the README must keep a compact quick start with 5 useful examples and point detailed workflow examples and config edits to `CONFIGURATION.md` and focused docs. | SCOPE-04 | FR-04 | automated help test + command proof + inspection |
 | SRS-05 | User-facing docs and help must replace `cargo run -p port-cli` examples with the canonical `port` command surface. | SCOPE-05 | FR-05 | search proof + inspection |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 

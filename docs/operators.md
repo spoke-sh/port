@@ -16,6 +16,8 @@ report with recent achievements and human-facing artifacts.
 ```bash
 port doctor
 port --config examples/port.toml machine launch --machine demo
+port --config examples/port.toml machine list
+port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'
 PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
 ```
 
