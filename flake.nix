@@ -6,13 +6,13 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     sift = {
-      url = "github:rupurt/sift";
+      url = "github:rupurt/sift?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
     };
     keel = {
-      url = "github:spoke-sh/keel";
+      url = "github:spoke-sh/keel?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -41,8 +41,14 @@
         sharedInputs = [
           rust
           pkgs.just
+          pkgs.debianutils
+          pkgs.procps
           pkgs.gnutar
           pkgs.gzip
+          pkgs.chromium
+          pkgs.playwright-driver.browsers
+          pkgs.ttyd
+          pkgs.ffmpeg
           pkgs.vhs
           pkgs.oras
           pkgs.cargo-nextest
@@ -69,6 +75,8 @@
           buildInputs = sharedInputs ++ linuxRuntimeInputs;
 
           shellHook = ''
+            export PATH="$PWD/scripts/bin:$PATH"
+            export PORT_HEADLESS_SHELL="$(find ${pkgs.playwright-driver.browsers} -path '*chrome-headless-shell-linux64/chrome-headless-shell' -print -quit 2>/dev/null)"
             export CARGO_TARGET_DIR="$HOME/.cache/cargo-target/port"
           '' + pkgs.lib.optionalString isDarwin ''
             export TMPDIR=/var/tmp

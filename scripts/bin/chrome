@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+headless_shell="${PORT_HEADLESS_SHELL:-}"
+if [[ -z "${headless_shell}" ]] && command -v find >/dev/null 2>&1; then
+  headless_shell="$(find /nix/store -path '*chrome-headless-shell-linux64/chrome-headless-shell' -print -quit 2>/dev/null || true)"
+fi
+
+if [[ -n "${headless_shell}" && -x "${headless_shell}" ]]; then
+  keep=()
+  for arg in "$@"; do
+    case "$arg" in
+      --remote-debugging-port=*|--user-data-dir=*|--headless|--no-first-run|--no-startup-window|--noerrdialogs)
+        keep+=("$arg")
+        ;;
+    esac
+  done
+
+  exec "${headless_shell}" --no-sandbox --disable-gpu --enable-unsafe-swiftshader "${keep[@]}"
+fi
+
+exec chromium --no-sandbox "$@"

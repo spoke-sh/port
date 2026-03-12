@@ -31,15 +31,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1773243332,
-        "narHash": "sha256-Mtr6hgJb2FJmzqvOz9KzuHae/vj+83yUlFLpl46wxGA=",
+        "lastModified": 1773316676,
+        "narHash": "sha256-KQLwVLQzJJ5jUQ6z6yI9mZjH7QRj9Ad1lfy2RArGhMk=",
         "owner": "spoke-sh",
         "repo": "keel",
-        "rev": "ba702094cbb1328492949bd51cd1feca9c9ce05b",
+        "rev": "f39af4435a72fd0981c81916e8473fa0afb84fce",
         "type": "github"
       },
       "original": {
         "owner": "spoke-sh",
+        "ref": "main",
         "repo": "keel",
         "type": "github"
       }
@@ -147,15 +148,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1773243299,
-        "narHash": "sha256-m9OP3nz9DHXeXzrEQEA7K9b6o1PmJzB1iNdB4ijbJEE=",
+        "lastModified": 1773259736,
+        "narHash": "sha256-xeyHiahvaf6JsV7ogll+efTZsu714SIq1gOtn4KKdlk=",
         "owner": "rupurt",
         "repo": "sift",
-        "rev": "cb600a7c6bf10eaf224e0615a1c49f29ad510379",
+        "rev": "52f46f87527cc39cc5efe214708b77426cb12e87",
         "type": "github"
       },
       "original": {
         "owner": "rupurt",
+        "ref": "main",
         "repo": "sift",
         "type": "github"
       }
