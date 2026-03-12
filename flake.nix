@@ -6,13 +6,13 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     sift = {
-      url = "github:rupurt/sift";
+      url = "github:rupurt/sift?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
     };
     keel = {
-      url = "github:spoke-sh/keel";
+      url = "github:spoke-sh/keel?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
