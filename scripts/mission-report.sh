@@ -423,7 +423,7 @@ emit_primary_proof() {
   if [[ -n "$primary_demo" ]]; then
     printf '    - demo script: %s\n' "$primary_demo"
   fi
-  if [[ -n "$primary_run" ]]; then
+  if [[ -n "$primary_run" && -z "$primary_demo" ]]; then
     printf '    - runnable command: %s\n' "$primary_run"
   fi
   if [[ -n "$primary_visual" ]]; then
