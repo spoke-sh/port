@@ -17,6 +17,29 @@ Fast search tools are available in the dev shell:
 - `rg` for general code and file search.
 - `sift` when file-type-aware or broader content filtering is useful.
 
+## Mission Proof Contract
+
+Treat `just mission` as the future repo-level proof surface for "can Port host
+an application?" rather than only a board summary.
+
+1. The canonical proof should launch a minimal HTTP application inside
+   Port-managed compute, expose it through the canonical Port transport or
+   forwarding surface, `curl` it from the host, and record the result through
+   the Keel proof system.
+2. Prefer human-reviewable terminal evidence for this path. Use the currently
+   working recorder path first:
+   - `vhs` or renderer-backed `.gif` / `.cast` artifacts today
+   - `atxt` once it is stable and verified in this repository environment
+3. Do not leave recorder migrations as chat-only follow-ups. If a better proof
+   recorder is blocked on external tool maturity, create or maintain a routine
+   that periodically reassesses readiness and materializes a scoped story when
+   the tool becomes viable.
+4. The current external-tool follow-up is `atxt`. Future agents should treat
+   "migrate mission proof recording from `vhs` to `atxt`" as an explicit board
+   commitment, not an optional idea. Maintain the routine
+   `review-atxt-mission-proof-adoption` instead of opening duplicate reminder
+   loops.
+
 ## Subagent / Delegation
 
 Use missions as the long-lived steering context and keep delivery contexts
