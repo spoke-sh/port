@@ -104,7 +104,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted HTTP App Curl Proof](epics/VDi2y6gch/voyages/VDi3LHFpb/) | planned |
+| [Hosted HTTP App Curl Proof](epics/VDi2y6gch/voyages/VDi3LHFpb/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

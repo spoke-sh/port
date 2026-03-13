@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::Command;
@@ -91,6 +92,104 @@ fn wait_for_port(addr: &str, rx: &mpsc::Receiver<anyhow::Result<()>>, label: &st
         thread::sleep(Duration::from_millis(20));
     }
     panic!("{label} did not become reachable in time");
+}
+
+fn wait_for_path(path: &Path, label: &str) {
+    for _ in 0..100 {
+        if path.exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("{label} did not appear at '{}'", path.display());
+}
+
+fn wait_for_machine_list(config_path: &Path, machine: &str) {
+    for _ in 0..100 {
+        let output = port_command(config_path)
+            .arg("machine")
+            .arg("list")
+            .output()
+            .expect("machine list should run");
+        if output.status.success() && String::from_utf8_lossy(&output.stdout).contains(machine) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("machine '{machine}' did not appear in machine list in time");
+}
+
+fn wait_for_service_status_contains(
+    config_path: &Path,
+    machine: &str,
+    service: &str,
+    needle: &str,
+) -> String {
+    for _ in 0..100 {
+        let output = port_command(config_path)
+            .arg("service")
+            .arg("status")
+            .arg("--machine")
+            .arg(machine)
+            .arg("--name")
+            .arg(service)
+            .output()
+            .expect("service status should run");
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            if stdout.contains(needle) {
+                return stdout;
+            }
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("service '{service}' did not surface '{needle}' in time");
+}
+
+fn extract_output_value(output: &str, prefix: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .map(str::trim)
+        .map(str::to_owned)
+        .unwrap_or_else(|| panic!("expected output to contain '{prefix}':\n{output}"))
+}
+
+fn fetch_http_response(addr: &str, path: &str) -> String {
+    let request = format!("GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n");
+    for _ in 0..100 {
+        match TcpStream::connect(addr) {
+            Ok(mut stream) => {
+                if stream.write_all(request.as_bytes()).is_err() {
+                    thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+                let mut response = Vec::new();
+                if stream.read_to_end(&mut response).is_ok() && !response.is_empty() {
+                    return String::from_utf8_lossy(&response).into_owned();
+                }
+            }
+            Err(_) => {}
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out fetching HTTP response from '{addr}{path}'");
+}
+
+fn busybox_bin() -> String {
+    let output = Command::new("/bin/sh")
+        .arg("-lc")
+        .arg("command -v busybox")
+        .output()
+        .expect("busybox lookup should run");
+    assert!(
+        output.status.success(),
+        "busybox should be available in the dev shell"
+    );
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    assert!(!path.is_empty(), "busybox lookup should return a path");
+    path
 }
 
 #[test]
@@ -315,6 +414,184 @@ fn cli_service_secret_backend_commands_cover_hosted_secret_service_and_sandbox_c
         fs::read_to_string(runtime_record).expect("runtime record should read");
     assert!(runtime_record_text.contains("\"state\": \"stopped\""));
     assert!(!runtime_record_text.contains("s3cr3t"));
+}
+
+#[test]
+fn cli_service_apply_and_forward_serves_hosted_http_payload() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let control_plane_addr = reserve_addr();
+    let control_plane_endpoint = format!("http://{control_plane_addr}");
+    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
+    unsafe {
+        std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+    }
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let server_config = hosted_config(&hosted_runtime_root, &control_plane_endpoint);
+    write_config(&server_config_path, &server_config);
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+    write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424244);
+
+    let guest_root = temp.path().join("guest");
+    fs::create_dir_all(guest_root.join("workspace")).expect("guest workspace should exist");
+    let guest_socket = hosted_runtime_root.join("cloud-aws/guest-agent.sock");
+    let guest_socket_for_thread = guest_socket.clone();
+    let guest_root_for_thread = guest_root.clone();
+    thread::spawn(move || {
+        serve_guest_agent(&guest_socket_for_thread, guest_root_for_thread)
+            .expect("guest agent should serve");
+    });
+    wait_for_path(&guest_socket, "guest agent socket");
+
+    let (control_tx, control_rx) = mpsc::channel();
+    let control_config = server_config.clone();
+    let control_bind = control_plane_addr.clone();
+    thread::spawn(move || {
+        let result = serve_control_plane(
+            control_config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: control_bind,
+                node_bindings: Vec::new(),
+            },
+        )
+        .map(|_| ());
+        let _ = control_tx.send(result);
+    });
+    wait_for_port(&control_plane_addr, &control_rx, "control-plane");
+
+    let node_addr = reserve_addr();
+    let (node_tx, node_rx) = mpsc::channel();
+    let node_config = server_config.clone();
+    let node_bind = node_addr.clone();
+    thread::spawn(move || {
+        let result = serve_node_agent(
+            node_config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: node_bind,
+                token: String::from("node-secret"),
+            },
+        )
+        .map(|_| ());
+        let _ = node_tx.send(result);
+    });
+    wait_for_port(&node_addr, &node_rx, "node-agent");
+    wait_for_machine_list(&client_config_path, "cloud-aws");
+
+    let busybox = busybox_bin();
+    let apply = port_command(&client_config_path)
+        .arg("service")
+        .arg("apply")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--host-group")
+        .arg("aws-builders")
+        .arg("--name")
+        .arg("web")
+        .arg("--kind")
+        .arg("service")
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-lc")
+        .arg(format!(
+            "mkdir -p workspace/site && printf '%s\\n' 'hosted-app-ok' > workspace/site/index.html && exec {busybox} httpd -f -p 127.0.0.1:18080 -h workspace/site"
+        ))
+        .output()
+        .expect("service apply should run");
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply_stdout = String::from_utf8_lossy(&apply.stdout);
+    assert!(apply_stdout.contains("name: web"), "{apply_stdout}");
+    assert!(apply_stdout.contains("kind: service"), "{apply_stdout}");
+    assert!(
+        apply_stdout.contains("runtime state: running"),
+        "{apply_stdout}"
+    );
+    assert!(
+        apply_stdout.contains("target host group: aws-builders"),
+        "{apply_stdout}"
+    );
+
+    let status_stdout = wait_for_service_status_contains(
+        &client_config_path,
+        "cloud-aws",
+        "web",
+        "runtime state: running",
+    );
+    assert!(
+        status_stdout.contains("service route: hosted-control-plane"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("control plane: demo"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("node: aws-linux-node"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("target host group: aws-builders"),
+        "{status_stdout}"
+    );
+
+    let forward = port_command(&client_config_path)
+        .arg("guest")
+        .arg("forward")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--listen")
+        .arg("127.0.0.1:0")
+        .arg("--target")
+        .arg("127.0.0.1:18080")
+        .output()
+        .expect("guest forward should run");
+    assert!(
+        forward.status.success(),
+        "{}",
+        String::from_utf8_lossy(&forward.stderr)
+    );
+    let forward_stdout = String::from_utf8_lossy(&forward.stdout);
+    assert!(
+        forward_stdout.contains("forward lifecycle: hosted-control-plane"),
+        "{forward_stdout}"
+    );
+    let listen_addr = extract_output_value(&forward_stdout, "forward listening:");
+    let response = fetch_http_response(&listen_addr, "/");
+    assert!(response.contains("200 OK"), "{response}");
+    assert!(response.contains("hosted-app-ok"), "{response}");
+
+    let stop = port_command(&client_config_path)
+        .arg("service")
+        .arg("stop")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--name")
+        .arg("web")
+        .output()
+        .expect("service stop should run");
+    assert!(stop.status.success());
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(
+        stop_stdout.contains("desired state: stopped"),
+        "{stop_stdout}"
+    );
+    assert!(
+        stop_stdout.contains("runtime state: stopped"),
+        "{stop_stdout}"
+    );
 }
 
 #[test]

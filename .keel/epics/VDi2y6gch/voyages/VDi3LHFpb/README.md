@@ -1,11 +1,12 @@
 ---
 id: VDi3LHFpb
 title: Hosted HTTP App Curl Proof
-status: planned
+status: in-progress
 epic: VDi2y6gch
 created_at: 2026-03-12T19:13:05
 index: 1
 updated_at: 2026-03-12T19:17:30
+started_at: 2026-03-12T19:21:47
 ---
 
 # Hosted HTTP App Curl Proof
@@ -30,5 +31,5 @@ updated_at: 2026-03-12T19:17:30
 |-------|------|--------|
 | [Wire Repo-Level Screen Surface To App Hosting Proof](../../../../stories/VDi3O5dlc/README.md) | feat | backlog |
 | [Publish App Hosting Proof Contract And Boundaries](../../../../stories/VDi3O6vld/README.md) | feat | backlog |
-| [Implement Hosted HTTP App Proof Workflow](../../../../stories/VDi3O7KjN/README.md) | feat | backlog |
+| [Implement Hosted HTTP App Proof Workflow](../../../../stories/VDi3O7KjN/README.md) | feat | needs-human-verification |
 <!-- END GENERATED -->
