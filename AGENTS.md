@@ -19,8 +19,18 @@ Fast search tools are available in the dev shell:
 
 ## Mission Proof Contract
 
-Treat `just mission` as the future repo-level proof surface for "can Port host
-an application?" rather than only a board summary.
+Treat the repo-level mission proof surface as the future answer to "can Port
+host an application?" rather than only a board summary.
+
+Current and planned naming:
+
+- Today the repo-level proof entrypoint is `just mission`.
+- The intended final product name is `screen`.
+- Once upstream `keel screen` exists, replace the repo-local entrypoint with
+  `just screen` routed through `just keel screen`.
+- Treat that as a hard cutover. Do not keep `just mission` and `just screen`
+  as parallel long-term surfaces unless a scoped story explicitly requires a
+  migration window.
 
 1. The canonical proof should launch a minimal HTTP application inside
    Port-managed compute, expose it through the canonical Port transport or
@@ -39,6 +49,9 @@ an application?" rather than only a board summary.
    commitment, not an optional idea. Maintain the routine
    `review-atxt-mission-proof-adoption` instead of opening duplicate reminder
    loops.
+5. Until `keel screen` ships, keep the current repo-local `just mission`
+   implementation working. When `keel screen` becomes available, prefer that
+   Keel command over extending `scripts/mission-report.sh`.
 
 ## Subagent / Delegation
 
