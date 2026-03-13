@@ -4,11 +4,11 @@
 
 | ID | Description | Verification |
 |----|-------------|--------------|
-| MG-01 | Capture first-class Linux and Mac developer experience as a board-managed horizon bearing. | board: VDcT0vaPb |
-| MG-02 | Capture hybrid local, remote, cloud, and SSH-first execution as a board-managed horizon bearing. | board: VDcStPolu |
-| MG-03 | Capture first-class k3s and Kubernetes workload support as a board-managed horizon bearing. | board: VDcStSMlp |
-| MG-04 | Capture cloud block-storage normalization as a board-managed horizon bearing. | board: VDcStQqlo |
-| MG-05 | Capture GPU execution support as a board-managed horizon bearing. | board: VDcStPNlr |
+| MG-01 | Capture first-class Linux and Mac developer experience as a board-managed horizon bearing. | manual: run `just keel epic show VDcT0vaPb` and confirm epic status `done` after bearing graduation |
+| MG-02 | Capture hybrid local, remote, cloud, and SSH-first execution as a board-managed horizon bearing. | manual: run `just keel epic show VDcStPolu` and confirm epic status `done` after bearing graduation |
+| MG-03 | Capture first-class k3s and Kubernetes workload support as a board-managed horizon bearing. | manual: run `just keel epic show VDcStSMlp` and confirm epic status `done` after bearing graduation |
+| MG-04 | Capture cloud block-storage normalization as a board-managed horizon bearing. | manual: run `just keel epic show VDcStQqlo` and confirm epic status `done` after bearing graduation |
+| MG-05 | Capture GPU execution support as a board-managed horizon bearing. | manual: run `just keel bearing show VDcStPNlr` and confirm status `parked` with recommendation `Park → revisit later` |
 | MG-06 | Leave the board doctor-clean with the new horizon visible through mission, bearing-list, and flow surfaces. | manual: run `just keel doctor`, `just keel bearing list`, and `just flow` |
 
 ## Constraints

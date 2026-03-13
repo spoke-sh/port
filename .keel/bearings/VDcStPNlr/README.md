@@ -1,7 +1,8 @@
 ---
 id: VDcStPNlr
 title: GPU Execution Support
-status: exploring
+mission: VDcSgc7je
+status: parked
 created_at: 2026-03-11T20:16:56
 index: 6
 ---

@@ -12,11 +12,19 @@
 | [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid | ✓ | ✓ | decision-ready | 3.07 | ✓ |
 | [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | decision-ready | 2.63 | ✓ |
 | [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | decision-ready | 3.42 | ✓ |
-| [GPU Execution Support](bearings/VDcStPNlr/) | exploring | ✓ | ✓ | decision-ready | 0.99 | - |
 | [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | laid | ✓ | ✓ | decision-ready | 3.47 | ✓ |
 | [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | laid | ✓ | ✓ | decision-ready | 1.89 | ✓ |
 | [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | laid | ✓ | ✓ | decision-ready | 2.73 | ✓ |
 | [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.20 | ✓ |
+
+<details>
+<summary>Archived Bearings</summary>
+
+| Bearing | Status |
+|---------|--------|
+| [GPU Execution Support](bearings/VDcStPNlr/) | parked |
+
+</details>
 
 ## Epics
 
