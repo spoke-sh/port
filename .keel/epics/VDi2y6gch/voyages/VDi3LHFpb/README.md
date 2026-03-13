@@ -25,11 +25,11 @@ started_at: 2026-03-12T19:21:47
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Wire Repo-Level Screen Surface To App Hosting Proof](../../../../stories/VDi3O5dlc/README.md) | feat | backlog |
+| [Wire Repo-Level Screen Surface To App Hosting Proof](../../../../stories/VDi3O5dlc/README.md) | feat | in-progress |
 | [Publish App Hosting Proof Contract And Boundaries](../../../../stories/VDi3O6vld/README.md) | feat | backlog |
-| [Implement Hosted HTTP App Proof Workflow](../../../../stories/VDi3O7KjN/README.md) | feat | needs-human-verification |
+| [Implement Hosted HTTP App Proof Workflow](../../../../stories/VDi3O7KjN/README.md) | feat | done |
 <!-- END GENERATED -->

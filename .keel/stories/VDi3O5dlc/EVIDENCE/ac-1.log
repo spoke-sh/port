@@ -1,0 +1,47 @@
+Mission report
+  Mission: Ship Canonical App Hosting Screen Proof (VDi2jvg4P)
+  Status: active
+  Selection: explicit
+
+Mission goals
+  - MG-01 [in progress] Deliver epic VDi2y6gch so Port has one canonical repo-level app-hosting proof surface that launches a minimal HTTP app through the hosted path, curls it from the host, and records a human-reviewable artifact.
+    board: Canonical App Hosting Screen Surface (VDi2y6gch, 0/1 voyages, 0/3 stories)
+  - MG-02 [manual] Keep the board doctor-clean and make this app-hosting proof mission legible through mission, flow, and routine surfaces.
+    manual: run `just keel mission show VDi2jvg4P`, `just keel mission next VDi2jvg4P`, `just flow`, `just keel routine show review-atxt-mission-proof-adoption`, and `just doctor`
+
+Key achievements
+  - Completed VDi3O7KjN: added hosted HTTP app proof regression, shipped hosted-http-app-demo.sh, and recorded proof logs for apply/status, guest forward/curl, and hosted service/forward regressions.
+
+Artifact gallery
+  Primary proof:
+    - entrypoint: just mission VDi2jvg4P
+    - demo script: scripts/hosted-http-app-demo.sh
+    - review artifact: .keel/stories/VDi3O5dlc/EVIDENCE/ac-2.gif
+  Recorded proof media:
+    - .keel/stories/VDi3O5dlc/EVIDENCE/ac-2.gif
+  Proof artifacts:
+    - .keel/stories/VDi3O5dlc/EVIDENCE/hosted-http-app-workflow.cast
+    - .keel/stories/VDi3O7KjN/EVIDENCE/ac-2.log
+    - .keel/stories/VDi3O7KjN/EVIDENCE/ac-4.log
+    - .keel/stories/VDi3O7KjN/EVIDENCE/ac-6.log
+  Demo scripts:
+    - scripts/render-hosted-http-app-proof.sh
+    - scripts/hosted-http-app-demo.sh
+    - scripts/mission-report.sh
+  Run commands:
+    - No runnable demos recorded.
+  Human docs:
+    - No human-facing docs recorded.
+
+Next
+  Next steps for mission [1mVDi2jvg4P[0m:
+  
+  [34m[1mmanager[0m[39m:
+    [36m[1mMission Steering[0m[39m: Ship Canonical App Hosting Screen Proof
+    [2mStatus[0m: active
+    [2mUnmet Goals[0m: 1
+    [33m[1mNext[0m[39m: Progress existing mission-scoped epics
+  
+  [34m[1moperator[0m[39m:
+    [36m[1mContinue[0m[39m work on existing story:
+    [1m[94mVDi3O5dlc[39m[0m [1mWire Repo-Level Screen Surface To App Hosting Proof[0m

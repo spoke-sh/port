@@ -10,3 +10,7 @@ Activated mission VDi2jvg4P with epic VDi2y6gch and planned voyage VDi3LHFpb for
 ## 2026-03-12T19:34:01
 
 Completed VDi3O7KjN: added hosted HTTP app proof regression, shipped hosted-http-app-demo.sh, and recorded proof logs for apply/status, guest forward/curl, and hosted service/forward regressions.
+
+## 2026-03-12T19:42:08
+
+Completed VDi3O5dlc: mission-report now features the hosted app proof, reads manifest-backed evidence, and the renderer publishes hosted-http-app-workflow.cast plus ac-2.gif.

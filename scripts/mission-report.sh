@@ -188,6 +188,7 @@ normalize_demo_command() {
   value="${value%\)}"
   value="${value#\`}"
   value="${value%\`}"
+  value="${value#./}"
   value="${value#bash -lc }"
   value="${value//\/tmp\/port-target\/debug\/port/port}"
   value="${value//cargo run -q -p port-cli -- /port }"
@@ -222,8 +223,19 @@ collect_demo_artifacts_from_text() {
 
   while IFS= read -r value; do
     value="$(trim "$value")"
+    value="${value#./}"
+    [[ -n "$value" ]] || continue
+    add_unique_line "$value" "$demos_file"
+  done < <(
+    printf '%s\n' "$text" \
+      | grep -oE '\./scripts/[A-Za-z0-9._/-]+\.sh|scripts/[A-Za-z0-9._/-]+\.sh' \
+      | sort -u
+  )
+
+  while IFS= read -r value; do
+    value="$(trim "$value")"
     case "$value" in
-      just\ *|port\ *|nix\ develop\ -c\ just\ *|bash\ scripts/*.sh|scripts/*.sh|PORT_[A-Z0-9_]*=*\ just\ *|PORT_[A-Z0-9_]*=*\ port\ *)
+      just\ *|port\ *|nix\ develop\ -c\ just\ *|bash\ scripts/*.sh|./scripts/*.sh|scripts/*.sh|PORT_[A-Z0-9_]*=*\ just\ *|PORT_[A-Z0-9_]*=*\ port\ *)
         ;;
       *)
         continue
@@ -239,6 +251,27 @@ collect_demo_artifacts_from_text() {
     esac
     add_unique_line "$value" "$demos_file"
   done < <(printf '%s\n' "$text")
+}
+
+collect_evidence_paths_for_story() {
+  local story_readme="$1"
+  local story_dir manifest evidence_path
+
+  story_dir="$(dirname "$story_readme")"
+  manifest="$story_dir/manifest.yaml"
+
+  if [[ -f "$manifest" ]]; then
+    while IFS= read -r evidence_path; do
+      evidence_path="$(trim "$evidence_path")"
+      [[ -n "$evidence_path" ]] || continue
+      printf '%s\n' "$story_dir/$evidence_path"
+    done < <(awk '/^  EVIDENCE\// { path=$1; sub(/:$/, "", path); print path }' "$manifest")
+    return 0
+  fi
+
+  if [[ -d "$story_dir/EVIDENCE" ]]; then
+    find "$story_dir/EVIDENCE" -type f 2>/dev/null | sort
+  fi
 }
 
 collect_artifacts_from_doc_path() {
@@ -259,30 +292,59 @@ collect_artifacts_from_doc_path() {
 collect_visual_artifacts_for_story() {
   local story_readme="$1"
   local visuals_file="$2"
-  local story_dir media
+  local media
 
-  story_dir="$(dirname "$story_readme")"
-  if [[ -d "$story_dir/EVIDENCE" ]]; then
-    while IFS= read -r media; do
-      media="$(trim "$media")"
-      [[ -n "$media" ]] || continue
-      add_unique_line "$media" "$visuals_file"
-    done < <(
-      find "$story_dir/EVIDENCE" -type f \
-        \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webm' -o -name '*.mp4' \) \
-        2>/dev/null \
-        | sort
-    )
-  fi
+  while IFS= read -r media; do
+    media="$(trim "$media")"
+    [[ -n "$media" ]] || continue
+    case "$media" in
+      *.png|*.jpg|*.jpeg|*.gif|*.webm|*.mp4|*.mov)
+        add_unique_line "$media" "$visuals_file"
+        ;;
+    esac
+  done < <(collect_evidence_paths_for_story "$story_readme")
+}
+
+collect_proof_artifacts_for_story() {
+  local story_readme="$1"
+  local proofs_file="$2"
+  local docs_file="$3"
+  local demos_file="$4"
+  local artifact source_text
+
+  while IFS= read -r artifact; do
+    artifact="$(trim "$artifact")"
+    [[ -n "$artifact" ]] || continue
+    case "$artifact" in
+      *.png|*.jpg|*.jpeg|*.gif|*.webm|*.mp4|*.mov)
+        ;;
+      *)
+        add_unique_line "$artifact" "$proofs_file"
+        ;;
+    esac
+
+    case "$artifact" in
+      *.log|*.txt|*.md)
+        if [[ -f "$artifact" ]]; then
+          source_text="$(sed -n '1,320p' "$artifact")"
+          collect_doc_artifacts_from_text "$source_text" "$docs_file"
+          collect_demo_artifacts_from_text "$source_text" "$demos_file"
+        fi
+        ;;
+    esac
+  done < <(collect_evidence_paths_for_story "$story_readme")
 }
 
 collect_human_artifacts_for_story() {
   local story_readme="$1"
   local docs_file="$2"
   local demos_file="$3"
-  local line description meta verify_cmd script_path source_text referenced_docs doc_path
+  local line description meta verify_cmd script_path source_text referenced_docs doc_path story_text
 
   referenced_docs="$(mktemp)"
+  story_text="$(sed -n '1,260p' "$story_readme")"
+  collect_doc_artifacts_from_text "$story_text" "$referenced_docs"
+  collect_demo_artifacts_from_text "$story_text" "$demos_file"
 
   while IFS= read -r line; do
     if [[ "$line" == "- [x] "* && "$line" == *"<!--"* && "$line" == *" verify: "* ]]; then
@@ -312,6 +374,64 @@ collect_human_artifacts_for_story() {
   done < "$referenced_docs"
 
   rm -f "$referenced_docs"
+}
+
+first_artifact_line() {
+  local file="$1"
+  if [[ -s "$file" ]]; then
+    head -n 1 "$file"
+  fi
+}
+
+preferred_demo_script() {
+  local file="$1"
+  local line
+
+  if [[ ! -s "$file" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    if [[ "$line" == *demo.sh ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  done < "$file"
+
+  first_artifact_line "$file"
+}
+
+emit_primary_proof() {
+  local mission_id="$1"
+  local visuals_file="$2"
+  local demo_scripts_file="$3"
+  local run_commands_file="$4"
+  local proof_artifacts_file="$5"
+  local primary_visual primary_demo primary_run primary_artifact
+
+  primary_visual="$(first_artifact_line "$visuals_file")"
+  primary_demo="$(preferred_demo_script "$demo_scripts_file")"
+  primary_run="$(first_artifact_line "$run_commands_file")"
+  primary_artifact="$(first_artifact_line "$proof_artifacts_file")"
+
+  if [[ -z "$primary_visual" && -z "$primary_demo" && -z "$primary_run" && -z "$primary_artifact" ]]; then
+    return 1
+  fi
+
+  echo "  Primary proof:"
+  printf '    - entrypoint: %s\n' "just mission ${mission_id}"
+  if [[ -n "$primary_demo" ]]; then
+    printf '    - demo script: %s\n' "$primary_demo"
+  fi
+  if [[ -n "$primary_run" ]]; then
+    printf '    - runnable command: %s\n' "$primary_run"
+  fi
+  if [[ -n "$primary_visual" ]]; then
+    printf '    - review artifact: %s\n' "$primary_visual"
+  elif [[ -n "$primary_artifact" ]]; then
+    printf '    - proof artifact: %s\n' "$primary_artifact"
+  fi
+  return 0
 }
 
 epic_progress_fields() {
@@ -613,7 +733,7 @@ play_visual_artifacts() {
 
 emit_artifact_gallery() {
   local mission_id="$1"
-  local visuals_file docs_file demos_file demo_scripts_file run_commands_file
+  local visuals_file docs_file demos_file demo_scripts_file run_commands_file proof_artifacts_file
   local epic_id story_readme
   local demo
 
@@ -622,12 +742,14 @@ emit_artifact_gallery() {
   demos_file="$(mktemp)"
   demo_scripts_file="$(mktemp)"
   run_commands_file="$(mktemp)"
+  proof_artifacts_file="$(mktemp)"
 
   while IFS= read -r epic_id; do
     [[ -n "$epic_id" ]] || continue
     while IFS= read -r story_readme; do
       [[ -n "$story_readme" ]] || continue
       collect_visual_artifacts_for_story "$story_readme" "$visuals_file"
+      collect_proof_artifacts_for_story "$story_readme" "$proof_artifacts_file" "$docs_file" "$demos_file"
       collect_human_artifacts_for_story "$story_readme" "$docs_file" "$demos_file"
     done < <(story_readmes_for_epic "$epic_id")
   done < <(related_epic_ids "$mission_id")
@@ -644,9 +766,19 @@ emit_artifact_gallery() {
     esac
   done < "$demos_file"
 
-  echo "  Visual evidence:"
+  if ! emit_primary_proof "$mission_id" "$visuals_file" "$demo_scripts_file" "$run_commands_file" "$proof_artifacts_file"; then
+    echo "  Primary proof:"
+    echo "    - No featured proof recorded yet."
+  fi
+
+  echo "  Recorded proof media:"
   if ! emit_section_from_file "$visuals_file" "    - " 6; then
     echo "    - No visual artifacts recorded."
+  fi
+
+  echo "  Proof artifacts:"
+  if ! emit_section_from_file "$proof_artifacts_file" "    - " 8; then
+    echo "    - No proof artifacts recorded."
   fi
 
   echo "  Demo scripts:"
@@ -666,7 +798,7 @@ emit_artifact_gallery() {
 
   play_visual_artifacts "$visuals_file"
 
-  rm -f "$visuals_file" "$docs_file" "$demos_file" "$demo_scripts_file" "$run_commands_file"
+  rm -f "$visuals_file" "$docs_file" "$demos_file" "$demo_scripts_file" "$run_commands_file" "$proof_artifacts_file"
 }
 
 emit_next() {
