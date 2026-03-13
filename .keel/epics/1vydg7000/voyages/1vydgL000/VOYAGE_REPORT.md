@@ -34,8 +34,8 @@ rewriting the command surface.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vydgl000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vydgl000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vydgl000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vydgl000/EVIDENCE/ac-3.log)
 
 ### Document Operator Workflows
 - **ID:** 1vydgm000
@@ -61,11 +61,11 @@ implicit.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vydgm000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vydgm000/EVIDENCE/ac-1.log)
-- [ac-5.log](../../../../stories/1vydgm000/EVIDENCE/ac-5.log)
-- [ac-3.log](../../../../stories/1vydgm000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vydgm000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vydgm000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vydgm000/EVIDENCE/ac-4.log)
+- [ac-5.log](../../../../stories/1vydgm000/EVIDENCE/ac-5.log)
 
 ### Implement Local Firecracker Launch
 - **ID:** 1vydim000
@@ -91,12 +91,12 @@ recorded end-to-end proof.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vydim000/EVIDENCE/ac-4.log)
-- [ac-6.log](../../../../stories/1vydim000/EVIDENCE/ac-6.log)
 - [ac-1.log](../../../../stories/1vydim000/EVIDENCE/ac-1.log)
-- [ac-5.log](../../../../stories/1vydim000/EVIDENCE/ac-5.log)
-- [ac-3.log](../../../../stories/1vydim000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vydim000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vydim000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vydim000/EVIDENCE/ac-4.log)
+- [ac-5.log](../../../../stories/1vydim000/EVIDENCE/ac-5.log)
+- [ac-6.log](../../../../stories/1vydim000/EVIDENCE/ac-6.log)
 
 ### Deliver Guest Agent Capabilities
 - **ID:** 1vydip000
@@ -120,10 +120,10 @@ and `forward` through the Port CLI and shared protocol.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vydip000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vydip000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vydip000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vydip000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vydip000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vydip000/EVIDENCE/ac-4.log)
 
 ### Build Artifact Pipelines And Docs
 - **ID:** 1vydit000
@@ -148,10 +148,10 @@ workflow.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vydit000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vydit000/EVIDENCE/ac-1.log)
-- [ac-5.log](../../../../stories/1vydit000/EVIDENCE/ac-5.log)
-- [ac-3.log](../../../../stories/1vydit000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vydit000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vydit000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vydit000/EVIDENCE/ac-4.log)
+- [ac-5.log](../../../../stories/1vydit000/EVIDENCE/ac-5.log)
 
 

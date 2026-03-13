@@ -26,8 +26,8 @@ and README examples, and replace stale cargo-runner examples with canonical
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/VDaiNwEwJ/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/VDaiNwEwJ/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/VDaiNwEwJ/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/VDaiNwEwJ/EVIDENCE/ac-3.log)
 
 ### Add Mission Verification Surface And Modular Just Workflows
 - **ID:** VDaiNxnwT
@@ -45,5 +45,7 @@ show only the workflows maintainers actually use.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/VDaiNxnwT/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/VDaiNxnwT/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/VDaiNxnwT/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/VDaiNxnwT/EVIDENCE/ac-3.log)
+
+

@@ -33,10 +33,10 @@ Replace the shared-host-path and guest-local-listener assumptions in `copy` and
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vyfvx000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vyfvx000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vyfvx000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vyfvx000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vyfvx000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vyfvx000/EVIDENCE/ac-4.log)
 
 ### Stabilize Runtime State For Guest Transport
 - **ID:** 1vyfwJ000
@@ -54,8 +54,8 @@ guest error with an actionable launched-VM transport diagnostic.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vyfwJ000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vyfwJ000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vyfwJ000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vyfwJ000/EVIDENCE/ac-3.log)
 
 ### Connect Exec Pty And Logs To Live VMs
 - **ID:** 1vyfwN000
@@ -73,9 +73,9 @@ Firecracker VMs.
 - [x] [SRS-03/AC-03] Automated tests cover transport selection plus the Firecracker-vsock control handshake without requiring a real VM. <!-- [SRS-03/AC-03] verify: nix develop -c env CARGO_TARGET_DIR=/tmp/port-target cargo test -p port-runtime guest_exec_uses_firecracker_vsock_tunnel_when_runtime_socket_is_absent, proof: ac-4.log-->
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vyfwN000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vyfwN000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vyfwN000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vyfwN000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vyfwN000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vyfwN000/EVIDENCE/ac-4.log)
 
 

@@ -34,7 +34,7 @@ when `nix develop` and `port doctor` are required.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vyfD0000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vyfD0000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vyfD0000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vyfD0000/EVIDENCE/ac-3.log)
 
 

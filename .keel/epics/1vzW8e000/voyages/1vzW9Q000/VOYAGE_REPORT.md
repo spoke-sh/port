@@ -27,8 +27,8 @@ selected artifact variant.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzWCG000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzWCG000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzWCG000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzWCG000/EVIDENCE/ac-3.log)
 
 ### Implement Hosted Artifact Control Plane Routes
 - **ID:** 1vzWCI000
@@ -46,8 +46,8 @@ path under `.port/hosted/...`.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzWCI000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzWCI000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzWCI000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzWCI000/EVIDENCE/ac-3.log)
 
 ### Route Artifact Push And Pull Through Hosted Backend
 - **ID:** 1vzWCJ000
@@ -65,8 +65,8 @@ deterministic backend and path details for the selected variant.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzWCJ000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzWCJ000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzWCJ000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzWCJ000/EVIDENCE/ac-3.log)
 
 ### Publish Hosted Artifact Mobility Workflow
 - **ID:** 1vzWCK000
@@ -85,7 +85,7 @@ support remains follow-on work.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzWCK000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzWCK000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzWCK000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzWCK000/EVIDENCE/ac-3.log)
 
 

@@ -57,10 +57,10 @@ the first human-reviewable proof artifact for the SSH-first workflow.
 - [x] [SRS-NFR-03/AC-02] The story records at least one human-reviewable proof artifact through the proof system for the SSH-first workflow. <!-- [SRS-NFR-03/AC-02] verify: bash -lc 'cd /home/alex/workspace/spoke-sh/port && ./scripts/render-hybrid-ssh-proof.sh .keel/stories/VDeuzbve3/EVIDENCE', proof: ac-2.gif -->
 
 #### Verified Evidence
-- [hybrid-ssh-workflow.cast](../../../../stories/VDeuzbve3/EVIDENCE/hybrid-ssh-workflow.cast)
 - [ac-1.log](../../../../stories/VDeuzbve3/EVIDENCE/ac-1.log)
-- [ac-2.log](../../../../stories/VDeuzbve3/EVIDENCE/ac-2.log)
 ![ac-2.gif](../../../../stories/VDeuzbve3/EVIDENCE/ac-2.gif)
+- [ac-2.log](../../../../stories/VDeuzbve3/EVIDENCE/ac-2.log)
+- [hybrid-ssh-workflow.cast](../../../../stories/VDeuzbve3/EVIDENCE/hybrid-ssh-workflow.cast)
 
 ### Introduce SSH Hybrid Route Contract
 - **ID:** VDeuzcDcL

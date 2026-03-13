@@ -27,8 +27,8 @@ unsupported-host guidance.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzXG2000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzXG2000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzXG2000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzXG2000/EVIDENCE/ac-3.log)
 
 ### Route Standard Cloud Launch Through Hosted Runtime
 - **ID:** 1vzXIF000
@@ -47,8 +47,8 @@ failing fast with provider guidance.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzXIF000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzXIF000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzXIF000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzXIF000/EVIDENCE/ac-3.log)
 
 ### Publish Hosted Standard Cloud Workflow
 - **ID:** 1vzXIG000

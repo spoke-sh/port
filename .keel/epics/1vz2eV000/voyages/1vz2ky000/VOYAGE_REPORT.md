@@ -34,8 +34,8 @@ artifact compatibility instead of through provider identity alone.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vz2oQ000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vz2oQ000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vz2oQ000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vz2oQ000/EVIDENCE/ac-3.log)
 
 ### Add Machine Inventory Status And Stop
 - **ID:** 1vz2oY000
@@ -61,10 +61,10 @@ coherent CLI output.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vz2oY000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vz2oY000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vz2oY000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vz2oY000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vz2oY000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vz2oY000/EVIDENCE/ac-4.log)
 
 ### Publish Hosted Node Agent Contract
 - **ID:** 1vz2oh000
@@ -90,8 +90,8 @@ lifecycle ownership, transport brokering, and inventory.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vz2oh000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vz2oh000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vz2oh000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vz2oh000/EVIDENCE/ac-3.log)
 
 ### Define Artifact Mobility Commands And Contracts
 - **ID:** 1vz2on000
@@ -117,9 +117,9 @@ pull semantics.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vz2on000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vz2on000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vz2on000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vz2on000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vz2on000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vz2on000/EVIDENCE/ac-4.log)
 
 

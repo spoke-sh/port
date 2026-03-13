@@ -43,8 +43,8 @@ projecting explicit attachment context in output and runtime state.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/VDfF1csOC/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/VDfF1csOC/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/VDfF1csOC/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/VDfF1csOC/EVIDENCE/ac-3.log)
 
 ### Publish Attached Volume Operator Proof
 - **ID:** VDfF1dVOF
@@ -59,10 +59,10 @@ human-reviewable proof artifact for mission and story review.
 - [x] [SRS-NFR-03/AC-02] The story records at least one human-reviewable proof artifact through the proof system for the attached-volume workflow. <!-- [SRS-NFR-03/AC-02] verify: sh -c 'cd /home/alex/workspace/spoke-sh/port && ./scripts/render-attached-volume-proof.sh .keel/stories/VDfF1dVOF/EVIDENCE', proof: ac-2.gif -->
 
 #### Verified Evidence
-- [attached-volume-workflow.cast](../../../../stories/VDfF1dVOF/EVIDENCE/attached-volume-workflow.cast)
 - [ac-1.log](../../../../stories/VDfF1dVOF/EVIDENCE/ac-1.log)
-- [ac-2.log](../../../../stories/VDfF1dVOF/EVIDENCE/ac-2.log)
 ![ac-2.gif](../../../../stories/VDfF1dVOF/EVIDENCE/ac-2.gif)
+- [ac-2.log](../../../../stories/VDfF1dVOF/EVIDENCE/ac-2.log)
+- [attached-volume-workflow.cast](../../../../stories/VDfF1dVOF/EVIDENCE/attached-volume-workflow.cast)
 
 ### Introduce Canonical Volume And Attachment Model
 - **ID:** VDfF1dZM9

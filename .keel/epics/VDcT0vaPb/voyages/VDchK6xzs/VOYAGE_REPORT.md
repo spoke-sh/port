@@ -26,8 +26,8 @@ for unsupported targets or missing prerequisites.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/VDchsvWfn/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/VDchsvWfn/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/VDchsvWfn/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/VDchsvWfn/EVIDENCE/ac-3.log)
 
 ### Surface AVF Distribution Boundary In Docs And Doctor
 - **ID:** VDchsw9fh
@@ -45,8 +45,8 @@ unsupported-host guidance as part of the packaged Port experience.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/VDchsw9fh/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/VDchsw9fh/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/VDchsw9fh/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/VDchsw9fh/EVIDENCE/ac-3.log)
 
 ### Add Install Proof For Packaged Port
 - **ID:** VDchsxHfm

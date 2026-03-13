@@ -27,8 +27,8 @@ namespace.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzUq5000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzUq5000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzUq5000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzUq5000/EVIDENCE/ac-3.log)
 
 ### Persist Hosted Registration And Freshness
 - **ID:** 1vzUq6000
@@ -55,10 +55,10 @@ ineligible.
 
 
 #### Verified Evidence
-- [ac-4.log](../../../../stories/1vzUq6000/EVIDENCE/ac-4.log)
 - [ac-1.log](../../../../stories/1vzUq6000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzUq6000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzUq6000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzUq6000/EVIDENCE/ac-3.log)
+- [ac-4.log](../../../../stories/1vzUq6000/EVIDENCE/ac-4.log)
 
 ### Materialize Imported Fleet Inventory
 - **ID:** 1vzUq7000
@@ -76,8 +76,8 @@ configured nodes before routing or inspection occurs.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzUq7000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzUq7000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzUq7000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzUq7000/EVIDENCE/ac-3.log)
 
 ### Surface Durable Hosted Fleet State
 - **ID:** 1vzUq8000
@@ -96,8 +96,8 @@ without reading runtime files directly.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzUq8000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzUq8000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzUq8000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzUq8000/EVIDENCE/ac-3.log)
 
 ### Publish Durable Hosted Fleet Workflow
 - **ID:** 1vzUq9000
@@ -116,7 +116,7 @@ voyage.
 
 #### Verified Evidence
 - [ac-1.log](../../../../stories/1vzUq9000/EVIDENCE/ac-1.log)
-- [ac-3.log](../../../../stories/1vzUq9000/EVIDENCE/ac-3.log)
 - [ac-2.log](../../../../stories/1vzUq9000/EVIDENCE/ac-2.log)
+- [ac-3.log](../../../../stories/1vzUq9000/EVIDENCE/ac-3.log)
 
 
