@@ -1,7 +1,10 @@
 # Operator Guide
 
 Use `port` for runtime workflows and `just mission` for a repo-level mission
-report with recent achievements and human-facing artifacts.
+report with recent achievements and human-facing artifacts. In the current app
+proof slice, `just mission` is the review surface for the hosted HTTP demo,
+while `port` remains the runtime surface that actually launches, exposes, and
+stops the workload.
 
 ## Platform Summary
 
@@ -171,6 +174,57 @@ Repo-local proof for this workflow:
 ```bash
 ./scripts/render-hosted-k3s-proof.sh .keel/stories/VDfzOEeFL/EVIDENCE
 ```
+
+## Hosted App Proof First Slice
+
+Port now has one bounded answer to "can it host an app?" without claiming a
+general hosted platform.
+
+Review surface:
+
+```bash
+just mission
+```
+
+Runnable hosted workflow:
+
+```bash
+bash scripts/hosted-http-app-demo.sh
+```
+
+That proof path keeps the operator contract explicit:
+
+- repo-local hosted control plane plus node agent
+- one hosted machine: `cloud-aws`
+- one explicit host group: `aws-builders`
+- one minimal HTTP service launched through `port service apply`
+- one host-side exposure through `port guest forward`
+- one host-side `curl` proving the payload
+
+Human-reviewable artifact:
+
+```bash
+./scripts/render-hosted-http-app-proof.sh .keel/stories/VDi3O5dlc/EVIDENCE
+```
+
+The current proof prerequisites are intentionally narrow:
+
+- run from the repo dev shell so `port`, `port-guest-agent`, `busybox`, `curl`,
+  and `agg` are available
+- keep `PORT_DEMO_TOKEN` available for the repo-local hosted control-plane
+  contract
+- treat the shipped workflow as a repo-local proof lane, not external hosted
+  infrastructure
+
+First-slice boundaries stay explicit:
+
+- current repo-level entrypoint name is `mission`; future `screen` cutover is
+  separate work once upstream `keel screen` ships
+- current recording path is the checked-in renderer plus cast/GIF artifact;
+  future `atxt` migration is separate work
+- this slice proves one minimal hosted HTTP app only; it does not ship ingress,
+  public exposure, multi-service orchestration, autoscaling, tenancy, or
+  production-hosting guarantees
 
 ## SSH Repo-local Proof
 

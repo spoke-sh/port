@@ -14,3 +14,7 @@ Completed VDi3O7KjN: added hosted HTTP app proof regression, shipped hosted-http
 ## 2026-03-12T19:42:08
 
 Completed VDi3O5dlc: mission-report now features the hosted app proof, reads manifest-backed evidence, and the renderer publishes hosted-http-app-workflow.cast plus ac-2.gif.
+
+## 2026-03-12T19:47:13
+
+Completed VDi3O6vld and closed VDi3LHFpb: README and operator docs now publish the hosted app proof contract, prerequisites, mission/screen boundary, and current renderer vs future atxt boundary.

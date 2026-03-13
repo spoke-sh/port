@@ -1,0 +1,8 @@
+docs/operators.md:72:  remain future SSH follow-on work.
+docs/operators.md:221:- current repo-level entrypoint name is `mission`; future `screen` cutover is
+docs/operators.md:222:  separate work once upstream `keel screen` ships
+docs/operators.md:224:  future `atxt` migration is separate work
+README.md:73:- it stays named `mission` until upstream `keel screen` exists and Port can
+README.md:74:  hard-cut to `just screen`
+README.md:75:- it uses the current renderer-backed cast/GIF path today; future `atxt`
+README.md:76:  adoption remains explicit follow-on work

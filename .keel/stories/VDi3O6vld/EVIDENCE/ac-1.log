@@ -1,0 +1,25 @@
+README.md:48:The first hosted app proof path, repo-level review surface, and current
+README.md:60:just mission
+README.md:66:For the current hosted app proof slice, `just mission` is the repo-level review
+README.md:69:- it points at `scripts/hosted-http-app-demo.sh` as the runnable hosted app
+README.md:71:- it points at `scripts/render-hosted-http-app-proof.sh` plus the recorded GIF
+docs/operators.md:3:Use `port` for runtime workflows and `just mission` for a repo-level mission
+docs/operators.md:5:proof slice, `just mission` is the review surface for the hosted HTTP demo,
+docs/operators.md:150:export PORT_DEMO_TOKEN=demo-token
+docs/operators.md:151:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+docs/operators.md:152:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
+docs/operators.md:153:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9235 --token node-secret
+docs/operators.md:154:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-generic
+docs/operators.md:155:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-aws
+docs/operators.md:156:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -"
+docs/operators.md:157:JOIN_TOKEN="$(PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /var/lib/rancher/k3s/server/node-token')"
+docs/operators.md:158:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-aws -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='${JOIN_TOKEN}' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -"
+docs/operators.md:159:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /etc/rancher/k3s/k3s.yaml'
+docs/operators.md:160:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'k3s kubectl get nodes -o wide'
+docs/operators.md:161:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-aws
+docs/operators.md:162:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-generic
+docs/operators.md:186:just mission
+docs/operators.md:192:bash scripts/hosted-http-app-demo.sh
+docs/operators.md:207:./scripts/render-hosted-http-app-proof.sh .keel/stories/VDi3O5dlc/EVIDENCE
+docs/operators.md:214:- keep `PORT_DEMO_TOKEN` available for the repo-local hosted control-plane
+docs/operators.md:249:PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws

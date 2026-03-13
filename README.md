@@ -45,6 +45,8 @@ The first hosted stateless K3s workflow, boundaries, and proof command live in
 [`docs/operators.md`](docs/operators.md).
 The first direct-runtime attached-volume workflow and proof command live in
 [`docs/operators.md`](docs/operators.md).
+The first hosted app proof path, repo-level review surface, and current
+boundaries also live in [`docs/operators.md`](docs/operators.md).
 The first installable release contract and support matrix live in
 [`docs/install.md`](docs/install.md).
 Packaged macOS AVF workflows still use the canonical `port` CLI plus an
@@ -60,6 +62,18 @@ just mission
 
 That shows a compact mission report with board-backed goal status, recent
 achievements, and a human-facing artifact gallery for the active mission.
+
+For the current hosted app proof slice, `just mission` is the repo-level review
+surface:
+
+- it points at `scripts/hosted-http-app-demo.sh` as the runnable hosted app
+  workflow
+- it points at `scripts/render-hosted-http-app-proof.sh` plus the recorded GIF
+  and cast artifact for review
+- it stays named `mission` until upstream `keel screen` exists and Port can
+  hard-cut to `just screen`
+- it uses the current renderer-backed cast/GIF path today; future `atxt`
+  adoption remains explicit follow-on work
 
 ## Documentation Map
 

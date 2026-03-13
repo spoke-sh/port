@@ -20,8 +20,8 @@ index: 12
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/3 stories done
+**Progress:** 0/1 voyages complete, 2/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted HTTP App Curl Proof](voyages/VDi3LHFpb/) | in-progress | 1/3 |
+| [Hosted HTTP App Curl Proof](voyages/VDi3LHFpb/) | in-progress | 2/3 |
 <!-- END GENERATED -->

@@ -1,10 +1,12 @@
 ---
 id: VDi2jvg4P
 title: Ship Canonical App Hosting Screen Proof
-status: active
+status: verified
 created_at: 2026-03-12T19:10:41
-updated_at: 2026-03-12T19:17:36
+updated_at: 2026-03-12T19:47:39
 activated_at: 2026-03-12T19:17:36
+achieved_at: 2026-03-12T19:47:33
+verified_at: 2026-03-12T19:47:39
 ---
 
 # Ship Canonical App Hosting Screen Proof

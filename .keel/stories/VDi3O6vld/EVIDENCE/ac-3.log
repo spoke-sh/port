@@ -1,0 +1,7 @@
+docs/operators.md:3:Use `port` for runtime workflows and `just mission` for a repo-level mission
+docs/operators.md:5:proof slice, `just mission` is the review surface for the hosted HTTP demo,
+docs/operators.md:186:just mission
+README.md:48:The first hosted app proof path, repo-level review surface, and current
+README.md:60:just mission
+README.md:64:achievements, and a human-facing artifact gallery for the active mission.
+README.md:66:For the current hosted app proof slice, `just mission` is the repo-level review
