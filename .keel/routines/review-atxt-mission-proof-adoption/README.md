@@ -2,16 +2,16 @@
 id: review-atxt-mission-proof-adoption
 title: Review ATXT Mission Proof Adoption
 cadence:
-  cron: 0 9 1 * *
+  cron: 0 9 * * *
   timezone: America/Los_Angeles
 target-scope: VDaiFfFPe
 created_at: 2026-03-12T17:52:14
-updated_at: 2026-03-12T17:52:14
+updated_at: 2026-03-12T18:44:59
 ---
 
 # Blueprint
 
-- Trigger: monthly review of whether `atxt` is ready to replace or augment the
+- Trigger: daily review of whether `atxt` is ready to replace or augment the
   current `vhs`-backed human-reviewable recording path for the repo-level
   proof surface (`just mission` today, `just screen` after the planned rename).
 - Review the current proof contract first:
