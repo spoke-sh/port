@@ -100,11 +100,13 @@
 |--------|--------|
 | [Mission Verification And Help Simplification](epics/VDaiFfFPe/voyages/VDaiL5HDr/) | done |
 
-### [Canonical App Hosting Screen Surface](epics/VDi2y6gch/) (active)
+### [Canonical App Hosting Screen Surface](epics/VDi2y6gch/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted HTTP App Curl Proof](epics/VDi2y6gch/voyages/VDi3LHFpb/) | in-progress |
+| [Hosted HTTP App Curl Proof](epics/VDi2y6gch/voyages/VDi3LHFpb/) | done |
+
+### [Strategic Maintenance](epics/VDqb5IPID/) (draft)
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

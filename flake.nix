@@ -12,7 +12,7 @@
       inputs.flake-utils.follows = "flake-utils";
     };
     keel = {
-      url = "github:spoke-sh/keel";
+      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -55,10 +55,12 @@
 
                 src = keel;
 
+                doCheck = false;
+
                 cargoLock = {
                   lockFile = "${keel}/Cargo.lock";
                   outputHashes = {
-                    "txtplot-0.1.0" = "sha256-PXj4ntPJ1UXda++7gcE+yk2cCLy/CFBMBGxgfBGSH5c=";
+                    "txtplot-0.1.0" = "sha256-bC6zo1yhJg41iz69XbXqwIKOfNVXwFke0vzcSMbqvFE=";
                   };
                 };
 

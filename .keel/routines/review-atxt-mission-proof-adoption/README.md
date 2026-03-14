@@ -4,7 +4,7 @@ title: Review ATXT Mission Proof Adoption
 cadence:
   cron: 0 9 * * *
   timezone: America/Los_Angeles
-target-scope: VDaiFfFPe
+target-scope: VDqb5IPID
 created_at: 2026-03-12T17:52:14
 updated_at: 2026-03-12T18:44:59
 ---

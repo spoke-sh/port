@@ -24,13 +24,11 @@ host an application?" rather than only a board summary.
 
 Current and planned naming:
 
-- Today the repo-level proof entrypoint is `just mission`.
+- Today the repo-level proof entrypoint is `just mission` routed through `just keel mission show`.
 - The intended final product name is `screen`.
-- Once upstream `keel screen` exists, replace the repo-local entrypoint with
-  `just screen` routed through `just keel screen`.
-- Treat that as a hard cutover. Do not keep `just mission` and `just screen`
-  as parallel long-term surfaces unless a scoped story explicitly requires a
-  migration window.
+- The `just screen` alias is available and routes to `just mission`.
+- These commands auto-select the current active mission if no ID is provided.
+- Treat that as a hard cutover. The legacy `scripts/mission-report.sh` has been removed.
 
 1. The canonical proof should launch a minimal HTTP application inside
    Port-managed compute, expose it through the canonical Port transport or
@@ -49,9 +47,8 @@ Current and planned naming:
    commitment, not an optional idea. Maintain the routine
    `review-atxt-mission-proof-adoption` instead of opening duplicate reminder
    loops.
-5. Until `keel screen` ships, keep the current repo-local `just mission`
-   implementation working. When `keel screen` becomes available, prefer that
-   Keel command over extending `scripts/mission-report.sh`.
+5. Prefer the Keel mission show output directly over manual scripts. Use
+   `just mission` or `just screen` as the repo-local entrypoint.
 
 ## Subagent / Delegation
 

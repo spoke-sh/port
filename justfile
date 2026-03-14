@@ -31,7 +31,10 @@ keel *args:
   if command -v nix >/dev/null 2>&1; then nix develop {{justfile_directory()}} -c keel {{args}}; else keel {{args}}; fi
 
 mission *args:
-  @just signal::report {{args}}
+  @bash {{justfile_directory()}}/scripts/keel-mission-show.sh {{args}}
+
+screen *args:
+  @just mission {{args}}
 
 check:
   @just checks::check
