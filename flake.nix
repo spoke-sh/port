@@ -12,7 +12,7 @@
       inputs.flake-utils.follows = "flake-utils";
     };
     keel = {
-      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
+      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=refs/heads/main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";

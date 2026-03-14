@@ -24,10 +24,9 @@ host an application?" rather than only a board summary.
 
 Current and planned naming:
 
-- Today the repo-level proof entrypoint is `just mission` routed through `just keel mission show`.
-- The intended final product name is `screen`.
-- The `just screen` alias is available and routes to `just mission`.
-- These commands auto-select the current active mission if no ID is provided.
+- Today the repo-level text-based entrypoint is `just mission` routed through `just keel mission show`.
+- The `just screen` command provides a **visual representation** of the project state by delegating to `just keel topology`.
+- These commands auto-select the current active mission or context if no ID is provided.
 - Treat that as a hard cutover. The legacy `scripts/mission-report.sh` has been removed.
 
 1. The canonical proof should launch a minimal HTTP application inside
