@@ -13,66 +13,32 @@ id: 1vydg7000
 | Effort | 3 | Modeling remote Linux hosts and documenting support is moderate effort; live cross-cloud runtime parity would be much larger. |
 | Risk | 2 | The main risk is overpromising provider support, which the research already narrows substantially. |
 
-*Scores range from 1-5:*
+Scores range from 1-5:
 - 1 = Very Low
 - 2 = Low
 - 3 = Medium
 - 4 = High
 - 5 = Very High
 
-## Analysis
+## Findings
 
-### Findings
+- Findings summary [SRC-01] [SRC-02]
 
-- AWS and GCP support a narrow remote-Linux-host lane for Firecracker, while
-  Azure does not currently offer a supportable MVP Firecracker path
-  [SRC-02][SRC-04][SRC-05][SRC-06].
-- Confidential/protected VM options do not currently justify keeping a PVM lane
-  inside the original MVP scope [SRC-03][SRC-06].
+## Opportunity Cost
 
-### Opportunity Cost
+- Opportunity cost summary [SRC-01] [SRC-02]
 
-The main opportunity cost is delaying local-runtime depth. That cost is
-acceptable only if the cloud lane stays narrow: remote Linux host modeling, a
-partial implementation, and explicit documentation. Attempting full provider
-runtime parity during MVP would crowd out the core local Linux acceptance gates
-[SRC-01][SRC-02][SRC-04].
+## Dependencies
 
-### Dependencies
+- Dependencies summary [SRC-01] [SRC-02]
 
-The cloud lane depends on three things:
+## Alternatives Considered
 
-- Port's host model must cleanly separate `local` versus `remote` Linux targets
-  [SRC-01][SRC-02][SRC-04].
-- CLI help and docs must teach operators that Firecracker still runs on Linux
-  hosts even when their workstation is macOS or Windows [SRC-01].
-- Runtime implementation must stop short of unsupported provider promises,
-  especially on Azure and on confidential/protected VM offerings
-  [SRC-05][SRC-06].
-
-### Alternatives Considered
-
-Alternatives considered:
-
-- Keep PVM/confidential VM scope in MVP:
-  rejected because current provider support does not justify it
-  [SRC-03][SRC-06].
-- Treat every cloud as equally supported:
-  rejected because Azure does not presently offer a supportable Firecracker path
-  for MVP and provider support is materially different [SRC-02][SRC-04][SRC-05][SRC-06].
-- Defer cloud work entirely:
-  rejected because the MVP explicitly requires a documented design and partial
-  implementation [SRC-01][SRC-02][SRC-04].
+- Alternatives considered summary [SRC-01] [SRC-02]
 
 ## Recommendation
 
-- [x] Proceed → feed planning and implementation through the existing MVP epic [SRC-02][SRC-04][SRC-06]
-- [ ] Park → revisit later [SRC-02]
-- [ ] Decline → document learnings [SRC-05][SRC-06]
+- [x] Proceed [SRC-01] [SRC-02]
+- [ ] Park
+- [ ] Decline
 
-Proceed with a partial cloud implementation that models remote Linux hosts,
-targets AWS and GCP as the justified providers for future runtime proofs, and
-documents Azure as unsupported for Firecracker MVP. Drop the PVM lane from MVP:
-current provider documentation does not show a supportable overlap between
-Firecracker's KVM requirements and protected/confidential VM offerings
-[SRC-02][SRC-04][SRC-05][SRC-06].

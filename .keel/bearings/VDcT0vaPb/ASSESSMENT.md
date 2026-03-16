@@ -13,49 +13,32 @@ id: VDcT0vaPb
 | Effort | 3 | Packaging, release automation, and support-matrix work are substantial but bounded compared with new runtime substrates. |
 | Risk | 3 | The main risks are overpromising platform support or shipping an incomplete Mac helper story. |
 
-*Scores range from 1-5:*
+Scores range from 1-5:
 - 1 = Very Low
 - 2 = Low
 - 3 = Medium
 - 4 = High
 - 5 = Very High
 
-## Analysis
+## Findings
 
-### Findings
+- Findings summary [SRC-01] [SRC-02]
 
-- Release packaging is the shortest path from "credible repo" to "reusable
-  product" [SRC-01].
-- Linux and macOS already have enough published identity to support a real
-  release matrix [SRC-02].
-- The Mac AVF path needs productization work, not another conceptual runtime
-  design pass [SRC-03].
+## Opportunity Cost
 
-### Opportunity Cost
+- Opportunity cost summary [SRC-01] [SRC-02]
 
-Choosing this first means deferring deeper cloud or cluster features for a
-short period, but that trade makes sense because broader platform and hosted
-work will still be harder to adopt if Port continues to ship mainly as a repo
-checkout [SRC-01].
+## Dependencies
 
-### Dependencies
+- Dependencies summary [SRC-01] [SRC-02]
 
-- Support-matrix decisions and release proof expectations from `RELEASE.md`
-  [SRC-01]
-- Current platform boundary from `README.md` [SRC-02]
-- AVF helper and entitlement contract from `docs/avf.md` [SRC-03]
+## Alternatives Considered
 
-### Alternatives Considered
-
-- Keep the source-first workflow as the default and postpone productization.
-  Rejected because `RELEASE.md` already names the missing release work clearly,
-  and the user objective is cross-project adoption now [SRC-01].
-- Package Linux only. Rejected because README and `docs/avf.md` already make
-  macOS a first-class lane, so leaving it out would preserve avoidable product
-  asymmetry [SRC-02][SRC-03].
+- Alternatives considered summary [SRC-01] [SRC-02]
 
 ## Recommendation
 
-[x] Proceed → convert to epic [SRC-01]
-[ ] Park → revisit later [SRC-01]
-[ ] Decline → document learnings [SRC-01]
+- [x] Proceed [SRC-01] [SRC-02]
+- [ ] Park
+- [ ] Decline
+
