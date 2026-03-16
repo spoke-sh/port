@@ -12,7 +12,7 @@
       inputs.flake-utils.follows = "flake-utils";
     };
     keel = {
-      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=refs/heads/main";
+      url = "git+file:///home/alex/workspace/spoke-sh/keel";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -51,7 +51,7 @@
             in
               rustPlatform.buildRustPackage {
                 pname = "keel";
-                version = cargoToml.package.version;
+                version = cargoToml.workspace.package.version;
 
                 src = keel;
 

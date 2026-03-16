@@ -25,7 +25,7 @@ host an application?" rather than only a board summary.
 Current and planned naming:
 
 - Today the repo-level text-based entrypoint is `just mission` routed through `just keel mission show`.
-- The `just screen` command provides a **visual representation** of the project state by delegating to `just keel topology`.
+- The `just screen` command provides a **visual representation** of the project state by delegating to `just keel screen`.
 - These commands auto-select the current active mission or context if no ID is provided.
 - Treat that as a hard cutover. The legacy `scripts/mission-report.sh` has been removed.
 

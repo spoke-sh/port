@@ -34,7 +34,7 @@ mission *args:
   @bash {{justfile_directory()}}/scripts/keel-mission-show.sh {{args}}
 
 screen *args:
-  if command -v nix >/dev/null 2>&1; then nix develop {{justfile_directory()}} -c keel topology {{args}}; else keel topology {{args}}; fi
+  if command -v nix >/dev/null 2>&1; then nix develop {{justfile_directory()}} -c keel screen {{args}}; else keel screen {{args}}; fi
 
 check:
   @just checks::check
