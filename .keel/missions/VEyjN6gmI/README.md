@@ -1,14 +1,15 @@
 ---
 # system-managed
 id: VEyjN6gmI
-status: achieved
+status: verified
 created_at: 2026-03-26T06:09:16
-updated_at: 2026-03-26T08:18:32
+updated_at: 2026-03-26T08:23:13
 # authored
 title: Ship Canonical External Project Deployment Workflow
 watch: ~
 activated_at: 2026-03-26T06:14:14
 achieved_at: 2026-03-26T08:18:32
+verified_at: 2026-03-26T08:23:13
 ---
 
 # Ship Canonical External Project Deployment Workflow
