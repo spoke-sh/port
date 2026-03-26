@@ -7,15 +7,15 @@
 
 | Bearing | Status | Evidence | Assessment | Readiness | EV | Laid |
 |---------|--------|----------|------------|-----------|----|------|
-| [Cloud Linux and PVM Viability](bearings/1vydg7000/) | laid | ✓ | ✓ | decision-ready | 3.88 | ✓ |
-| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid | ✓ | ✓ | decision-ready | 2.58 | ✓ |
-| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid | ✓ | ✓ | decision-ready | 3.07 | ✓ |
-| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | decision-ready | 2.63 | ✓ |
-| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | decision-ready | 3.42 | ✓ |
-| [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | laid | ✓ | ✓ | decision-ready | 3.47 | ✓ |
-| [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | laid | ✓ | ✓ | decision-ready | 1.89 | ✓ |
-| [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | laid | ✓ | ✓ | decision-ready | 2.73 | ✓ |
-| [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.20 | ✓ |
+| [Cloud Linux and PVM Viability](bearings/1vydg7000/) | laid | ✓ | ✓ | decision-ready | 3.56 | ✓ |
+| [Cloud Substrate And PVM Strategy](bearings/1vz2eV000/) | laid | ✓ | ✓ | decision-ready | 2.45 | ✓ |
+| [PVM And Multi-Substrate Execution](bearings/1vz3ck000/) | laid | ✓ | ✓ | decision-ready | 2.93 | ✓ |
+| [Hosted Control Plane And Operator Surface](bearings/1vz4Yn000/) | laid | ✓ | ✓ | decision-ready | 2.45 | ✓ |
+| [Executable Pvm And Avf Lanes](bearings/1vzJKE000/) | laid | ✓ | ✓ | decision-ready | 3.16 | ✓ |
+| [Hybrid Local Remote And SSH Execution](bearings/VDcStPolu/) | laid | ✓ | ✓ | decision-ready | 3.16 | ✓ |
+| [Cloud Block Storage Normalization](bearings/VDcStQqlo/) | laid | ✓ | ✓ | decision-ready | 1.76 | ✓ |
+| [K3s And Kubernetes Workloads](bearings/VDcStSMlp/) | laid | ✓ | ✓ | decision-ready | 2.53 | ✓ |
+| [Installable Linux And Mac Developer Experience](bearings/VDcT0vaPb/) | laid | ✓ | ✓ | decision-ready | 4.00 | ✓ |
 
 <details>
 <summary>Archived Bearings</summary>
@@ -106,7 +106,11 @@
 |--------|--------|
 | [Hosted HTTP App Curl Proof](epics/VDi2y6gch/voyages/VDi3LHFpb/) | done |
 
-### [Strategic Maintenance](epics/VDqb5IPID/) (draft)
+### [Canonical External Project Deployment Workflow](epics/VEyjUL2Zr/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted External Project Deployment Proof](epics/VEyjUL2Zr/voyages/VEyjdNXnp/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
