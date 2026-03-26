@@ -27,11 +27,11 @@ started_at: 2026-03-26T06:14:25
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Publish External Project Deployment Contract And Boundaries](../../../../stories/VEyjdJhne/README.md) | feat | backlog |
 | [Wire Repo-Level Mission Surface To External Project Deployment Proof](../../../../stories/VEyjdN0nf/README.md) | feat | backlog |
-| [Implement Hosted External Project Deployment Workflow](../../../../stories/VEyjdNRno/README.md) | feat | backlog |
+| [Implement Hosted External Project Deployment Workflow](../../../../stories/VEyjdNRno/README.md) | feat | done |
 <!-- END GENERATED -->

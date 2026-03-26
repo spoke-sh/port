@@ -1,0 +1,168 @@
+workdir: /tmp/port-http-app.Myknb7
+server config: /tmp/port-http-app.Myknb7/server-port.toml
+client config: /tmp/port-http-app.Myknb7/client-port.toml
+machine: cloud-aws
+host group: aws-builders
+snapshot source: /home/alex/workspace/spoke-sh/port/examples/external-static-site/index.html
+target: 127.0.0.1:18080
+
+guest exec prepare:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml guest exec --machine cloud-aws -- /nix/store/4dd2451gimsjq0v2i1s8zrh5w2b72qrw-busybox-1.37.0/bin/busybox mkdir -p workspace/site
+
+
+guest copy:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml guest copy --machine cloud-aws --direction host-to-guest --source /home/alex/workspace/spoke-sh/port/examples/external-static-site/index.html --destination /workspace/site/index.html
+copied 294 bytes via HostToGuest to /workspace/site/index.html
+
+guest exec inspect:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml guest exec --machine cloud-aws -- /nix/store/4dd2451gimsjq0v2i1s8zrh5w2b72qrw-busybox-1.37.0/bin/busybox cat workspace/site/index.html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Port External Project Proof</title>
+  </head>
+  <body>
+    <main>
+      <h1>external-project-ok</h1>
+      <p>Repo-local external static-site snapshot for hosted deployment proof.</p>
+    </main>
+  </body>
+</html>
+
+service apply:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml service apply --machine cloud-aws --host-group aws-builders --name web --kind service -- /bin/sh -lc exec\ /nix/store/4dd2451gimsjq0v2i1s8zrh5w2b72qrw-busybox-1.37.0/bin/busybox\ httpd\ -f\ -p\ 127.0.0.1:18080\ -h\ workspace/site
+machine: cloud-aws
+name: web
+kind: service
+desired state: active
+runtime state: running
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: never
+health policy: none
+health command: (none)
+manifest: /tmp/port-http-app.Myknb7/hosted/aws-linux-node/cloud-aws/services/definitions/web.json
+runtime record: /tmp/port-http-app.Myknb7/hosted/aws-linux-node/cloud-aws/services/runtime/web.json
+runtime pid: 3587422
+runtime exit code: (none)
+restart count: 0
+last exit code: (none)
+last exit detail: (none)
+health state: unknown
+health detail: (none)
+stdout log: /run/port/services/web.stdout.log
+stderr log: /run/port/services/web.stderr.log
+command: /bin/sh -lc exec /nix/store/4dd2451gimsjq0v2i1s8zrh5w2b72qrw-busybox-1.37.0/bin/busybox httpd -f -p 127.0.0.1:18080 -h workspace/site
+secret bindings: (none)
+secret sources: (none)
+detail: managed process is running
+
+service status:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml service status --machine cloud-aws --name web
+machine: cloud-aws
+name: web
+kind: service
+desired state: active
+runtime state: running
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: never
+health policy: none
+health command: (none)
+manifest: /tmp/port-http-app.Myknb7/hosted/aws-linux-node/cloud-aws/services/definitions/web.json
+runtime record: /tmp/port-http-app.Myknb7/hosted/aws-linux-node/cloud-aws/services/runtime/web.json
+runtime pid: 3587422
+runtime exit code: (none)
+restart count: 0
+last exit code: (none)
+last exit detail: (none)
+health state: unknown
+health detail: (none)
+stdout log: /run/port/services/web.stdout.log
+stderr log: /run/port/services/web.stderr.log
+command: /bin/sh -lc exec /nix/store/4dd2451gimsjq0v2i1s8zrh5w2b72qrw-busybox-1.37.0/bin/busybox httpd -f -p 127.0.0.1:18080 -h workspace/site
+secret bindings: (none)
+secret sources: (none)
+detail: managed process is running
+
+guest forward:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml guest forward --machine cloud-aws --listen 127.0.0.1:0 --target 127.0.0.1:18080
+forward listening: 127.0.0.1:42855
+forward target: 127.0.0.1:18080
+forward lifecycle: hosted-control-plane
+forward listen address: 127.0.0.1:42855
+
+curl:
+$ curl --http1.0 -i -fsS http://127.0.0.1:42855/
+HTTP/1.1 200 OK
+Date: Thu, 26 Mar 2026 14:59:49 GMT
+Connection: close
+Content-type: text/html
+Accept-Ranges: bytes
+Last-Modified: Thu, 26 Mar 2026 14:59:49 GMT
+ETag: "69c549e5-126"
+Content-Length: 294
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Port External Project Proof</title>
+  </head>
+  <body>
+    <main>
+      <h1>external-project-ok</h1>
+      <p>Repo-local external static-site snapshot for hosted deployment proof.</p>
+    </main>
+  </body>
+</html>
+
+service stop:
+$ /home/alex/.cache/cargo-target/port/debug/port --config /tmp/port-http-app.Myknb7/client-port.toml service stop --machine cloud-aws --name web
+machine: cloud-aws
+name: web
+kind: service
+desired state: stopped
+runtime state: stopped
+inventory scope: hosted-fleet
+lifecycle owner: hosted-node-agent
+guest broker: control-plane-node-agent-tunnel
+service route: hosted-control-plane
+control plane: demo
+node: aws-linux-node
+host groups: aws-builders, remote-linux
+target host group: aws-builders
+scheduler: deterministic-first-fit
+restart policy: never
+health policy: none
+health command: (none)
+manifest: /tmp/port-http-app.Myknb7/hosted/aws-linux-node/cloud-aws/services/definitions/web.json
+runtime record: /tmp/port-http-app.Myknb7/hosted/aws-linux-node/cloud-aws/services/runtime/web.json
+runtime pid: (none)
+runtime exit code: (none)
+restart count: 0
+last exit code: (none)
+last exit detail: managed process stopped
+health state: unknown
+health detail: (none)
+stdout log: /run/port/services/web.stdout.log
+stderr log: /run/port/services/web.stderr.log
+command: /bin/sh -lc exec /nix/store/4dd2451gimsjq0v2i1s8zrh5w2b72qrw-busybox-1.37.0/bin/busybox httpd -f -p 127.0.0.1:18080 -h workspace/site
+secret bindings: (none)
+secret sources: (none)
+detail: managed process stopped

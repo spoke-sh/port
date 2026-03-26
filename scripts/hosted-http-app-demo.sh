@@ -20,6 +20,8 @@ HOSTED_RUNTIME_ROOT="$WORKDIR/hosted/aws-linux-node"
 BOGUS_RUNTIME_ROOT="$WORKDIR/bogus/aws-linux-node"
 MACHINE_DIR="$HOSTED_RUNTIME_ROOT/cloud-aws"
 SOCKET_PATH="$MACHINE_DIR/guest-agent.sock"
+SITE_SOURCE="$REPO_ROOT/examples/external-static-site/index.html"
+SITE_EXPECTED="external-project-ok"
 
 cleanup() {
   local status=$?
@@ -148,6 +150,11 @@ if [[ -z "$BUSYBOX_BIN" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$SITE_SOURCE" ]]; then
+  echo "external static-site snapshot is missing: $SITE_SOURCE" >&2
+  exit 1
+fi
+
 mkdir -p "$GUEST_ROOT/workspace" "$MACHINE_DIR" "$BOGUS_RUNTIME_ROOT"
 
 (cd "$REPO_ROOT" && cargo build -q -p port-cli --bin port)
@@ -202,7 +209,56 @@ echo "server config: $SERVER_CONFIG"
 echo "client config: $CLIENT_CONFIG"
 echo "machine: cloud-aws"
 echo "host group: aws-builders"
+echo "snapshot source: $SITE_SOURCE"
 echo "target: 127.0.0.1:18080"
+
+prepare_cmd=(
+  "$PORT_BIN" --config "$CLIENT_CONFIG"
+  guest exec
+  --machine cloud-aws
+  --
+  "$BUSYBOX_BIN"
+  mkdir
+  -p
+  workspace/site
+)
+echo
+echo "guest exec prepare:"
+print_command "${prepare_cmd[@]}"
+prepare_output="$("${prepare_cmd[@]}")"
+printf '%s\n' "$prepare_output"
+
+copy_cmd=(
+  "$PORT_BIN" --config "$CLIENT_CONFIG"
+  guest copy
+  --machine cloud-aws
+  --direction host-to-guest
+  --source "$SITE_SOURCE"
+  --destination /workspace/site/index.html
+)
+echo
+echo "guest copy:"
+print_command "${copy_cmd[@]}"
+copy_output="$("${copy_cmd[@]}")"
+printf '%s\n' "$copy_output"
+require_contains "$copy_output" "copied"
+require_contains "$copy_output" "/workspace/site/index.html"
+
+inspect_cmd=(
+  "$PORT_BIN" --config "$CLIENT_CONFIG"
+  guest exec
+  --machine cloud-aws
+  --
+  "$BUSYBOX_BIN"
+  cat
+  workspace/site/index.html
+)
+echo
+echo "guest exec inspect:"
+print_command "${inspect_cmd[@]}"
+inspect_output="$("${inspect_cmd[@]}")"
+printf '%s\n' "$inspect_output"
+require_contains "$inspect_output" "$SITE_EXPECTED"
 
 apply_cmd=(
   "$PORT_BIN" --config "$CLIENT_CONFIG"
@@ -214,7 +270,7 @@ apply_cmd=(
   --
   /bin/sh
   -lc
-  "mkdir -p workspace/site && printf '%s\\n' 'hosted-app-ok' > workspace/site/index.html && exec $BUSYBOX_BIN httpd -f -p 127.0.0.1:18080 -h workspace/site"
+  "exec $BUSYBOX_BIN httpd -f -p 127.0.0.1:18080 -h workspace/site"
 )
 echo
 echo "service apply:"
@@ -251,12 +307,12 @@ forward_listen="$(extract_forward_listen "$forward_output")"
 echo "forward listen address: $forward_listen"
 
 curl_url="http://$forward_listen/"
-curl_output="$(wait_for_curl "$curl_url" "hosted-app-ok")"
+curl_output="$(wait_for_curl "$curl_url" "$SITE_EXPECTED")"
 echo
 echo "curl:"
 print_command curl --http1.0 -i -fsS "$curl_url"
 printf '%s\n' "$curl_output"
-require_contains "$curl_output" "hosted-app-ok"
+require_contains "$curl_output" "$SITE_EXPECTED"
 
 stop_cmd=(
   "$PORT_BIN" --config "$CLIENT_CONFIG"

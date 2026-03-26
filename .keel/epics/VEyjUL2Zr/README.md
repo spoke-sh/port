@@ -22,8 +22,8 @@ index: 14
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/3 stories done
+**Progress:** 0/1 voyages complete, 1/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Hosted External Project Deployment Proof](voyages/VEyjdNXnp/) | in-progress | 0/3 |
+| [Hosted External Project Deployment Proof](voyages/VEyjdNXnp/) | in-progress | 1/3 |
 <!-- END GENERATED -->

@@ -1,3 +1,10 @@
+---
+recorded_at: 2026-03-26T07:53:03.922010808-07:00
+mode: manual
+files: ["/home/alex/workspace/spoke-sh/port/.keel/stories/VDi3O5dlc/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
 Mission report
   Mission: Ship Canonical App Hosting Screen Proof (VDi2jvg4P)
   Status: active
@@ -45,3 +52,4 @@ Next
   [34m[1moperator[0m[39m:
     [36m[1mContinue[0m[39m work on existing story:
     [1m[94mVDi3O5dlc[39m[0m [1mWire Repo-Level Screen Surface To App Hosting Proof[0m
+

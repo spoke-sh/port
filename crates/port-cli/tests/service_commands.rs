@@ -417,7 +417,7 @@ fn cli_service_secret_backend_commands_cover_hosted_secret_service_and_sandbox_c
 }
 
 #[test]
-fn cli_service_apply_and_forward_serves_hosted_http_payload() {
+fn cli_service_apply_and_forward_serves_hosted_external_project_payload() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
@@ -488,6 +488,57 @@ fn cli_service_apply_and_forward_serves_hosted_http_payload() {
     wait_for_machine_list(&client_config_path, "cloud-aws");
 
     let busybox = busybox_bin();
+    let site_source = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/external-static-site/index.html")
+        .canonicalize()
+        .expect("external static-site fixture should exist");
+    let prepare = port_command(&client_config_path)
+        .arg("guest")
+        .arg("exec")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--")
+        .arg(&busybox)
+        .arg("mkdir")
+        .arg("-p")
+        .arg("workspace/site")
+        .output()
+        .expect("guest exec should run");
+    assert!(
+        prepare.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepare.stderr)
+    );
+    let copy = port_command(&client_config_path)
+        .arg("guest")
+        .arg("copy")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--direction")
+        .arg("host-to-guest")
+        .arg("--source")
+        .arg(&site_source)
+        .arg("--destination")
+        .arg("/workspace/site/index.html")
+        .output()
+        .expect("guest copy should run");
+    assert!(
+        copy.status.success(),
+        "{}",
+        String::from_utf8_lossy(&copy.stderr)
+    );
+    let copied_stdout = String::from_utf8_lossy(&copy.stdout);
+    assert!(copied_stdout.contains("copied"), "{copied_stdout}");
+    assert!(
+        copied_stdout.contains("/workspace/site/index.html"),
+        "{copied_stdout}"
+    );
+    let expected_payload =
+        fs::read_to_string(&site_source).expect("fixture payload should be readable");
+    let staged_payload = fs::read_to_string(guest_root.join("workspace/site/index.html"))
+        .expect("staged payload should exist in guest workspace");
+    assert_eq!(staged_payload, expected_payload);
+
     let apply = port_command(&client_config_path)
         .arg("service")
         .arg("apply")
@@ -503,7 +554,7 @@ fn cli_service_apply_and_forward_serves_hosted_http_payload() {
         .arg("/bin/sh")
         .arg("-lc")
         .arg(format!(
-            "mkdir -p workspace/site && printf '%s\\n' 'hosted-app-ok' > workspace/site/index.html && exec {busybox} httpd -f -p 127.0.0.1:18080 -h workspace/site"
+            "exec {busybox} httpd -f -p 127.0.0.1:18080 -h workspace/site"
         ))
         .output()
         .expect("service apply should run");
@@ -571,7 +622,7 @@ fn cli_service_apply_and_forward_serves_hosted_http_payload() {
     let listen_addr = extract_output_value(&forward_stdout, "forward listening:");
     let response = fetch_http_response(&listen_addr, "/");
     assert!(response.contains("200 OK"), "{response}");
-    assert!(response.contains("hosted-app-ok"), "{response}");
+    assert!(response.contains("external-project-ok"), "{response}");
 
     let stop = port_command(&client_config_path)
         .arg("service")
