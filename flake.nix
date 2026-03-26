@@ -146,6 +146,7 @@
         };
         sharedInputs = [
           rust
+          portPkg
           pkgs.just
           pkgs.gnutar
           pkgs.gzip
