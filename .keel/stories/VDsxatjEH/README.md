@@ -2,11 +2,11 @@
 id: VDsxatjEH
 title: Review ATXT Mission Proof Adoption
 type: feat
-status: backlog
+status: icebox
 scope: VDqb5IPID
 milestone: null
 created_at: 2026-03-14T22:59:15
-updated_at: 2026-03-14T22:59:15
+updated_at: 2026-03-26T07:36:32
 started_at: null
 completed_at: null
 submitted_at: null

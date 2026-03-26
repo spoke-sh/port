@@ -39,7 +39,7 @@ Current and planned naming:
    - `vhs` or renderer-backed `.gif` / `.cast` artifacts today
    - `atxt` once it is stable and verified in this repository environment
 3. Do not leave recorder migrations as chat-only follow-ups. If a better proof recorder is blocked on external tool maturity, create or maintain a routine that periodically reassesses readiness and materializes a scoped story when the tool becomes viable.
-4. The current external-tool follow-up is `atxt`. Future agents should treat "migrate mission proof recording from `vhs` to `atxt`" as an explicit board commitment, not an optional idea. Maintain the routine `review-atxt-mission-proof-adoption` instead of opening duplicate reminder loops.
+4. The current external-tool follow-up is `atxt`. Future agents should treat "migrate mission proof recording from `vhs` to `atxt`" as an explicit board commitment, not an optional idea. Maintain the routine `VEz56fPp4` instead of opening duplicate reminder loops.
 5. Prefer the Keel mission show output directly over manual scripts. Use `keel mission show <id>` or `keel screen <id>` as the canonical surfaces.
 
 ## Subagent / Delegation

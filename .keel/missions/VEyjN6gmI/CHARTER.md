@@ -7,7 +7,7 @@ Archetype: Strategic
 | ID | Description | Verification |
 |----|-------------|--------------|
 | MG-01 | Deliver epic VEyjUL2Zr so Port has one canonical repo-level proof that stages a real external static-site project snapshot into hosted compute with hosted `guest copy`, serves it through `port service apply`, curls it from the host, and records human-reviewable evidence. | board: VEyjUL2Zr |
-| MG-02 | Keep the board doctor-clean and make the external-project deployment mission legible through mission, flow, and routine surfaces while keeping app-bundle work explicit follow-on scope. | manual: run `keel mission show VEyjN6gmI`, `keel mission next VEyjN6gmI`, `keel flow`, `keel routine show review-atxt-mission-proof-adoption`, and `keel doctor` |
+| MG-02 | Keep the board doctor-clean and make the external-project deployment mission legible through mission, flow, and routine surfaces while keeping app-bundle work explicit follow-on scope. | manual: run `keel mission show VEyjN6gmI`, `keel mission next VEyjN6gmI`, `keel flow`, `keel routine show VEz56fPp4`, and `keel doctor` |
 
 ## Constraints
 
