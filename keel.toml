@@ -1,6 +1,13 @@
 board_dir = ".keel"
 
-[scoring]
-mode = "constrained"
+[audio]
+enabled = true
 
-[scoring.modes]
+[workflow]
+auto_stage = true
+open_for_work = true
+working_hours_start = 0
+working_hours_end = 24
+max_active_missions = 1
+max_battery_packs = 10
+battery_decay_minutes = 15
