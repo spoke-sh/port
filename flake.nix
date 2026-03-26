@@ -46,6 +46,12 @@
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
         siftPkg = sift.packages.${system}.sift;
+        portPkg = pkgs.callPackage ./nix/port.nix {
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust;
+            rustc = rust;
+          };
+        };
         atxtPkg = pkgs.callPackage (
           {
             lib,
@@ -163,10 +169,11 @@
         ];
       in {
         packages = {
+          port = portPkg;
           atext = atxtPkg;
           atxt = atxtAliasPkg;
           keel = keelPkg;
-          default = keelPkg;
+          default = portPkg;
         };
 
         devShells.default = pkgs.mkShell {
