@@ -49,7 +49,7 @@ The package contract for this slice is:
 3. Run the canonical validation path:
 
 ```bash
-just mission
+keel mission show <mission-id>
 just test
 just doctest
 just package x86_64-unknown-linux-gnu
@@ -66,7 +66,7 @@ artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
 5. Confirm the board is clean:
 
 ```bash
-just doctor
+keel doctor
 ```
 
 6. Commit the release metadata and tag the revision.
@@ -80,7 +80,7 @@ Release validation should confirm:
 - the canonical package and package-proof commands pass
 - the packaged `port doctor` check remains the post-install gate
 - the board is doctor-clean
-- the current mission signal is legible through `just mission`
+- the current mission signal is legible through `keel mission show <mission-id>`
 - top-level docs and help surfaces match shipped behavior
 
 ## Open Release Work

@@ -8,16 +8,16 @@ This repository uses Keel as its project management engine. Your primary respons
 
 ### Core Principles
 1. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
-2. **Pacemaker Stability**: Monitor the system's pulse via `just keel health --scene`. Treat "uncommitted energy" (dirty heartbeat) as tactical debt that must be resolved autonomously to maintain system stability.
+2. **Pacemaker Stability**: Monitor the system's pulse via `keel health --scene`. Treat "uncommitted energy" (dirty heartbeat) as tactical debt that must be resolved autonomously to maintain system stability.
 3. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
 
 ### Session Start & Human Interaction
 When a human user opens the chat or "pokes" you (e.g., "Wake up", "I'm poking you"), you MUST immediately energize the system and orient yourself by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
-1.  **Energize**: Run `just keel poke "Human interaction in chat"`.
-2.  **Pulse**: Run `just keel health --scene` to check subsystem stability.
-3.  **Scan**: Run `just keel mission next --status` and `just keel pulse`.
-4.  **Confirm**: Run `just keel flow --scene` to verify the LIGHT IS ON.
-5.  **Diagnose**: Run `just keel doctor` to ensure board integrity before proceeding.
+1.  **Energize**: Run `keel poke "Human interaction in chat"`.
+2.  **Pulse**: Run `keel health --scene` to check subsystem stability.
+3.  **Scan**: Run `keel mission next --status` and `keel pulse`.
+4.  **Confirm**: Run `keel flow --scene` to verify the LIGHT IS ON.
+5.  **Diagnose**: Run `keel doctor` to ensure board integrity before proceeding.
 
 ### Procedural Instructions
 Follow the formal procedural loops and checklists defined in:
@@ -29,9 +29,9 @@ Treat the repo-level mission proof surface as the future answer to "can Port hos
 
 Current and planned naming:
 
-- Today the repo-level text-based entrypoint is `just mission` routed through `just keel mission show`.
-- The `just screen` command provides a **visual representation** of the project state by delegating to `just keel screen`.
-- These commands auto-select the current active mission or context if no ID is provided.
+- Today the canonical text-based entrypoint is `keel mission show <id>`.
+- `just mission [<id>]` is a thin repo-local convenience wrapper that auto-selects the current active mission or context when no ID is provided.
+- `keel screen <id>` provides a **visual representation** of the project state, and `just screen [<id>]` is the corresponding convenience wrapper.
 - Treat that as a hard cutover. The legacy `scripts/mission-report.sh` has been removed.
 
 1. The canonical proof should launch a minimal HTTP application inside Port-managed compute, expose it through the canonical Port transport or forwarding surface, `curl` it from the host, and record the result through the Keel proof system.
@@ -40,19 +40,19 @@ Current and planned naming:
    - `atxt` once it is stable and verified in this repository environment
 3. Do not leave recorder migrations as chat-only follow-ups. If a better proof recorder is blocked on external tool maturity, create or maintain a routine that periodically reassesses readiness and materializes a scoped story when the tool becomes viable.
 4. The current external-tool follow-up is `atxt`. Future agents should treat "migrate mission proof recording from `vhs` to `atxt`" as an explicit board commitment, not an optional idea. Maintain the routine `review-atxt-mission-proof-adoption` instead of opening duplicate reminder loops.
-5. Prefer the Keel mission show output directly over manual scripts. Use `just mission` or `just screen` as the repo-local entrypoint.
+5. Prefer the Keel mission show output directly over manual scripts. Use `keel mission show <id>` or `keel screen <id>` as the canonical surfaces.
 
 ## Subagent / Delegation
 
 Use missions as the long-lived steering context and keep delivery contexts narrow. If your harness supports subagents, worker sessions, or fresh task-local contexts, use them to preserve workflow-specific focus instead of carrying one mixed context across planning, research, and execution.
 
-1. **Keep One Mission Steward**: The top-level harness/session owns mission scope, charter integrity, `just keel mission show <id>`, `just flow`, `just keel mission next [<id>]`, mission logging, phase switching, and final mission lifecycle transitions. Omit the ID to auto-select the highest-priority actionable mission.
+1. **Keep One Mission Steward**: The top-level harness/session owns mission scope, charter integrity, `keel mission show <id>`, `keel flow`, `keel mission next [<id>]`, mission logging, phase switching, and final mission lifecycle transitions. Omit the ID to auto-select the highest-priority actionable mission.
 2. **Delegate By Workflow Type**: Hand one concrete work unit to a dedicated worker context:
    - **Operator**: one primary implementation slice at a time, usually one story plus any directly coupled lifecycle work required to finish that slice cleanly, for example `story submit`, evidence capture, or `voyage done` when closing the final scoped story.
    - **Manager**: one planning unit at a time, including authored artifacts and downstream story decomposition needed to seal that unit cleanly.
    - **Explorer**: exactly one bearing research package, one lifecycle transition chain, one atomic commit.
 3. **Pass Primary Sources, Not Just Summaries**: Give each worker the entity IDs, file ownership, verification expectations, lifecycle expectations, and the canonical `show` commands or document paths it must open first.
-4. **Return Control After Each Unit**: When a worker finishes, the mission steward reviews the result, records the outcome with `just keel mission log <id> --entry "<text>"`, optionally runs `just keel mission digest <id>` for long logs, then reruns board health commands before choosing the next phase.
+4. **Return Control After Each Unit**: When a worker finishes, the mission steward reviews the result, records the outcome with `keel mission log <id> --entry "<text>"`, optionally runs `keel mission digest <id>` for long logs, then reruns board health commands before choosing the next phase.
 5. **Do Not Mix Phases In One Worker**: If the work changes from execution to planning or research, stop and hand off to the matching workflow context instead of continuing in the old one. Parent context reads and directly coupled closure steps are fine; silent mission re-scoping is not. Only parallelize workers when their artifacts and ownership do not overlap.
 
 ## Decision Resolution Hierarchy
@@ -113,7 +113,7 @@ Use one path for each concern:
 
 - `nix develop` for the repository shell and shared tooling.
 - `just ...` for repo build, test, formatting, and helper workflows.
-- `just keel ...` for all planning, mission, execution, research, and verification workflows.
+- `keel ...` for all planning, mission, execution, research, and verification workflows.
 
 ### `just` Workflow Commands
 
@@ -128,24 +128,21 @@ Use one path for each concern:
 | `just doctest [args]` | Run doc tests |
 | `just coverage [args]` | Produce coverage output |
 | `just port ...` | Run the Port CLI |
-| `just next` | Convenience alias for `keel next --role operator` |
-| `just flow` | Visualize board flow |
-| `just doctor` | Check board health |
-| `just mission` | Show current mission |
-| `just screen` | Visual representation of project state |
+| `just mission [id]` | Convenience wrapper for `keel mission show` with auto-selection when `id` is omitted |
+| `just screen [id]` | Convenience wrapper for `keel screen` |
 
-### `just keel` Board Workflow Commands
+### `keel` Board Workflow Commands
 
-Run `just keel --help` for the full command tree. Common commands:
+Run `keel --help` for the full command tree. Common commands:
 
 | Category | Commands |
 |----------|----------|
-| Discovery | `just keel bearing new <name>` `just keel play <id>` `just keel bearing research <id>` `just keel bearing assess <id>` `just keel bearing list` |
-| Planning | `just keel epic new "<Title>" --problem "<Problem>"` `just keel voyage new "<Title>" --epic <epic-id> --goal "<Specific outcome>"` |
-| Execution | `just keel story new "<title>" [--type <type>] [--epic <epic-id> [--voyage <voyage-id>]]` |
-| Board Ops | `just keel mission next [<id>]` `just keel next --role manager` `just keel flow` `just keel doctor` `just keel generate` `just keel config show` `just keel mission show <id>` |
-| Routines | `just keel routine new "<name>"` `just keel routine list` `just keel routine show <id>` `just keel pulse` |
-| Verification | `just keel verify run <id>` `just keel verify detect` `just keel verify recommend` |
+| Discovery | `keel bearing new <name>` `keel play <id>` `keel bearing research <id>` `keel bearing assess <id>` `keel bearing list` |
+| Planning | `keel epic new "<Title>" --problem "<Problem>"` `keel voyage new "<Title>" --epic <epic-id> --goal "<Specific outcome>"` |
+| Execution | `keel story new "<title>" [--type <type>] [--epic <epic-id> [--voyage <voyage-id>]]` |
+| Board Ops | `keel mission next [<id>]` `keel next --role manager` `keel flow` `keel doctor` `keel generate` `keel config show` `keel mission show <id>` |
+| Routines | `keel routine new "<name>"` `keel routine list` `keel routine show <id>` `keel pulse` |
+| Verification | `keel verify run <id>` `keel verify detect` `keel verify recommend` |
 
 ## Story and Milestone State Changes
 
@@ -153,16 +150,16 @@ Use CLI commands only. Do not move `.keel` files manually.
 
 | Action | Command |
 |--------|---------|
-| Start | `just keel story start <id>` |
-| Reflect | `just keel story reflect <id>` |
-| Submit | `just keel story submit <id>` |
-| Reject | `just keel story reject <id> "reason"` |
-| Accept | `just keel story accept <id> --role manager` |
-| Ice | `just keel story ice <id>` |
-| Thaw | `just keel story thaw <id>` |
-| Voyage plan | `just keel voyage plan <id>` |
-| Voyage done | `just keel voyage done <id>` |
-| Bearing assess | `just keel bearing assess <id>` |
-| Bearing lay | `just keel bearing lay <id>` |
-| Mission activate | `just keel mission activate <id>` |
-| Mission achieve | `just keel mission achieve <id>` |
+| Start | `keel story start <id>` |
+| Reflect | `keel story reflect <id>` |
+| Submit | `keel story submit <id>` |
+| Reject | `keel story reject <id> "reason"` |
+| Accept | `keel story accept <id> --role manager` |
+| Ice | `keel story ice <id>` |
+| Thaw | `keel story thaw <id>` |
+| Voyage plan | `keel voyage plan <id>` |
+| Voyage done | `keel voyage done <id>` |
+| Bearing assess | `keel bearing assess <id>` |
+| Bearing lay | `keel bearing lay <id>` |
+| Mission activate | `keel mission activate <id>` |
+| Mission achieve | `keel mission achieve <id>` |

@@ -11,14 +11,14 @@ default:
     'Common recipes:' \
     '  just mission               Show mission artifact report' \
     '  just check                 Run formatting, tests, and doctests' \
-    '  just doctor                Validate the Keel board' \
-    '  just flow                  Show workflow lane state' \
+    '  keel doctor                Validate the Keel board' \
+    '  keel flow --scene          Show workflow lane state' \
+    '  keel mission next --status Show next board moves' \
     '  just test                  Run workspace tests' \
     '  just build                 Build the port CLI binary' \
     '  just package <target>      Build a canonical install tarball' \
     '  just package-proof <tgt>   Prove packaged Port works from an installed path' \
     '  just port --help           Run the Port CLI in the dev shell' \
-    '  just keel flow             Run arbitrary Keel commands' \
     '' \
     'More recipes:' \
     '  just --list board' \
@@ -26,9 +26,6 @@ default:
     '  just --list signal' \
     '  just --list cli' \
     '  just --list demo'
-
-keel *args:
-  if command -v nix >/dev/null 2>&1; then nix develop {{justfile_directory()}} -c keel {{args}}; else keel {{args}}; fi
 
 mission *args:
   @bash {{justfile_directory()}}/scripts/keel-mission-show.sh {{args}}

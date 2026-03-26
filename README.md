@@ -57,21 +57,24 @@ by Apple's virtualization entitlement requirements described in
 ## Mission Report
 
 ```bash
-just mission
+keel mission show <mission-id>
 ```
 
-That shows a compact mission report with board-backed goal status, recent
-achievements, and a human-facing artifact gallery for the active mission.
+That shows the canonical mission report with board-backed goal status, recent
+achievements, and a human-facing artifact gallery.
 
-For the current hosted app proof slice, `just mission` is the repo-level review
-surface:
+If you want the thin repo-local convenience wrapper that auto-selects the most
+relevant mission when no id is provided, run `just mission`.
+
+For the current hosted app proof slice, `keel mission show <mission-id>` is the
+repo-level review surface:
 
 - it points at `scripts/hosted-http-app-demo.sh` as the runnable hosted app
   workflow
 - it points at `scripts/render-hosted-http-app-proof.sh` plus the recorded GIF
   and cast artifact for review
 - it stays named `mission` until upstream `keel screen` exists and Port can
-  hard-cut to `just screen`
+  hard-cut to `keel screen`
 - it uses the current renderer-backed cast/GIF path today; future `atxt`
   adoption remains explicit follow-on work
 
