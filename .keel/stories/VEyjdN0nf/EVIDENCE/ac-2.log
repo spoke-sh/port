@@ -1,0 +1,53 @@
+Mission report
+  Mission: Ship Canonical External Project Deployment Workflow (VEyjN6gmI)
+  Status: active
+  Selection: explicit
+
+Mission goals
+  - MG-01 [in progress] Deliver epic VEyjUL2Zr so Port has one canonical repo-level proof that stages a real external static-site project snapshot into hosted compute with hosted `guest copy`, serves it through `port service apply`, curls it from the host, and records human-reviewable evidence.
+    board: Canonical External Project Deployment Workflow (VEyjUL2Zr, 0/1 voyages, 1/3 stories)
+  - MG-02 [manual] Keep the board doctor-clean and make the external-project deployment mission legible through mission, flow, and routine surfaces while keeping app-bundle work explicit follow-on scope.
+    manual: run `keel mission show VEyjN6gmI`, `keel mission next VEyjN6gmI`, `keel flow`, `keel routine show VEz56fPp4`, and `keel doctor`
+
+Key achievements
+  - Submitted VEyjdNRno with an external static-site fixture, staged hosted guest copy workflow, hosted service/forward/curl proof logs, and targeted hosted guest copy/service/forward regression coverage.
+
+Artifact gallery
+  Primary proof:
+    - entrypoint: just mission VEyjN6gmI
+    - demo script: scripts/hosted-external-project-demo.sh
+    - review artifact: .keel/stories/VEyjdN0nf/EVIDENCE/ac-3.gif
+  Recorded proof media:
+    - .keel/stories/VEyjdN0nf/EVIDENCE/ac-3.gif
+  Proof artifacts:
+    - .keel/stories/VEyjdN0nf/EVIDENCE/ac-2.log
+    - .keel/stories/VEyjdN0nf/EVIDENCE/ac-3.log
+    - .keel/stories/VEyjdN0nf/EVIDENCE/external-project-workflow.cast
+    - .keel/stories/VEyjdNRno/EVIDENCE/ac-1.log
+    - .keel/stories/VEyjdNRno/EVIDENCE/ac-2.log
+    - .keel/stories/VEyjdNRno/EVIDENCE/ac-3.log
+  Demo scripts:
+    - scripts/hosted-http-app-demo.sh
+    - scripts/render-hosted-http-app-proof.sh
+    - scripts/render-attached-volume-proof.sh
+    - scripts/render-hosted-k3s-proof.sh
+    - scripts/render-hybrid-ssh-proof.sh
+    - scripts/hosted-external-project-demo.sh
+
+Next
+  [4m[1mStatus Summary[0m[0m
+  • Warning: Pacemaker has uncommitted energy. Commit .keel/heartbeat to stabilize the board.
+  • [36m[1mContinue[0m[39m [1m[94mVEyjdN0nf[39m[0m [1mWire Repo-Level Mission Surface To External Project Deployment Proof[0m
+  • Progress existing mission-scoped epics
+  
+  Next steps for mission [1mVEyjN6gmI[0m:
+  
+  [34m[1mmanager[0m[39m:
+    [36m[1mMission Steering[0m[39m: Ship Canonical External Project Deployment Workflow
+    [2mStatus[0m: active
+    [2mUnmet Goals[0m: 1
+    [33m[1mNext[0m[39m: Progress existing mission-scoped epics
+  
+  [34m[1moperator[0m[39m:
+    [36m[1mContinue[0m[39m work on existing story:
+    [1m[94mVEyjdN0nf[39m[0m [1mWire Repo-Level Mission Surface To External Project Deployment Proof[0m

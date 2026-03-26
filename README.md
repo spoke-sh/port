@@ -45,7 +45,8 @@ The first hosted stateless K3s workflow, boundaries, and proof command live in
 [`docs/operators.md`](docs/operators.md).
 The first direct-runtime attached-volume workflow and proof command live in
 [`docs/operators.md`](docs/operators.md).
-The first hosted app proof path, repo-level review surface, and current
+The first hosted external-project deployment proof path, repo-level review
+surface, and current
 boundaries also live in [`docs/operators.md`](docs/operators.md).
 The first installable release contract and support matrix live in
 [`docs/install.md`](docs/install.md).
@@ -57,22 +58,31 @@ by Apple's virtualization entitlement requirements described in
 ## Mission Report
 
 ```bash
-keel mission show <mission-id>
+just mission [<mission-id>]
 ```
 
-That shows the canonical mission report with board-backed goal status, recent
-achievements, and a human-facing artifact gallery.
+That is the repo-level proof surface. It wraps the active mission in a
+board-backed report with goal status, recent achievements, the current primary
+demo path, and the recorded review artifact.
 
-If you want the thin repo-local convenience wrapper that auto-selects the most
-relevant mission when no id is provided, run `just mission`.
+If you want the raw board entity output instead, run `keel mission show
+<mission-id>` directly.
 
-For the current hosted app proof slice, `keel mission show <mission-id>` is the
+For the current hosted external-project deployment slice, `just mission` is the
 repo-level review surface:
 
-- it points at `scripts/hosted-http-app-demo.sh` as the runnable hosted app
-  workflow
-- it points at `scripts/render-hosted-http-app-proof.sh` plus the recorded GIF
-  and cast artifact for review
+- it points at `bash scripts/hosted-external-project-demo.sh` as the runnable
+  external-project workflow
+- it points at `./scripts/render-external-project-proof.sh
+  .keel/stories/VEyjdN0nf/EVIDENCE` plus the recorded GIF and cast artifact for
+  review
+- it assumes the repo dev shell so `port`, `port-guest-agent`, `busybox`,
+  `curl`, and `agg` are available, with `PORT_DEMO_TOKEN` set or left at the
+  repo default
+- it proves one repo-local external static-site snapshot staged through hosted
+  `port guest copy`, `port service apply`, and `port guest forward`
+- it keeps app bundle artifact contracts and app bundle service runtimes as
+  explicit follow-on work
 - it stays named `mission` until upstream `keel screen` exists and Port can
   hard-cut to `keel screen`
 - it uses the current renderer-backed cast/GIF path today; future `atxt`

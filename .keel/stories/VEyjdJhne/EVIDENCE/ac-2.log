@@ -1,0 +1,7 @@
+README.md:82:- it proves one repo-local external static-site snapshot staged through hosted
+README.md:83:  `port guest copy`, `port service apply`, and `port guest forward`
+README.md:84:- it keeps app bundle artifact contracts and app bundle service runtimes as
+README.md:85:  explicit follow-on work
+docs/operators.md:228:- this slice stages and runs one external static-site project snapshot through
+docs/operators.md:229:  shipped hosted primitives only; it does not yet ship an app bundle artifact
+docs/operators.md:230:  contract or app bundle service runtime

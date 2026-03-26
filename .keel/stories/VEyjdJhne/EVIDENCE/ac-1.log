@@ -1,0 +1,65 @@
+README.md:61:just mission [<mission-id>]
+README.md:62:```
+README.md:63:
+README.md:64:That is the repo-level proof surface. It wraps the active mission in a
+README.md:65:board-backed report with goal status, recent achievements, the current primary
+README.md:66:demo path, and the recorded review artifact.
+README.md:67:
+README.md:68:If you want the raw board entity output instead, run `keel mission show
+README.md:69:<mission-id>` directly.
+README.md:70:
+README.md:71:For the current hosted external-project deployment slice, `just mission` is the
+README.md:72:repo-level review surface:
+README.md:73:
+README.md:74:- it points at `bash scripts/hosted-external-project-demo.sh` as the runnable
+README.md:75:  external-project workflow
+README.md:76:- it points at `./scripts/render-external-project-proof.sh
+README.md:77:  .keel/stories/VEyjdN0nf/EVIDENCE` plus the recorded GIF and cast artifact for
+README.md:78:  review
+README.md:79:- it assumes the repo dev shell so `port`, `port-guest-agent`, `busybox`,
+README.md:80:  `curl`, and `agg` are available, with `PORT_DEMO_TOKEN` set or left at the
+README.md:81:  repo default
+README.md:82:- it proves one repo-local external static-site snapshot staged through hosted
+README.md:83:  `port guest copy`, `port service apply`, and `port guest forward`
+README.md:84:- it keeps app bundle artifact contracts and app bundle service runtimes as
+docs/operators.md:178:## Hosted External Project Deployment First Slice
+docs/operators.md:179:
+docs/operators.md:180:Port now has one bounded answer to "can it host an external project?" without
+docs/operators.md:181:claiming a general hosted platform or a container-like app bundle surface.
+docs/operators.md:182:
+docs/operators.md:183:Review surface:
+docs/operators.md:184:
+docs/operators.md:185:```bash
+docs/operators.md:186:just mission
+docs/operators.md:187:```
+docs/operators.md:188:
+docs/operators.md:189:Runnable hosted workflow:
+docs/operators.md:190:
+docs/operators.md:191:```bash
+docs/operators.md:192:bash scripts/hosted-external-project-demo.sh
+docs/operators.md:193:```
+docs/operators.md:194:
+docs/operators.md:195:That proof path keeps the operator contract explicit:
+docs/operators.md:196:
+docs/operators.md:197:- repo-local hosted control plane plus node agent
+docs/operators.md:198:- one hosted machine: `cloud-aws`
+docs/operators.md:199:- one explicit host group: `aws-builders`
+docs/operators.md:200:- one repo-local external static-site snapshot:
+docs/operators.md:201:  `examples/external-static-site/index.html`
+docs/operators.md:202:- one staging path through hosted `port guest copy`
+docs/operators.md:203:- one minimal HTTP service launched through `port service apply`
+docs/operators.md:204:- one host-side exposure through `port guest forward`
+docs/operators.md:205:- one host-side `curl` proving the payload
+docs/operators.md:206:
+docs/operators.md:207:Human-reviewable artifact:
+docs/operators.md:208:
+docs/operators.md:209:```bash
+docs/operators.md:210:./scripts/render-external-project-proof.sh .keel/stories/VEyjdN0nf/EVIDENCE
+docs/operators.md:211:```
+docs/operators.md:212:
+docs/operators.md:213:The current proof prerequisites are intentionally narrow:
+docs/operators.md:214:
+docs/operators.md:215:- run from the repo dev shell so `port`, `port-guest-agent`, `busybox`, `curl`,
+docs/operators.md:216:  and `agg` are available
+docs/operators.md:217:- keep `PORT_DEMO_TOKEN` available for the repo-local hosted control-plane
+docs/operators.md:218:  contract, or rely on the script's repo-default `demo-token`

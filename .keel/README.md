@@ -106,11 +106,13 @@
 |--------|--------|
 | [Hosted HTTP App Curl Proof](epics/VDi2y6gch/voyages/VDi3LHFpb/) | done |
 
-### [Canonical External Project Deployment Workflow](epics/VEyjUL2Zr/) (active)
+### [Canonical External Project Deployment Workflow](epics/VEyjUL2Zr/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Hosted External Project Deployment Proof](epics/VEyjUL2Zr/voyages/VEyjdNXnp/) | in-progress |
+| [Hosted External Project Deployment Proof](epics/VEyjUL2Zr/voyages/VEyjdNXnp/) | done |
+
+### [Mission Proof Recorder Readiness](epics/VEzGIe4i4/) (draft)
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
