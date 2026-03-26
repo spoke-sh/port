@@ -1,5 +1,54 @@
 {
   "nodes": {
+    "atxt": {
+      "inputs": {
+        "crane": "crane",
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "keel": [
+          "keel"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ],
+        "sift": [
+          "sift"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773692675,
+        "narHash": "sha256-q2DM8JS51e377QteMN4CCWq0epUoZFhpiQpi3ftmtc8=",
+        "ref": "main",
+        "rev": "5168d1d4b256d5aab58408496f0758d025bde653",
+        "revCount": 61,
+        "type": "git",
+        "url": "ssh://git@github.com/spoke-sh/atxt.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "ssh://git@github.com/spoke-sh/atxt.git"
+      }
+    },
+    "crane": {
+      "locked": {
+        "lastModified": 1773189535,
+        "narHash": "sha256-E1G/Or6MWeP+L6mpQ0iTFLpzSzlpGrITfU2220Gq47g=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "6fa2fb4cf4a89ba49fc9dd5a3eb6cde99d388269",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -109,6 +158,7 @@
     },
     "root": {
       "inputs": {
+        "atxt": "atxt",
         "flake-utils": "flake-utils",
         "keel": "keel",
         "nixpkgs": "nixpkgs",

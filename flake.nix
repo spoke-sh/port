@@ -11,6 +11,14 @@
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
     };
+    atxt = {
+      url = "git+ssh://git@github.com/spoke-sh/atxt.git?ref=main";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+      inputs.flake-utils.follows = "flake-utils";
+      inputs.keel.follows = "keel";
+      inputs.sift.follows = "sift";
+    };
     keel = {
       url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -25,6 +33,7 @@
     rust-overlay,
     flake-utils,
     sift,
+    atxt,
     keel,
   }:
     flake-utils.lib.eachDefaultSystem (system:
@@ -37,6 +46,46 @@
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
         siftPkg = sift.packages.${system}.sift;
+        atxtPkg = pkgs.callPackage (
+          {
+            lib,
+            rustPlatform,
+            ...
+          }:
+            let
+              cargoToml = lib.importTOML "${atxt}/Cargo.toml";
+            in
+              rustPlatform.buildRustPackage {
+                pname = cargoToml.package.name;
+                version = cargoToml.package.version;
+
+                src = atxt;
+
+                doCheck = false;
+
+                cargoLock = {
+                  lockFile = "${atxt}/Cargo.lock";
+                  outputHashes = {
+                    "txtplot-0.1.0" = "sha256-XPDnH8Bo461tdizRS00P3A7eg+yEgUyKIls7W/OHCt4=";
+                  };
+                };
+
+                meta = with lib; {
+                  description = cargoToml.package.description;
+                  homepage = "https://github.com/spoke-sh/atxt";
+                  license = licenses.mit;
+                  maintainers = [ ];
+                };
+              }
+        ) {
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rust;
+            rustc = rust;
+          };
+        };
+        atxtAliasPkg = pkgs.writeShellScriptBin "atxt" ''
+          exec ${atxtPkg}/bin/atext "$@"
+        '';
         keelPkg = pkgs.callPackage (
           {
             lib,
@@ -99,6 +148,8 @@
           pkgs.cargo-nextest
           pkgs.cargo-llvm-cov
           siftPkg
+          atxtAliasPkg
+          atxtPkg
           keelPkg
           pkgs.curl
         ];
@@ -112,6 +163,8 @@
         ];
       in {
         packages = {
+          atext = atxtPkg;
+          atxt = atxtAliasPkg;
           keel = keelPkg;
           default = keelPkg;
         };
