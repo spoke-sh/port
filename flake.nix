@@ -92,58 +92,7 @@
         atxtAliasPkg = pkgs.writeShellScriptBin "atxt" ''
           exec ${atxtPkg}/bin/atext "$@"
         '';
-        keelPkg = pkgs.callPackage (
-          {
-            lib,
-            rustPlatform,
-            pkg-config,
-            zstd,
-            git,
-            ...
-          }:
-            let
-              cargoToml = lib.importTOML "${keel}/Cargo.toml";
-            in
-              rustPlatform.buildRustPackage {
-                pname = "keel";
-                version = cargoToml.workspace.package.version;
-
-                src = keel;
-
-                doCheck = false;
-
-                cargoLock = {
-                  lockFile = "${keel}/Cargo.lock";
-                  outputHashes = {
-                    "txtplot-0.1.0" = "sha256-bC6zo1yhJg41iz69XbXqwIKOfNVXwFke0vzcSMbqvFE=";
-                  };
-                };
-
-                nativeBuildInputs = [
-                  pkg-config
-                ];
-
-                nativeCheckInputs = [
-                  git
-                ];
-
-                buildInputs = [
-                  zstd
-                ];
-
-                meta = with lib; {
-                  description = "Fast CLI for project board management";
-                  homepage = "https://github.com/spoke-sh/keel";
-                  license = licenses.mit;
-                  maintainers = [ ];
-                };
-              }
-        ) {
-          rustPlatform = pkgs.makeRustPlatform {
-            cargo = rust;
-            rustc = rust;
-          };
-        };
+        keelPkg = keel.packages.${system}.keel;
         sharedInputs = [
           rust
           portPkg

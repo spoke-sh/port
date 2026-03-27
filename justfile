@@ -36,6 +36,9 @@ screen *args:
 check:
   @just checks::check
 
+quality:
+  @just checks::check
+
 test *args:
   @just checks::test {{args}}
 

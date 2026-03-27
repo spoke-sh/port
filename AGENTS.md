@@ -8,7 +8,7 @@ This repository uses Keel as its project management engine. Your primary respons
 
 ### Core Principles
 1. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
-2. **Pacemaker Stability**: Monitor the system's pulse via `keel health --scene`. Treat "uncommitted energy" (dirty heartbeat) as tactical debt that must be resolved autonomously to maintain system stability.
+2. **Heartbeat Hygiene**: Monitor the system's pulse via `keel health --scene`. A missing heartbeat is not structural drift, but "uncommitted energy" (a dirty heartbeat) is tactical debt that should be closed autonomously by landing the sealing commit.
 3. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
 
 ### Session Start & Human Interaction

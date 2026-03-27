@@ -11,11 +11,11 @@ Every session follows this deterministic cycle:
 1.  **Mission Orientation**: Start by running `keel mission next --status`. This gives you the top 3 high-signal moves required by the engine. Check `keel flow --scene` to quickly visualize if the workflow is autonomous or blocked waiting for human input.
 2.  **Role Selection**: Identify if you are a `manager` (planning/decisions) or an `operator` (implementation). Do not drift across these roles in a single atomic change.
 3.  **Execute Move**: Perform exactly ONE move (e.g., plan a voyage, implement a story, fix a diagnostic).
-4.  **Seal Move**: Close the loop with `story submit`, `voyage plan`, or `bearing lay`. This mutates the `.keel` state. Ensure the pacemaker is stable (committed heartbeat).
+4.  **Seal Move**: Close the loop with `story submit`, `voyage plan`, or `bearing lay`. This mutates the `.keel` state and may leave temporary heartbeat debt that should be cleared by the sealing commit.
 5.  **Log & Commit**:
     - Record your move in the mission `LOG.md`.
-    - **Pace-setting**: Execute `keel poke "Sealing move: <summary>"` to synchronize the pacemaker with the board state.
-    - **Commit**: Execute `git commit`. The pre-commit hook will automatically run `just check` and `just test`. Resolve any issues if the commit is rejected.
+    - **Pace-setting**: Execute `keel poke "Sealing move: <summary>"` to refresh the board's wake marker immediately before the commit boundary.
+    - **Commit**: Execute `git commit`. The installed hooks automatically run `just quality`, `just test`, auto-poke and stage `.keel/heartbeat`, and append `doctor --status` to the commit message. Resolve any issues if the commit is rejected.
 6.  **Re-orient**: After the commit lands, run `keel doctor --status` and `keel flow --scene` to see what the board needs next.
  This is the "plug the chord back in" moment — you reconnect to the board's current state. If the delivery lane has ready work, start the next loop immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification).
 
@@ -56,7 +56,7 @@ As long as the system is **AUTONOMOUS (LIGHT ON)** and the circuit is healthy (n
 2.  **Autonomous Start**: For each ready story, execute `keel story start <id>`. 
 3.  **Rube Goldberg Loop**: Transitioning a story to `in-progress` mutates the board, which physically recharges the system battery, keeping the circuit closed and the engine running. 
 4.  **Priority**: Discharging the backlog is your primary tactical objective once energized. You must continue until the backlog is empty or the circuit trips.
-5.  **Loop Closure**: After every successful implementation or transition, you MUST stabilize the pacemaker by executing `keel poke "Sealing move: <summary>"` and committing the `.keel/heartbeat` alongside the board changes. This applies to ALL work, including storyless gardening or engine changes. Do not leave the loop open.
+5.  **Loop Closure**: After every successful implementation or transition, you MUST execute `keel poke "Sealing move: <summary>"` and commit the resulting `.keel/heartbeat` alongside the board changes. This applies to ALL work, including storyless gardening or engine changes. The heartbeat is a wake marker, not a required structural file, but leaving it dirty means you have left warning-level tactical debt behind.
 
 ## Global Hygiene Checklist
 
@@ -72,12 +72,12 @@ Apply these checks to **every change** before finalizing work:
    - **VITAL**: Missions (Strategic achievement)
    - **AUTONOMIC**: Routines (Cadence, materialization)
    - **CIRCULATORY**: Workflow (Graph integrity, topology)
-   - **PACEMAKER**: Heartbeat (System energization and commit stability)
+   - **PACEMAKER**: Heartbeat (recent energization and open-loop warning state)
    - **KINETIC**: Delivery (Backlog liquidity, execution capacity)
-3. **Pacemaker Protocol**: The system's heartbeat (.keel/heartbeat) is its pacemaker. You MUST ensure the pacemaker is stable (committed) before concluding any unit of work. Every commit MUST be preceded by a `keel poke "Sealing move: <summary>"` to refresh the system's pulse and reflect the latest change, especially when working without a story. Uncommitted energy is a signal of an open tactical loop and will trigger a CRITICAL status in the Med-Bay bio-scan. Any commit that includes `.keel/heartbeat` MUST append the output of `keel doctor --status` to the commit message body so reviewers can see the board's importance snapshot at the time of the commit.
+3. **Pacemaker Protocol**: The system's heartbeat (`.keel/heartbeat`) is a wake marker for recent activity, not a required structural artifact. A missing heartbeat does not fail `doctor`. Once the file exists, a dirty heartbeat is warning-level evidence of an open tactical loop. Before concluding any unit of work, execute `keel poke "Sealing move: <summary>"` and land the sealing commit so that warning clears. The installed pre-commit hook keeps `just quality`, `just test`, and heartbeat staging tied to the commit boundary, and the commit-msg hook appends `doctor --status` to the message body. The Med-Bay scene may still visually flag the pacemaker while that warning is open.
 4. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
 5. **Notification Threshold**: Only request human intervention when you reach a "Manual Lane" that requires design direction or a decision on application behavior (e.g., assessing a Bearing, planning a Voyage, or human verification of a complex Story).
-6. **Automated Guardrails**: You no longer need to run `just fmt-check` or `just clippy` manually before every commit. The git pre-commit hook (installed via `keel hooks install`) automatically enforces these checks. If a commit fails, resolve the reported lints or test failures and try again.
+6. **Automated Guardrails**: You no longer need to run `just quality` or `just test` manually before every commit. The git pre-commit hook (installed via `keel hooks install`) automatically enforces these checks. If a commit fails, resolve the reported lints or test failures and try again.
 7. **Lifecycle Before Commit**: Run board-mutating lifecycle commands before the atomic commit when they generate or rewrite `.keel` artifacts (for example `story submit`, `voyage plan`, `voyage done`, `bearing assess`, `bearing lay`). After the transition, inspect `git status` and include the resulting `.keel` churn in the same commit.
 8. **Atomic Commits**: Commit once per logical unit of work. Use [Conventional Commits](https://www.conventionalcommits.org/):
    - `feat:` (new feature)
