@@ -663,7 +663,7 @@ fn write_fake_pvm_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
 }
 
 #[test]
-fn cli_help_stays_concise_and_links_lane_specific_docs() {
+fn cli_help_stays_concise_without_extra_doc_or_avf_sections() {
     let output = Command::new(port_bin())
         .arg("--help")
         .output()
@@ -673,12 +673,14 @@ fn cli_help_stays_concise_and_links_lane_specific_docs() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Examples:"));
     assert!(stdout.contains("port doctor"));
-    assert!(stdout.contains("CONFIGURATION.md"));
-    assert!(stdout.contains("docs/install.md"));
-    assert!(stdout.contains("docs/avf.md"));
-    assert!(stdout.contains("docs/operators.md"));
-    assert!(stdout.contains("Apple Virtualization Framework"));
-    assert!(stdout.contains("PORT_AVF_LAUNCHER"));
+    assert!(stdout.contains("guest exec --machine demo"));
+    assert!(!stdout.contains("Detailed examples:"));
+    assert!(!stdout.contains("macOS AVF install boundary:"));
+    assert!(!stdout.contains("CONFIGURATION.md"));
+    assert!(!stdout.contains("docs/install.md"));
+    assert!(!stdout.contains("docs/avf.md"));
+    assert!(!stdout.contains("docs/operators.md"));
+    assert!(!stdout.contains("PORT_AVF_LAUNCHER"));
     assert!(!stdout.contains("demo-avf"));
 }
 
