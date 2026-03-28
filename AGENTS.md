@@ -8,15 +8,24 @@ This repository uses Keel as its project management engine. Your primary respons
 
 ### Core Principles
 1. **Gardening First**: You MUST tend to the garden (fixing `doctor` errors, discharging automated backlog, and resolving structural drift) BEFORE notifying the human operator or requesting input. 
-2. **Heartbeat Hygiene**: Monitor the system's pulse via `keel health --scene`. A missing heartbeat is not structural drift, but "uncommitted energy" (a dirty heartbeat) is tactical debt that should be closed autonomously by landing the sealing commit.
+2. **Heartbeat Hygiene**: Monitor the system's pulse via `keel heartbeat` and `keel health --scene`. The pacemaker is derived from repository activity; uncommitted energy in the worktree is tactical debt that should be closed autonomously by landing the sealing commit.
 3. **Notification Discipline**: Ping the human operator ONLY when you need input on design direction or how the application behaves. Resolve technical drift and tactical moves autonomously.
 
+### Canonical Turn Loop
+Port's operator rhythm follows Keel's `Orient -> Inspect -> Pull -> Ship -> Close` loop surfaced by `keel turn`.
+
+- **Orient**: Inspect charge and board stability with `keel heartbeat`, `keel health --scene`, `keel flow --scene`, and `keel doctor`.
+- **Inspect**: Read current demand with `keel mission next --status`, `keel pulse`, `keel roles`, and `keel next --role <role> --explain` when routing is unclear.
+- **Pull**: Select one role-scoped slice with `keel next --role <role>`.
+- **Ship**: Execute the slice, record proof, and advance lifecycle state.
+- **Close**: Land the relevant transition and the sealing commit that clears open-loop energy.
+
 ### Session Start & Human Interaction
-When a human user opens the chat or "pokes" you (e.g., "Wake up", "I'm poking you"), you MUST immediately energize the system and orient yourself by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
-1.  **Energize**: Run `keel poke "Human interaction in chat"`.
+When a human user opens the chat or "pokes" you (e.g., "Wake up", "I'm poking you"), you MUST immediately perform the `Orient` and `Inspect` halves of the turn loop by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
+1.  **Heartbeat**: Run `keel heartbeat` to inspect current charge and whether the worktree is carrying uncommitted energy.
 2.  **Pulse**: Run `keel health --scene` to check subsystem stability.
 3.  **Scan**: Run `keel mission next --status` and `keel pulse`.
-4.  **Confirm**: Run `keel flow --scene` to verify the LIGHT IS ON.
+4.  **Confirm**: Run `keel flow --scene` to verify whether the LIGHT IS ON or the board is idle waiting for fresh repository activity.
 5.  **Diagnose**: Run `keel doctor` to ensure board integrity before proceeding.
 
 ### Procedural Instructions
