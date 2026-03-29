@@ -114,7 +114,11 @@
 
 ### [Mission Proof Recorder Readiness](epics/VEzGIe4i4/) (draft)
 
-### [Ship Cluster-First Bootstrap UX](epics/VFDhlRjOf/) (draft)
+### [Ship Cluster-First Bootstrap UX](epics/VFDhlRjOf/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Plan Single-Node Local Cluster Surface](epics/VFDhlRjOf/voyages/VFDk8fdnG/) | planned |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

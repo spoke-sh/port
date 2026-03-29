@@ -13,3 +13,7 @@
   forwarding, and kubeconfig rewriting itself.
 - This mission reframes the next Port slice around a simple cluster-first
   operator contract inspired by Slicer's K3s workflow.
+
+## 2026-03-28T19:50:26
+
+Refined epic VFDhlRjOf around a cluster-first local K3s contract, planned voyage VFDk8fdnG for the first single-node local slice, and decomposed four execution stories covering cluster CLI/config, offline bootstrap inputs, lifecycle plus kubeconfig health surfaces, and docs or proof handoff. The recommendation maps to this mission directly; multi-node or AWS expansion remains explicit follow-on scope.
