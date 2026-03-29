@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFHn1OVki
-status: backlog
+status: in-progress
 created_at: 2026-03-29T12:22:56
-updated_at: 2026-03-29T12:24:38
+updated_at: 2026-03-29T12:27:56
 # authored
 title: Replace Demo Local Cluster Stub With Real K3s Control Plane
 type: feat
 operator-signal:
 scope: VFHmKH5XR/VFHmctWC5
 index: 1
+started_at: 2026-03-29T12:27:56
 ---
 
 # Replace Demo Local Cluster Stub With Real K3s Control Plane

@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFHmctWC5
-status: planned
+status: in-progress
 epic: VFHmKH5XR
 created_at: 2026-03-29T12:21:22
 # authored
 title: Replace Demo API With GitOps-Capable Local K3s Runtime
 index: 1
 updated_at: 2026-03-29T12:24:38
+started_at: 2026-03-29T12:27:56
 ---
 
 # Replace Demo API With GitOps-Capable Local K3s Runtime
@@ -30,7 +31,7 @@ updated_at: 2026-03-29T12:24:38
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Replace Demo Local Cluster Stub With Real K3s Control Plane](../../../../stories/VFHn1OVki/README.md) | feat | backlog |
+| [Replace Demo Local Cluster Stub With Real K3s Control Plane](../../../../stories/VFHn1OVki/README.md) | feat | in-progress |
 | [Harden Kubeconfig Handoff And Kubernetes Discovery](../../../../stories/VFHn1Ozkj/README.md) | feat | backlog |
 | [Prove Flux And Pulumi Operator Install Against Port Kubeconfig](../../../../stories/VFHn1PHka/README.md) | feat | backlog |
 | [Verify Unchanged Downstream Infra GitOps Handoff](../../../../stories/VFHn1Pslh/README.md) | feat | backlog |

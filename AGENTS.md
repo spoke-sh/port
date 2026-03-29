@@ -20,6 +20,15 @@ Port's operator rhythm follows Keel's `Orient -> Inspect -> Pull -> Ship -> Clos
 - **Ship**: Execute the slice, record proof, and advance lifecycle state.
 - **Close**: Land the relevant transition and the sealing commit that clears open-loop energy.
 
+### Delivery And Git Discipline
+The turn loop is a scheduling model. It does not relax Git hygiene, story boundaries, or completion semantics.
+
+1. **One Story, One Clean Closure**: Finish one implementation story at a time. Record proof, land the relevant `.keel` lifecycle changes, and make at least one sealing commit for that story before pulling the next one.
+2. **No Multi-Story Dirty Waves**: Do not let several stories accumulate in one dirty worktree. If the work no longer fits one story cleanly, stop and re-scope through planning instead of continuing ad hoc.
+3. **No Completion Claims Before Commit**: Do not describe a story, voyage, epic, or mission as complete, executed, achieved, verified, or sealed while the relevant code or `.keel` changes are still uncommitted.
+4. **Human Status Must Match Repo Reality**: Distinguish clearly between `implemented but uncommitted`, `committed and submitted`, and `accepted/sealed`. Do not collapse those states in chat.
+5. **Pacemaker Guidance Is Not A Waiver**: Heartbeat, pacemaker, and loop-closure instructions mean "commit promptly." They never justify skipping story-level commit boundaries or claiming closure early.
+
 ### Session Start & Human Interaction
 When a human user opens the chat or "pokes" you (e.g., "Wake up", "I'm poking you"), you MUST immediately perform the `Orient` and `Inspect` halves of the turn loop by following the **Human Interaction & Pokes** workflow in [INSTRUCTIONS.md](INSTRUCTIONS.md):
 1.  **Heartbeat**: Run `keel heartbeat` to inspect current charge and whether the worktree is carrying uncommitted energy.
@@ -57,7 +66,7 @@ Use missions as the long-lived steering context and keep delivery contexts narro
 
 1. **Keep One Mission Steward**: The top-level harness/session owns mission scope, charter integrity, `keel mission show <id>`, `keel flow`, `keel mission next [<id>]`, mission logging, phase switching, and final mission lifecycle transitions. Omit the ID to auto-select the highest-priority actionable mission.
 2. **Delegate By Workflow Type**: Hand one concrete work unit to a dedicated worker context:
-   - **Operator**: one primary implementation slice at a time, usually one story plus any directly coupled lifecycle work required to finish that slice cleanly, for example `story submit`, evidence capture, or `voyage done` when closing the final scoped story.
+   - **Operator**: one primary implementation slice at a time, usually one story plus any directly coupled lifecycle work required to finish that slice cleanly, for example `story submit`, evidence capture, or `voyage done` when closing the final scoped story. The worker returns only after the slice is commit-ready or committed; do not hand back half-finished multi-story dirt.
    - **Manager**: one planning unit at a time, including authored artifacts and downstream story decomposition needed to seal that unit cleanly.
    - **Explorer**: exactly one bearing research package, one lifecycle transition chain, one atomic commit.
 3. **Pass Primary Sources, Not Just Summaries**: Give each worker the entity IDs, file ownership, verification expectations, lifecycle expectations, and the canonical `show` commands or document paths it must open first.

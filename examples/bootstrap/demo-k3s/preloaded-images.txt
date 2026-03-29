@@ -1,0 +1,13 @@
+# K3s v1.32.13+k3s1 system images for the local single-node runtime lane.
+rancher/mirrored-pause:3.6
+rancher/mirrored-coredns-coredns:1.14.1
+rancher/local-path-provisioner:v0.0.34
+rancher/mirrored-library-busybox:1.37.0
+rancher/mirrored-metrics-server:v0.8.1
+
+# Downstream unchanged GitOps controllers required by spoke infra.
+ghcr.io/fluxcd/source-controller:v1.7.4
+ghcr.io/fluxcd/kustomize-controller:v1.7.3
+ghcr.io/fluxcd/helm-controller:v1.4.5
+ghcr.io/fluxcd/notification-controller:v1.7.5
+docker.io/pulumi/pulumi-kubernetes-operator:v2.5.1

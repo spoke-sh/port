@@ -16,6 +16,7 @@ Port uses Keel as its project management engine. Your job is to move the board t
     - Record your move in the mission `LOG.md`.
     - **Heartbeat Check**: Use `keel heartbeat` if you need to inspect the current activity source or confirm the circuit is still energized before the commit boundary.
     - **Commit**: Execute `git commit`. The installed hooks automatically run `just quality`, `just test`, and append `doctor --status` to the commit message. Resolve any issues if the commit is rejected.
+    - **Meaning Of Close**: A slice is not shipped until the relevant code, proof, and `.keel` lifecycle churn are committed. Runtime proof alone is not a completion boundary.
 6.  **Re-orient**: After the commit lands, run `keel doctor --status` and `keel flow --scene` to see what the board needs next.
  This is the "plug the cord back in" moment. If the delivery lane has ready work, start the next turn immediately. Only stop to ask the human when you reach a manual lane (design direction, bearing assessment, or human verification).
 
@@ -25,7 +26,7 @@ Port uses Keel as its project management engine. Your job is to move the board t
 Focus on **evidence-backed delivery**.
 - **Context**: `keel story show <id>`, `keel voyage show <id>`, and `keel next --role operator`.
 - **Action**: Implement requirements, record proofs with `keel story record`, and `submit`.
-- **Constraint**: Every AC must have a proof.
+- **Constraint**: Every AC must have a proof, and every implementation story must close with at least one sealing commit before you move on.
 
 ### Manager (Planning)
 Focus on **strategic alignment and unblocking**.
@@ -86,8 +87,11 @@ Apply these checks to **every change** before finalizing work:
    - `refactor:` (code change, no behavior change)
    - `test:` (adding/updating tests)
    - `chore:` (build/tooling)
-9. **Mission Loop Discipline**: For mission-driven work, return to the mission steward loop after every completed story, planning unit, or bearing instead of continuing ad hoc from the last worker context.
-10. **Knowledge Quality Bar**: Prefer no new knowledge over low-signal knowledge. A new knowledge entry should be novel, reusable across stories, and materially reduce future drift; otherwise link existing knowledge or omit capture entirely.
+9. **Story Commit Minimum**: Every implementation story needs at least one dedicated sealing commit. Do not carry multiple effectively-complete stories in one dirty worktree. If the change no longer fits one story cleanly, stop and re-scope before continuing.
+10. **No Completion Claims Before Commit**: Do not report a story, voyage, epic, or mission as complete, executed, achieved, verified, or sealed until the relevant code, proof, and lifecycle changes are committed and the board state matches that claim.
+11. **Turn Loop Does Not Override Git Discipline**: Heartbeat, pacemaker, and loop-closure guidance exist to force timely commits, not to justify batching unrelated stories or deferring story-level commit boundaries.
+12. **Mission Loop Discipline**: For mission-driven work, return to the mission steward loop after every completed story, planning unit, or bearing instead of continuing ad hoc from the last worker context.
+13. **Knowledge Quality Bar**: Prefer no new knowledge over low-signal knowledge. A new knowledge entry should be novel, reusable across stories, and materially reduce future drift; otherwise link existing knowledge or omit capture entirely.
 
 ## Compatibility Policy (Hard Cutover)
 

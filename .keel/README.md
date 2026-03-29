@@ -130,7 +130,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Replace Demo API With GitOps-Capable Local K3s Runtime](epics/VFHmKH5XR/voyages/VFHmctWC5/) | planned |
+| [Replace Demo API With GitOps-Capable Local K3s Runtime](epics/VFHmKH5XR/voyages/VFHmctWC5/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
