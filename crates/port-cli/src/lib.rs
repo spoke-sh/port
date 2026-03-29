@@ -33,8 +33,9 @@ Quick start:
 Examples:
   port doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
-  port --config examples/port.toml cluster list
-  port --config examples/port.toml machine launch --machine demo
+  port --config examples/port.toml cluster show --cluster demo
+  port --config examples/port.toml cluster up --cluster demo --runtime-root /tmp/port-runtime
+  port --config examples/port.toml cluster kubeconfig --cluster demo --runtime-root /tmp/port-runtime --format json
   port --config examples/port.toml machine list
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'";
 
@@ -68,7 +69,10 @@ pub enum Command {
     },
     #[command(subcommand, about = "Build and validate kernel or guest artifacts")]
     Artifacts(ArtifactCommand),
-    #[command(subcommand, about = "Inspect named cluster contracts")]
+    #[command(
+        subcommand,
+        about = "Operate named cluster contracts and the first local cluster lifecycle slice"
+    )]
     Cluster(ClusterCommand),
     #[command(subcommand, about = "Launch and inspect Port-managed machines")]
     Machine(MachineCommand),
@@ -3047,8 +3051,9 @@ mod tests {
             "Examples:",
             "port doctor",
             "port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native",
-            "port --config examples/port.toml cluster list",
-            "port --config examples/port.toml machine launch --machine demo",
+            "port --config examples/port.toml cluster show --cluster demo",
+            "port --config examples/port.toml cluster up --cluster demo --runtime-root /tmp/port-runtime",
+            "port --config examples/port.toml cluster kubeconfig --cluster demo --runtime-root",
             "port --config examples/port.toml machine list",
             "port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'",
         ] {

@@ -22,8 +22,8 @@ mission: VFDhGw9vE
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Plan Single-Node Local Cluster Surface](voyages/VFDk8fdnG/) | in-progress | 3/4 |
+| [Plan Single-Node Local Cluster Surface](voyages/VFDk8fdnG/) | done | 4/4 |
 <!-- END GENERATED -->

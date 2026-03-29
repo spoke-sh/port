@@ -171,70 +171,77 @@ Hosted and SSH-owned machines keep the attached-volume boundary explicit:
 declaring an attached volume on those lanes fails validation before launch
 instead of rerouting the request or collapsing it back into the rootfs story.
 
-### 3. Hosted Stateless K3s First Slice
+### 3. Local Cluster First Slice
 
-Start from a copy of `examples/port.toml` and keep the hosted control plane on
-the canonical demo lane:
+Start from a copy of `examples/port.toml`. The sample file already includes a
+local cluster contract under `[clusters.demo]`.
 
-1. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
-2. Point `nodes.generic-linux-node.runtime_root` and
-   `nodes.aws-linux-node.runtime_root` at the real runtime roots owned by the
-   two node agents.
-3. Add a hosted K3s cluster contract:
+The first slice stays intentionally narrow:
 
-   ```toml
-   [k3s_clusters.demo]
-   control_plane = "demo"
-   host_group = "remote-linux"
-   server_machine = "cloud-generic"
-   worker_machines = ["cloud-aws"]
-   version = "v1.32.0+k3s1"
-   server_args = ["--disable=traefik"]
-   worker_args = ["--node-label=role=worker"]
-   ```
+- provider `local`
+- count `1`
+- one Firecracker `standard` machine on Linux
+- Port-owned offline bootstrap inputs
+- Port-owned readiness reporting and kubeconfig handoff
 
-4. Start the hosted server processes:
+Relevant config shape:
 
-   ```bash
-   export PORT_DEMO_TOKEN=demo-token
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9235 --token node-secret
-   ```
+```toml
+[clusters.demo]
+flavor = "k3s"
+provider = "local"
+count = 1
+machine = "demo"
+version = "v1.32.2+k3s1"
+args = ["--disable=traefik"]
 
-5. Launch the two hosted machines through the same machine lifecycle surface:
+[clusters.demo.bootstrap]
+stage_root = "/opt/port/clusters/demo"
+install_script = "examples/bootstrap/demo-k3s/install-k3s-offline.sh"
+binary = "examples/bootstrap/demo-k3s/k3s"
 
-   ```bash
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-generic
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-aws
-   ```
+[clusters.demo.bootstrap.guest_profile]
+name = "kube-ready"
+required_commands = ["sh", "install", "ln", "chmod"]
 
-6. Bootstrap K3s through canonical guest execution rather than a second
-   Kubernetes-only toolchain:
+[clusters.demo.lifecycle]
+health_command = ["opt/port/clusters/demo/bin/k3s", "kubectl", "get", "nodes", "-o", "wide"]
+kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
+api_forward_target = "127.0.0.1:6443"
+```
 
-   ```bash
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -"
-   JOIN_TOKEN="$(PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /var/lib/rancher/k3s/server/node-token')"
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-aws -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='${JOIN_TOKEN}' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -"
-   ```
+Canonical operator workflow:
 
-7. Review cluster access through the same guest surface:
+```bash
+port --config /tmp/port-local-cluster.toml cluster show --cluster demo
+port --config /tmp/port-local-cluster.toml cluster up --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-local-cluster.toml cluster status --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-local-cluster.toml cluster kubeconfig --cluster demo --runtime-root /var/lib/port/runtime --format json
+port --config /tmp/port-local-cluster.toml cluster down --cluster demo --runtime-root /var/lib/port/runtime
+```
 
-   ```bash
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /etc/rancher/k3s/k3s.yaml'
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'k3s kubectl get nodes -o wide'
-   ```
+Thin downstream infra handoff:
 
-8. Stop the worker and server through the same canonical lifecycle commands:
+- `cluster status` is Port's answer to "is the first cluster healthy?"
+- `cluster kubeconfig --format json` is Port's handoff payload for downstream
+  automation; infra consumes the returned `kubeconfig` field instead of managing
+  `guest forward` or rewriting `server:` lines itself.
+- Raw `machine launch`, `guest exec`, `guest forward`, and `cluster stage`
+  remain implementation substrate or troubleshooting tools, not the blessed
+  cluster workflow.
 
-   ```bash
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-aws
-   PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-generic
-   ```
+Explicit follow-on boundaries:
 
-The K3s lane remains explicit about what it does not do yet: no HA, no
-attached volumes or persistence, no ingress, and no SSH-owned or multi-group
-cluster routing.
+- no hosted, multi-node, or AWS cluster orchestration
+- no guest networking, CIDR allocation, or stable inter-node addressing
+- no ingress, public service exposure, attached volumes, or storage guarantees
+- no Flux, Pulumi, or GitOps bootstrap convergence claims inside Port itself
+
+Repo-local proof for this workflow:
+
+```bash
+./scripts/render-local-cluster-proof.sh .keel/stories/VFDk8ggoV/EVIDENCE
+```
 
 ### 4. Cloud Hypervisor Override
 

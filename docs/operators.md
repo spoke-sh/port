@@ -2,15 +2,16 @@
 
 Use `port` for runtime workflows and `just mission` for a repo-level mission
 report with recent achievements and human-facing artifacts. In the current
-external-project deployment slice, `just mission` is the review surface for the
-hosted static-site proof, while `port` remains the runtime surface that
-actually launches, stages, exposes, and stops the workload.
+local-cluster deployment-prep slice, `just mission` is the review surface for
+the human-reviewable cluster proof, while `port` remains the runtime surface
+that actually brings the cluster up, reports readiness, hands off kubeconfig,
+and tears it down.
 
 ## Platform Summary
 
 | Environment | Supported path |
 |-------------|----------------|
-| Linux | Local Firecracker, hosted control-plane demos, and the first SSH-managed remote lifecycle slice |
+| Linux | Local Firecracker, the first local cluster lifecycle slice, hosted control-plane demos, and the first SSH-managed remote lifecycle slice |
 | macOS | AVF local workflow through the same `machine` and `guest` verbs |
 | Windows | Linux-backed workflow through WSL or a remote Linux host |
 
@@ -117,62 +118,83 @@ Repo-local proof for this workflow:
 ./scripts/render-attached-volume-proof.sh .keel/stories/VDfF1dVOF/EVIDENCE
 ```
 
-## Hosted Stateless K3s First Slice
+## Local Cluster First Slice
 
-Port's first K3s lane is intentionally narrow and stays on the hosted control
-plane plus node-agent path. It does not introduce `port k3s` or a second
-Kubernetes-only operator toolchain.
+Port's first blessed cluster workflow is now local, single-node, and
+cluster-first. Operators should use `port cluster ...` for the first K3s lane
+instead of assembling cluster bring-up from `machine launch`, `guest exec`,
+manual API forwarding, or kubeconfig rewriting.
 
 The contract is:
 
-- one hosted control plane
-- one host group
-- one K3s server machine
-- one or more worker machines
-- stateless Firecracker `standard` machines only
+- one named cluster from `[clusters.<name>]`
+- provider `local`
+- count `1`
+- one Firecracker `standard` machine on the Linux local lane
+- Port-owned offline bootstrap inputs
+- Port-owned readiness reporting and kubeconfig handoff
 
 Config shape:
 
 ```toml
-[k3s_clusters.demo]
-control_plane = "demo"
-host_group = "remote-linux"
-server_machine = "cloud-generic"
-worker_machines = ["cloud-aws"]
-version = "v1.32.0+k3s1"
-server_args = ["--disable=traefik"]
-worker_args = ["--node-label=role=worker"]
+[clusters.demo]
+flavor = "k3s"
+provider = "local"
+count = 1
+machine = "demo"
+version = "v1.32.2+k3s1"
+args = ["--disable=traefik"]
+
+[clusters.demo.bootstrap]
+stage_root = "/opt/port/clusters/demo"
+install_script = "examples/bootstrap/demo-k3s/install-k3s-offline.sh"
+binary = "examples/bootstrap/demo-k3s/k3s"
+
+[clusters.demo.bootstrap.guest_profile]
+name = "kube-ready"
+required_commands = ["sh", "install", "ln", "chmod"]
+
+[clusters.demo.lifecycle]
+health_command = ["opt/port/clusters/demo/bin/k3s", "kubectl", "get", "nodes", "-o", "wide"]
+kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
+api_forward_target = "127.0.0.1:6443"
 ```
 
-Canonical hosted workflow:
+Canonical workflow:
 
 ```bash
-export PORT_DEMO_TOKEN=demo-token
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9235 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine launch --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh -"
-JOIN_TOKEN="$(PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /var/lib/rancher/k3s/server/node-token')"
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-aws -- /bin/sh -lc "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='${JOIN_TOKEN}' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -"
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'cat /etc/rancher/k3s/k3s.yaml'
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml guest exec --machine cloud-generic -- /bin/sh -lc 'k3s kubectl get nodes -o wide'
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-k3s.toml machine stop --machine cloud-generic
+port --config /tmp/port-local-cluster.toml cluster show --cluster demo
+port --config /tmp/port-local-cluster.toml cluster up --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-local-cluster.toml cluster status --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-local-cluster.toml cluster kubeconfig --cluster demo --runtime-root /var/lib/port/runtime --format json
+port --config /tmp/port-local-cluster.toml cluster down --cluster demo --runtime-root /var/lib/port/runtime
 ```
+
+Thin downstream infra handoff:
+
+- Port owns machine launch, offline K3s staging, guest bootstrap, readiness,
+  API forward lifecycle, and kubeconfig server rewrite for this first slice.
+- Downstream infra asks Port for `cluster status` and `cluster kubeconfig`, then
+  owns everything after that point: Flux bootstrap, Pulumi operator setup,
+  GitOps convergence, and broader platform health.
+- Raw `machine launch`, `guest exec`, `guest forward`, and manual kubeconfig
+  edits remain implementation substrate or troubleshooting tools, not the
+  blessed cluster workflow.
 
 First-slice boundaries stay explicit:
 
-- no HA or multi-server control planes
-- no attached volumes, persistent storage, or CSI
-- no ingress, load balancers, or public service exposure
-- no SSH-owned or multi-group cluster routing
+- single-node local only
+- no hosted, multi-node, or AWS cluster orchestration
+- no guest networking, CIDR management, or stable inter-node addressing
+- no ingress, load balancers, public service exposure, attached volumes, or
+  persistent storage guarantees
+- `port cluster stage` remains a diagnostic or proof substrate, not the primary
+  operator handoff
 
-Repo-local proof for this workflow:
+Human-reviewable artifact:
 
 ```bash
-./scripts/render-hosted-k3s-proof.sh .keel/stories/VDfzOEeFL/EVIDENCE
+./scripts/render-local-cluster-proof.sh .keel/stories/VFDk8ggoV/EVIDENCE
 ```
 
 ## Hosted External Project Deployment First Slice
@@ -248,6 +270,8 @@ the real `port doctor` plus `port machine launch|status|stop` workflow.
 
 ```bash
 port doctor
+port --config examples/port.toml cluster show --cluster demo
+port --config examples/port.toml cluster status --cluster demo --runtime-root /tmp/port-runtime
 port --config examples/port.toml machine launch --machine demo
 port --config examples/port.toml machine list
 port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'

@@ -6,6 +6,7 @@ Linux workloads in microVMs across local and hosted environments.
 It keeps one operator vocabulary across lanes:
 
 - `port doctor` for host and lane checks
+- `port cluster` for named cluster lifecycle and kubeconfig handoff
 - `port artifacts` for build, validate, push, and pull
 - `port machine` for lifecycle and status
 - `port guest` for exec, copy, PTY, logs, and forward
@@ -19,13 +20,13 @@ It keeps one operator vocabulary across lanes:
 - SSH-managed remote lane: one bounded Linux lifecycle slice for `machine
   launch`, `status`, and `stop` through `mode = "ssh"` with explicit route and
   ownership output
+- Local cluster first slice: one named local K3s cluster on the Firecracker
+  `standard` lane with `port cluster up|status|kubeconfig|down`, Port-owned
+  offline bootstrap inputs, and an explicit downstream handoff of health plus
+  kubeconfig
 - Attached volume first slice: one persistent `host-file` attached volume on
   the local Firecracker `standard` lane with explicit host path and ownership
   output
-- Hosted stateless K3s first slice: one hosted control plane, one host group,
-  one server machine, one or more worker machines, and cluster access through
-  the canonical `machine` and `guest` verbs instead of a second Kubernetes-only
-  command family
 - Additional proof-backed lanes: Cloud Hypervisor `standard`, AVF `standard`,
   and prepared-node Firecracker/PVM on `x86_64`
 
@@ -33,15 +34,17 @@ It keeps one operator vocabulary across lanes:
 
 ```bash
 port doctor
+port --config examples/port.toml cluster show --cluster demo
+port --config examples/port.toml cluster up --cluster demo --runtime-root /tmp/port-runtime
+port --config examples/port.toml cluster status --cluster demo --runtime-root /tmp/port-runtime
 port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
-port --config examples/port.toml machine launch --machine demo
 port --config examples/port.toml machine list
-port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'
 ```
 
 Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
-The first hosted stateless K3s workflow, boundaries, and proof command live in
+The first local cluster workflow, thin downstream infra handoff, and proof
+command live in
 [`docs/operators.md`](docs/operators.md).
 The first direct-runtime attached-volume workflow and proof command live in
 [`docs/operators.md`](docs/operators.md).
@@ -68,21 +71,20 @@ demo path, and the recorded review artifact.
 If you want the raw board entity output instead, run `keel mission show
 <mission-id>` directly.
 
-For the current hosted external-project deployment slice, `just mission` is the
+For the current local cluster deployment-prep slice, `just mission` is the
 repo-level review surface:
 
-- it points at `bash scripts/hosted-external-project-demo.sh` as the runnable
-  external-project workflow
-- it points at `./scripts/render-external-project-proof.sh
-  .keel/stories/VEyjdN0nf/EVIDENCE` plus the recorded GIF and cast artifact for
+- it points at `./scripts/render-local-cluster-proof.sh
+  .keel/stories/VFDk8ggoV/EVIDENCE` plus the recorded GIF and cast artifact for
   review
-- it assumes the repo dev shell so `port`, `port-guest-agent`, `busybox`,
-  `curl`, and `agg` are available, with `PORT_DEMO_TOKEN` set or left at the
-  repo default
-- it proves one repo-local external static-site snapshot staged through hosted
-  `port guest copy`, `port service apply`, and `port guest forward`
-- it keeps app bundle artifact contracts and app bundle service runtimes as
-  explicit follow-on work
+- it assumes the repo dev shell so `port`, `port-guest-agent`, `agg`, and the
+  local Linux Firecracker lane are available
+- it proves the canonical `port cluster up|status|kubeconfig|down` workflow for
+  one named local K3s cluster
+- it keeps the downstream seam thin: infra asks Port for cluster readiness plus
+  kubeconfig, then owns later GitOps/bootstrap convergence
+- it keeps hosted, multi-node, AWS, richer networking, ingress, and storage
+  guarantees as explicit follow-on work
 - it stays named `mission` until upstream `keel screen` exists and Port can
   hard-cut to `keel screen`
 - it uses the current renderer-backed cast/GIF path today; future `atxt`

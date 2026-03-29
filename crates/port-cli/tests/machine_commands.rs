@@ -723,6 +723,9 @@ fn cli_help_stays_concise_without_extra_doc_or_avf_sections() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Examples:"));
     assert!(stdout.contains("port doctor"));
+    assert!(stdout.contains("cluster show --cluster demo"));
+    assert!(stdout.contains("cluster up --cluster demo"));
+    assert!(stdout.contains("cluster kubeconfig --cluster demo"));
     assert!(stdout.contains("guest exec --machine demo"));
     assert!(!stdout.contains("Detailed examples:"));
     assert!(!stdout.contains("macOS AVF install boundary:"));

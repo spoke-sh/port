@@ -273,30 +273,8 @@ collect_artifacts_for_story() {
 
 preferred_demo_script() {
   local file="$1"
-  local line
 
   [[ -s "$file" ]] || return 0
-  while IFS= read -r line; do
-    if [[ "$line" == *hosted-external-project-demo.sh ]]; then
-      printf '%s\n' "$line"
-      return 0
-    fi
-  done < "$file"
-
-  while IFS= read -r line; do
-    if [[ "$line" == *external-project* ]]; then
-      printf '%s\n' "$line"
-      return 0
-    fi
-  done < "$file"
-
-  while IFS= read -r line; do
-    if [[ "$line" == *demo.sh ]]; then
-      printf '%s\n' "$line"
-      return 0
-    fi
-  done < "$file"
-
   head -n 1 "$file"
 }
 
@@ -309,13 +287,6 @@ emit_artifact_gallery() {
   proofs_file="$(mktemp)"
   demos_file="$(mktemp)"
 
-  collect_artifacts_from_doc_path "README.md" "$demos_file"
-  collect_artifacts_from_doc_path "docs/operators.md" "$demos_file"
-  shopt -s nullglob
-  for script_path in scripts/*external-project*demo.sh; do
-    add_unique_line "$script_path" "$demos_file"
-  done
-
   while IFS= read -r epic_id; do
     [[ -n "$epic_id" ]] || continue
     while IFS= read -r story_readme; do
@@ -323,6 +294,9 @@ emit_artifact_gallery() {
       collect_artifacts_for_story "$story_readme" "$visuals_file" "$proofs_file" "$demos_file"
     done < <(story_readmes_for_epic "$epic_id")
   done < <(related_epic_ids "$mission_id" | sort)
+
+  collect_artifacts_from_doc_path "README.md" "$demos_file"
+  collect_artifacts_from_doc_path "docs/operators.md" "$demos_file"
 
   primary_visual="$(head -n 1 "$visuals_file" 2>/dev/null || true)"
   primary_proof="$(head -n 1 "$proofs_file" 2>/dev/null || true)"

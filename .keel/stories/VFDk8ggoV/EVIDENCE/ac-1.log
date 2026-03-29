@@ -1,0 +1,16 @@
+$ cargo run -q -p port-cli -- --help | rg -n "cluster show --cluster demo|cluster up --cluster demo|cluster kubeconfig --cluster demo"
+36:  port --config examples/port.toml cluster show --cluster demo
+37:  port --config examples/port.toml cluster up --cluster demo --runtime-root /tmp/port-runtime
+38:  port --config examples/port.toml cluster kubeconfig --cluster demo --runtime-root
+
+$ rg -n "Local cluster first slice|Port owns machine launch|Downstream infra asks Port|not the blessed cluster workflow|cluster status is Port.s answer|cluster kubeconfig --format json|render-local-cluster-proof" README.md docs/operators.md CONFIGURATION.md
+CONFIGURATION.md:226:- `cluster kubeconfig --format json` is Port's handoff payload for downstream
+CONFIGURATION.md:243:./scripts/render-local-cluster-proof.sh .keel/stories/VFDk8ggoV/EVIDENCE
+docs/operators.md:175:- Port owns machine launch, offline K3s staging, guest bootstrap, readiness,
+docs/operators.md:177:- Downstream infra asks Port for `cluster status` and `cluster kubeconfig`, then
+docs/operators.md:197:./scripts/render-local-cluster-proof.sh .keel/stories/VFDk8ggoV/EVIDENCE
+README.md:23:- Local cluster first slice: one named local K3s cluster on the Firecracker
+README.md:77:- it points at `./scripts/render-local-cluster-proof.sh
+
+$ ! rg -n "Hosted Stateless K3s First Slice|curl https://get.k3s.io" README.md docs/operators.md CONFIGURATION.md
+stale hosted K3s bootstrap guidance removed from canonical cluster docs
