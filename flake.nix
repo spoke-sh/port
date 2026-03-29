@@ -96,6 +96,9 @@
         sharedInputs = [
           rust
           portPkg
+          pkgs.k3s
+          pkgs.kubernetes-helm
+          pkgs.fluxcd
           pkgs.just
           pkgs.gnutar
           pkgs.gzip
@@ -114,8 +117,10 @@
           pkgs.iproute2
           pkgs.iptables
           pkgs.busybox
+          pkgs.cpio
           pkgs.e2fsprogs
           pkgs.mold
+          pkgs.skopeo
         ];
       in {
         packages = {

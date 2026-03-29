@@ -27,11 +27,11 @@ started_at: 2026-03-29T12:27:56
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/4 stories complete
+**Progress:** 1/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Replace Demo Local Cluster Stub With Real K3s Control Plane](../../../../stories/VFHn1OVki/README.md) | feat | in-progress |
+| [Replace Demo Local Cluster Stub With Real K3s Control Plane](../../../../stories/VFHn1OVki/README.md) | feat | done |
 | [Harden Kubeconfig Handoff And Kubernetes Discovery](../../../../stories/VFHn1Ozkj/README.md) | feat | backlog |
 | [Prove Flux And Pulumi Operator Install Against Port Kubeconfig](../../../../stories/VFHn1PHka/README.md) | feat | backlog |
 | [Verify Unchanged Downstream Infra GitOps Handoff](../../../../stories/VFHn1Pslh/README.md) | feat | backlog |

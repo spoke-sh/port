@@ -20,6 +20,82 @@ fn write_config(path: &Path, config: &PortConfig) {
         .expect("config should write");
 }
 
+fn write_fake_cluster_bootstrap_assets(root: &Path) {
+    let bootstrap_root = root.join("examples/bootstrap/demo-k3s");
+    fs::create_dir_all(&bootstrap_root).expect("bootstrap root should exist");
+    fs::write(
+        bootstrap_root.join("install-k3s-offline.sh"),
+        r#"#!/bin/sh
+set -eu
+
+role="${1:-server}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+stage_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+binary="${stage_root}/k3s"
+target_dir="${PORT_K3S_BIN_DIR:-${stage_root}/bin}"
+kubeconfig_path="${PORT_K3S_KUBECONFIG_PATH:-etc/rancher/k3s/k3s.yaml}"
+
+install -d "${target_dir}"
+install -m 0755 "${binary}" "${target_dir}/k3s"
+ln -sf "k3s" "${target_dir}/kubectl"
+install -d "$(dirname "${kubeconfig_path}")"
+cat >"${kubeconfig_path}" <<'EOF'
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: http://127.0.0.1:6443
+  name: demo
+contexts:
+- context:
+    cluster: demo
+    user: demo
+  name: demo
+current-context: demo
+users:
+- name: demo
+  user:
+    token: demo-token
+EOF
+printf 'offline-install-ok role=%s args=%s bin-dir=%s kubeconfig=%s\n' \
+  "${role}" "$*" "${target_dir}" "${kubeconfig_path}"
+printf 'installed-binary:%s\n' "${target_dir}/k3s"
+printf 'installed-kubectl:%s\n' "${target_dir}/kubectl"
+"#,
+    )
+    .expect("fake install script should write");
+    fs::write(
+        bootstrap_root.join("k3s"),
+        r#"#!/bin/sh
+set -eu
+
+if [ "$#" -ge 4 ] && [ "$1" = "kubectl" ] && [ "$2" = "get" ] && [ "$3" = "nodes" ]; then
+  cat <<'EOF'
+NAME   STATUS   ROLES                  AGE   VERSION
+demo   Ready    control-plane,master   1m    v1.32.13+k3s1
+EOF
+  exit 0
+fi
+
+printf 'demo-k3s-stub %s\n' "$*"
+"#,
+    )
+    .expect("fake k3s binary should write");
+    for path in [
+        bootstrap_root.join("install-k3s-offline.sh"),
+        bootstrap_root.join("k3s"),
+    ] {
+        let mut permissions = fs::metadata(&path)
+            .expect("bootstrap asset metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).expect("bootstrap asset should be executable");
+    }
+}
+
 fn port_bin() -> &'static str {
     env!("CARGO_BIN_EXE_port")
 }
@@ -770,7 +846,7 @@ fn cli_cluster_list_and_show_surface_local_contract() {
     assert!(show.status.success());
     let show_stdout = String::from_utf8_lossy(&show.stdout);
     assert!(show_stdout.contains("cluster: demo"));
-    assert!(show_stdout.contains("version: v1.32.2+k3s1"));
+    assert!(show_stdout.contains("version: v1.32.13+k3s1"));
     assert!(show_stdout.contains("stage root: /opt/port/clusters/demo"));
     assert!(
         show_stdout.contains("install script: examples/bootstrap/demo-k3s/install-k3s-offline.sh")
@@ -794,12 +870,14 @@ fn cli_cluster_stage_stages_offline_bootstrap_kit_without_live_fetch() {
     let runtime_root = temp.path().join("runtime");
     let config_path = temp.path().join("port.toml");
     fs::create_dir_all(&guest_root).expect("guest root should exist");
+    write_fake_cluster_bootstrap_assets(temp.path());
     write_config(&config_path, &PortConfig::sample());
 
     let socket_path = runtime_socket(&runtime_root, "demo");
     spawn_guest_agent(&socket_path, &guest_root);
 
     let stage = Command::new(port_bin())
+        .env("PORT_REPO_ROOT", temp.path())
         .arg("--config")
         .arg(&config_path)
         .arg("cluster")
@@ -843,6 +921,7 @@ fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
     let runtime_root = temp.path().join("runtime");
     let config_path = temp.path().join("port.toml");
     fs::create_dir_all(&guest_root).expect("guest root should exist");
+    write_fake_cluster_bootstrap_assets(temp.path());
 
     let mut config = PortConfig::sample();
     write_fake_standard_firecracker_artifacts(&mut config, temp.path());
@@ -853,6 +932,7 @@ fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
     spawn_guest_agent_after_runtime_dir(&runtime_root, "demo", &guest_root);
 
     let up = Command::new(port_bin())
+        .env("PORT_REPO_ROOT", temp.path())
         .env("PATH", &path_env)
         .arg("--config")
         .arg(&config_path)
@@ -879,6 +959,7 @@ fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
     );
 
     let status = Command::new(port_bin())
+        .env("PORT_REPO_ROOT", temp.path())
         .env("PATH", &path_env)
         .arg("--config")
         .arg(&config_path)
@@ -916,6 +997,7 @@ fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
     );
 
     let kubeconfig = Command::new(port_bin())
+        .env("PORT_REPO_ROOT", temp.path())
         .env("PATH", &path_env)
         .arg("--config")
         .arg(&config_path)
@@ -957,6 +1039,7 @@ fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
     assert!(forward_manifest.exists(), "forward manifest should exist");
 
     let down = Command::new(port_bin())
+        .env("PORT_REPO_ROOT", temp.path())
         .env("PATH", &path_env)
         .arg("--config")
         .arg(&config_path)

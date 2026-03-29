@@ -13,7 +13,11 @@ if [[ ! -f "$kernel_path" ]]; then
 fi
 
 case "$kernel_path" in
-  */x86_64/firecracker/standard/*|*/x86_64/firecracker/pvm/*)
+  */x86_64/firecracker/standard/*)
+    arch="x86_64"
+    expected_path="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.dev)/vmlinux"
+    ;;
+  */x86_64/firecracker/pvm/*)
     arch="x86_64"
     expected_sha256="e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53"
     ;;
@@ -32,9 +36,21 @@ case "$kernel_path" in
 esac
 
 actual_sha256="$(sha256sum "$kernel_path" | awk '{print $1}')"
-if [[ "$actual_sha256" != "$expected_sha256" ]]; then
-  echo "kernel sha256 mismatch: expected $expected_sha256 got $actual_sha256" >&2
-  exit 1
+if [[ -n "${expected_path:-}" ]]; then
+  if [[ ! -f "$expected_path" ]]; then
+    echo "missing expected Nix kernel validation target: $expected_path" >&2
+    exit 1
+  fi
+  expected_sha256="$(sha256sum "$expected_path" | awk '{print $1}')"
+  if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+    echo "kernel sha256 mismatch: expected $expected_sha256 got $actual_sha256" >&2
+    exit 1
+  fi
+else
+  if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+    echo "kernel sha256 mismatch: expected $expected_sha256 got $actual_sha256" >&2
+    exit 1
+  fi
 fi
 
 kernel_size="$(stat -c '%s' "$kernel_path")"

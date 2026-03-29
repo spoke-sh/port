@@ -425,7 +425,7 @@ substrate = "firecracker"
 protection_mode = "standard"
 architecture = "native"
 vcpu_count = 2
-memory_mib = 512
+memory_mib = 2048
 kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
 rootfs_read_only = false
 
@@ -565,7 +565,7 @@ flavor = "k3s"
 provider = "local"
 count = 1
 machine = "demo"
-version = "v1.32.2+k3s1"
+version = "v1.32.13+k3s1"
 args = ["--disable=traefik"]
 
 [clusters.demo.bootstrap]
@@ -578,7 +578,7 @@ binary = "examples/bootstrap/demo-k3s/k3s"
 
 [clusters.demo.bootstrap.guest_profile]
 name = "kube-ready"
-required_commands = ["sh", "install", "ln", "chmod", "dirname", "setsid"]
+required_commands = ["sh", "install", "ln", "chmod", "dirname", "setsid", "modprobe"]
 
 [clusters.demo.lifecycle]
 health_command = [
@@ -588,6 +588,7 @@ health_command = [
   "nodes",
   "-o",
   "wide",
+  "--request-timeout=15s",
 ]
 kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
 api_forward_target = "127.0.0.1:6443"

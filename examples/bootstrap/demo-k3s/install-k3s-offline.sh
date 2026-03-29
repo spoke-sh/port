@@ -10,153 +10,184 @@ stage_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 binary="${stage_root}/k3s"
 target_dir="${PORT_K3S_BIN_DIR:-${stage_root}/bin}"
 kubeconfig_path="${PORT_K3S_KUBECONFIG_PATH:-etc/rancher/k3s/k3s.yaml}"
-api_port="${PORT_K3S_API_PORT:-6443}"
-api_pid_path="${target_dir}/k3s-api.pid"
-api_handler="${target_dir}/k3s-api-handler"
-api_server="${target_dir}/k3s-api-server"
+server_log_path="${PORT_K3S_LOG_PATH:-var/log/port-k3s.log}"
+server_pid_path="${target_dir}/k3s-server.pid"
+server_ready_path="${target_dir}/k3s-server.ready"
+node_name="${PORT_K3S_NODE_NAME:-demo}"
+node_ip="${PORT_K3S_NODE_IP:-10.66.0.1}"
+node_ip_cidr="${PORT_K3S_NODE_IP_CIDR:-${node_ip}/24}"
+cluster_iface="${PORT_K3S_CLUSTER_IFACE:-port0}"
+wait_seconds="${PORT_K3S_WAIT_SECONDS:-90}"
 
-install -d "${target_dir}"
+make_absolute() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '/%s\n' "$1" ;;
+  esac
+}
+
+target_dir="$(make_absolute "${target_dir}")"
+kubeconfig_path="$(make_absolute "${kubeconfig_path}")"
+server_log_path="$(make_absolute "${server_log_path}")"
+
+install -d \
+  "${target_dir}" \
+  "$(dirname "${kubeconfig_path}")" \
+  "$(dirname "${server_log_path}")" \
+  /etc/rancher/k3s \
+  /opt/cni/bin \
+  /run \
+  /sys/fs/cgroup \
+  /var/lib/cni \
+  /var/lib/kubelet \
+  /var/lib/rancher/k3s/agent/images \
+  /var/lib/rancher/k3s \
+  /var/log
 install -m 0755 "${binary}" "${target_dir}/k3s"
 ln -sf "k3s" "${target_dir}/kubectl"
-install -d "$(dirname "${kubeconfig_path}")"
-cat >"${kubeconfig_path}" <<'EOF'
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: http://127.0.0.1:6443
-  name: demo
-contexts:
-- context:
-    cluster: demo
-    user: demo
-  name: demo
-current-context: demo
-users:
-- name: demo
-  user:
-    token: demo-token
-EOF
 
-cat >"${api_handler}" <<'EOF'
-#!/bin/sh
-set -eu
-
-cr=$(printf '\r')
-request_line=""
-IFS= read -r request_line || exit 0
-request_line=${request_line%"$cr"}
-path=${request_line#GET }
-path=${path%% HTTP/*}
-path=${path%%\?*}
-accept=""
-while IFS= read -r header; do
-  header=${header%"$cr"}
-  [ -z "${header}" ] && break
-  case "${header}" in
-    Accept:*)
-      accept=${header#Accept: }
-      ;;
-  esac
-done
-
-table_body() {
-  cat <<'JSON'
-{"kind":"Table","apiVersion":"meta.k8s.io/v1","columnDefinitions":[{"name":"Name","type":"string","format":"name","description":""},{"name":"Status","type":"string","description":""},{"name":"Roles","type":"string","description":""},{"name":"Age","type":"string","description":""},{"name":"Version","type":"string","description":""},{"name":"Internal-IP","type":"string","description":""},{"name":"OS-Image","type":"string","description":""},{"name":"Kernel-Version","type":"string","description":""},{"name":"Container-Runtime","type":"string","description":""}],"rows":[{"cells":["demo","Ready","control-plane,master","1m","v1.32.2+k3s1","127.0.0.1","Port Demo Guest","6.1.155","containerd://2.0.0"]}]}
-JSON
+ensure_cgroup2() {
+  if /bin/busybox grep -q ' /sys/fs/cgroup cgroup2 ' /proc/mounts 2>/dev/null; then
+    return
+  fi
+  /bin/busybox mount -t cgroup2 cgroup2 /sys/fs/cgroup 2>/dev/null || true
 }
 
-node_list_body() {
-  cat <<'JSON'
-{"kind":"NodeList","apiVersion":"v1","metadata":{"resourceVersion":"1"},"items":[{"metadata":{"name":"demo","creationTimestamp":"2026-03-29T10:00:00Z","labels":{"node-role.kubernetes.io/control-plane":"true","node-role.kubernetes.io/master":"true"}},"spec":{},"status":{"addresses":[{"type":"InternalIP","address":"127.0.0.1"},{"type":"Hostname","address":"demo"}],"nodeInfo":{"kubeletVersion":"v1.32.2+k3s1","osImage":"Port Demo Guest","containerRuntimeVersion":"containerd://2.0.0","kernelVersion":"6.1.155","architecture":"amd64"},"conditions":[{"type":"Ready","status":"True"}]}}]}
-JSON
-}
-
-write_response() {
-  status_line=$1
-  body=$2
-  body_bytes=$(printf '%s' "${body}" | /bin/busybox wc -c)
-  printf '%s\r\n' "${status_line}"
-  printf 'Content-Type: application/json\r\n'
-  printf 'Content-Length: %s\r\n' "${body_bytes}"
-  printf 'Connection: close\r\n'
-  printf '\r\n'
-  printf '%s' "${body}"
-}
-
-case "${path}" in
-  /api)
-    body='{"kind":"APIVersions","versions":["v1"],"serverAddressByClientCIDRs":[]}'
-    ;;
-  /apis)
-    body='{"kind":"APIGroupList","groups":[]}'
-    ;;
-  /api/v1)
-    body='{"kind":"APIResourceList","groupVersion":"v1","resources":[{"name":"nodes","singularName":"","namespaced":false,"kind":"Node","verbs":["get","list"]}]}'
-    ;;
-  /api/v1/nodes)
-    case "${accept}" in
-      *as=Table*)
-        body=$(table_body)
-        ;;
-      *)
-        body=$(node_list_body)
-        ;;
-    esac
-    ;;
-  *)
-    write_response \
-      'HTTP/1.0 404 Not Found' \
-      '{"kind":"Status","apiVersion":"v1","status":"Failure","message":"not found","reason":"NotFound","code":404}'
-    exit 0
-    ;;
-esac
-
-write_response 'HTTP/1.0 200 OK' "${body}"
-EOF
-chmod 0755 "${api_handler}"
-
-cat >"${api_server}" <<EOF
-#!/bin/sh
-set -eu
-exec /bin/busybox tcpsvd 127.0.0.1 ${api_port} ${api_handler}
-EOF
-chmod 0755 "${api_server}"
-
-/bin/busybox ip link set lo up
-loopback_state="$(/bin/busybox ip addr show dev lo 2>/dev/null || true)"
-case "${loopback_state}" in
-  *"inet 127.0.0.1/8"*)
-    ;;
-  *)
+ensure_loopback() {
+  /bin/busybox ip link set lo up
+  if ! /bin/busybox ip addr show dev lo 2>/dev/null | /bin/busybox grep -q 'inet 127.0.0.1/8'; then
     /bin/busybox ip addr add 127.0.0.1/8 dev lo
+  fi
+}
+
+load_kube_modules() {
+  for module in \
+    bridge \
+    br_netfilter \
+    dummy \
+    nf_conntrack \
+    nf_conntrack_netlink \
+    nf_nat \
+    nf_tables \
+    nft_chain_nat \
+    nft_compat \
+    nft_nat \
+    overlay \
+    ipt_REJECT \
+    veth \
+    x_tables \
+    xt_MASQUERADE \
+    xt_addrtype \
+    xt_comment \
+    xt_conntrack \
+    xt_mark \
+    xt_nat \
+    xt_tcpudp
+  do
+    /usr/bin/modprobe "${module}" 2>/dev/null || true
+  done
+}
+
+ensure_cluster_iface() {
+  if ! /bin/busybox ip link show dev "${cluster_iface}" >/dev/null 2>&1; then
+    /bin/busybox ip link add "${cluster_iface}" type dummy
+  fi
+  if ! /bin/busybox ip addr show dev "${cluster_iface}" 2>/dev/null | /bin/busybox grep -q "inet ${node_ip_cidr}"; then
+    /bin/busybox ip addr add "${node_ip_cidr}" dev "${cluster_iface}" 2>/dev/null || true
+  fi
+  /bin/busybox ip link set "${cluster_iface}" up
+}
+
+ensure_hostname() {
+  printf '%s\n' "${node_name}" >/proc/sys/kernel/hostname 2>/dev/null || true
+}
+
+ensure_hosts_file() {
+  if [ -f /etc/hosts ] && /bin/busybox grep -q 'localhost' /etc/hosts 2>/dev/null; then
+    return
+  fi
+  cat >/etc/hosts <<'EOF'
+127.0.0.1 localhost
+::1 localhost
+EOF
+}
+
+configure_kube_sysctls() {
+  printf '1\n' >/proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+  if [ -w /proc/sys/net/bridge/bridge-nf-call-iptables ]; then
+    printf '1\n' >/proc/sys/net/bridge/bridge-nf-call-iptables 2>/dev/null || true
+  fi
+  if [ -w /proc/sys/net/bridge/bridge-nf-call-ip6tables ]; then
+    printf '1\n' >/proc/sys/net/bridge/bridge-nf-call-ip6tables 2>/dev/null || true
+  fi
+}
+
+kubectl_node_ready() {
+  "${target_dir}/k3s" kubectl get nodes -o wide --request-timeout=5s >/dev/null 2>&1
+}
+
+server_state="started"
+if kubectl_node_ready; then
+  server_state="already-running"
+else
+  /bin/busybox rm -f "${server_pid_path}" "${server_ready_path}"
+fi
+
+case "${role}" in
+  server)
+    ensure_cgroup2
+    ensure_loopback
+    load_kube_modules
+    ensure_cluster_iface
+    ensure_hostname
+    ensure_hosts_file
+    configure_kube_sysctls
+    if [ "${server_state}" = "started" ]; then
+      setsid "${target_dir}/k3s" \
+        server \
+        --bind-address 0.0.0.0 \
+        --https-listen-port 6443 \
+        --advertise-address "${node_ip}" \
+        --tls-san 127.0.0.1 \
+        --tls-san "${node_ip}" \
+        --write-kubeconfig "${kubeconfig_path}" \
+        --write-kubeconfig-mode 0644 \
+        --data-dir /var/lib/rancher/k3s \
+        --node-name "${node_name}" \
+        --node-ip "${node_ip}" \
+        --node-external-ip "${node_ip}" \
+        --flannel-iface "${cluster_iface}" \
+        --flannel-backend host-gw \
+        --disable servicelb \
+        "$@" >"${server_log_path}" 2>&1 &
+      server_pid=$!
+      printf '%s\n' "${server_pid}" >"${server_pid_path}"
+    fi
+    ready=0
+    attempts=0
+    while [ "${attempts}" -lt "${wait_seconds}" ]; do
+      if kubectl_node_ready; then
+        /bin/busybox touch "${server_ready_path}"
+        ready=1
+        break
+      fi
+      sleep 1
+      attempts=$((attempts + 1))
+    done
+    if [ "${ready}" -ne 1 ]; then
+      cat "${server_log_path}" >&2 || true
+      echo "timed out waiting for local K3s readiness after ${wait_seconds}s" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "unsupported-role:${role}" >&2
+    exit 1
     ;;
 esac
 
-api_server_state="skipped"
-guest_cmdline="$(cat /proc/cmdline 2>/dev/null || true)"
-case "${guest_cmdline}" in
-  *port.guest_control_port=*)
-  api_server_state="already-running"
-  if [ -f "${api_pid_path}" ]; then
-    read -r existing_pid <"${api_pid_path}" || existing_pid=""
-    if [ -z "${existing_pid}" ] || ! kill -0 "${existing_pid}" 2>/dev/null; then
-      /bin/busybox rm -f "${api_pid_path}"
-      api_server_state="started"
-    fi
-  else
-    api_server_state="started"
-  fi
-  if [ "${api_server_state}" = "started" ]; then
-    setsid "${api_server}" >/var/log/port-k3s-api.log 2>&1 &
-    api_server_pid=$!
-    printf '%s\n' "${api_server_pid}" >"${api_pid_path}"
-  fi
-  ;;
-esac
-
-printf 'api-server:%s port=%s pid-file=%s\n' \
-  "${api_server_state}" "${api_port}" "${api_pid_path}"
+printf 'k3s-server:%s pid-file=%s log=%s\n' \
+  "${server_state}" "${server_pid_path}" "${server_log_path}"
 
 printf 'offline-install-ok role=%s args=%s bin-dir=%s kubeconfig=%s\n' \
   "${role}" "$*" "${target_dir}" "${kubeconfig_path}"

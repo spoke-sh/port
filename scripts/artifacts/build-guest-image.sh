@@ -33,25 +33,50 @@ case "$output_path" in
     ;;
 esac
 
-for tool in busybox cargo e2fsck ldd mkfs.ext4; do
+for tool in busybox cargo e2fsck ldd mkfs.ext4 nix nix-store; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "missing required tool for guest image build: $tool" >&2
     exit 1
   fi
 done
 
+if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
+  for tool in cpio gzip skopeo; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "missing required tool for guest image build: $tool" >&2
+      exit 1
+    fi
+  done
+fi
+
+case "$guest_architecture" in
+  x86_64)
+    guest_nix_system="x86_64-linux"
+    ;;
+  aarch64)
+    guest_nix_system="aarch64-linux"
+    ;;
+  *)
+    echo "unsupported guest architecture for demo guest-image pipeline: $guest_architecture" >&2
+    exit 1
+    ;;
+esac
+
 staging_dir="$(mktemp -d)"
+initrd_dir="$(mktemp -d)"
 image_path="$(mktemp)"
-trap 'rm -rf "$staging_dir"; rm -f "$image_path"' EXIT
+initrd_path="$(mktemp)"
+trap 'chmod -R u+w "$staging_dir" "$initrd_dir" 2>/dev/null || true; rm -rf "$staging_dir" "$initrd_dir"; rm -f "$image_path" "$initrd_path"' EXIT
 
-copy_binary_with_libs() {
-  local source="$1"
-  local destination="$2"
+copy_binary_with_libs_into() {
+  local root="$1"
+  local source="$2"
+  local destination="$3"
 
-  install -D "$source" "$staging_dir/$destination"
+  install -D "$source" "$root/$destination"
   while IFS= read -r library; do
     [[ -n "$library" ]] || continue
-    install -D "$library" "$staging_dir/$library"
+    install -D "$library" "$root/$library"
   done < <(
     ldd "$source" | awk '
       {
@@ -65,15 +90,92 @@ copy_binary_with_libs() {
   )
 }
 
+copy_binary_with_libs() {
+  copy_binary_with_libs_into "$staging_dir" "$1" "$2"
+}
+
+copy_store_closure() {
+  local attr="$1"
+  local output_path
+  local primary_output=""
+
+  while IFS= read -r output_path; do
+    [[ -n "$output_path" ]] || continue
+    if [[ -z "$primary_output" ]]; then
+      primary_output="$output_path"
+    fi
+    while IFS= read -r closure_path; do
+      [[ -n "$closure_path" ]] || continue
+      if [[ -e "$staging_dir/$closure_path" ]]; then
+        continue
+      fi
+      mkdir -p "$staging_dir/$(dirname "$closure_path")"
+      cp -a "$closure_path" "$staging_dir/$(dirname "$closure_path")/"
+      chmod -R u+w "$staging_dir/$closure_path"
+    done < <(nix-store -qR "$output_path")
+  done < <(nix build --option eval-cache false --no-link --print-out-paths "$attr")
+
+  if [[ -z "$primary_output" ]]; then
+    echo "failed to resolve any store outputs for $attr" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "$primary_output"
+}
+
+sanitize_image_ref() {
+  printf '%s' "$1" | tr '/:@' '___'
+}
+
+stage_preloaded_images() {
+  local manifest_path="$1"
+  local cache_root="$2"
+  local image_root="$staging_dir/var/lib/rancher/k3s/agent/images"
+  local recorded=0
+
+  mkdir -p "$cache_root" "$image_root"
+  : >"$staging_dir/etc/port-preloaded-images.txt"
+  while IFS= read -r image || [[ -n "$image" ]]; do
+    [[ -n "$image" ]] || continue
+    [[ "$image" == \#* ]] && continue
+
+    local archive_name
+    archive_name="$(sanitize_image_ref "$image").tar"
+    local cached_archive="$cache_root/$archive_name"
+    if [[ ! -f "$cached_archive" ]]; then
+      skopeo copy --insecure-policy --retry-times 3 \
+        "docker://$image" \
+        "docker-archive:${cached_archive}:${image}"
+    fi
+
+    install -Dm0644 "$cached_archive" "$image_root/$archive_name"
+    printf '%s\n' "$image" >>"$staging_dir/etc/port-preloaded-images.txt"
+    recorded=1
+  done <"$manifest_path"
+
+  if [[ "$recorded" -ne 1 ]]; then
+    echo "preloaded image manifest did not contain any images: $manifest_path" >&2
+    exit 1
+  fi
+}
+
 mkdir -p \
   "$staging_dir/bin" \
   "$staging_dir/dev" \
   "$staging_dir/etc" \
+  "$staging_dir/etc/rancher/k3s" \
+  "$staging_dir/nix/store" \
+  "$staging_dir/opt/cni/bin" \
   "$staging_dir/proc" \
   "$staging_dir/run/port" \
   "$staging_dir/sys" \
+  "$staging_dir/sys/fs/cgroup" \
   "$staging_dir/tmp" \
   "$staging_dir/usr/bin" \
+  "$staging_dir/var/lib/rancher/k3s/agent/images" \
+  "$staging_dir/var/lib/cni" \
+  "$staging_dir/var/lib/kubelet" \
+  "$staging_dir/var/lib/rancher/k3s" \
   "$staging_dir/var/log"
 
 cat >"$staging_dir/etc/group" <<'EOF'
@@ -87,6 +189,84 @@ EOF
 printf '%s\n' "$guest_architecture" >"$staging_dir/etc/port-guest-architecture"
 printf '%s\n' "$protection_mode" >"$staging_dir/etc/port-protection-mode"
 
+k3s_attr="nixpkgs#legacyPackages.${guest_nix_system}.k3s_1_32"
+k3s_store="$(copy_store_closure "$k3s_attr")"
+k3s_version="$(nix eval --option eval-cache false --raw "${k3s_attr}.version")"
+printf '%s\n' "$k3s_version" >"$staging_dir/etc/port-k3s-version"
+printf '%s\n' "$k3s_store" >"$staging_dir/etc/port-k3s-store-path"
+kmod_attr="nixpkgs#legacyPackages.${guest_nix_system}.kmod.out"
+kmod_store="$(copy_store_closure "$kmod_attr")"
+ln -sf "${kmod_store}/bin/modprobe" "$staging_dir/usr/bin/modprobe"
+ln -sf "${kmod_store}/bin/lsmod" "$staging_dir/usr/bin/lsmod"
+
+if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
+  kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.modules)"
+  if [[ ! -d "${kernel_modules_store}/lib/modules" ]]; then
+    echo "missing kernel modules in ${kernel_modules_store}/lib/modules" >&2
+    exit 1
+  fi
+  mkdir -p "$staging_dir/lib"
+  cp -a "${kernel_modules_store}/lib/modules" "$staging_dir/lib/"
+  chmod -R u+w "$staging_dir/lib/modules"
+  kernel_release="$(find "${kernel_modules_store}/lib/modules" -mindepth 1 -maxdepth 1 -type d | head -n 1 | xargs basename)"
+  if [[ -z "$kernel_release" ]]; then
+    echo "failed to determine kernel release from ${kernel_modules_store}/lib/modules" >&2
+    exit 1
+  fi
+  printf '%s\n' "$kernel_release" >"$staging_dir/etc/port-kernel-modules-release"
+  stage_preloaded_images \
+    "$repo_root/examples/bootstrap/demo-k3s/preloaded-images.txt" \
+    "${PORT_PRELOADED_IMAGE_CACHE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/port/preloaded-images}"
+
+  mkdir -p "$initrd_dir/bin" "$initrd_dir/dev" "$initrd_dir/etc" "$initrd_dir/lib" "$initrd_dir/newroot" "$initrd_dir/proc" "$initrd_dir/sys"
+  copy_binary_with_libs_into \
+    "$initrd_dir" \
+    "$(readlink -f "$(command -v busybox)")" \
+    "bin/busybox"
+  copy_binary_with_libs_into \
+    "$initrd_dir" \
+    "${kmod_store}/bin/modprobe" \
+    "bin/modprobe"
+  for applet in cat echo mkdir mount sh sleep switch_root; do
+    ln -sf busybox "$initrd_dir/bin/$applet"
+  done
+  cp -a "${kernel_modules_store}/lib/modules" "$initrd_dir/lib/"
+  chmod -R u+w "$initrd_dir/lib/modules"
+  printf '%s\n' "$kernel_release" >"$initrd_dir/etc/port-kernel-modules-release"
+  cat >"$initrd_dir/init" <<'EOF'
+#!/bin/sh
+set -eu
+
+PATH=/bin
+kernel_release="$(cat /etc/port-kernel-modules-release)"
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+
+/bin/modprobe -d / -S "$kernel_release" virtio_mmio
+/bin/modprobe -d / -S "$kernel_release" virtio_blk
+/bin/modprobe -d / -S "$kernel_release" ext4
+/bin/modprobe -d / -S "$kernel_release" vsock || true
+/bin/modprobe -d / -S "$kernel_release" vmw_vsock_virtio_transport || true
+
+for _ in 1 2 3 4 5; do
+  if mount -t ext4 -o rw /dev/vda /newroot 2>/dev/null; then
+    exec switch_root /newroot /init
+  fi
+  sleep 1
+done
+
+echo "failed to mount /dev/vda from initrd" >/dev/console
+exec sh
+EOF
+  chmod 0755 "$initrd_dir/init"
+  (
+    cd "$initrd_dir"
+    find . -print0 | cpio --null -o -H newc | gzip -n >"$initrd_path"
+  )
+  initrd_output_path="$(dirname "$output_path")/initrd.cpio.gz"
+fi
+
 cargo build -p port-guest-agent --release
 
 copy_binary_with_libs \
@@ -96,9 +276,20 @@ copy_binary_with_libs \
   "${CARGO_TARGET_DIR:-$repo_root/target}/release/port-guest-agent" \
   "usr/bin/port-guest-agent"
 
-for applet in cat chmod dirname echo install ln ls mkdir mount mknod setsid sh sleep uname; do
+for applet in cat chmod cp dirname echo env grep head install kill ln ls mkdir mount mknod mv ps pwd readlink rm sed setsid sh sleep stat sync tail touch uname; do
   ln -sf busybox "$staging_dir/bin/$applet"
 done
+
+cat >"$staging_dir/usr/bin/k3s" <<EOF
+#!/bin/sh
+set -eu
+
+exec '${k3s_store}/bin/k3s' "\$@"
+EOF
+chmod 0755 "$staging_dir/usr/bin/k3s"
+ln -sf k3s "$staging_dir/usr/bin/kubectl"
+ln -sf k3s "$staging_dir/usr/bin/crictl"
+ln -sf k3s "$staging_dir/usr/bin/ctr"
 
 cat >"$staging_dir/init" <<'EOF'
 #!/bin/sh
@@ -113,7 +304,9 @@ mkdir -p /dev/pts
 mount_if_needed devpts devpts /dev/pts
 mount_if_needed proc proc /proc
 mount_if_needed sysfs sysfs /sys
-mkdir -p /run/port /tmp /var/log
+mkdir -p /run/port /tmp /var/log /sys/fs/cgroup
+mount_if_needed cgroup2 cgroup2 /sys/fs/cgroup
+mkdir -p /etc/rancher/k3s /opt/cni/bin /var/lib/cni /var/lib/kubelet /var/lib/rancher/k3s /var/lib/rancher/k3s/agent/images
 
 guest_control_port=7000
 protection_mode="$(cat /etc/port-protection-mode 2>/dev/null || echo unknown)"
@@ -129,6 +322,11 @@ echo "port guest image booted" >/dev/console
 echo "port guest image booted" >>/var/log/port-agent.log
 echo "port protection mode: ${protection_mode}" >/dev/console
 echo "port protection mode: ${protection_mode}" >>/var/log/port-agent.log
+if [ -f /etc/port-k3s-version ]; then
+  k3s_version="$(cat /etc/port-k3s-version)"
+  echo "port k3s version: ${k3s_version}" >/dev/console
+  echo "port k3s version: ${k3s_version}" >>/var/log/port-agent.log
+fi
 /usr/bin/port-guest-agent --socket /run/port/guest-agent.sock --vsock-port "$guest_control_port" --root / >>/var/log/port-agent.log 2>&1 &
 echo "port-guest-agent launched on vsock port $guest_control_port" >/dev/console
 echo "port-guest-agent launched on vsock port $guest_control_port" >>/var/log/port-agent.log
@@ -140,12 +338,19 @@ EOF
 chmod 0755 "$staging_dir/init"
 
 mkdir -p "$(dirname "$output_path")"
-truncate -s 256M "$image_path"
+truncate -s "${PORT_DEMO_GUEST_IMAGE_SIZE:-12G}" "$image_path"
 mkfs.ext4 -q -F -L port-demo-rootfs -d "$staging_dir" "$image_path"
 install -m 0644 "$image_path" "$output_path"
+if [[ -n "${initrd_output_path:-}" ]]; then
+  install -m 0644 "$initrd_path" "$initrd_output_path"
+fi
 e2fsck -fn "$output_path" >/dev/null
 
 printf 'guest image artifact: %s\n' "$output_path"
 printf 'guest image architecture: %s\n' "$guest_architecture"
 printf 'guest image protection mode: %s\n' "$protection_mode"
-printf 'guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent\n'
+printf 'guest image K3s version: %s\n' "$k3s_version"
+if [[ -n "${initrd_output_path:-}" ]]; then
+  printf 'guest image initrd: %s\n' "$initrd_output_path"
+fi
+printf 'guest image contains: /init, /bin/busybox, /usr/bin/port-guest-agent, /usr/bin/k3s\n'

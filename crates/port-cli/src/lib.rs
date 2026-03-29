@@ -3117,12 +3117,12 @@ mod tests {
             "Examples:",
             "port --config examples/port.toml artifacts list",
             "port doctor",
-            "port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native",
+            "port --config examples/port.toml artifacts build --artifact demo-kernel",
             "port --config examples/port.toml cluster show --cluster demo",
-            "port --config examples/port.toml cluster up --cluster demo --runtime-root /tmp/port-runtime",
-            "port --config examples/port.toml cluster kubeconfig --cluster demo --runtime-root",
+            "port --config examples/port.toml cluster up --cluster demo",
+            "port --config examples/port.toml cluster kubeconfig --cluster demo",
             "port --config examples/port.toml machine list",
-            "port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'",
+            "port --config examples/port.toml guest exec --machine demo",
         ] {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }

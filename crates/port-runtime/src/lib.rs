@@ -96,6 +96,12 @@ pub struct ClusterStagedFile {
     pub bytes_copied: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClusterBootstrapSource {
+    configured: PathBuf,
+    resolved: PathBuf,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ClusterStageResult {
     pub cluster_name: String,
@@ -587,6 +593,36 @@ impl RuntimePaths {
             runtime_dir,
         }
     }
+}
+
+fn materialize_runtime_guest_image(
+    paths: &RuntimePaths,
+    source: &Path,
+    rootfs_read_only: bool,
+) -> Result<PathBuf> {
+    if rootfs_read_only {
+        return Ok(source.to_path_buf());
+    }
+
+    let file_name = source.file_name().with_context(|| {
+        format!(
+            "guest image path '{}' must reference a file name for runtime materialization",
+            source.display()
+        )
+    })?;
+    let destination = paths.runtime_dir.join(file_name);
+    if source != destination {
+        copy_file(source, &destination)?;
+    }
+
+    if let Some(initrd_source) = firecracker_initrd_path_for_rootfs(source) {
+        let initrd_destination = destination.with_file_name("initrd.cpio.gz");
+        if initrd_source != initrd_destination {
+            copy_file(&initrd_source, &initrd_destination)?;
+        }
+    }
+
+    Ok(destination)
 }
 
 fn configure_detached_session(command: &mut Command) {
@@ -1735,14 +1771,16 @@ pub fn stage_local_cluster_bootstrap(
     })?;
     let install_script_destination = cluster.bootstrap.stage_root.join(install_script_name);
     let binary_destination = cluster.bootstrap.stage_root.join(binary_name);
-
-    let staged_files = vec![
+    let install_script_source =
+        resolve_cluster_bootstrap_source(&cluster.bootstrap.install_script)?;
+    let binary_source = resolve_cluster_bootstrap_source(&cluster.bootstrap.binary)?;
+    let mut staged_files = vec![
         stage_cluster_bootstrap_file(
             config,
             request.runtime_root,
             request.cluster_name,
             &cluster.machine,
-            &cluster.bootstrap.install_script,
+            &install_script_source,
             &install_script_destination,
         )?,
         stage_cluster_bootstrap_file(
@@ -1750,10 +1788,17 @@ pub fn stage_local_cluster_bootstrap(
             request.runtime_root,
             request.cluster_name,
             &cluster.machine,
-            &cluster.bootstrap.binary,
+            &binary_source,
             &binary_destination,
         )?,
     ];
+    staged_files.extend(stage_cluster_bootstrap_runtime_dependencies(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+        &binary_source,
+    )?);
 
     execute_cluster_exec(
         config,
@@ -1834,16 +1879,15 @@ fn stage_cluster_bootstrap_file(
     runtime_root: &Path,
     cluster_name: &str,
     machine_name: &str,
-    source: &Path,
+    source: &ClusterBootstrapSource,
     destination: &Path,
 ) -> Result<ClusterStagedFile> {
-    let resolved_source = resolve_cluster_bootstrap_source(source)?;
     let result = copy_guest_file(
         config,
         GuestCopyRequest {
             machine_name,
             runtime_root,
-            source: &resolved_source,
+            source: &source.resolved,
             destination,
             direction: CopyDirection::HostToGuest,
         },
@@ -1851,24 +1895,154 @@ fn stage_cluster_bootstrap_file(
     .with_context(|| {
         format!(
             "failed to stage '{}' into '{}' for cluster '{}'",
-            source.display(),
+            source.configured.display(),
             destination.display(),
             cluster_name
         )
     })?;
     Ok(ClusterStagedFile {
-        source: source.to_path_buf(),
+        source: source.configured.clone(),
         destination: destination.to_path_buf(),
         bytes_copied: result.bytes_copied,
     })
 }
 
-fn resolve_cluster_bootstrap_source(source: &Path) -> Result<PathBuf> {
-    if source.is_absolute() || source.exists() {
-        Ok(source.to_path_buf())
-    } else {
-        Ok(repo_root()?.join(source))
+fn resolve_cluster_bootstrap_source(source: &Path) -> Result<ClusterBootstrapSource> {
+    if source.is_absolute() {
+        return Ok(ClusterBootstrapSource {
+            configured: source.to_path_buf(),
+            resolved: source.to_path_buf(),
+        });
     }
+
+    let candidates = cluster_bootstrap_source_candidates(source);
+    if let Some(path) = candidates.iter().find(|candidate| candidate.is_file()) {
+        return Ok(ClusterBootstrapSource {
+            configured: source.to_path_buf(),
+            resolved: path.clone(),
+        });
+    }
+
+    let searched = candidates
+        .iter()
+        .map(|candidate| format!("'{}'", candidate.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "failed to resolve cluster bootstrap source '{}'; searched {}",
+        source.display(),
+        searched
+    )
+}
+
+fn cluster_bootstrap_source_candidates(source: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if source.is_absolute() {
+        candidates.push(source.to_path_buf());
+        return candidates;
+    }
+
+    if let Some(configured) = env::var_os("PORT_SHARE_ROOT") {
+        push_cluster_bootstrap_candidate(&mut candidates, PathBuf::from(configured).join(source));
+    }
+
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(prefix_root) = current_exe.parent().and_then(Path::parent) {
+            push_cluster_bootstrap_candidate(
+                &mut candidates,
+                prefix_root.join("share/port").join(source),
+            );
+        }
+    }
+
+    if let Some(configured) = env::var_os("PORT_REPO_ROOT") {
+        push_cluster_bootstrap_candidate(&mut candidates, PathBuf::from(configured).join(source));
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        for candidate in current_dir.ancestors() {
+            push_cluster_bootstrap_candidate(&mut candidates, candidate.join(source));
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(candidate) = manifest_dir.parent().and_then(Path::parent) {
+        push_cluster_bootstrap_candidate(&mut candidates, candidate.join(source));
+    }
+
+    candidates
+}
+
+fn push_cluster_bootstrap_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !candidates.iter().any(|existing| existing == &candidate) {
+        candidates.push(candidate);
+    }
+}
+
+fn stage_cluster_bootstrap_runtime_dependencies(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    machine_name: &str,
+    source: &ClusterBootstrapSource,
+) -> Result<Vec<ClusterStagedFile>> {
+    let dependencies = binary_runtime_dependencies(&source.resolved)?;
+    let mut staged = Vec::new();
+    for dependency in dependencies {
+        staged.push(stage_cluster_bootstrap_file(
+            config,
+            runtime_root,
+            cluster_name,
+            machine_name,
+            &ClusterBootstrapSource {
+                configured: source.configured.clone(),
+                resolved: dependency.clone(),
+            },
+            &dependency,
+        )?);
+    }
+    Ok(staged)
+}
+
+fn binary_runtime_dependencies(source: &Path) -> Result<Vec<PathBuf>> {
+    if !cfg!(target_os = "linux") {
+        return Ok(Vec::new());
+    }
+
+    let mut header = [0u8; 4];
+    let mut file = File::open(source).with_context(|| {
+        format!(
+            "failed to open '{}' for dependency inspection",
+            source.display()
+        )
+    })?;
+    if file.read(&mut header)? < header.len() || &header != b"\x7fELF" {
+        return Ok(Vec::new());
+    }
+
+    let output = Command::new("ldd").arg(source).output().with_context(|| {
+        format!(
+            "failed to inspect runtime dependencies for '{}'",
+            source.display()
+        )
+    })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("ldd failed for '{}': {}", source.display(), stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut dependencies = Vec::new();
+    for token in stdout.split_whitespace() {
+        if token.starts_with('/') {
+            let path = PathBuf::from(token);
+            if path.is_file() && !dependencies.iter().any(|existing| existing == &path) {
+                dependencies.push(path);
+            }
+        }
+    }
+    Ok(dependencies)
 }
 
 fn guest_shell_path(path: &Path) -> String {
@@ -2068,14 +2242,39 @@ fn ensure_local_cluster_guest_image_ready(
         .machines
         .get(&cluster.machine)
         .with_context(|| format!("unknown machine '{}'", cluster.machine))?;
-    let request = ArtifactRequest {
+    let selector = ArtifactRequest {
         name: &machine.guest_image,
         architecture: machine.architecture,
         substrate: machine.substrate,
         protection_mode: machine.protection_mode,
     };
+    ensure_repo_managed_local_cluster_artifact_ready(
+        config,
+        ArtifactRequest {
+            name: &machine.kernel,
+            ..selector
+        },
+        cluster_name,
+        "kernel",
+    )?;
+    ensure_repo_managed_local_cluster_artifact_ready(
+        config,
+        selector,
+        cluster_name,
+        "guest image",
+    )?;
+
+    Ok(())
+}
+
+fn ensure_repo_managed_local_cluster_artifact_ready(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+    cluster_name: &str,
+    artifact_label: &str,
+) -> Result<()> {
     let artifact = resolve_artifact_metadata(config, request)?;
-    if !uses_repo_managed_guest_image_pipeline(&artifact.path) {
+    if !uses_repo_managed_artifact_pipeline(&artifact.path) {
         return Ok(());
     }
 
@@ -2085,20 +2284,39 @@ fn ensure_local_cluster_guest_image_ready(
 
     run_artifact_pipeline_quiet(config, request, ArtifactAction::Build).with_context(|| {
         format!(
-            "failed to rebuild guest image '{}' for local cluster '{}'",
-            machine.guest_image, cluster_name
+            "failed to rebuild {artifact_label} '{}' for local cluster '{}'",
+            artifact.name, cluster_name
         )
     })?;
     run_artifact_pipeline_quiet(config, request, ArtifactAction::Validate).with_context(|| {
         format!(
-            "guest image '{}' for local cluster '{}' remained invalid after rebuild",
-            machine.guest_image, cluster_name
+            "{artifact_label} '{}' for local cluster '{}' remained invalid after rebuild",
+            artifact.name, cluster_name
         )
     })?;
 
     Ok(())
 }
 
+fn uses_repo_managed_artifact_pipeline(path: &Path) -> bool {
+    for relative_root in [Path::new("artifacts/kernel"), Path::new("artifacts/guest")] {
+        if path.starts_with(relative_root) {
+            return true;
+        }
+    }
+
+    if let Ok(root) = repo_root() {
+        for relative_root in [Path::new("artifacts/kernel"), Path::new("artifacts/guest")] {
+            if path.starts_with(root.join(relative_root)) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+#[cfg(test)]
 fn uses_repo_managed_guest_image_pipeline(path: &Path) -> bool {
     let relative_root = Path::new("artifacts/guest");
     if path.starts_with(relative_root) {
@@ -2737,9 +2955,12 @@ fn firecracker_local_launch_machine(
     })?;
     prepare_runtime_state(&paths, request.machine_name)?;
 
+    let runtime_guest_image_path =
+        materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
+
     let config_payload = build_firecracker_config(
         kernel_variant.path.clone(),
-        guest_variant.path.clone(),
+        runtime_guest_image_path,
         &machine.volumes,
         machine.vcpu_count,
         machine.memory_mib,
@@ -2964,11 +3185,14 @@ fn cloud_hypervisor_local_launch_machine(
         machine.guest.vsock_cid,
         paths.vsock_path.display()
     );
+    let runtime_guest_image_path =
+        materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
+
     let config_payload = CloudHypervisorLaunchConfig {
         machine_name: request.machine_name.to_string(),
         runtime_dir: paths.runtime_dir.clone(),
         kernel_path: kernel_variant.path.clone(),
-        guest_image_path: guest_variant.path.clone(),
+        guest_image_path: runtime_guest_image_path.clone(),
         vcpu_count: machine.vcpu_count,
         memory_mib: machine.memory_mib,
         kernel_args: boot_args.clone(),
@@ -2990,7 +3214,7 @@ fn cloud_hypervisor_local_launch_machine(
 
     let disk_arg = format!(
         "path={},readonly={}",
-        guest_variant.path.display(),
+        runtime_guest_image_path.display(),
         if machine.rootfs_read_only {
             "on"
         } else {
@@ -3185,12 +3409,15 @@ fn avf_local_launch_machine_with_host_os(
     })?;
     prepare_avf_runtime_state(&paths, request.machine_name)?;
 
+    let runtime_guest_image_path =
+        materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
+
     let contract = AvfExecutionContract::linux_guest();
     let config_payload = AvfLaunchConfig {
         machine_name: request.machine_name.to_string(),
         runtime_dir: paths.runtime_dir.clone(),
         kernel_path: kernel_variant.path.clone(),
-        guest_image_path: guest_variant.path.clone(),
+        guest_image_path: runtime_guest_image_path,
         vcpu_count: machine.vcpu_count,
         memory_mib: machine.memory_mib,
         kernel_args: machine.kernel_args.clone(),
@@ -8774,7 +9001,7 @@ fn run_artifact_pipeline_with_io(
 
 fn artifact_pipeline_workdir(action: ArtifactAction) -> Result<Option<PathBuf>> {
     match action {
-        ArtifactAction::Build => Ok(Some(repo_root()?)),
+        ArtifactAction::Build => Ok(None),
         ArtifactAction::Validate => Ok(None),
     }
 }
@@ -11081,6 +11308,7 @@ fn build_firecracker_config(
     uds_path: PathBuf,
 ) -> FirecrackerConfig {
     let boot_args = format!("{boot_args} init=/init port.guest_control_port={guest_control_port}");
+    let initrd_path = firecracker_initrd_path_for_rootfs(&rootfs_path);
     let mut drives = vec![DriveConfig {
         drive_id: String::from("rootfs"),
         path_on_host: rootfs_path,
@@ -11097,6 +11325,7 @@ fn build_firecracker_config(
     FirecrackerConfig {
         boot_source: BootSourceConfig {
             kernel_image_path,
+            initrd_path,
             boot_args,
         },
         drives,
@@ -11125,7 +11354,14 @@ struct FirecrackerConfig {
 #[derive(Debug, Serialize)]
 struct BootSourceConfig {
     kernel_image_path: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initrd_path: Option<PathBuf>,
     boot_args: String,
+}
+
+fn firecracker_initrd_path_for_rootfs(rootfs_path: &Path) -> Option<PathBuf> {
+    let candidate = rootfs_path.with_file_name("initrd.cpio.gz");
+    candidate.is_file().then_some(candidate)
 }
 
 #[derive(Debug, Serialize)]
@@ -12660,6 +12896,199 @@ exit 23
         }
     }
 
+    struct ScopedEnvVar {
+        name: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl ScopedEnvVar {
+        fn set(name: &'static str, value: &Path) -> Self {
+            let original = std::env::var_os(name);
+            unsafe {
+                std::env::set_var(name, value);
+            }
+            Self { name, original }
+        }
+    }
+
+    impl Drop for ScopedEnvVar {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => unsafe {
+                    std::env::set_var(self.name, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.name);
+                },
+            }
+        }
+    }
+
+    fn write_fake_cluster_bootstrap_assets(root: &Path) {
+        let bootstrap_root = root.join("examples/bootstrap/demo-k3s");
+        fs::create_dir_all(&bootstrap_root).expect("bootstrap root should exist");
+        fs::write(
+            bootstrap_root.join("install-k3s-offline.sh"),
+            r#"#!/bin/sh
+set -eu
+
+role="${1:-server}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+stage_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+binary="${stage_root}/k3s"
+target_dir="${PORT_K3S_BIN_DIR:-${stage_root}/bin}"
+kubeconfig_path="${PORT_K3S_KUBECONFIG_PATH:-etc/rancher/k3s/k3s.yaml}"
+server_log_path="${PORT_K3S_LOG_PATH:-var/log/port-k3s.log}"
+server_pid_path="${target_dir}/k3s-server.pid"
+server_ready_path="${target_dir}/k3s-server.ready"
+node_name="${PORT_K3S_NODE_NAME:-demo}"
+
+install -d \
+  "${target_dir}" \
+  "$(dirname "${kubeconfig_path}")" \
+  "$(dirname "${server_log_path}")" \
+  etc/rancher/k3s \
+  opt/cni/bin \
+  run \
+  sys/fs/cgroup \
+  var/lib/cni \
+  var/lib/kubelet \
+  var/lib/rancher/k3s \
+  var/log
+install -m 0755 "${binary}" "${target_dir}/k3s"
+ln -sf "k3s" "${target_dir}/kubectl"
+"${target_dir}/k3s" "${role}" --write-kubeconfig "${kubeconfig_path}" >/dev/null
+printf 'k3s-server:%s pid-file=%s log=%s\n' \
+  'started' "${server_pid_path}" "${server_log_path}"
+printf 'offline-install-ok role=%s args=%s bin-dir=%s kubeconfig=%s\n' \
+  "${role}" "$*" "${target_dir}" "${kubeconfig_path}"
+"#,
+        )
+        .expect("fake install script should write");
+        fs::write(
+            bootstrap_root.join("k3s"),
+            r#"#!/bin/sh
+set -eu
+
+exec usr/bin/k3s "$@"
+"#,
+        )
+        .expect("fake k3s binary should write");
+        for path in [
+            bootstrap_root.join("install-k3s-offline.sh"),
+            bootstrap_root.join("k3s"),
+        ] {
+            let mut permissions = fs::metadata(&path)
+                .expect("bootstrap asset metadata should exist")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("bootstrap asset should be executable");
+        }
+    }
+
+    fn write_fake_guest_k3s_runtime(guest_root: &Path) {
+        let usr_bin = guest_root.join("usr/bin");
+        let state_root = guest_root.join("var/lib/rancher/k3s");
+        fs::create_dir_all(&usr_bin).expect("guest usr/bin should exist");
+        fs::create_dir_all(&state_root).expect("guest state root should exist");
+        let k3s = usr_bin.join("k3s");
+        fs::write(
+            &k3s,
+            r#"#!/bin/sh
+set -eu
+
+state_root="var/lib/rancher/k3s"
+state_file="${state_root}/server.started"
+node_name="demo"
+version="v1.32.13+k3s1"
+write_kubeconfig="etc/rancher/k3s/k3s.yaml"
+
+if [ "$#" -gt 0 ] && [ "$1" = "server" ]; then
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --write-kubeconfig)
+        shift
+        write_kubeconfig="$1"
+        ;;
+      --node-name)
+        shift
+        node_name="$1"
+        ;;
+    esac
+    shift
+  done
+  mkdir -p "$(dirname "${write_kubeconfig}")" "${state_root}"
+  cat >"${write_kubeconfig}" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: demo
+contexts:
+- context:
+    cluster: demo
+    user: demo
+  name: demo
+current-context: demo
+users:
+- name: demo
+  user:
+    token: demo-token
+EOF
+  printf '%s\n' "${node_name}" >"${state_file}"
+  exit 0
+fi
+
+if [ "$#" -ge 4 ] && [ "$1" = "kubectl" ] && [ "$2" = "get" ] && [ "$3" = "nodes" ]; then
+  if [ ! -f "${state_file}" ]; then
+    echo "control plane not ready" >&2
+    exit 1
+  fi
+  read -r stored_name <"${state_file}"
+  cat <<EOF
+NAME          STATUS   ROLES                  AGE   VERSION
+${stored_name}   Ready    control-plane,master   1m    ${version}
+EOF
+  exit 0
+fi
+
+if [ "$#" -ge 4 ] && [ "$1" = "kubectl" ] && [ "$2" = "api-resources" ] && [ "$3" = "-o" ] && [ "$4" = "name" ]; then
+  cat <<EOF
+configmaps
+namespaces
+secrets
+serviceaccounts
+deployments.apps
+customresourcedefinitions.apiextensions.k8s.io
+EOF
+  exit 0
+fi
+
+if [ "$#" -gt 0 ] && [ "$1" = "--version" ]; then
+  printf 'k3s version %s (fake)\n' "${version}"
+  exit 0
+fi
+
+printf 'fake-k3s %s\n' "$*"
+"#,
+        )
+        .expect("fake guest k3s should write");
+        let mut permissions = fs::metadata(&k3s)
+            .expect("fake guest k3s metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&k3s, permissions).expect("fake guest k3s should become executable");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("k3s", usr_bin.join("kubectl"))
+            .expect("fake guest kubectl symlink should exist");
+    }
+
     fn write_fake_avf_launcher_binary(root: &Path, name: &str) -> PathBuf {
         let path = root.join(name);
         fs::write(
@@ -13158,6 +13587,35 @@ exec sleep 30
         assert!(json.contains("\"guest_cid\": 52"));
         assert!(json.contains("init=/init"));
         assert!(json.contains("port.guest_control_port=7000"));
+        assert!(!json.contains("\"initrd_path\""));
+    }
+
+    #[test]
+    fn firecracker_config_uses_sibling_initrd_when_present() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let kernel = tempdir.path().join("vmlinux");
+        let rootfs = tempdir.path().join("rootfs.ext4");
+        let initrd = tempdir.path().join("initrd.cpio.gz");
+        fs::write(&kernel, "kernel").expect("kernel should write");
+        fs::write(&rootfs, "rootfs").expect("rootfs should write");
+        fs::write(&initrd, "initrd").expect("initrd should write");
+
+        let config = build_firecracker_config(
+            kernel,
+            rootfs,
+            &[],
+            2,
+            512,
+            String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
+            false,
+            7000,
+            52,
+            tempdir.path().join("guest.vsock"),
+        );
+        let json = serde_json::to_string_pretty(&config).expect("config should encode");
+
+        assert!(json.contains("\"initrd_path\""));
+        assert!(json.contains("initrd.cpio.gz"));
     }
 
     #[test]
@@ -13243,10 +13701,9 @@ exec sleep 30
                 .expect("validate workdir should resolve"),
             None
         );
-        assert!(
-            artifact_pipeline_workdir(ArtifactAction::Build)
-                .expect("build workdir should resolve")
-                .is_some()
+        assert_eq!(
+            artifact_pipeline_workdir(ArtifactAction::Build).expect("build workdir should resolve"),
+            None
         );
     }
 
@@ -17584,6 +18041,9 @@ exec sleep 30
         let runtime_root = tempdir.path().join("runtime");
         let socket_path = runtime_root.join("demo").join("guest-agent.sock");
         fs::create_dir_all(&guest_root).expect("guest root should exist");
+        write_fake_guest_k3s_runtime(&guest_root);
+        write_fake_cluster_bootstrap_assets(tempdir.path());
+        let _repo_root = ScopedEnvVar::set("PORT_REPO_ROOT", tempdir.path());
         fs::create_dir_all(
             socket_path
                 .parent()
@@ -17646,7 +18106,7 @@ exec sleep 30
         assert!(
             fs::read_to_string(&binary)
                 .expect("staged binary should read")
-                .contains("demo-k3s-stub")
+                .contains("exec usr/bin/k3s")
         );
         assert_eq!(
             fs::metadata(&binary)
@@ -17673,6 +18133,9 @@ exec sleep 30
         let guest_root = tempdir.path().join("guest-root");
         let runtime_root = tempdir.path().join("runtime");
         fs::create_dir_all(&guest_root).expect("guest root should exist");
+        write_fake_guest_k3s_runtime(&guest_root);
+        write_fake_cluster_bootstrap_assets(tempdir.path());
+        let _repo_root = ScopedEnvVar::set("PORT_REPO_ROOT", tempdir.path());
 
         let mut config = PortConfig::sample();
         write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
@@ -17714,7 +18177,7 @@ exec sleep 30
         assert_eq!(up.machine_name, "demo");
         assert_eq!(up.launch_action, "launched");
         assert_eq!(up.status.readiness, ClusterReadinessState::Ready);
-        assert!(up.status.health_output.contains("NAME   STATUS"));
+        assert!(up.status.health_output.contains("control-plane,master"));
         assert!(up.status.kubeconfig_available);
         assert!(
             up.status
@@ -17732,7 +18195,7 @@ exec sleep 30
         .expect("local cluster status should succeed");
         assert_eq!(status.readiness, ClusterReadinessState::Ready);
         assert_eq!(status.machine_state, MachineRuntimeState::Running);
-        assert!(status.health_output.contains("NAME   STATUS"));
+        assert!(status.health_output.contains("control-plane,master"));
         assert_eq!(status.api_forward_target, "127.0.0.1:6443");
 
         let kubeconfig = local_cluster_kubeconfig(
@@ -17749,7 +18212,7 @@ exec sleep 30
         assert!(
             kubeconfig
                 .kubeconfig
-                .contains("server: http://127.0.0.1:6443")
+                .contains("server: https://127.0.0.1:6443")
         );
         assert!(
             guest_root.join("etc/rancher/k3s/k3s.yaml").exists(),

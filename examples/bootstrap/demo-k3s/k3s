@@ -1,12 +1,14 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ge 4 ] && [ "$1" = "kubectl" ] && [ "$2" = "get" ] && [ "$3" = "nodes" ]; then
-  cat <<'EOF'
-NAME   STATUS   ROLES                  AGE   VERSION
-demo   Ready    control-plane,master   1m    v1.32.2+k3s1
-EOF
-  exit 0
+store_path="${PORT_K3S_STORE_PATH:-}"
+if [ -z "${store_path}" ] && [ -f /etc/port-k3s-store-path ]; then
+  store_path="$(cat /etc/port-k3s-store-path)"
 fi
 
-printf 'demo-k3s-stub %s\n' "$*"
+if [ -z "${store_path}" ]; then
+  echo "missing Port K3s store path; set PORT_K3S_STORE_PATH or provide /etc/port-k3s-store-path" >&2
+  exit 1
+fi
+
+exec "${store_path}/bin/k3s" "$@"

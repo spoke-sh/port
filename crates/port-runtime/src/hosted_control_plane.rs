@@ -6765,8 +6765,16 @@ mod tests {
                 .expect("manifest path should be present"),
         );
         let config_json = std::fs::read_to_string(&config_path).expect("config should exist");
+        let runtime_guest_path = config_path
+            .parent()
+            .expect("config should have a parent")
+            .join(
+                guest_path
+                    .file_name()
+                    .expect("guest image path should reference a file"),
+            );
         assert!(config_json.contains(kernel_path.to_string_lossy().as_ref()));
-        assert!(config_json.contains(guest_path.to_string_lossy().as_ref()));
+        assert!(config_json.contains(runtime_guest_path.to_string_lossy().as_ref()));
         assert!(manifest_path.exists());
 
         let pid = result["pid"].as_u64().expect("pid should be present");

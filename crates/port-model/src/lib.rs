@@ -384,7 +384,7 @@ impl PortConfig {
                 provider: ClusterProvider::Local,
                 count: 1,
                 machine: String::from("demo"),
-                version: String::from("v1.32.2+k3s1"),
+                version: String::from("v1.32.13+k3s1"),
                 args: vec![String::from("--disable=traefik")],
                 bootstrap: ClusterBootstrapSpec {
                     stage_root: PathBuf::from("/opt/port/clusters/demo"),
@@ -401,6 +401,7 @@ impl PortConfig {
                             String::from("chmod"),
                             String::from("dirname"),
                             String::from("setsid"),
+                            String::from("modprobe"),
                         ],
                     },
                 },
@@ -412,6 +413,7 @@ impl PortConfig {
                         String::from("nodes"),
                         String::from("-o"),
                         String::from("wide"),
+                        String::from("--request-timeout=15s"),
                     ],
                     kubeconfig_path: PathBuf::from("/etc/rancher/k3s/k3s.yaml"),
                     api_forward_target: String::from("127.0.0.1:6443"),
@@ -1114,7 +1116,7 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
         protection_mode: ProtectionMode::Standard,
         architecture: MachineArchitecture::Native,
         vcpu_count: 2,
-        memory_mib: 512,
+        memory_mib: 2048,
         kernel_args: String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
         rootfs_read_only: false,
         volumes: Vec::new(),
@@ -3900,7 +3902,7 @@ mod tests {
                 provider: ClusterProvider::Local,
                 count: 1,
                 machine: String::from("demo"),
-                version: String::from("v1.32.2+k3s1"),
+                version: String::from("v1.32.13+k3s1"),
                 args: vec![String::from("--disable=traefik")],
                 bootstrap: ClusterBootstrapSpec {
                     stage_root: PathBuf::from("/opt/port/clusters/demo"),
@@ -3917,6 +3919,7 @@ mod tests {
                             String::from("chmod"),
                             String::from("dirname"),
                             String::from("setsid"),
+                            String::from("modprobe"),
                         ],
                     },
                 },
@@ -3928,6 +3931,7 @@ mod tests {
                         String::from("nodes"),
                         String::from("-o"),
                         String::from("wide"),
+                        String::from("--request-timeout=15s"),
                     ],
                     kubeconfig_path: PathBuf::from("/etc/rancher/k3s/k3s.yaml"),
                     api_forward_target: String::from("127.0.0.1:6443"),
@@ -3939,7 +3943,7 @@ mod tests {
         assert!(encoded.contains("[clusters.demo]"));
         assert!(encoded.contains("count = 1"));
         assert!(encoded.contains("machine = \"demo\""));
-        assert!(encoded.contains("version = \"v1.32.2+k3s1\""));
+        assert!(encoded.contains("version = \"v1.32.13+k3s1\""));
         assert!(
             encoded.contains(
                 "install_script = \"examples/bootstrap/demo-k3s/install-k3s-offline.sh\""

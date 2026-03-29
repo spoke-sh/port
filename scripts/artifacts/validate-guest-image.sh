@@ -58,6 +58,9 @@ require_debugfs_path /bin/busybox
 require_debugfs_path /bin/dirname
 require_debugfs_path /bin/install
 require_debugfs_path /usr/bin/port-guest-agent
+require_debugfs_path /usr/bin/k3s
+require_debugfs_path /usr/bin/kubectl
+require_debugfs_path /etc/port-k3s-version
 if [[ "$(debugfs -R 'cat /etc/port-guest-architecture' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" != "$expected_architecture" ]]; then
   echo "guest image architecture marker does not match $expected_architecture" >&2
   exit 1
@@ -74,9 +77,53 @@ if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q '/etc/port
   echo "guest image init does not load the protection-mode marker" >&2
   exit 1
 fi
+if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q 'cgroup2'; then
+  echo "guest image init does not mount cgroup2 for K3s" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /usr/bin/k3s' "$guest_image_path" 2>/dev/null | grep -q '/bin/k3s'; then
+  echo "guest image k3s wrapper does not point at the packaged K3s runtime" >&2
+  exit 1
+fi
+if [[ -z "$(debugfs -R 'cat /etc/port-k3s-version' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" ]]; then
+  echo "guest image K3s version marker is empty" >&2
+  exit 1
+fi
+if [[ "$guest_image_path" == */x86_64/firecracker/standard/* ]]; then
+  initrd_path="$(dirname "$guest_image_path")/initrd.cpio.gz"
+  if [[ ! -f "$initrd_path" ]]; then
+    echo "guest image initrd is missing: $initrd_path" >&2
+    exit 1
+  fi
+  if [[ "$(stat -c '%s' "$initrd_path")" -le 0 ]]; then
+    echo "guest image initrd is empty: $initrd_path" >&2
+    exit 1
+  fi
+  require_debugfs_path /etc/port-kernel-modules-release
+  kernel_release="$(debugfs -R 'cat /etc/port-kernel-modules-release' "$guest_image_path" 2>/dev/null | tr -d '\r\n')"
+  if [[ -z "$kernel_release" ]]; then
+    echo "guest image kernel modules marker is empty" >&2
+    exit 1
+  fi
+  require_debugfs_path "/lib/modules/${kernel_release}/modules.dep"
+  require_debugfs_path /etc/port-preloaded-images.txt
+  preloaded_images="$(debugfs -R 'cat /etc/port-preloaded-images.txt' "$guest_image_path" 2>/dev/null || true)"
+  if [[ -z "$(printf '%s\n' "$preloaded_images" | tr -d '\r\n[:space:]')" ]]; then
+    echo "guest image preloaded image manifest is empty" >&2
+    exit 1
+  fi
+  while IFS= read -r image; do
+    [[ -n "$image" ]] || continue
+    archive_name="$(printf '%s' "$image" | tr '/:@' '___').tar"
+    require_debugfs_path "/var/lib/rancher/k3s/agent/images/${archive_name}"
+  done <<EOF
+$preloaded_images
+EOF
+fi
 
 guest_image_size="$(stat -c '%s' "$guest_image_path")"
 printf 'validated guest image: %s\n' "$guest_image_path"
 printf 'guest image architecture: %s\n' "$expected_architecture"
 printf 'guest image protection mode: %s\n' "$expected_protection_mode"
+printf 'guest image K3s version: %s\n' "$(debugfs -R 'cat /etc/port-k3s-version' "$guest_image_path" 2>/dev/null | tr -d '\r\n')"
 printf 'guest image bytes: %s\n' "$guest_image_size"
