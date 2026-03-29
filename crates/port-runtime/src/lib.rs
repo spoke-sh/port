@@ -12,10 +12,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
-    ExecRequest, ExecResult, ForwardEndpoint, GuestOperation, LogsResult, ManagedServiceOperation,
-    ManagedServiceRequest, ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus,
-    OperationResult, PtyResult, RequestEnvelope, ResponseEnvelope, StreamRequestFrame,
-    StreamResponseFrame, parse_forward_endpoint, read_frame, render_forward_endpoint, write_frame,
+    CopyDirection, ExecRequest, ExecResult, ForwardEndpoint, GuestOperation, LogsResult,
+    ManagedServiceOperation, ManagedServiceRequest, ManagedServiceResult,
+    ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult, PtyResult, RequestEnvelope,
+    ResponseEnvelope, StreamRequestFrame, StreamResponseFrame, parse_forward_endpoint, read_frame,
+    render_forward_endpoint, write_frame,
 };
 use port_hosted_protocol::{
     HostedArtifactTransferRequest, HostedArtifactTransferResult, HostedDetachedForwardStartRequest,
@@ -25,13 +26,13 @@ use port_hosted_protocol::{
 };
 use port_model::{
     ArtifactKind, ArtifactReference, ArtifactSelector, ArtifactStore, ArtifactVariant,
-    AvfExecutionContract, ExecutionSubstrate, HostConnection, HostPlatform, HostProvider,
-    HostedApiIdentityContract, HostedArtifactIdentityContract, HostedImportedNodeRecord,
-    HostedPvmCapability, HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy, K3sClusterSpec,
-    MachineArchitecture, MachineControlContract, MachineVolumeBackend, MachineVolumePersistence,
-    MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode,
-    PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
-    ServiceSecretSourceStatus,
+    AvfExecutionContract, ClusterSpec, ExecutionSubstrate, HostConnection, HostPlatform,
+    HostProvider, HostedApiIdentityContract, HostedArtifactIdentityContract,
+    HostedImportedNodeRecord, HostedPvmCapability, HostedPvmHostKitPackageAttachment,
+    HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineControlContract,
+    MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec, OciRegistryAuth,
+    OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState, PvmHostKit,
+    PvmHostKitPackage, ServiceHealthState, ServiceSecretSourceStatus,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -85,6 +86,30 @@ pub struct DoctorCheck {
     pub ok: bool,
     pub required: bool,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClusterStagedFile {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub bytes_copied: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClusterStageResult {
+    pub cluster_name: String,
+    pub machine_name: String,
+    pub guest_profile: String,
+    pub required_commands: Vec<String>,
+    pub stage_root: PathBuf,
+    pub staged_files: Vec<ClusterStagedFile>,
+    pub preflight_command: Vec<String>,
+    pub preflight_stdout: String,
+    pub install_command: Vec<String>,
+    pub install_stdout: String,
+    pub installed_binary: PathBuf,
+    pub installed_kubectl: PathBuf,
+    pub boundary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -516,6 +541,12 @@ pub struct GuestForwardRequest<'a> {
     pub runtime_root: &'a Path,
     pub listen: &'a str,
     pub target: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterStageRequest<'a> {
+    pub cluster_name: &'a str,
+    pub runtime_root: &'a Path,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1238,6 +1269,294 @@ fn validate_machine_runtime_launch_config(config: &PortConfig) -> Result<()> {
     effective
         .validate()
         .map_err(|error| anyhow!("invalid port config: {error}"))
+}
+
+pub fn stage_local_cluster_bootstrap(
+    config: &PortConfig,
+    request: ClusterStageRequest<'_>,
+) -> Result<ClusterStageResult> {
+    let cluster = config
+        .clusters
+        .get(request.cluster_name)
+        .with_context(|| format!("cluster '{}' not found in config", request.cluster_name))?;
+    let install_script_name = cluster
+        .bootstrap
+        .install_script
+        .file_name()
+        .with_context(|| {
+            format!(
+                "cluster '{}' bootstrap install_script '{}' must reference a file",
+                request.cluster_name,
+                cluster.bootstrap.install_script.display()
+            )
+        })?;
+    let binary_name = cluster.bootstrap.binary.file_name().with_context(|| {
+        format!(
+            "cluster '{}' bootstrap binary '{}' must reference a file",
+            request.cluster_name,
+            cluster.bootstrap.binary.display()
+        )
+    })?;
+    let install_script_destination = cluster.bootstrap.stage_root.join(install_script_name);
+    let binary_destination = cluster.bootstrap.stage_root.join(binary_name);
+
+    let staged_files = vec![
+        stage_cluster_bootstrap_file(
+            config,
+            request.runtime_root,
+            request.cluster_name,
+            &cluster.machine,
+            &cluster.bootstrap.install_script,
+            &install_script_destination,
+        )?,
+        stage_cluster_bootstrap_file(
+            config,
+            request.runtime_root,
+            request.cluster_name,
+            &cluster.machine,
+            &cluster.bootstrap.binary,
+            &binary_destination,
+        )?,
+    ];
+
+    execute_cluster_exec(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+        vec![
+            String::from("/bin/sh"),
+            String::from("-lc"),
+            format!(
+                "chmod 0755 {} {}",
+                shell_single_quote(&guest_shell_path(&install_script_destination)),
+                shell_single_quote(&guest_shell_path(&binary_destination))
+            ),
+        ],
+        "mark staged cluster bootstrap inputs executable",
+    )?;
+
+    let preflight_command = cluster_preflight_command(
+        &cluster.bootstrap.guest_profile.required_commands,
+        &install_script_destination,
+        &binary_destination,
+    );
+    let preflight_stdout = execute_cluster_exec(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+        preflight_command.clone(),
+        "verify the staged cluster bootstrap kit and guest profile",
+    )?
+    .stdout;
+
+    let install_command = cluster_install_command(cluster, &install_script_destination);
+    let mut install_stdout = execute_cluster_exec(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+        install_command.clone(),
+        "run the offline cluster bootstrap proof",
+    )?
+    .stdout;
+    let installed_binary = cluster.bootstrap.stage_root.join("bin").join("k3s");
+    let installed_kubectl = cluster.bootstrap.stage_root.join("bin").join("kubectl");
+    let install_validation = execute_cluster_exec(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+        cluster_install_validation_command(&installed_binary, &installed_kubectl),
+        "verify the offline cluster bootstrap outputs",
+    )?
+    .stdout;
+    install_stdout.push_str(&install_validation);
+
+    Ok(ClusterStageResult {
+        cluster_name: request.cluster_name.to_string(),
+        machine_name: cluster.machine.clone(),
+        guest_profile: cluster.bootstrap.guest_profile.name.clone(),
+        required_commands: cluster.bootstrap.guest_profile.required_commands.clone(),
+        stage_root: cluster.bootstrap.stage_root.clone(),
+        staged_files,
+        preflight_command,
+        preflight_stdout,
+        install_command,
+        install_stdout,
+        installed_binary,
+        installed_kubectl,
+        boundary: String::from(
+            "staged Port-owned bootstrap inputs only; cluster lifecycle, health, and kubeconfig remain follow-on work",
+        ),
+    })
+}
+
+fn stage_cluster_bootstrap_file(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    machine_name: &str,
+    source: &Path,
+    destination: &Path,
+) -> Result<ClusterStagedFile> {
+    let resolved_source = resolve_cluster_bootstrap_source(source)?;
+    let result = copy_guest_file(
+        config,
+        GuestCopyRequest {
+            machine_name,
+            runtime_root,
+            source: &resolved_source,
+            destination,
+            direction: CopyDirection::HostToGuest,
+        },
+    )
+    .with_context(|| {
+        format!(
+            "failed to stage '{}' into '{}' for cluster '{}'",
+            source.display(),
+            destination.display(),
+            cluster_name
+        )
+    })?;
+    Ok(ClusterStagedFile {
+        source: source.to_path_buf(),
+        destination: destination.to_path_buf(),
+        bytes_copied: result.bytes_copied,
+    })
+}
+
+fn resolve_cluster_bootstrap_source(source: &Path) -> Result<PathBuf> {
+    if source.is_absolute() || source.exists() {
+        Ok(source.to_path_buf())
+    } else {
+        Ok(repo_root()?.join(source))
+    }
+}
+
+fn guest_shell_path(path: &Path) -> String {
+    path.strip_prefix(Path::new("/"))
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+fn execute_cluster_exec(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    machine_name: &str,
+    command: Vec<String>,
+    action: &str,
+) -> Result<ExecResult> {
+    let operation = execute_guest_operation(
+        config,
+        GuestRequest {
+            machine_name,
+            runtime_root,
+            operation: GuestOperation::Exec(ExecRequest {
+                command,
+                cwd: Some(String::from("/")),
+                env: Default::default(),
+            }),
+        },
+    )
+    .with_context(|| {
+        format!(
+            "failed to {} on machine '{}' for cluster '{}'",
+            action, machine_name, cluster_name
+        )
+    })?;
+    match operation {
+        OperationResult::Exec(result) => Ok(result),
+        other => bail!(
+            "cluster '{}' expected exec output from machine '{}' while trying to {}, received {other:?}",
+            cluster_name,
+            machine_name,
+            action
+        ),
+    }
+}
+
+fn cluster_preflight_command(
+    required_commands: &[String],
+    install_script_destination: &Path,
+    binary_destination: &Path,
+) -> Vec<String> {
+    let mut script = String::from("set -eu;");
+    for command in required_commands {
+        script.push_str(&format!(
+            " command -v {} >/dev/null;",
+            shell_single_quote(command)
+        ));
+        script.push_str(&format!(
+            " printf 'required-command:%s\\n' {};",
+            shell_single_quote(command)
+        ));
+    }
+    script.push_str(&format!(
+        " test -x {};",
+        shell_single_quote(&guest_shell_path(install_script_destination))
+    ));
+    script.push_str(&format!(
+        " printf 'staged-file:%s\\n' {};",
+        shell_single_quote(&install_script_destination.display().to_string())
+    ));
+    script.push_str(&format!(
+        " test -x {};",
+        shell_single_quote(&guest_shell_path(binary_destination))
+    ));
+    script.push_str(&format!(
+        " printf 'staged-file:%s\\n' {};",
+        shell_single_quote(&binary_destination.display().to_string())
+    ));
+    script.push_str(" printf 'guest-profile-ok\\n';");
+
+    vec![String::from("/bin/sh"), String::from("-lc"), script]
+}
+
+fn cluster_install_command(
+    cluster: &ClusterSpec,
+    install_script_destination: &Path,
+) -> Vec<String> {
+    let install_bin_dir = cluster.bootstrap.stage_root.join("bin");
+    let mut script = format!(
+        "set -eu; PORT_K3S_BIN_DIR={} {} server",
+        shell_single_quote(&guest_shell_path(&install_bin_dir)),
+        shell_single_quote(&guest_shell_path(install_script_destination)),
+    );
+    for arg in &cluster.args {
+        script.push(' ');
+        script.push_str(&shell_single_quote(arg));
+    }
+
+    vec![String::from("/bin/sh"), String::from("-lc"), script]
+}
+
+fn cluster_install_validation_command(
+    installed_binary: &Path,
+    installed_kubectl: &Path,
+) -> Vec<String> {
+    let mut script = String::from("set -eu;");
+    script.push_str(&format!(
+        " test -x {};",
+        shell_single_quote(&guest_shell_path(installed_binary))
+    ));
+    script.push_str(&format!(
+        " printf 'installed-binary:%s\\n' {};",
+        shell_single_quote(&installed_binary.display().to_string())
+    ));
+    script.push_str(&format!(
+        " test -L {};",
+        shell_single_quote(&guest_shell_path(installed_kubectl))
+    ));
+    script.push_str(&format!(
+        " printf 'installed-kubectl:%s\\n' {};",
+        shell_single_quote(&installed_kubectl.display().to_string())
+    ));
+
+    vec![String::from("/bin/sh"), String::from("-lc"), script]
 }
 
 fn hosted_k3s_boundary_notes() -> Vec<String> {
@@ -10119,9 +10438,9 @@ mod tests {
 
     use super::{
         ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, CloudHypervisorRuntimeMetadata,
-        ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts, GuestCopyRequest,
-        GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
-        MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
+        ClusterStageRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts,
+        GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata,
+        LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
         ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
         ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
         apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
@@ -10137,7 +10456,8 @@ mod tests {
         read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
         resolve_artifact_store_contract, resolve_machine_architecture, select_firecracker_binary,
         serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
-        service_status_from_record, stop_machine, stop_machine_service,
+        service_status_from_record, stage_local_cluster_bootstrap, stop_machine,
+        stop_machine_service,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -16229,6 +16549,96 @@ exec sleep 30
         );
 
         server.join().expect("copy server thread should complete");
+    }
+
+    #[test]
+    fn stage_local_cluster_bootstrap_copies_offline_inputs_and_proves_install() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let guest_root = tempdir.path().join("guest-root");
+        let runtime_root = tempdir.path().join("runtime");
+        let socket_path = runtime_root.join("demo").join("guest-agent.sock");
+        fs::create_dir_all(&guest_root).expect("guest root should exist");
+        fs::create_dir_all(
+            socket_path
+                .parent()
+                .expect("guest agent socket parent should exist"),
+        )
+        .expect("runtime root should exist");
+
+        let server_socket = socket_path.clone();
+        let server_root = guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&server_socket, server_root).expect("guest agent should serve");
+        });
+        for _ in 0..100 {
+            if socket_path.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(socket_path.exists(), "guest agent socket should appear");
+
+        let result = stage_local_cluster_bootstrap(
+            &PortConfig::sample(),
+            ClusterStageRequest {
+                cluster_name: "demo",
+                runtime_root: &runtime_root,
+            },
+        )
+        .expect("local cluster stage should succeed");
+
+        assert_eq!(result.cluster_name, "demo");
+        assert_eq!(result.machine_name, "demo");
+        assert_eq!(result.guest_profile, "kube-ready");
+        assert_eq!(result.stage_root, PathBuf::from("/opt/port/clusters/demo"));
+        assert_eq!(result.staged_files.len(), 2);
+        assert!(result.preflight_stdout.contains("required-command:sh"));
+        assert!(result.preflight_stdout.contains("guest-profile-ok"));
+        assert!(result.install_stdout.contains("offline-install-ok"));
+        assert!(
+            result
+                .install_stdout
+                .contains("installed-binary:/opt/port/clusters/demo/bin/k3s")
+        );
+        assert!(
+            result
+                .install_stdout
+                .contains("installed-kubectl:/opt/port/clusters/demo/bin/kubectl")
+        );
+        let rendered_install_command = result.install_command.join(" ");
+        assert!(rendered_install_command.contains("install-k3s-offline.sh"));
+        assert!(!rendered_install_command.contains("curl"));
+        assert!(!rendered_install_command.contains("get.k3s.io"));
+
+        let staged_root = guest_root.join("opt/port/clusters/demo");
+        let install_script = staged_root.join("install-k3s-offline.sh");
+        let binary = staged_root.join("k3s");
+        let installed_binary = staged_root.join("bin/k3s");
+        let installed_kubectl = staged_root.join("bin/kubectl");
+        assert!(install_script.exists(), "install script should be staged");
+        assert!(binary.exists(), "binary should be staged");
+        assert!(
+            fs::read_to_string(&binary)
+                .expect("staged binary should read")
+                .contains("demo-k3s-stub")
+        );
+        assert_eq!(
+            fs::metadata(&binary)
+                .expect("staged binary metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        assert!(installed_binary.exists(), "installed binary should exist");
+        assert!(
+            fs::symlink_metadata(&installed_kubectl).is_ok(),
+            "installed kubectl link should exist"
+        );
+        assert_eq!(
+            fs::read_link(&installed_kubectl).expect("installed kubectl link should read"),
+            PathBuf::from("k3s")
+        );
     }
 
     #[test]

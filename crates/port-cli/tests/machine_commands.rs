@@ -24,6 +24,34 @@ fn port_bin() -> &'static str {
     env!("CARGO_BIN_EXE_port")
 }
 
+fn spawn_guest_agent(socket: &Path, root: &Path) {
+    if let Some(parent) = socket.parent() {
+        fs::create_dir_all(parent).expect("runtime dir should exist");
+    }
+    let socket = socket.to_path_buf();
+    let serve_socket = socket.clone();
+    let root = root.to_path_buf();
+    thread::spawn(move || {
+        port_guest_agent::serve(&serve_socket, root).expect("agent should serve");
+    });
+
+    for _ in 0..100 {
+        if socket.exists() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    panic!(
+        "guest agent socket did not appear at '{}'",
+        socket.display()
+    );
+}
+
+fn runtime_socket(runtime_root: &Path, machine: &str) -> PathBuf {
+    runtime_root.join(machine).join("guest-agent.sock")
+}
+
 fn reserve_addr() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("port should bind");
     let addr = listener.local_addr().expect("addr should exist");
@@ -721,7 +749,63 @@ fn cli_cluster_list_and_show_surface_local_contract() {
     let show_stdout = String::from_utf8_lossy(&show.stdout);
     assert!(show_stdout.contains("cluster: demo"));
     assert!(show_stdout.contains("version: v1.32.2+k3s1"));
+    assert!(show_stdout.contains("stage root: /opt/port/clusters/demo"));
+    assert!(
+        show_stdout.contains("install script: examples/bootstrap/demo-k3s/install-k3s-offline.sh")
+    );
+    assert!(show_stdout.contains("binary: examples/bootstrap/demo-k3s/k3s"));
+    assert!(show_stdout.contains("guest profile: kube-ready"));
+    assert!(show_stdout.contains("required commands: sh install ln chmod"));
     assert!(show_stdout.contains("boundary: single-node local K3s only in this slice"));
+}
+
+#[test]
+fn cli_cluster_stage_stages_offline_bootstrap_kit_without_live_fetch() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let runtime_root = temp.path().join("runtime");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(&guest_root).expect("guest root should exist");
+    write_config(&config_path, &PortConfig::sample());
+
+    let socket_path = runtime_socket(&runtime_root, "demo");
+    spawn_guest_agent(&socket_path, &guest_root);
+
+    let stage = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("stage")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("cluster stage command should run");
+    assert!(stage.status.success());
+    let stdout = String::from_utf8_lossy(&stage.stdout);
+    assert!(stdout.contains("cluster: demo"));
+    assert!(stdout.contains("guest profile: kube-ready"));
+    assert!(stdout.contains("preflight output:"));
+    assert!(stdout.contains("required-command:sh"));
+    assert!(stdout.contains("guest-profile-ok"));
+    assert!(stdout.contains("install output:"));
+    assert!(stdout.contains("offline-install-ok"));
+    assert!(stdout.contains("installed binary: /opt/port/clusters/demo/bin/k3s"));
+    assert!(stdout.contains("installed kubectl: /opt/port/clusters/demo/bin/kubectl"));
+    assert!(stdout.contains("install command: /bin/sh -lc"));
+    assert!(!stdout.contains("curl"));
+    assert!(!stdout.contains("get.k3s.io"));
+
+    let staged_root = guest_root.join("opt/port/clusters/demo");
+    assert!(staged_root.join("install-k3s-offline.sh").exists());
+    assert!(staged_root.join("k3s").exists());
+    assert!(staged_root.join("bin/k3s").exists());
+    assert!(fs::symlink_metadata(staged_root.join("bin/kubectl")).is_ok());
+    assert_eq!(
+        fs::read_link(staged_root.join("bin/kubectl")).expect("installed kubectl link should read"),
+        PathBuf::from("k3s")
+    );
 }
 
 #[test]

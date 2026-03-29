@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T21:34:32.693276010-07:00
+mode: manual
+---
+Repo-local verification passed with `just quality`, plus targeted coverage in `cargo test -p port-model local_cluster_contract`, `cargo test -p port-runtime stage_local_cluster_bootstrap_copies_offline_inputs_and_proves_install`, `cargo test -p port-cli parses_cluster_contract_arguments`, `cargo test -p port-cli cli_cluster_list_and_show_surface_local_contract --test machine_commands`, and `cargo test -p port-cli cli_cluster_stage_stages_offline_bootstrap_kit_without_live_fetch --test machine_commands`.

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+printf 'demo-k3s-stub %s\n' "$*"

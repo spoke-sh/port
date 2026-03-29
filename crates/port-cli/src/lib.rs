@@ -17,9 +17,9 @@ use port_model::{
     PortConfig, ProtectionMode, PvmHostKitPackage,
 };
 use port_runtime::{
-    ArtifactRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest, GuestForwardRequest,
-    GuestRequest, HostedNodeBinding, HostedPvmNodePrepareRequest, LaunchRequest,
-    NodeAgentServeRequest, ServiceHealthPolicy, ServiceHealthcheck, ServicePolicy,
+    ArtifactRequest, ClusterStageRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest,
+    GuestForwardRequest, GuestRequest, HostedNodeBinding, HostedPvmNodePrepareRequest,
+    LaunchRequest, NodeAgentServeRequest, ServiceHealthPolicy, ServiceHealthcheck, ServicePolicy,
     ServiceRestartPolicy,
 };
 use serde::{Deserialize, Serialize};
@@ -201,6 +201,15 @@ pub enum ClusterCommand {
     Show {
         #[arg(long)]
         cluster: String,
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    #[command(about = "Stage the offline bootstrap kit for one named local cluster")]
+    Stage {
+        #[arg(long)]
+        cluster: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
@@ -626,6 +635,11 @@ struct RenderedClusterRecord {
     machine: String,
     version: String,
     args: Vec<String>,
+    stage_root: String,
+    install_script: String,
+    binary: String,
+    guest_profile: String,
+    required_commands: Vec<String>,
     boundary: String,
 }
 
@@ -797,6 +811,14 @@ fn run_cluster(command: ClusterCommand, config: &PortConfig) -> Result<()> {
                             rendered.args.join(" ")
                         }
                     );
+                    println!("stage root: {}", rendered.stage_root);
+                    println!("install script: {}", rendered.install_script);
+                    println!("binary: {}", rendered.binary);
+                    println!("guest profile: {}", rendered.guest_profile);
+                    println!(
+                        "required commands: {}",
+                        rendered.required_commands.join(" ")
+                    );
                     println!("boundary: {}", rendered.boundary);
                     Ok(())
                 }
@@ -805,6 +827,66 @@ fn run_cluster(command: ClusterCommand, config: &PortConfig) -> Result<()> {
                         "{}",
                         serde_json::to_string_pretty(&rendered)
                             .context("failed to encode cluster record")?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        ClusterCommand::Stage {
+            cluster,
+            runtime_root,
+            format,
+        } => {
+            let result = port_runtime::stage_local_cluster_bootstrap(
+                config,
+                ClusterStageRequest {
+                    cluster_name: &cluster,
+                    runtime_root: &runtime_root,
+                },
+            )?;
+            match format {
+                OutputFormat::Text => {
+                    println!("cluster: {}", result.cluster_name);
+                    println!("machine: {}", result.machine_name);
+                    println!("stage root: {}", result.stage_root.display());
+                    println!("guest profile: {}", result.guest_profile);
+                    println!("required commands: {}", result.required_commands.join(" "));
+                    for staged in &result.staged_files {
+                        println!(
+                            "staged file: {} -> {} ({} bytes)",
+                            staged.source.display(),
+                            staged.destination.display(),
+                            staged.bytes_copied
+                        );
+                    }
+                    println!(
+                        "preflight command: {}",
+                        render_shell_command(&result.preflight_command)
+                    );
+                    println!("preflight output:");
+                    print!("{}", result.preflight_stdout);
+                    if !result.preflight_stdout.ends_with('\n') {
+                        println!();
+                    }
+                    println!(
+                        "install command: {}",
+                        render_shell_command(&result.install_command)
+                    );
+                    println!("install output:");
+                    print!("{}", result.install_stdout);
+                    if !result.install_stdout.ends_with('\n') {
+                        println!();
+                    }
+                    println!("installed binary: {}", result.installed_binary.display());
+                    println!("installed kubectl: {}", result.installed_kubectl.display());
+                    println!("boundary: {}", result.boundary);
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&result)
+                            .context("failed to encode cluster stage result")?
                     );
                     Ok(())
                 }
@@ -822,10 +904,32 @@ fn render_cluster_record(name: &str, cluster: &port_model::ClusterSpec) -> Rende
         machine: cluster.machine.clone(),
         version: cluster.version.clone(),
         args: cluster.args.clone(),
+        stage_root: cluster.bootstrap.stage_root.display().to_string(),
+        install_script: cluster.bootstrap.install_script.display().to_string(),
+        binary: cluster.bootstrap.binary.display().to_string(),
+        guest_profile: cluster.bootstrap.guest_profile.name.clone(),
+        required_commands: cluster.bootstrap.guest_profile.required_commands.clone(),
         boundary: String::from(
             "single-node local K3s only in this slice; multi-node, hosted, and aws lanes remain follow-on work",
         ),
     }
+}
+
+fn render_shell_command(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|part| {
+            if part
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "/._-:=+".contains(character))
+            {
+                part.clone()
+            } else {
+                format!("'{}'", part.replace('\'', "'\\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn run_control_plane(command: ControlPlaneCommand, config: PortConfig) -> Result<()> {
@@ -2785,6 +2889,30 @@ mod tests {
                     show.config.as_deref(),
                     Some(std::path::Path::new("examples/port.toml"))
                 );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let stage = Cli::parse_from([
+            "port",
+            "cluster",
+            "stage",
+            "--cluster",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--format",
+            "json",
+        ]);
+        match stage.command {
+            Command::Cluster(ClusterCommand::Stage {
+                cluster,
+                runtime_root,
+                format,
+            }) => {
+                assert_eq!(cluster, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(format, super::OutputFormat::Json);
             }
             other => panic!("unexpected command: {other:?}"),
         }

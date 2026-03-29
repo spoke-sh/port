@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T21:34:32.673940697-07:00
+mode: manual
+---
+Ran `cargo run -q -p port-cli -- --config examples/port.toml cluster stage --cluster demo --runtime-root <temp>` against a live local guest-agent socket. The command staged `examples/bootstrap/demo-k3s/install-k3s-offline.sh` and `examples/bootstrap/demo-k3s/k3s`, reported `required-command:sh`, `install`, `ln`, and `chmod`, and emitted an offline install command with no `curl` or `get.k3s.io`.

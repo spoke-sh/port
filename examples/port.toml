@@ -568,6 +568,18 @@ machine = "demo"
 version = "v1.32.2+k3s1"
 args = ["--disable=traefik"]
 
+[clusters.demo.bootstrap]
+# Repo-local offline bootstrap kit for the first cluster slice. This fixture
+# keeps the install path Port-owned and live-fetch-free until a fully packaged
+# K3s artifact lane lands.
+stage_root = "/opt/port/clusters/demo"
+install_script = "examples/bootstrap/demo-k3s/install-k3s-offline.sh"
+binary = "examples/bootstrap/demo-k3s/k3s"
+
+[clusters.demo.bootstrap.guest_profile]
+name = "kube-ready"
+required_commands = ["sh", "install", "ln", "chmod"]
+
 # Service reliability workflow (repo-local hosted proof):
 # export PORT_DEMO_TOKEN=demo-token
 # port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t

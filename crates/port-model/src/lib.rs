@@ -386,6 +386,22 @@ impl PortConfig {
                 machine: String::from("demo"),
                 version: String::from("v1.32.2+k3s1"),
                 args: vec![String::from("--disable=traefik")],
+                bootstrap: ClusterBootstrapSpec {
+                    stage_root: PathBuf::from("/opt/port/clusters/demo"),
+                    install_script: PathBuf::from(
+                        "examples/bootstrap/demo-k3s/install-k3s-offline.sh",
+                    ),
+                    binary: PathBuf::from("examples/bootstrap/demo-k3s/k3s"),
+                    guest_profile: ClusterGuestProfileSpec {
+                        name: String::from("kube-ready"),
+                        required_commands: vec![
+                            String::from("sh"),
+                            String::from("install"),
+                            String::from("ln"),
+                            String::from("chmod"),
+                        ],
+                    },
+                },
             },
         )]);
 
@@ -1870,6 +1886,22 @@ pub struct ClusterSpec {
     pub version: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+    pub bootstrap: ClusterBootstrapSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterBootstrapSpec {
+    pub stage_root: PathBuf,
+    pub install_script: PathBuf,
+    pub binary: PathBuf,
+    pub guest_profile: ClusterGuestProfileSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterGuestProfileSpec {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -3149,6 +3181,63 @@ fn validate_cluster(
             cluster_name
         )));
     }
+    if !cluster.bootstrap.stage_root.is_absolute() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap stage_root '{}' must be an absolute guest path",
+            cluster_name,
+            cluster.bootstrap.stage_root.display()
+        )));
+    }
+    if cluster.bootstrap.install_script.as_os_str().is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap install_script must declare a host path",
+            cluster_name
+        )));
+    }
+    if cluster.bootstrap.install_script.file_name().is_none() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap install_script '{}' must reference a file",
+            cluster_name,
+            cluster.bootstrap.install_script.display()
+        )));
+    }
+    if cluster.bootstrap.binary.as_os_str().is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap binary must declare a host path",
+            cluster_name
+        )));
+    }
+    if cluster.bootstrap.binary.file_name().is_none() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap binary '{}' must reference a file",
+            cluster_name,
+            cluster.bootstrap.binary.display()
+        )));
+    }
+    if cluster.bootstrap.guest_profile.name.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap guest profile must declare a non-empty name",
+            cluster_name
+        )));
+    }
+    if cluster.bootstrap.guest_profile.required_commands.is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap guest profile '{}' must declare at least one required command",
+            cluster_name, cluster.bootstrap.guest_profile.name
+        )));
+    }
+    if cluster
+        .bootstrap
+        .guest_profile
+        .required_commands
+        .iter()
+        .any(|command| command.trim().is_empty())
+    {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' bootstrap guest profile '{}' required commands must not contain empty values",
+            cluster_name, cluster.bootstrap.guest_profile.name
+        )));
+    }
 
     let machine = config.machines.get(&cluster.machine).ok_or_else(|| {
         ValidationError::new(format!(
@@ -3599,16 +3688,16 @@ mod tests {
 
     use super::{
         ArtifactReference, ArtifactSelector, ArtifactStore, AvfConsoleTransport,
-        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ClusterFlavor, ClusterProvider,
-        ClusterSpec, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
-        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
-        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
-        HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineCommandRoute,
-        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
-        MachineLifecycleOwner, MachineStatusSource, OciRegistryAuth, OciRegistryTransport,
-        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision, ServiceHealthPolicy,
-        ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
-        hosted_artifact_store_path,
+        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ClusterBootstrapSpec,
+        ClusterFlavor, ClusterGuestProfileSpec, ClusterProvider, ClusterSpec, ExecutionSubstrate,
+        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
+        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
+        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy, K3sClusterSpec,
+        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
+        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
+        OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
+        PvmLaneDecision, ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy,
+        ServiceRestartPolicy, hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
@@ -3668,6 +3757,10 @@ mod tests {
         assert!(encoded.contains("[clusters.demo]"));
         assert!(encoded.contains("flavor = \"k3s\""));
         assert!(encoded.contains("provider = \"local\""));
+        assert!(encoded.contains("[clusters.demo.bootstrap]"));
+        assert!(encoded.contains("stage_root = \"/opt/port/clusters/demo\""));
+        assert!(encoded.contains("[clusters.demo.bootstrap.guest_profile]"));
+        assert!(encoded.contains("name = \"kube-ready\""));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.distribution.push]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.variants]"));
@@ -3751,6 +3844,22 @@ mod tests {
                 machine: String::from("demo"),
                 version: String::from("v1.32.2+k3s1"),
                 args: vec![String::from("--disable=traefik")],
+                bootstrap: ClusterBootstrapSpec {
+                    stage_root: PathBuf::from("/opt/port/clusters/demo"),
+                    install_script: PathBuf::from(
+                        "examples/bootstrap/demo-k3s/install-k3s-offline.sh",
+                    ),
+                    binary: PathBuf::from("examples/bootstrap/demo-k3s/k3s"),
+                    guest_profile: ClusterGuestProfileSpec {
+                        name: String::from("kube-ready"),
+                        required_commands: vec![
+                            String::from("sh"),
+                            String::from("install"),
+                            String::from("ln"),
+                            String::from("chmod"),
+                        ],
+                    },
+                },
             }
         );
 
@@ -3759,6 +3868,17 @@ mod tests {
         assert!(encoded.contains("count = 1"));
         assert!(encoded.contains("machine = \"demo\""));
         assert!(encoded.contains("version = \"v1.32.2+k3s1\""));
+        assert!(
+            encoded.contains(
+                "install_script = \"examples/bootstrap/demo-k3s/install-k3s-offline.sh\""
+            )
+        );
+        assert!(encoded.contains("binary = \"examples/bootstrap/demo-k3s/k3s\""));
+        assert!(encoded.contains("required_commands = ["));
+        assert!(encoded.contains("\"sh\""));
+        assert!(encoded.contains("\"install\""));
+        assert!(encoded.contains("\"ln\""));
+        assert!(encoded.contains("\"chmod\""));
 
         let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
         assert_eq!(decoded, sample);
@@ -3796,6 +3916,40 @@ mod tests {
             error
                 .to_string()
                 .contains("only count = 1 is supported in this slice")
+        );
+    }
+
+    #[test]
+    fn local_cluster_contract_rejects_relative_stage_root_and_empty_guest_profile_commands() {
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .bootstrap
+            .stage_root = PathBuf::from("opt/port/clusters/demo");
+
+        let error = config
+            .validate()
+            .expect_err("relative cluster stage root should fail validation");
+        assert!(error.to_string().contains("must be an absolute guest path"));
+
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .bootstrap
+            .guest_profile
+            .required_commands = Vec::new();
+
+        let error = config
+            .validate()
+            .expect_err("empty guest profile commands should fail validation");
+        assert!(
+            error
+                .to_string()
+                .contains("must declare at least one required command")
         );
     }
 
