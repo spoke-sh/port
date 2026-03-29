@@ -114,6 +114,8 @@
 
 ### [Mission Proof Recorder Readiness](epics/VEzGIe4i4/) (draft)
 
+### [Ship Cluster-First Bootstrap UX](epics/VFDhlRjOf/) (draft)
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
