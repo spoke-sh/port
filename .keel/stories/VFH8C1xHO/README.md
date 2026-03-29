@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFH8C1xHO
-status: backlog
+status: in-progress
 created_at: 2026-03-29T09:40:46
-updated_at: 2026-03-29T09:41:57
+updated_at: 2026-03-29T11:21:39
 # authored
 title: Verify Downstream Local Cluster Handoff
 type: feat
 operator-signal:
 scope: VFH7YspJx/VFH7t3cG9
 index: 4
+started_at: 2026-03-29T11:21:39
 ---
 
 # Verify Downstream Local Cluster Handoff

@@ -1,0 +1,666 @@
+---
+recorded_at: 2026-03-29T11:20:23.800318875-07:00
+mode: manual
+files: [".keel/stories/VFH8C1fHP/EVIDENCE/ac-1.nix-package-validate.log", ".keel/stories/VFH8C1fHP/EVIDENCE/ac-2.package-proof.log", ".keel/stories/VFH8C1fHP/EVIDENCE/ac-3.prefix-validate.log", ".keel/stories/VFH8C1fHP/EVIDENCE/absolute-artifact-config.toml"]
+---
+
+--- File: ac-1.nix-package-validate.log ---
+validated guest image: /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+
+
+--- File: ac-2.package-proof.log ---
+artifact: /var/tmp/tmp.AAweR4bhRH/pkg/port-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+target: x86_64-unknown-linux-gnu
+version: 0.1.0
+included-files:
+  - bin/port
+  - README.md
+  - RELEASE.md
+  - docs/install.md
+  - scripts/artifacts/validate-kernel.sh
+  - scripts/artifacts/validate-guest-image.sh
+  - PACKAGE_METADATA.txt
+  - PACKAGE_MANIFEST.txt
+proof-root: /var/tmp/tmp.AAweR4bhRH/proof
+prefix: /var/tmp/tmp.AAweR4bhRH/proof/prefix
+binary: /var/tmp/tmp.AAweR4bhRH/proof/prefix/bin/port
+version-output: port 0.1.0
+doctor-command: /var/tmp/tmp.AAweR4bhRH/proof/prefix/bin/port doctor
+doctor-status: ok
+doctor-output:
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.
+validate-command: /var/tmp/tmp.AAweR4bhRH/proof/prefix/bin/port --config /var/tmp/tmp.AAweR4bhRH/proof/validate.toml artifacts validate --artifact demo-guest --architecture x86-64
+validate-status: ok
+validate-output:
+e2fsck 1.47.3 (8-Jul-2025)
+validated guest image: /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+
+
+--- File: ac-3.prefix-validate.log ---
+validated guest image: /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+
+
+--- File: absolute-artifact-config.toml ---
+[artifacts.kernels.demo-kernel]
+build = "port artifacts build --artifact demo-kernel"
+validate = "port artifacts validate --artifact demo-kernel"
+# Repo-local OCI registry proof:
+# - copy this file to a temp config
+# - change `registry = "demo-fs"` below to a reachable registry such as
+#   `127.0.0.1:5510`
+# - switch the demo-kernel distribution `push` and `pull` backends to
+#   `backend = "oci-registry"` with `transport = "plain-http"`
+# - set `[artifacts.kernels.demo-kernel.distribution.push.auth] kind = "anonymous"`
+#   and `[artifacts.kernels.demo-kernel.distribution.pull.auth] kind = "anonymous"`
+# - then run `just demo-push-oci` followed by `just demo-pull-oci`
+# - direct CLI use of `oci-registry` requires `oras` on PATH
+
+[artifacts.kernels.demo-kernel.reference]
+registry = "demo-fs"
+repository = "port/demo-kernel"
+version = "v1"
+
+[artifacts.kernels.demo-kernel.distribution]
+cache_root = ".port/cache"
+
+[artifacts.kernels.demo-kernel.distribution.push]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[artifacts.kernels.demo-kernel.distribution.pull]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/x86_64/firecracker/pvm/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/aarch64/firecracker/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "aarch64"
+substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/x86_64/cloud-hypervisor/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/aarch64/cloud-hypervisor/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "aarch64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/x86_64/avf/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "x86_64"
+substrate = "avf"
+protection_mode = "standard"
+
+[[artifacts.kernels.demo-kernel.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/aarch64/avf/standard/vmlinux"
+
+[artifacts.kernels.demo-kernel.variants.selector]
+architecture = "aarch64"
+substrate = "avf"
+protection_mode = "standard"
+
+[artifacts.guest_images.demo-guest]
+build = "port artifacts build --artifact demo-guest"
+validate = "port artifacts validate --artifact demo-guest"
+
+[artifacts.guest_images.demo-guest.reference]
+registry = "demo-fs"
+repository = "port/demo-guest"
+version = "v1"
+
+[artifacts.guest_images.demo-guest.distribution]
+cache_root = ".port/cache"
+
+[artifacts.guest_images.demo-guest.distribution.push]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[artifacts.guest_images.demo-guest.distribution.pull]
+backend = "file-system"
+root = "artifact-store/demo-fs"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/pvm/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/aarch64/firecracker/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "aarch64"
+substrate = "firecracker"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/cloud-hypervisor/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/aarch64/cloud-hypervisor/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "aarch64"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/avf/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "x86_64"
+substrate = "avf"
+protection_mode = "standard"
+
+[[artifacts.guest_images.demo-guest.variants]]
+path = "/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/aarch64/avf/standard/rootfs.ext4"
+
+[artifacts.guest_images.demo-guest.variants.selector]
+architecture = "aarch64"
+substrate = "avf"
+protection_mode = "standard"
+
+[control_planes.demo]
+endpoint = "https://port.example.internal"
+audience = "port-hosted-demo"
+
+[control_planes.demo.auth]
+scheme = "bearer"
+header = "authorization"
+
+[control_planes.demo.auth.source]
+kind = "env"
+variable = "PORT_DEMO_TOKEN"
+
+[hosts.local]
+platform = "linux"
+provider = "local"
+
+[hosts.local.connection]
+mode = "local"
+
+[hosts.local.firecracker]
+local_launch = true
+notes = ["Requires /dev/kvm and the firecracker binary"]
+
+[hosts.mac-local]
+platform = "macos"
+provider = "local"
+
+[hosts.mac-local.connection]
+mode = "local"
+
+[hosts.mac-local.firecracker]
+local_launch = false
+notes = ["AVF local execution is modeled separately from Firecracker."]
+
+[[hosts.local.firecracker.pvm_lanes]]
+architecture = "x86_64"
+decision = "planned"
+operator_prerequisites = [
+  "Prepare a dedicated Linux/x86_64 host kit before enabling Firecracker/PVM in Port.",
+  "Do not reuse the standard Firecracker host or standard guest artifacts for the PVM lane.",
+]
+follow_on_work = [
+  "Teach port doctor to validate the x86_64 PVM host kit and host boot-line requirements.",
+  "Add build, pull, and validate pipelines for x86_64/firecracker/pvm kernel and guest-image variants.",
+  "Add a Firecracker/PVM driver path that selects the PVM host kit and fails fast when the host kit is absent.",
+]
+
+[hosts.local.firecracker.pvm_lanes.host_kit]
+package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
+host_platform = "linux"
+host_architecture = "x86_64"
+requires_custom_host_kernel = true
+requires_patched_firecracker = true
+firecracker_binary_name = "firecracker-pvm"
+firecracker_binary_env = "PORT_PVM_FIRECRACKER_BINARY"
+host_boot_args = ["pti=off"]
+notes = [
+  "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
+  "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
+]
+
+[hosts.local.firecracker.pvm_lanes.artifact_kit]
+requires_dedicated_variants = true
+notes = [
+  "PVM guests require dedicated kernel and guest-image variants; standard Firecracker artifacts are insufficient.",
+  "The guest image must boot with the guest-side PVM expectations rather than the current standard guest contract.",
+]
+
+[hosts.local.firecracker.pvm_lanes.artifact_kit.kernel_selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[hosts.local.firecracker.pvm_lanes.artifact_kit.guest_image_selector]
+architecture = "x86_64"
+substrate = "firecracker"
+protection_mode = "pvm"
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "host-architecture"
+blocking = true
+detail = "Confirm the execution host is Linux/x86_64 before attempting the Firecracker/PVM lane."
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "host-kernel"
+blocking = true
+detail = "Confirm the host is booted into the custom PVM-capable kernel and that the host boot line includes pti=off."
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "firecracker-binary"
+blocking = true
+detail = "Confirm the selected Firecracker binary is the patched PVM-capable build rather than the standard local-launch binary."
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "artifact-variants"
+blocking = true
+detail = "Confirm both kernel and guest-image artifacts exist for x86_64/firecracker/pvm and pass their variant-specific validation steps."
+
+# Keep this boundary explicit in the sample config too:
+# `aarch64` Firecracker/PVM remains research-only until Port has a supportable
+# host-kit, VMM, artifact, and runtime contract.
+[[hosts.local.firecracker.pvm_lanes]]
+architecture = "aarch64"
+decision = "research-only"
+operator_prerequisites = ["Treat arm64 Firecracker/PVM as research-only until Port ships a host-kit, VMM, and artifact contract backed by a real runtime path."]
+follow_on_work = [
+  "Track upstream arm64 protected-virtualization and guest-memory work relevant to Firecracker.",
+  "Reassess arm64 only after a supportable Firecracker runtime path exists, not only because upstream kernel capability exists.",
+]
+
+[[hosts.local.firecracker.pvm_lanes.validation]]
+name = "runtime-path"
+blocking = true
+detail = "Upstream arm64 protected virtualization work exists, but Port does not yet have a supportable Firecracker/PVM runtime path to validate."
+
+[hosts.generic-linux]
+platform = "linux"
+provider = "generic-linux"
+
+[hosts.generic-linux.connection]
+mode = "hosted-control-plane"
+control_plane = "demo"
+
+[hosts.generic-linux.firecracker]
+local_launch = false
+notes = ["Remote Linux host is modeled through the demo hosted control plane contract."]
+
+[hosts.aws-linux]
+platform = "linux"
+provider = "aws"
+
+[hosts.aws-linux.connection]
+mode = "hosted-control-plane"
+control_plane = "demo"
+
+[hosts.aws-linux.firecracker]
+local_launch = false
+notes = ["AWS is a justified future Firecracker provider lane and is modeled through the demo hosted control plane contract."]
+
+[hosts.gcp-linux]
+platform = "linux"
+provider = "gcp"
+
+[hosts.gcp-linux.connection]
+mode = "hosted-control-plane"
+control_plane = "demo"
+
+[hosts.gcp-linux.firecracker]
+local_launch = false
+notes = ["GCP is a justified future Firecracker provider lane and is modeled through the demo hosted control plane contract."]
+
+[hosts.azure-linux]
+platform = "linux"
+provider = "azure"
+
+[hosts.azure-linux.connection]
+mode = "hosted-control-plane"
+control_plane = "demo"
+
+[hosts.azure-linux.firecracker]
+local_launch = false
+notes = ["Azure is modeled explicitly through the demo hosted control plane so diagnostics can report it as unsupported."]
+
+[nodes.generic-linux-node]
+# Hosted PVM admission example:
+#   switching [machines.cloud-generic] to protection_mode = "pvm" should now
+#   fail placement because this node only advertises a planned PVM lane.
+host = "generic-linux"
+runtime_root = "runtime/hosted/generic-linux-node"
+notes = ["Generic Linux is the baseline hosted node contract before multi-node scheduler execution lands."]
+
+[nodes.generic-linux-node.capabilities]
+providers = ["generic-linux"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.generic-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the sample inventory."]
+
+[nodes.aws-linux-node]
+# Hosted PVM admission-ready example:
+#   switching [machines.cloud-aws] to protection_mode = "pvm" should pass the
+#   hosted placement gate because this node advertises a ready PVM lane and can
+#   launch once the host kit and PVM artifact paths are prepared.
+# Hosted Cloud Hypervisor proof:
+#   keep the checked-in sample on the Firecracker standard lane, then copy this
+#   config and switch [machines.cloud-aws].substrate to "cloud-hypervisor",
+#   [machines.cloud-aws].architecture to "x86_64", and
+#   [nodes.aws-linux-node.capabilities].substrates to ["cloud-hypervisor"] when
+#   you want the hosted Cloud Hypervisor workflow. Leaving this node on
+#   ["firecracker"] is the explicit rejected-node proof for that lane.
+host = "aws-linux"
+runtime_root = "runtime/hosted/aws-linux-node"
+notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
+
+[nodes.aws-linux-node.capabilities]
+providers = ["aws"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.aws-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "ready"
+notes = ["AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit."]
+
+[nodes.aws-linux-node.capabilities.pvm_lanes.host_kit]
+package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
+host_platform = "linux"
+host_architecture = "x86_64"
+requires_custom_host_kernel = true
+requires_patched_firecracker = true
+firecracker_binary_name = "firecracker-pvm"
+firecracker_binary_env = "PORT_PVM_FIRECRACKER_BINARY"
+host_boot_args = ["pti=off"]
+notes = [
+  "The host kernel must carry the Firecracker/PVM-capable KVM changes rather than stock KVM alone.",
+  "The VMM binary must be a PVM-capable Firecracker build, not the current standard lane binary.",
+]
+
+[nodes.gcp-linux-node]
+host = "gcp-linux"
+runtime_root = "runtime/hosted/gcp-linux-node"
+notes = ["GCP is modeled as a hosted node so placement and lifecycle work can remain provider-aware."]
+
+[nodes.gcp-linux-node.capabilities]
+providers = ["gcp"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.gcp-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+notes = ["GCP remains modeled as a planned PVM node until a prepared host kit is explicitly advertised."]
+
+[host_groups.remote-linux]
+placement = "explicit-membership"
+scheduler = "deterministic-first-fit"
+nodes = ["generic-linux-node", "aws-linux-node", "gcp-linux-node"]
+notes = ["This group is the first hosted placement boundary; later scheduler, monitoring, and services work should reuse it instead of inventing another inventory axis."]
+
+[host_groups.aws-builders]
+placement = "explicit-membership"
+scheduler = "deterministic-first-fit"
+nodes = ["aws-linux-node"]
+notes = ["Provider-specific groups stay explicit so later scheduling and service placement can target them without creating a second host taxonomy."]
+
+[machines.demo]
+# Standard shipped lane:
+#   keep this machine on protection_mode = "standard" when you want the real
+#   local Firecracker launch proof while PVM remains a gated admission lane.
+host = "local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.demo.guest]
+vsock_cid = 52
+control_port = 7000
+console_log = "runtime/demo/console.log"
+
+[machines.demo-ch]
+# Local Cloud Hypervisor lane:
+#   `port doctor` validates the Linux host, supported architecture, and
+#   `cloud-hypervisor` binary for this machine without falling back to Firecracker.
+host = "local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "cloud-hypervisor"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.demo-ch.guest]
+vsock_cid = 54
+control_port = 7000
+console_log = "runtime/demo-ch/console.log"
+
+[machines.demo-avf]
+# macOS AVF lane:
+#   on macOS, set PORT_AVF_LAUNCHER to an AVF launcher helper that bridges the
+#   guest transport onto runtime/demo-avf/guest-agent.sock and writes console
+#   output to runtime/demo-avf/console.log.
+host = "mac-local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "avf"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=hvc0 reboot=k panic=1 root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.demo-avf.guest]
+vsock_cid = 53
+control_port = 7000
+console_log = "runtime/demo-avf/console.log"
+
+[machines.cloud-generic]
+# Hosted denial example:
+#   change protection_mode to "pvm" to see Port reject placement because
+#   generic-linux-node only advertises state = "planned".
+host = "generic-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-generic.guest]
+vsock_cid = 60
+control_port = 7000
+console_log = "runtime/cloud-generic/console.log"
+
+[machines.cloud-aws]
+# Hosted admission-ready example:
+#   change protection_mode to "pvm" to model a hosted machine whose node
+#   inventory advertises state = "ready" for x86_64 Firecracker/PVM and can
+#   boot through the live control-plane and node-agent path once prepared.
+# Hosted Cloud Hypervisor proof:
+#   copy this file to a temp config, point [control_planes.demo].endpoint at
+#   http://127.0.0.1:7040, switch substrate to "cloud-hypervisor", switch
+#   architecture to "x86_64", and switch
+#   [nodes.aws-linux-node.capabilities].substrates to ["cloud-hypervisor"].
+#   The checked-in sample stays on Firecracker so the standard hosted lane keeps
+#   its canonical proof.
+host = "aws-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-aws.guest]
+vsock_cid = 61
+control_port = 7000
+console_log = "runtime/cloud-aws/console.log"
+
+[machines.cloud-gcp]
+host = "gcp-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-gcp.guest]
+vsock_cid = 62
+control_port = 7000
+console_log = "runtime/cloud-gcp/console.log"
+
+[machines.cloud-azure]
+host = "azure-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "native"
+vcpu_count = 2
+memory_mib = 512
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = false
+
+[machines.cloud-azure.guest]
+vsock_cid = 63
+control_port = 7000
+console_log = "runtime/cloud-azure/console.log"
+
+[clusters.demo]
+# First cluster contract:
+#   this is the single-node local K3s lane. Hosted, AWS, and multi-node
+#   expansion stay explicit follow-on work until Port owns the wider lifecycle.
+flavor = "k3s"
+provider = "local"
+count = 1
+machine = "demo"
+version = "v1.32.2+k3s1"
+args = ["--disable=traefik"]
+
+[clusters.demo.bootstrap]
+# Repo-local offline bootstrap kit for the first cluster slice. This fixture
+# keeps the install path Port-owned and live-fetch-free until a fully packaged
+# K3s artifact lane lands.
+stage_root = "/opt/port/clusters/demo"
+install_script = "examples/bootstrap/demo-k3s/install-k3s-offline.sh"
+binary = "examples/bootstrap/demo-k3s/k3s"
+
+[clusters.demo.bootstrap.guest_profile]
+name = "kube-ready"
+required_commands = ["sh", "install", "ln", "chmod", "dirname", "setsid"]
+
+[clusters.demo.lifecycle]
+health_command = [
+  "opt/port/clusters/demo/bin/k3s",
+  "kubectl",
+  "get",
+  "nodes",
+  "-o",
+  "wide",
+]
+kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
+api_forward_target = "127.0.0.1:6443"
+
+# Service reliability workflow (repo-local hosted proof):
+# export PORT_DEMO_TOKEN=demo-token
+# port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
+# port --config examples/port.toml service apply --machine cloud-aws --host-group aws-builders --name api --kind service --restart on-failure --health command --health-command /bin/test --health-command=-f --health-command workspace/healthy --secret API_TOKEN=demo-token -- /bin/sh -lc 'count_file=workspace/restarts; count=$(cat "$count_file" 2>/dev/null || echo 0); count=$((count + 1)); printf "%s" "$count" > "$count_file"; if [ "$count" -eq 1 ]; then sleep 0.2; exit 23; fi; trap '\''exit 0'\'' TERM; while :; do sleep 1; done'
+# port --config examples/port.toml service status --machine cloud-aws --name api
+# port --config examples/port.toml service stop --machine cloud-aws --name api
+

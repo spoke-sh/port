@@ -8733,10 +8733,10 @@ fn run_artifact_pipeline_with_io(
     let script = artifact_script(kind, action)?;
 
     let mut command = Command::new(&script);
-    command
-        .arg(&artifact.path)
-        .current_dir(repo_root()?)
-        .stdin(Stdio::null());
+    command.arg(&artifact.path).stdin(Stdio::null());
+    if let Some(workdir) = artifact_pipeline_workdir(action)? {
+        command.current_dir(workdir);
+    }
     match io {
         ArtifactPipelineIo::Inherit => {
             let status = command
@@ -8770,6 +8770,13 @@ fn run_artifact_pipeline_with_io(
     }
 
     Ok(artifact)
+}
+
+fn artifact_pipeline_workdir(action: ArtifactAction) -> Result<Option<PathBuf>> {
+    match action {
+        ArtifactAction::Build => Ok(Some(repo_root()?)),
+        ArtifactAction::Validate => Ok(None),
+    }
 }
 
 fn ensure_native_build_lane(architecture: MachineArchitecture) -> Result<()> {
@@ -9182,12 +9189,86 @@ fn artifact_script(kind: ArtifactKind, action: ArtifactAction) -> Result<PathBuf
         (ArtifactKind::GuestImage, ArtifactAction::Build) => "build-guest-image.sh",
         (ArtifactKind::GuestImage, ArtifactAction::Validate) => "validate-guest-image.sh",
     };
-    let path = repo_root()?.join("scripts/artifacts").join(script_name);
-    if path.is_file() {
-        Ok(path)
-    } else {
-        bail!("artifact pipeline script '{}' is missing", path.display())
+    resolve_artifact_script_path(script_name, artifact_script_candidates(script_name))
+}
+
+fn artifact_script_candidates(script_name: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(configured) = env::var_os("PORT_SHARE_ROOT") {
+        push_artifact_script_candidate(
+            &mut candidates,
+            PathBuf::from(configured)
+                .join("scripts/artifacts")
+                .join(script_name),
+        );
     }
+
+    if let Some(configured) = env::var_os("PORT_REPO_ROOT") {
+        push_artifact_script_candidate(
+            &mut candidates,
+            PathBuf::from(configured)
+                .join("scripts/artifacts")
+                .join(script_name),
+        );
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        for candidate in current_dir.ancestors() {
+            push_artifact_script_candidate(
+                &mut candidates,
+                candidate.join("scripts/artifacts").join(script_name),
+            );
+        }
+    }
+
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(prefix_root) = current_exe.parent().and_then(Path::parent) {
+            push_artifact_script_candidate(
+                &mut candidates,
+                prefix_root
+                    .join("share/port/scripts/artifacts")
+                    .join(script_name),
+            );
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(candidate) = manifest_dir.parent().and_then(Path::parent) {
+        push_artifact_script_candidate(
+            &mut candidates,
+            candidate.join("scripts/artifacts").join(script_name),
+        );
+    }
+
+    candidates
+}
+
+fn push_artifact_script_candidate(candidates: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if !candidates.iter().any(|existing| existing == &candidate) {
+        candidates.push(candidate);
+    }
+}
+
+fn resolve_artifact_script_path(
+    script_name: &str,
+    candidates: impl IntoIterator<Item = PathBuf>,
+) -> Result<PathBuf> {
+    let candidates: Vec<_> = candidates.into_iter().collect();
+    if let Some(path) = candidates.iter().find(|candidate| candidate.is_file()) {
+        return Ok(path.clone());
+    }
+
+    let searched = candidates
+        .iter()
+        .map(|candidate| format!("'{}'", candidate.display()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "artifact pipeline script '{}' is missing; searched {}",
+        script_name,
+        searched
+    )
 }
 
 fn repo_root() -> Result<PathBuf> {
@@ -11162,22 +11243,23 @@ mod tests {
         HostedNodeBinding, LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
         NodeAgentServeRequest, RuntimePaths, ServiceApplyRequest, ServiceDefinitionRecord,
         ServiceDesiredState, ServiceKind, ServicePolicy, ServiceRuntimeState, ServiceSecretBinding,
-        StopResult, apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
-        bootstrap_hosted_k3s_cluster, build_firecracker_config, cache_path_for,
-        cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
-        cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
-        collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
-        down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        hosted_k3s_cluster_access, hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
+        StopResult, apply_machine_service, artifact_pipeline_workdir, artifact_script,
+        avf_local_launch_machine_with_host_os, bootstrap_hosted_k3s_cluster,
+        build_firecracker_config, cache_path_for, cloud_hypervisor_api_socket_path,
+        cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
+        cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
+        copy_guest_file, delete_machine_secret, down_local_cluster, driver_for_machine,
+        ensure_native_build_lane, execute_guest_operation, hosted_k3s_cluster_access,
+        hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
         hosted_placeholder_runtime_root, launch_local_machine, list_artifacts,
         list_machine_secrets, list_machine_services, list_machines, local_cluster_kubeconfig,
         local_cluster_status, machine_monitor, machine_service_status, machine_status, machine_top,
         path_check, prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
         put_machine_secret, read_json_file, read_pid_file, render_hosted_route_context, repo_root,
-        resolve_artifact_metadata, resolve_artifact_store_contract, resolve_machine_architecture,
-        select_firecracker_binary, serve_control_plane, serve_node_agent, service_definition_dir,
-        service_runtime_dir, service_status_from_record, stage_local_cluster_bootstrap,
-        stop_machine, stop_machine_service, up_local_cluster,
+        resolve_artifact_metadata, resolve_artifact_script_path, resolve_artifact_store_contract,
+        resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
+        serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
+        stage_local_cluster_bootstrap, stop_machine, stop_machine_service, up_local_cluster,
         uses_repo_managed_guest_image_pipeline,
     };
     use port_agent_protocol::{
@@ -13118,6 +13200,53 @@ exec sleep 30
             artifact_script(ArtifactKind::GuestImage, ArtifactAction::Validate)
                 .expect("guest image validate script should resolve"),
             root.join("scripts/artifacts/validate-guest-image.sh")
+        );
+    }
+
+    #[test]
+    fn artifact_scripts_resolve_from_packaged_share_root_candidates() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let packaged_script = tempdir
+            .path()
+            .join("share/port/scripts/artifacts/validate-guest-image.sh");
+        fs::create_dir_all(
+            packaged_script
+                .parent()
+                .expect("packaged script parent should exist"),
+        )
+        .expect("packaged script parent should exist");
+        fs::write(&packaged_script, "#!/bin/sh\nexit 0\n").expect("packaged script should write");
+        let mut permissions = fs::metadata(&packaged_script)
+            .expect("packaged script metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&packaged_script, permissions)
+            .expect("packaged script should be executable");
+
+        let root = repo_root().expect("repo root should resolve");
+        let resolved = resolve_artifact_script_path(
+            "validate-guest-image.sh",
+            [
+                packaged_script.clone(),
+                root.join("scripts/artifacts/validate-guest-image.sh"),
+            ],
+        )
+        .expect("packaged validate script should resolve");
+
+        assert_eq!(resolved, packaged_script);
+    }
+
+    #[test]
+    fn artifact_validate_pipeline_does_not_require_a_repo_workdir() {
+        assert_eq!(
+            artifact_pipeline_workdir(ArtifactAction::Validate)
+                .expect("validate workdir should resolve"),
+            None
+        );
+        assert!(
+            artifact_pipeline_workdir(ArtifactAction::Build)
+                .expect("build workdir should resolve")
+                .is_some()
         );
     }
 

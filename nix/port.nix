@@ -22,6 +22,13 @@ rustPlatform.buildRustPackage {
 
   doCheck = false;
 
+  postInstall = ''
+    install -Dm755 ${../scripts/artifacts/validate-kernel.sh} \
+      $out/share/port/scripts/artifacts/validate-kernel.sh
+    install -Dm755 ${../scripts/artifacts/validate-guest-image.sh} \
+      $out/share/port/scripts/artifacts/validate-guest-image.sh
+  '';
+
   meta = with lib; {
     description = "Agentic compute orchestration CLI";
     homepage = "https://github.com/spoke-sh/port";

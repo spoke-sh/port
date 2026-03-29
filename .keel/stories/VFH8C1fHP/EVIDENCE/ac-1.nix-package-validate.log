@@ -1,0 +1,5 @@
+validated guest image: /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4

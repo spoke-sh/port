@@ -1,0 +1,39 @@
+artifact: /var/tmp/tmp.AAweR4bhRH/pkg/port-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+target: x86_64-unknown-linux-gnu
+version: 0.1.0
+included-files:
+  - bin/port
+  - README.md
+  - RELEASE.md
+  - docs/install.md
+  - scripts/artifacts/validate-kernel.sh
+  - scripts/artifacts/validate-guest-image.sh
+  - PACKAGE_METADATA.txt
+  - PACKAGE_MANIFEST.txt
+proof-root: /var/tmp/tmp.AAweR4bhRH/proof
+prefix: /var/tmp/tmp.AAweR4bhRH/proof/prefix
+binary: /var/tmp/tmp.AAweR4bhRH/proof/prefix/bin/port
+version-output: port 0.1.0
+doctor-command: /var/tmp/tmp.AAweR4bhRH/proof/prefix/bin/port doctor
+doctor-status: ok
+doctor-output:
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.
+validate-command: /var/tmp/tmp.AAweR4bhRH/proof/prefix/bin/port --config /var/tmp/tmp.AAweR4bhRH/proof/validate.toml artifacts validate --artifact demo-guest --architecture x86-64
+validate-status: ok
+validate-output:
+e2fsck 1.47.3 (8-Jul-2025)
+validated guest image: /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image bytes: 268435456
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4

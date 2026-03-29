@@ -10,7 +10,7 @@ usage() {
 usage: scripts/package-proof.sh <target-triple> [package-output-dir] [proof-root]
 
 Build the canonical Port package, install it into a clean prefix, and run the
-packaged binary through --version and doctor.
+packaged binary through --version, doctor, and guest artifact validation.
 EOF
 }
 
@@ -48,6 +48,16 @@ copy_if_present() {
   if [[ -f "$source_path" ]]; then
     mkdir -p "$(dirname "$destination_path")"
     cp "$source_path" "$destination_path"
+  fi
+}
+
+copy_tree_if_present() {
+  source_path=$1
+  destination_path=$2
+
+  if [[ -d "$source_path" ]]; then
+    mkdir -p "$(dirname "$destination_path")"
+    cp -R "$source_path" "$destination_path"
   fi
 }
 
@@ -93,11 +103,26 @@ chmod 755 "$installed_binary"
 copy_if_present "$package_root/README.md" "$prefix_root/share/port/README.md"
 copy_if_present "$package_root/RELEASE.md" "$prefix_root/share/port/RELEASE.md"
 copy_if_present "$package_root/docs/install.md" "$prefix_root/share/port/docs/install.md"
+copy_tree_if_present "$package_root/scripts/artifacts" "$prefix_root/share/port/scripts/artifacts"
 copy_if_present "$package_root/PACKAGE_METADATA.txt" "$prefix_root/share/port/PACKAGE_METADATA.txt"
 copy_if_present "$package_root/PACKAGE_MANIFEST.txt" "$prefix_root/share/port/PACKAGE_MANIFEST.txt"
 
 version_output=$("$installed_binary" --version)
 doctor_output=$("$installed_binary" doctor)
+validate_config="$proof_root/validate.toml"
+sed \
+  -e "s|path = \"artifacts/|path = \"$repo_root/artifacts/|g" \
+  -e "s|cache_root = \".port/cache\"|cache_root = \"$repo_root/.port/cache\"|g" \
+  -e "s|root = \"artifact-store/|root = \"$repo_root/artifact-store/|g" \
+  "$repo_root/examples/port.toml" > "$validate_config"
+validate_output=$(
+  cd "$proof_root"
+  "$installed_binary" \
+    --config "$validate_config" \
+    artifacts validate \
+    --artifact demo-guest \
+    --architecture x86-64 2>&1
+)
 
 printf '%s\n' "$package_output"
 printf 'proof-root: %s\n' "$proof_root"
@@ -107,3 +132,6 @@ printf 'version-output: %s\n' "$version_output"
 printf 'doctor-command: %s doctor\n' "$installed_binary"
 printf 'doctor-status: ok\n'
 printf 'doctor-output:\n%s\n' "$doctor_output"
+printf 'validate-command: %s --config %s artifacts validate --artifact demo-guest --architecture x86-64\n' "$installed_binary" "$validate_config"
+printf 'validate-status: ok\n'
+printf 'validate-output:\n%s\n' "$validate_output"

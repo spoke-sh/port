@@ -27,12 +27,12 @@ started_at: 2026-03-29T09:48:13
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Repair Local Cluster Guest Boot Path](../../../../stories/VFH8C0wHN/README.md) | feat | done |
 | [Restore Live Cluster Status And Kubeconfig Handoff](../../../../stories/VFH8C1KHM/README.md) | feat | done |
-| [Fix Packaged Guest Artifact Validation Contract](../../../../stories/VFH8C1fHP/README.md) | feat | backlog |
-| [Verify Downstream Local Cluster Handoff](../../../../stories/VFH8C1xHO/README.md) | feat | backlog |
+| [Fix Packaged Guest Artifact Validation Contract](../../../../stories/VFH8C1fHP/README.md) | feat | done |
+| [Verify Downstream Local Cluster Handoff](../../../../stories/VFH8C1xHO/README.md) | feat | in-progress |
 <!-- END GENERATED -->

@@ -122,7 +122,12 @@ else
 fi
 
 rm -rf "$stage_dir"
-mkdir -p "$stage_dir/bin" "$stage_dir/docs" "$output_dir" "$staging_root"
+mkdir -p \
+  "$stage_dir/bin" \
+  "$stage_dir/docs" \
+  "$stage_dir/scripts/artifacts" \
+  "$output_dir" \
+  "$staging_root"
 rm -f "$archive_members" "$archive_path" "$temporary_archive"
 
 copy_package_file "$binary_source" "$stage_dir/bin/port"
@@ -130,7 +135,20 @@ chmod 755 "$stage_dir/bin/port"
 copy_package_file "$repo_root/README.md" "$stage_dir/README.md"
 copy_package_file "$repo_root/RELEASE.md" "$stage_dir/RELEASE.md"
 copy_package_file "$repo_root/docs/install.md" "$stage_dir/docs/install.md"
-chmod 755 "$stage_dir" "$stage_dir/bin" "$stage_dir/docs"
+copy_package_file \
+  "$repo_root/scripts/artifacts/validate-kernel.sh" \
+  "$stage_dir/scripts/artifacts/validate-kernel.sh"
+copy_package_file \
+  "$repo_root/scripts/artifacts/validate-guest-image.sh" \
+  "$stage_dir/scripts/artifacts/validate-guest-image.sh"
+chmod 755 \
+  "$stage_dir" \
+  "$stage_dir/bin" \
+  "$stage_dir/docs" \
+  "$stage_dir/scripts" \
+  "$stage_dir/scripts/artifacts" \
+  "$stage_dir/scripts/artifacts/validate-kernel.sh" \
+  "$stage_dir/scripts/artifacts/validate-guest-image.sh"
 chmod 644 \
   "$stage_dir/README.md" \
   "$stage_dir/RELEASE.md" \
@@ -149,6 +167,8 @@ bin/port
 README.md
 RELEASE.md
 docs/install.md
+scripts/artifacts/validate-kernel.sh
+scripts/artifacts/validate-guest-image.sh
 PACKAGE_METADATA.txt
 PACKAGE_MANIFEST.txt
 EOF
@@ -158,6 +178,8 @@ $package_name/bin/port
 $package_name/README.md
 $package_name/RELEASE.md
 $package_name/docs/install.md
+$package_name/scripts/artifacts/validate-kernel.sh
+$package_name/scripts/artifacts/validate-guest-image.sh
 $package_name/PACKAGE_METADATA.txt
 $package_name/PACKAGE_MANIFEST.txt
 EOF
@@ -170,6 +192,10 @@ for path in \
   "$stage_dir/bin/port" \
   "$stage_dir/docs" \
   "$stage_dir/docs/install.md" \
+  "$stage_dir/scripts" \
+  "$stage_dir/scripts/artifacts" \
+  "$stage_dir/scripts/artifacts/validate-kernel.sh" \
+  "$stage_dir/scripts/artifacts/validate-guest-image.sh" \
   "$stage_dir/PACKAGE_METADATA.txt" \
   "$stage_dir/PACKAGE_MANIFEST.txt" \
   "$stage_dir/README.md" \
@@ -190,5 +216,7 @@ printf '  - %s\n' \
   'README.md' \
   'RELEASE.md' \
   'docs/install.md' \
+  'scripts/artifacts/validate-kernel.sh' \
+  'scripts/artifacts/validate-guest-image.sh' \
   'PACKAGE_METADATA.txt' \
   'PACKAGE_MANIFEST.txt'

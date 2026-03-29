@@ -30,7 +30,7 @@ fn write_fake_port_binary(dir: &Path) -> PathBuf {
     let path = dir.join("port");
     fs::write(
         &path,
-        "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  --version)\n    printf 'port 9.9.9-test\\n'\n    ;;\n  doctor)\n    printf 'doctor ok\\n'\n    ;;\n  *)\n    printf 'unexpected args: %s\\n' \"$*\" >&2\n    exit 1\n    ;;\nesac\n",
+        "#!/usr/bin/env bash\nset -euo pipefail\ncase \"${1:-}\" in\n  --version)\n    printf 'port 9.9.9-test\\n'\n    ;;\n  doctor)\n    printf 'doctor ok\\n'\n    ;;\n  --config)\n    shift 2\n    if [[ \"${1:-}\" == \"artifacts\" && \"${2:-}\" == \"validate\" ]]; then\n      printf 'validated guest image: fake-rootfs.ext4\\n'\n    else\n      printf 'unexpected args: %s\\n' \"$*\" >&2\n      exit 1\n    fi\n    ;;\n  *)\n    printf 'unexpected args: %s\\n' \"$*\" >&2\n    exit 1\n    ;;\nesac\n",
     )
     .expect("fake binary should write");
     let mut permissions = fs::metadata(&path)
@@ -81,6 +81,10 @@ fn package_proof_installs_packaged_port_and_runs_version_and_doctor_from_prefix(
     assert!(stdout.contains("doctor-status: ok"));
     assert!(stdout.contains("doctor-output:"));
     assert!(stdout.contains("doctor ok"));
+    assert!(stdout.contains("validate-command: "));
+    assert!(stdout.contains("validate-status: ok"));
+    assert!(stdout.contains("validate-output:"));
+    assert!(stdout.contains("validated guest image: fake-rootfs.ext4"));
 
     assert!(
         artifact.exists(),
@@ -97,6 +101,16 @@ fn package_proof_installs_packaged_port_and_runs_version_and_doctor_from_prefix(
     assert!(
         proof_root
             .join("prefix/share/port/docs/install.md")
+            .exists()
+    );
+    assert!(
+        proof_root
+            .join("prefix/share/port/scripts/artifacts/validate-kernel.sh")
+            .exists()
+    );
+    assert!(
+        proof_root
+            .join("prefix/share/port/scripts/artifacts/validate-guest-image.sh")
             .exists()
     );
 }

@@ -127,6 +127,8 @@ fn package_workflow_emits_versioned_artifact_and_reports_target_and_included_fil
     assert!(stdout.contains("README.md"));
     assert!(stdout.contains("RELEASE.md"));
     assert!(stdout.contains("docs/install.md"));
+    assert!(stdout.contains("scripts/artifacts/validate-kernel.sh"));
+    assert!(stdout.contains("scripts/artifacts/validate-guest-image.sh"));
     assert!(stdout.contains("PACKAGE_METADATA.txt"));
     assert!(stdout.contains("PACKAGE_MANIFEST.txt"));
     assert!(
@@ -141,6 +143,8 @@ fn package_workflow_emits_versioned_artifact_and_reports_target_and_included_fil
             format!("{package_name}/README.md"),
             format!("{package_name}/RELEASE.md"),
             format!("{package_name}/docs/install.md"),
+            format!("{package_name}/scripts/artifacts/validate-kernel.sh"),
+            format!("{package_name}/scripts/artifacts/validate-guest-image.sh"),
             format!("{package_name}/PACKAGE_METADATA.txt"),
             format!("{package_name}/PACKAGE_MANIFEST.txt"),
         ]
@@ -155,6 +159,16 @@ fn package_workflow_emits_versioned_artifact_and_reports_target_and_included_fil
     assert!(package_root.join("README.md").exists());
     assert!(package_root.join("RELEASE.md").exists());
     assert!(package_root.join("docs/install.md").exists());
+    assert!(
+        package_root
+            .join("scripts/artifacts/validate-kernel.sh")
+            .exists()
+    );
+    assert!(
+        package_root
+            .join("scripts/artifacts/validate-guest-image.sh")
+            .exists()
+    );
 
     let metadata = fs::read_to_string(package_root.join("PACKAGE_METADATA.txt"))
         .expect("package metadata should exist");
@@ -167,6 +181,8 @@ fn package_workflow_emits_versioned_artifact_and_reports_target_and_included_fil
     assert!(manifest.contains("README.md"));
     assert!(manifest.contains("RELEASE.md"));
     assert!(manifest.contains("docs/install.md"));
+    assert!(manifest.contains("scripts/artifacts/validate-kernel.sh"));
+    assert!(manifest.contains("scripts/artifacts/validate-guest-image.sh"));
 }
 
 #[test]
