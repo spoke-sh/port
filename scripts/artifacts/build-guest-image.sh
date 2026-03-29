@@ -96,7 +96,7 @@ copy_binary_with_libs \
   "${CARGO_TARGET_DIR:-$repo_root/target}/release/port-guest-agent" \
   "usr/bin/port-guest-agent"
 
-for applet in cat chmod echo ln ls mkdir mount mknod setsid sh sleep uname; do
+for applet in cat chmod dirname echo install ln ls mkdir mount mknod setsid sh sleep uname; do
   ln -sf busybox "$staging_dir/bin/$applet"
 done
 

@@ -714,6 +714,12 @@ pub enum ArtifactAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactPipelineIo {
+    Inherit,
+    Capture,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtifactRequest<'a> {
     pub name: &'a str,
     pub architecture: MachineArchitecture,
@@ -1369,6 +1375,7 @@ pub fn up_local_cluster(
     let (launch_action, launch) = if current_status.state == MachineRuntimeState::Running {
         (String::from("already-running"), None)
     } else {
+        ensure_local_cluster_guest_image_ready(config, request.cluster_name, &cluster)?;
         (
             String::from("launched"),
             Some(launch_local_machine(
@@ -1382,7 +1389,12 @@ pub fn up_local_cluster(
         )
     };
 
-    wait_for_local_cluster_guest_socket(request.runtime_root, &cluster.machine)?;
+    wait_for_local_cluster_guest_control(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+    )?;
     let stage = stage_local_cluster_bootstrap(
         config,
         ClusterStageRequest {
@@ -1446,8 +1458,12 @@ pub fn local_cluster_status(
         });
     }
 
-    if let Err(error) = wait_for_local_cluster_guest_socket(request.runtime_root, &cluster.machine)
-    {
+    if let Err(error) = wait_for_local_cluster_guest_control(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+    ) {
         return Ok(ClusterStatusReport {
             cluster_name: request.cluster_name.to_string(),
             machine_name: cluster.machine.clone(),
@@ -1969,24 +1985,97 @@ fn read_local_cluster_kubeconfig_raw(
     Ok(kubeconfig)
 }
 
-fn wait_for_local_cluster_guest_socket(runtime_root: &Path, machine_name: &str) -> Result<()> {
+fn ensure_local_cluster_guest_image_ready(
+    config: &PortConfig,
+    cluster_name: &str,
+    cluster: &ClusterSpec,
+) -> Result<()> {
+    let machine = config
+        .machines
+        .get(&cluster.machine)
+        .with_context(|| format!("unknown machine '{}'", cluster.machine))?;
+    let request = ArtifactRequest {
+        name: &machine.guest_image,
+        architecture: machine.architecture,
+        substrate: machine.substrate,
+        protection_mode: machine.protection_mode,
+    };
+    let artifact = resolve_artifact_metadata(config, request)?;
+    if !uses_repo_managed_guest_image_pipeline(&artifact.path) {
+        return Ok(());
+    }
+
+    if run_artifact_pipeline_quiet(config, request, ArtifactAction::Validate).is_ok() {
+        return Ok(());
+    }
+
+    run_artifact_pipeline_quiet(config, request, ArtifactAction::Build).with_context(|| {
+        format!(
+            "failed to rebuild guest image '{}' for local cluster '{}'",
+            machine.guest_image, cluster_name
+        )
+    })?;
+    run_artifact_pipeline_quiet(config, request, ArtifactAction::Validate).with_context(|| {
+        format!(
+            "guest image '{}' for local cluster '{}' remained invalid after rebuild",
+            machine.guest_image, cluster_name
+        )
+    })?;
+
+    Ok(())
+}
+
+fn uses_repo_managed_guest_image_pipeline(path: &Path) -> bool {
+    let relative_root = Path::new("artifacts/guest");
+    if path.starts_with(relative_root) {
+        return true;
+    }
+
+    repo_root()
+        .map(|root| path.starts_with(root.join(relative_root)))
+        .unwrap_or(false)
+}
+
+fn wait_for_local_cluster_guest_control(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    machine_name: &str,
+) -> Result<()> {
     const SOCKET_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
     const SOCKET_WAIT_INTERVAL: Duration = Duration::from_millis(20);
 
     let paths = RuntimePaths::for_machine(runtime_root, machine_name);
     let started = Instant::now();
+    let mut last_error = String::from("guest control probe did not run");
     while started.elapsed() < SOCKET_WAIT_TIMEOUT {
-        if paths.guest_agent_socket.exists() {
-            return Ok(());
+        match execute_cluster_exec(
+            config,
+            runtime_root,
+            cluster_name,
+            machine_name,
+            vec![
+                String::from("/bin/sh"),
+                String::from("-lc"),
+                String::from("true"),
+            ],
+            "probe local cluster guest control",
+        ) {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                last_error = error.to_string();
+                thread::sleep(SOCKET_WAIT_INTERVAL);
+            }
         }
-        thread::sleep(SOCKET_WAIT_INTERVAL);
     }
 
     bail!(
-        "guest control socket '{}' did not appear for machine '{}' within {:?}",
-        paths.guest_agent_socket.display(),
+        "guest control did not become ready for machine '{}' within {:?} (runtime socket: '{}', vsock transport: '{}'): {}",
         machine_name,
-        SOCKET_WAIT_TIMEOUT
+        SOCKET_WAIT_TIMEOUT,
+        paths.guest_agent_socket.display(),
+        paths.vsock_path.display(),
+        last_error
     )
 }
 
@@ -8537,25 +8626,63 @@ fn run_artifact_pipeline(
     request: ArtifactRequest<'_>,
     action: ArtifactAction,
 ) -> Result<ArtifactMetadata> {
+    run_artifact_pipeline_with_io(config, request, action, ArtifactPipelineIo::Inherit)
+}
+
+fn run_artifact_pipeline_quiet(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+    action: ArtifactAction,
+) -> Result<ArtifactMetadata> {
+    run_artifact_pipeline_with_io(config, request, action, ArtifactPipelineIo::Capture)
+}
+
+fn run_artifact_pipeline_with_io(
+    config: &PortConfig,
+    request: ArtifactRequest<'_>,
+    action: ArtifactAction,
+    io: ArtifactPipelineIo,
+) -> Result<ArtifactMetadata> {
     ensure_native_build_lane(request.architecture)?;
     let artifact = resolve_artifact_metadata(config, request)?;
     let kind = artifact.kind;
     let script = artifact_script(kind, action)?;
 
-    let status = Command::new(&script)
+    let mut command = Command::new(&script);
+    command
         .arg(&artifact.path)
         .current_dir(repo_root()?)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .with_context(|| format!("failed to start artifact pipeline '{}'", script.display()))?;
-
-    if !status.success() {
-        bail!(
-            "artifact pipeline '{}' exited with status {status}",
-            script.display()
-        );
+        .stdin(Stdio::null());
+    match io {
+        ArtifactPipelineIo::Inherit => {
+            let status = command
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()
+                .with_context(|| {
+                    format!("failed to start artifact pipeline '{}'", script.display())
+                })?;
+            if !status.success() {
+                bail!(
+                    "artifact pipeline '{}' exited with status {status}",
+                    script.display()
+                );
+            }
+        }
+        ArtifactPipelineIo::Capture => {
+            let output = command.output().with_context(|| {
+                format!("failed to start artifact pipeline '{}'", script.display())
+            })?;
+            if !output.status.success() {
+                bail!(
+                    "artifact pipeline '{}' exited with status {} (stdout: {}; stderr: {})",
+                    script.display(),
+                    output.status,
+                    summarize_process_output(&output.stdout),
+                    summarize_process_output(&output.stderr)
+                );
+            }
+        }
     }
 
     Ok(artifact)
@@ -8935,12 +9062,35 @@ fn artifact_script(kind: ArtifactKind, action: ArtifactAction) -> Result<PathBuf
 }
 
 fn repo_root() -> Result<PathBuf> {
+    if let Some(configured) = env::var_os("PORT_REPO_ROOT") {
+        let candidate = PathBuf::from(configured);
+        if candidate.join("scripts/artifacts").is_dir() {
+            return Ok(candidate);
+        }
+    }
+
+    if let Ok(current_dir) = env::current_dir() {
+        for candidate in current_dir.ancestors() {
+            if candidate.join("scripts/artifacts").is_dir() {
+                return Ok(candidate.to_path_buf());
+            }
+        }
+    }
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
+    let candidate = manifest_dir
         .parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-        .ok_or_else(|| anyhow!("failed to derive repository root from CARGO_MANIFEST_DIR"))
+        .ok_or_else(|| anyhow!("failed to derive repository root from CARGO_MANIFEST_DIR"))?;
+    if candidate.join("scripts/artifacts").is_dir() {
+        Ok(candidate)
+    } else {
+        bail!(
+            "failed to resolve the Port repository root; searched PORT_REPO_ROOT, the current working directory, and '{}'",
+            candidate.display()
+        )
+    }
 }
 
 pub fn execute_guest_operation(
@@ -10899,6 +11049,7 @@ mod tests {
         select_firecracker_binary, serve_control_plane, serve_node_agent, service_definition_dir,
         service_runtime_dir, service_status_from_record, stage_local_cluster_bootstrap,
         stop_machine, stop_machine_service, up_local_cluster,
+        uses_repo_managed_guest_image_pipeline,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -12020,6 +12171,52 @@ exit 23
         path
     }
 
+    fn serve_vsock_guest_agent_proxy(vsock_path: &Path, backend_socket: &Path) {
+        let listener = UnixListener::bind(vsock_path).expect("vsock proxy should bind");
+        for stream in listener.incoming() {
+            let mut frontend = stream.expect("vsock proxy should accept");
+            let reader_stream = frontend
+                .try_clone()
+                .expect("vsock proxy frontend should clone");
+            let mut handshake_reader = BufReader::new(reader_stream);
+            let mut handshake = String::new();
+            handshake_reader
+                .read_line(&mut handshake)
+                .expect("vsock proxy handshake should read");
+            assert_eq!(handshake, "CONNECT 7000\n");
+            frontend
+                .write_all(b"OK\n")
+                .expect("vsock proxy should acknowledge handshake");
+            frontend
+                .flush()
+                .expect("vsock proxy handshake should flush");
+
+            let mut frontend_reader = handshake_reader.into_inner();
+            let mut frontend_writer = frontend;
+            let mut backend_reader = std::os::unix::net::UnixStream::connect(backend_socket)
+                .expect("vsock proxy backend should connect");
+            let mut backend_writer = backend_reader
+                .try_clone()
+                .expect("vsock proxy backend should clone");
+
+            let frontend_to_backend = thread::spawn(move || {
+                let _ = std::io::copy(&mut frontend_reader, &mut backend_writer);
+                let _ = backend_writer.shutdown(Shutdown::Write);
+            });
+            let backend_to_frontend = thread::spawn(move || {
+                let _ = std::io::copy(&mut backend_reader, &mut frontend_writer);
+                let _ = frontend_writer.shutdown(Shutdown::Write);
+            });
+
+            frontend_to_backend
+                .join()
+                .expect("vsock proxy upload thread should complete");
+            backend_to_frontend
+                .join()
+                .expect("vsock proxy download thread should complete");
+        }
+    }
+
     fn write_fake_standard_firecracker_artifacts(config: &mut PortConfig, root: &Path) {
         let kernel_path = root.join("standard-vmlinux");
         let guest_path = root.join("standard-rootfs.ext4");
@@ -12677,6 +12874,21 @@ exec sleep 30
                 .expect("guest image validate script should resolve"),
             root.join("scripts/artifacts/validate-guest-image.sh")
         );
+    }
+
+    #[test]
+    fn repo_managed_guest_image_pipeline_detection_covers_relative_and_absolute_paths() {
+        let root = repo_root().expect("repo root should resolve");
+
+        assert!(uses_repo_managed_guest_image_pipeline(Path::new(
+            "artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4"
+        )));
+        assert!(uses_repo_managed_guest_image_pipeline(&root.join(
+            "artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4"
+        )));
+        assert!(!uses_repo_managed_guest_image_pipeline(Path::new(
+            "/tmp/custom-rootfs.ext4"
+        )));
     }
 
     #[test]
@@ -17094,13 +17306,20 @@ exec sleep 30
         let _path_guard = ScopedPathEnv::prepend(tempdir.path());
 
         let runtime_dir = runtime_root.join("demo");
-        let guest_socket = runtime_dir.join("guest-agent.sock");
+        let paths = RuntimePaths::for_machine(&runtime_root, "demo");
+        let backend_socket = tempdir.path().join("demo-guest-agent.sock");
         let guest_root_for_thread = guest_root.clone();
+        thread::spawn(move || {
+            serve_guest_agent(&backend_socket, guest_root_for_thread)
+                .expect("guest agent should serve");
+        });
+
+        let backend_socket = tempdir.path().join("demo-guest-agent.sock");
+        let vsock_path = paths.vsock_path.clone();
         thread::spawn(move || {
             for _ in 0..200 {
                 if runtime_dir.exists() {
-                    serve_guest_agent(&guest_socket, guest_root_for_thread)
-                        .expect("guest agent should serve");
+                    serve_vsock_guest_agent_proxy(&vsock_path, &backend_socket);
                     return;
                 }
                 thread::sleep(Duration::from_millis(20));

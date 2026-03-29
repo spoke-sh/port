@@ -578,7 +578,7 @@ binary = "examples/bootstrap/demo-k3s/k3s"
 
 [clusters.demo.bootstrap.guest_profile]
 name = "kube-ready"
-required_commands = ["sh", "install", "ln", "chmod"]
+required_commands = ["sh", "install", "ln", "chmod", "dirname"]
 
 [clusters.demo.lifecycle]
 health_command = [

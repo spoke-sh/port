@@ -42,10 +42,22 @@ for tool in debugfs e2fsck; do
   fi
 done
 
+require_debugfs_path() {
+  local path="$1"
+  local output
+  output="$(debugfs -R "stat $path" "$guest_image_path" 2>&1 || true)"
+  if ! printf '%s\n' "$output" | grep -q 'Inode:'; then
+    echo "guest image is missing required path: $path" >&2
+    exit 1
+  fi
+}
+
 e2fsck -fn "$guest_image_path" >/dev/null
-debugfs -R 'stat /init' "$guest_image_path" >/dev/null 2>&1
-debugfs -R 'stat /bin/busybox' "$guest_image_path" >/dev/null 2>&1
-debugfs -R 'stat /usr/bin/port-guest-agent' "$guest_image_path" >/dev/null 2>&1
+require_debugfs_path /init
+require_debugfs_path /bin/busybox
+require_debugfs_path /bin/dirname
+require_debugfs_path /bin/install
+require_debugfs_path /usr/bin/port-guest-agent
 if [[ "$(debugfs -R 'cat /etc/port-guest-architecture' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" != "$expected_architecture" ]]; then
   echo "guest image architecture marker does not match $expected_architecture" >&2
   exit 1

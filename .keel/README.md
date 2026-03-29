@@ -124,7 +124,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Boot Live Local Cluster And Fix Packaged Guest Validation](epics/VFH7YspJx/voyages/VFH7t3cG9/) | planned |
+| [Boot Live Local Cluster And Fix Packaged Guest Validation](epics/VFH7YspJx/voyages/VFH7t3cG9/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
