@@ -1,4 +1,12 @@
 #!/bin/sh
 set -eu
 
+if [ "$#" -ge 4 ] && [ "$1" = "kubectl" ] && [ "$2" = "get" ] && [ "$3" = "nodes" ]; then
+  cat <<'EOF'
+NAME   STATUS   ROLES                  AGE   VERSION
+demo   Ready    control-plane,master   1m    v1.32.2+k3s1
+EOF
+  exit 0
+fi
+
 printf 'demo-k3s-stub %s\n' "$*"

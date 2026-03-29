@@ -48,6 +48,25 @@ fn spawn_guest_agent(socket: &Path, root: &Path) {
     );
 }
 
+fn spawn_guest_agent_after_runtime_dir(runtime_root: &Path, machine: &str, root: &Path) {
+    let runtime_dir = runtime_root.join(machine);
+    let socket = runtime_socket(runtime_root, machine);
+    let root = root.to_path_buf();
+    thread::spawn(move || {
+        for _ in 0..200 {
+            if runtime_dir.exists() {
+                spawn_guest_agent(&socket, &root);
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!(
+            "runtime dir '{}' did not appear in time for guest agent startup",
+            runtime_dir.display()
+        );
+    });
+}
+
 fn runtime_socket(runtime_root: &Path, machine: &str) -> PathBuf {
     runtime_root.join(machine).join("guest-agent.sock")
 }
@@ -756,6 +775,12 @@ fn cli_cluster_list_and_show_surface_local_contract() {
     assert!(show_stdout.contains("binary: examples/bootstrap/demo-k3s/k3s"));
     assert!(show_stdout.contains("guest profile: kube-ready"));
     assert!(show_stdout.contains("required commands: sh install ln chmod"));
+    assert!(
+        show_stdout
+            .contains("health command: opt/port/clusters/demo/bin/k3s kubectl get nodes -o wide")
+    );
+    assert!(show_stdout.contains("kubeconfig path: /etc/rancher/k3s/k3s.yaml"));
+    assert!(show_stdout.contains("api forward target: 127.0.0.1:6443"));
     assert!(show_stdout.contains("boundary: single-node local K3s only in this slice"));
 }
 
@@ -805,6 +830,154 @@ fn cli_cluster_stage_stages_offline_bootstrap_kit_without_live_fetch() {
     assert_eq!(
         fs::read_link(staged_root.join("bin/kubectl")).expect("installed kubectl link should read"),
         PathBuf::from("k3s")
+    );
+}
+
+#[test]
+fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
+    let temp = tempdir().expect("tempdir should exist");
+    let guest_root = temp.path().join("guest-root");
+    let runtime_root = temp.path().join("runtime");
+    let config_path = temp.path().join("port.toml");
+    fs::create_dir_all(&guest_root).expect("guest root should exist");
+
+    let mut config = PortConfig::sample();
+    write_fake_standard_firecracker_artifacts(&mut config, temp.path());
+    write_config(&config_path, &config);
+    write_fake_firecracker_binary(temp.path(), "firecracker");
+    let path_env = prepend_path_env(temp.path());
+
+    spawn_guest_agent_after_runtime_dir(&runtime_root, "demo", &guest_root);
+
+    let up = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("up")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("cluster up command should run");
+    assert!(up.status.success(), "{up:?}");
+    let up_stdout = String::from_utf8_lossy(&up.stdout);
+    assert!(up_stdout.contains("cluster: demo"), "{up_stdout}");
+    assert!(up_stdout.contains("launch action: launched"), "{up_stdout}");
+    assert!(up_stdout.contains("readiness: ready"), "{up_stdout}");
+    assert!(up_stdout.contains("health output:"), "{up_stdout}");
+    assert!(up_stdout.contains("NAME   STATUS"), "{up_stdout}");
+    assert!(
+        up_stdout.contains(
+            "Port owns machine launch, guest bootstrap, node-health confirmation, and kubeconfig handoff"
+        ),
+        "{up_stdout}"
+    );
+
+    let status = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("status")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("cluster status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("readiness: ready"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("kubeconfig available: true"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("api forward target: 127.0.0.1:6443"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains(
+            "kubeconfig surface: port cluster kubeconfig --cluster demo --runtime-root <runtime-root>"
+        ),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("Downstream GitOps/bootstrap convergence remains separate work."),
+        "{status_stdout}"
+    );
+
+    let kubeconfig = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("kubeconfig")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("cluster kubeconfig command should run");
+    assert!(kubeconfig.status.success(), "{kubeconfig:?}");
+    let kubeconfig_stdout = String::from_utf8_lossy(&kubeconfig.stdout);
+    assert!(
+        kubeconfig_stdout.contains("forward name: cluster-demo-api"),
+        "{kubeconfig_stdout}"
+    );
+    assert!(
+        kubeconfig_stdout.contains("forward action: started"),
+        "{kubeconfig_stdout}"
+    );
+    assert!(
+        kubeconfig_stdout.contains("forward target: 127.0.0.1:6443"),
+        "{kubeconfig_stdout}"
+    );
+    assert!(
+        kubeconfig_stdout.contains("kubeconfig:"),
+        "{kubeconfig_stdout}"
+    );
+    assert!(
+        kubeconfig_stdout.contains("server: https://127.0.0.1:"),
+        "{kubeconfig_stdout}"
+    );
+
+    let forward_manifest = runtime_root
+        .join("demo")
+        .join("forwards")
+        .join("cluster-demo-api.json");
+    assert!(forward_manifest.exists(), "forward manifest should exist");
+
+    let down = Command::new(port_bin())
+        .env("PATH", &path_env)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("down")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(&runtime_root)
+        .output()
+        .expect("cluster down command should run");
+    assert!(down.status.success(), "{down:?}");
+    let down_stdout = String::from_utf8_lossy(&down.stdout);
+    assert!(
+        down_stdout.contains("forward cleanup: cluster-demo-api stopped"),
+        "{down_stdout}"
+    );
+    assert!(
+        down_stdout.contains("current state: stopped"),
+        "{down_stdout}"
+    );
+    assert!(
+        !forward_manifest.exists(),
+        "forward manifest should be removed during cluster down"
     );
 }
 

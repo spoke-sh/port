@@ -402,6 +402,18 @@ impl PortConfig {
                         ],
                     },
                 },
+                lifecycle: ClusterLifecycleSpec {
+                    health_command: vec![
+                        String::from("opt/port/clusters/demo/bin/k3s"),
+                        String::from("kubectl"),
+                        String::from("get"),
+                        String::from("nodes"),
+                        String::from("-o"),
+                        String::from("wide"),
+                    ],
+                    kubeconfig_path: PathBuf::from("/etc/rancher/k3s/k3s.yaml"),
+                    api_forward_target: String::from("127.0.0.1:6443"),
+                },
             },
         )]);
 
@@ -1887,6 +1899,7 @@ pub struct ClusterSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     pub bootstrap: ClusterBootstrapSpec,
+    pub lifecycle: ClusterLifecycleSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1902,6 +1915,14 @@ pub struct ClusterGuestProfileSpec {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterLifecycleSpec {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub health_command: Vec<String>,
+    pub kubeconfig_path: PathBuf,
+    pub api_forward_target: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -3238,6 +3259,36 @@ fn validate_cluster(
             cluster_name, cluster.bootstrap.guest_profile.name
         )));
     }
+    if cluster.lifecycle.health_command.is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' lifecycle must declare a non-empty health_command",
+            cluster_name
+        )));
+    }
+    if cluster
+        .lifecycle
+        .health_command
+        .iter()
+        .any(|part| part.trim().is_empty())
+    {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' lifecycle health_command must not contain empty values",
+            cluster_name
+        )));
+    }
+    if !cluster.lifecycle.kubeconfig_path.is_absolute() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' lifecycle kubeconfig_path '{}' must be an absolute guest path",
+            cluster_name,
+            cluster.lifecycle.kubeconfig_path.display()
+        )));
+    }
+    if cluster.lifecycle.api_forward_target.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' lifecycle api_forward_target must declare a non-empty guest endpoint",
+            cluster_name
+        )));
+    }
 
     let machine = config.machines.get(&cluster.machine).ok_or_else(|| {
         ValidationError::new(format!(
@@ -3689,15 +3740,16 @@ mod tests {
     use super::{
         ArtifactReference, ArtifactSelector, ArtifactStore, AvfConsoleTransport,
         AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ClusterBootstrapSpec,
-        ClusterFlavor, ClusterGuestProfileSpec, ClusterProvider, ClusterSpec, ExecutionSubstrate,
-        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
-        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
-        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy, K3sClusterSpec,
-        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
-        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
-        OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
-        PvmLaneDecision, ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy,
-        ServiceRestartPolicy, hosted_artifact_store_path,
+        ClusterFlavor, ClusterGuestProfileSpec, ClusterLifecycleSpec, ClusterProvider, ClusterSpec,
+        ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection,
+        HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
+        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
+        HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineCommandRoute,
+        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
+        MachineLifecycleOwner, MachineStatusSource, OciRegistryAuth, OciRegistryTransport,
+        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision, ServiceHealthPolicy,
+        ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
+        hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
@@ -3761,6 +3813,9 @@ mod tests {
         assert!(encoded.contains("stage_root = \"/opt/port/clusters/demo\""));
         assert!(encoded.contains("[clusters.demo.bootstrap.guest_profile]"));
         assert!(encoded.contains("name = \"kube-ready\""));
+        assert!(encoded.contains("[clusters.demo.lifecycle]"));
+        assert!(encoded.contains("kubeconfig_path = \"/etc/rancher/k3s/k3s.yaml\""));
+        assert!(encoded.contains("api_forward_target = \"127.0.0.1:6443\""));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.distribution.push]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.variants]"));
@@ -3860,6 +3915,18 @@ mod tests {
                         ],
                     },
                 },
+                lifecycle: ClusterLifecycleSpec {
+                    health_command: vec![
+                        String::from("opt/port/clusters/demo/bin/k3s"),
+                        String::from("kubectl"),
+                        String::from("get"),
+                        String::from("nodes"),
+                        String::from("-o"),
+                        String::from("wide"),
+                    ],
+                    kubeconfig_path: PathBuf::from("/etc/rancher/k3s/k3s.yaml"),
+                    api_forward_target: String::from("127.0.0.1:6443"),
+                },
             }
         );
 
@@ -3874,6 +3941,9 @@ mod tests {
             )
         );
         assert!(encoded.contains("binary = \"examples/bootstrap/demo-k3s/k3s\""));
+        assert!(encoded.contains("health_command = ["));
+        assert!(encoded.contains("kubeconfig_path = \"/etc/rancher/k3s/k3s.yaml\""));
+        assert!(encoded.contains("api_forward_target = \"127.0.0.1:6443\""));
         assert!(encoded.contains("required_commands = ["));
         assert!(encoded.contains("\"sh\""));
         assert!(encoded.contains("\"install\""));
@@ -3951,6 +4021,45 @@ mod tests {
                 .to_string()
                 .contains("must declare at least one required command")
         );
+
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .lifecycle
+            .health_command = Vec::new();
+
+        let error = config
+            .validate()
+            .expect_err("empty lifecycle health command should fail validation");
+        assert!(error.to_string().contains("non-empty health_command"));
+
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .lifecycle
+            .kubeconfig_path = PathBuf::from("etc/rancher/k3s/k3s.yaml");
+
+        let error = config
+            .validate()
+            .expect_err("relative kubeconfig path should fail validation");
+        assert!(error.to_string().contains("must be an absolute guest path"));
+
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .lifecycle
+            .api_forward_target = String::new();
+
+        let error = config
+            .validate()
+            .expect_err("empty api forward target should fail validation");
+        assert!(error.to_string().contains("non-empty guest endpoint"));
     }
 
     #[test]

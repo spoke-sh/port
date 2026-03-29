@@ -112,6 +112,75 @@ pub struct ClusterStageResult {
     pub boundary: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClusterReadinessState {
+    Ready,
+    MachineStopped,
+    GuestUnavailable,
+    Unhealthy,
+}
+
+impl std::fmt::Display for ClusterReadinessState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ready => f.write_str("ready"),
+            Self::MachineStopped => f.write_str("machine-stopped"),
+            Self::GuestUnavailable => f.write_str("guest-unavailable"),
+            Self::Unhealthy => f.write_str("unhealthy"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClusterStatusReport {
+    pub cluster_name: String,
+    pub machine_name: String,
+    pub runtime_dir: PathBuf,
+    pub machine_state: MachineRuntimeState,
+    pub pid: Option<u32>,
+    pub readiness: ClusterReadinessState,
+    pub health_command: Vec<String>,
+    pub health_output: String,
+    pub kubeconfig_path: PathBuf,
+    pub kubeconfig_available: bool,
+    pub api_forward_target: String,
+    pub kubeconfig_surface: String,
+    pub boundary: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClusterUpResult {
+    pub cluster_name: String,
+    pub machine_name: String,
+    pub launch_action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch: Option<LaunchMetadata>,
+    pub stage: ClusterStageResult,
+    pub status: ClusterStatusReport,
+    pub boundary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClusterRawKubeconfig {
+    pub cluster_name: String,
+    pub machine_name: String,
+    pub kubeconfig_path: PathBuf,
+    pub api_forward_target: String,
+    pub kubeconfig_surface: String,
+    pub kubeconfig: String,
+    pub boundary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClusterDownResult {
+    pub cluster_name: String,
+    pub machine_name: String,
+    pub stop: StopResult,
+    pub boundary: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DoctorHostFacts {
     host_os: String,
@@ -547,6 +616,26 @@ pub struct GuestForwardRequest<'a> {
 pub struct ClusterStageRequest<'a> {
     pub cluster_name: &'a str,
     pub runtime_root: &'a Path,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterUpRequest<'a> {
+    pub cluster_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub boot_wait: Duration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterStatusRequest<'a> {
+    pub cluster_name: &'a str,
+    pub runtime_root: &'a Path,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterDownRequest<'a> {
+    pub cluster_name: &'a str,
+    pub runtime_root: &'a Path,
+    pub stop_wait: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1271,6 +1360,263 @@ fn validate_machine_runtime_launch_config(config: &PortConfig) -> Result<()> {
         .map_err(|error| anyhow!("invalid port config: {error}"))
 }
 
+pub fn up_local_cluster(
+    config: &PortConfig,
+    request: ClusterUpRequest<'_>,
+) -> Result<ClusterUpResult> {
+    let cluster = load_local_cluster(config, request.cluster_name)?;
+    let current_status = local_cluster_machine_status(config, &cluster, request.runtime_root)?;
+    let (launch_action, launch) = if current_status.state == MachineRuntimeState::Running {
+        (String::from("already-running"), None)
+    } else {
+        (
+            String::from("launched"),
+            Some(launch_local_machine(
+                config,
+                &LaunchRequest {
+                    machine_name: &cluster.machine,
+                    runtime_root: request.runtime_root,
+                    boot_wait: request.boot_wait,
+                },
+            )?),
+        )
+    };
+
+    wait_for_local_cluster_guest_socket(request.runtime_root, &cluster.machine)?;
+    let stage = stage_local_cluster_bootstrap(
+        config,
+        ClusterStageRequest {
+            cluster_name: request.cluster_name,
+            runtime_root: request.runtime_root,
+        },
+    )?;
+    let status = local_cluster_status(
+        config,
+        ClusterStatusRequest {
+            cluster_name: request.cluster_name,
+            runtime_root: request.runtime_root,
+        },
+    )?;
+    if status.readiness != ClusterReadinessState::Ready {
+        bail!(
+            "cluster '{}' did not become ready after bootstrap: {} {}",
+            request.cluster_name,
+            status.detail,
+            status.boundary
+        );
+    }
+
+    Ok(ClusterUpResult {
+        cluster_name: request.cluster_name.to_string(),
+        machine_name: cluster.machine.clone(),
+        launch_action,
+        launch,
+        stage,
+        status,
+        boundary: cluster_boundary_note().to_string(),
+    })
+}
+
+pub fn local_cluster_status(
+    config: &PortConfig,
+    request: ClusterStatusRequest<'_>,
+) -> Result<ClusterStatusReport> {
+    let cluster = load_local_cluster(config, request.cluster_name)?;
+    let machine_status = local_cluster_machine_status(config, &cluster, request.runtime_root)?;
+    let runtime_dir = machine_status.runtime_dir.clone();
+    if machine_status.state != MachineRuntimeState::Running {
+        return Ok(ClusterStatusReport {
+            cluster_name: request.cluster_name.to_string(),
+            machine_name: cluster.machine.clone(),
+            runtime_dir,
+            machine_state: machine_status.state,
+            pid: machine_status.pid,
+            readiness: ClusterReadinessState::MachineStopped,
+            health_command: cluster.lifecycle.health_command.clone(),
+            health_output: String::new(),
+            kubeconfig_path: cluster.lifecycle.kubeconfig_path.clone(),
+            kubeconfig_available: false,
+            api_forward_target: cluster.lifecycle.api_forward_target.clone(),
+            kubeconfig_surface: cluster_kubeconfig_surface(request.cluster_name),
+            boundary: cluster_boundary_note().to_string(),
+            detail: format!(
+                "machine '{}' is '{}'; Port cluster readiness is not satisfied until the local machine is running. Downstream bootstrap and broader networking remain out of scope.",
+                cluster.machine, machine_status.state
+            ),
+        });
+    }
+
+    if let Err(error) = wait_for_local_cluster_guest_socket(request.runtime_root, &cluster.machine)
+    {
+        return Ok(ClusterStatusReport {
+            cluster_name: request.cluster_name.to_string(),
+            machine_name: cluster.machine.clone(),
+            runtime_dir,
+            machine_state: machine_status.state,
+            pid: machine_status.pid,
+            readiness: ClusterReadinessState::GuestUnavailable,
+            health_command: cluster.lifecycle.health_command.clone(),
+            health_output: String::new(),
+            kubeconfig_path: cluster.lifecycle.kubeconfig_path.clone(),
+            kubeconfig_available: false,
+            api_forward_target: cluster.lifecycle.api_forward_target.clone(),
+            kubeconfig_surface: cluster_kubeconfig_surface(request.cluster_name),
+            boundary: cluster_boundary_note().to_string(),
+            detail: format!(
+                "machine '{}' is running but the guest control path is unavailable: {error}",
+                cluster.machine
+            ),
+        });
+    }
+
+    let health_output = match execute_cluster_exec(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster.machine,
+        cluster.lifecycle.health_command.clone(),
+        "inspect local cluster readiness",
+    ) {
+        Ok(result) => result.stdout.trim_end().to_string(),
+        Err(error) => {
+            return Ok(ClusterStatusReport {
+                cluster_name: request.cluster_name.to_string(),
+                machine_name: cluster.machine.clone(),
+                runtime_dir,
+                machine_state: machine_status.state,
+                pid: machine_status.pid,
+                readiness: ClusterReadinessState::Unhealthy,
+                health_command: cluster.lifecycle.health_command.clone(),
+                health_output: String::new(),
+                kubeconfig_path: cluster.lifecycle.kubeconfig_path.clone(),
+                kubeconfig_available: false,
+                api_forward_target: cluster.lifecycle.api_forward_target.clone(),
+                kubeconfig_surface: cluster_kubeconfig_surface(request.cluster_name),
+                boundary: cluster_boundary_note().to_string(),
+                detail: format!(
+                    "Port launched the local machine but the cluster health command failed: {error}",
+                ),
+            });
+        }
+    };
+
+    let kubeconfig = match read_local_cluster_kubeconfig_raw(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster,
+    ) {
+        Ok(kubeconfig) => kubeconfig,
+        Err(error) => {
+            return Ok(ClusterStatusReport {
+                cluster_name: request.cluster_name.to_string(),
+                machine_name: cluster.machine.clone(),
+                runtime_dir,
+                machine_state: machine_status.state,
+                pid: machine_status.pid,
+                readiness: ClusterReadinessState::Unhealthy,
+                health_command: cluster.lifecycle.health_command.clone(),
+                health_output,
+                kubeconfig_path: cluster.lifecycle.kubeconfig_path.clone(),
+                kubeconfig_available: false,
+                api_forward_target: cluster.lifecycle.api_forward_target.clone(),
+                kubeconfig_surface: cluster_kubeconfig_surface(request.cluster_name),
+                boundary: cluster_boundary_note().to_string(),
+                detail: format!(
+                    "Port confirmed guest-reported node health but could not read kubeconfig '{}': {error}",
+                    cluster.lifecycle.kubeconfig_path.display()
+                ),
+            });
+        }
+    };
+
+    Ok(ClusterStatusReport {
+        cluster_name: request.cluster_name.to_string(),
+        machine_name: cluster.machine.clone(),
+        runtime_dir,
+        machine_state: machine_status.state,
+        pid: machine_status.pid,
+        readiness: ClusterReadinessState::Ready,
+        health_command: cluster.lifecycle.health_command.clone(),
+        health_output,
+        kubeconfig_path: cluster.lifecycle.kubeconfig_path.clone(),
+        kubeconfig_available: !kubeconfig.trim().is_empty(),
+        api_forward_target: cluster.lifecycle.api_forward_target.clone(),
+        kubeconfig_surface: cluster_kubeconfig_surface(request.cluster_name),
+        boundary: cluster_boundary_note().to_string(),
+        detail: String::from(
+            "Port owns machine launch, guest bootstrap, node-health confirmation, and kubeconfig handoff for this first local cluster slice. Downstream GitOps/bootstrap convergence remains separate work.",
+        ),
+    })
+}
+
+pub fn local_cluster_kubeconfig(
+    config: &PortConfig,
+    request: ClusterStatusRequest<'_>,
+) -> Result<ClusterRawKubeconfig> {
+    let cluster = load_local_cluster(config, request.cluster_name)?;
+    let status = local_cluster_status(config, request.clone())?;
+    if status.readiness != ClusterReadinessState::Ready {
+        bail!(
+            "cluster '{}' is not ready for kubeconfig handoff: {} {}",
+            request.cluster_name,
+            status.detail,
+            status.boundary
+        );
+    }
+
+    let kubeconfig = read_local_cluster_kubeconfig_raw(
+        config,
+        request.runtime_root,
+        request.cluster_name,
+        &cluster,
+    )?;
+
+    Ok(ClusterRawKubeconfig {
+        cluster_name: request.cluster_name.to_string(),
+        machine_name: cluster.machine.clone(),
+        kubeconfig_path: cluster.lifecycle.kubeconfig_path.clone(),
+        api_forward_target: cluster.lifecycle.api_forward_target.clone(),
+        kubeconfig_surface: cluster_kubeconfig_surface(request.cluster_name),
+        kubeconfig,
+        boundary: cluster_boundary_note().to_string(),
+    })
+}
+
+pub fn down_local_cluster(
+    config: &PortConfig,
+    request: ClusterDownRequest<'_>,
+) -> Result<ClusterDownResult> {
+    let cluster = load_local_cluster(config, request.cluster_name)?;
+    let paths = RuntimePaths::for_machine(request.runtime_root, &cluster.machine);
+    let stop = if !paths.runtime_dir.exists() {
+        StopResult {
+            machine_name: cluster.machine.clone(),
+            previous_state: MachineRuntimeState::Stopped,
+            current_state: MachineRuntimeState::Stopped,
+            pid: None,
+            control: MachineControlContract::local_runtime_root(),
+            runtime_dir: paths.runtime_dir,
+            attached_volumes: Vec::new(),
+            detail: String::from("cluster machine was already stopped; no runtime state existed"),
+        }
+    } else {
+        stop_machine(
+            config,
+            request.runtime_root,
+            &cluster.machine,
+            request.stop_wait,
+        )?
+    };
+
+    Ok(ClusterDownResult {
+        cluster_name: request.cluster_name.to_string(),
+        machine_name: cluster.machine,
+        stop,
+        boundary: cluster_boundary_note().to_string(),
+    })
+}
+
 pub fn stage_local_cluster_bootstrap(
     config: &PortConfig,
     request: ClusterStageRequest<'_>,
@@ -1522,8 +1868,9 @@ fn cluster_install_command(
 ) -> Vec<String> {
     let install_bin_dir = cluster.bootstrap.stage_root.join("bin");
     let mut script = format!(
-        "set -eu; PORT_K3S_BIN_DIR={} {} server",
+        "set -eu; PORT_K3S_BIN_DIR={} PORT_K3S_KUBECONFIG_PATH={} {} server",
         shell_single_quote(&guest_shell_path(&install_bin_dir)),
+        shell_single_quote(&guest_shell_path(&cluster.lifecycle.kubeconfig_path)),
         shell_single_quote(&guest_shell_path(install_script_destination)),
     );
     for arg in &cluster.args {
@@ -1557,6 +1904,98 @@ fn cluster_install_validation_command(
     ));
 
     vec![String::from("/bin/sh"), String::from("-lc"), script]
+}
+
+fn load_local_cluster(config: &PortConfig, cluster_name: &str) -> Result<ClusterSpec> {
+    config
+        .clusters
+        .get(cluster_name)
+        .cloned()
+        .ok_or_else(|| anyhow!("cluster '{}' not found in config", cluster_name))
+}
+
+fn local_cluster_machine_status(
+    config: &PortConfig,
+    cluster: &ClusterSpec,
+    runtime_root: &Path,
+) -> Result<MachineStatus> {
+    let paths = RuntimePaths::for_machine(runtime_root, &cluster.machine);
+    if !paths.runtime_dir.exists() {
+        return Ok(synthetic_machine_status(
+            &cluster.machine,
+            &paths,
+            MachineControlContract::local_runtime_root(),
+            MachineRuntimeState::Stopped,
+            format!(
+                "cluster machine '{}' has not been launched beneath '{}'",
+                cluster.machine,
+                runtime_root.display()
+            ),
+        ));
+    }
+    machine_status(config, runtime_root, &cluster.machine)
+}
+
+fn read_local_cluster_kubeconfig_raw(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    cluster: &ClusterSpec,
+) -> Result<String> {
+    let output = execute_cluster_exec(
+        config,
+        runtime_root,
+        cluster_name,
+        &cluster.machine,
+        vec![
+            String::from("/bin/sh"),
+            String::from("-lc"),
+            format!(
+                "cat {}",
+                shell_single_quote(&guest_shell_path(&cluster.lifecycle.kubeconfig_path))
+            ),
+        ],
+        "read local cluster kubeconfig",
+    )?
+    .stdout;
+    let kubeconfig = output.trim_end().to_string();
+    if kubeconfig.trim().is_empty() {
+        bail!(
+            "cluster '{}' returned an empty kubeconfig from '{}'",
+            cluster_name,
+            cluster.lifecycle.kubeconfig_path.display()
+        );
+    }
+    Ok(kubeconfig)
+}
+
+fn wait_for_local_cluster_guest_socket(runtime_root: &Path, machine_name: &str) -> Result<()> {
+    const SOCKET_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
+    const SOCKET_WAIT_INTERVAL: Duration = Duration::from_millis(20);
+
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    let started = Instant::now();
+    while started.elapsed() < SOCKET_WAIT_TIMEOUT {
+        if paths.guest_agent_socket.exists() {
+            return Ok(());
+        }
+        thread::sleep(SOCKET_WAIT_INTERVAL);
+    }
+
+    bail!(
+        "guest control socket '{}' did not appear for machine '{}' within {:?}",
+        paths.guest_agent_socket.display(),
+        machine_name,
+        SOCKET_WAIT_TIMEOUT
+    )
+}
+
+fn cluster_boundary_note() -> &'static str {
+    "Port readiness in this slice covers local machine launch, guest bootstrap, guest-reported node visibility, and kubeconfig handoff. Downstream GitOps/bootstrap convergence, richer networking, and multi-node expansion remain follow-on work."
+}
+
+fn cluster_kubeconfig_surface(cluster_name: &str) -> String {
+    format!("port cluster kubeconfig --cluster {cluster_name} --runtime-root <runtime-root>")
 }
 
 fn hosted_k3s_boundary_notes() -> Vec<String> {
@@ -10438,26 +10877,28 @@ mod tests {
 
     use super::{
         ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, CloudHypervisorRuntimeMetadata,
-        ClusterStageRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts,
-        GuestCopyRequest, GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata,
-        LaunchRequest, MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
+        ClusterDownRequest, ClusterReadinessState, ClusterStageRequest, ClusterStatusRequest,
+        ClusterUpRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts, GuestCopyRequest,
+        GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
+        MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
         ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
         ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
         apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
         bootstrap_hosted_k3s_cluster, build_firecracker_config, cloud_hypervisor_api_socket_path,
         cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
         cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
-        copy_guest_file, delete_machine_secret, driver_for_machine, ensure_native_build_lane,
-        execute_guest_operation, hosted_k3s_cluster_access, hosted_k3s_kubeconfig_command,
-        hosted_k3s_visibility_command, hosted_placeholder_runtime_root, launch_local_machine,
-        list_machine_secrets, list_machine_services, list_machines, machine_monitor,
-        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
-        read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
-        resolve_artifact_store_contract, resolve_machine_architecture, select_firecracker_binary,
-        serve_control_plane, serve_node_agent, service_definition_dir, service_runtime_dir,
-        service_status_from_record, stage_local_cluster_bootstrap, stop_machine,
-        stop_machine_service,
+        copy_guest_file, delete_machine_secret, down_local_cluster, driver_for_machine,
+        ensure_native_build_lane, execute_guest_operation, hosted_k3s_cluster_access,
+        hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
+        hosted_placeholder_runtime_root, launch_local_machine, list_machine_secrets,
+        list_machine_services, list_machines, local_cluster_kubeconfig, local_cluster_status,
+        machine_monitor, machine_service_status, machine_status, machine_top, path_check,
+        prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
+        put_machine_secret, read_json_file, read_pid_file, render_hosted_route_context, repo_root,
+        resolve_artifact_metadata, resolve_artifact_store_contract, resolve_machine_architecture,
+        select_firecracker_binary, serve_control_plane, serve_node_agent, service_definition_dir,
+        service_runtime_dir, service_status_from_record, stage_local_cluster_bootstrap,
+        stop_machine, stop_machine_service, up_local_cluster,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -11569,8 +12010,7 @@ exit 23
 
     fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
         let path = root.join(name);
-        fs::write(&path, "#!/usr/bin/env bash\nexec sleep 30\n")
-            .expect("fake firecracker should write");
+        fs::write(&path, "#!/usr/bin/env bash\nsleep 30\n").expect("fake firecracker should write");
         let mut permissions = fs::metadata(&path)
             .expect("fake firecracker metadata should exist")
             .permissions();
@@ -16639,6 +17079,102 @@ exec sleep 30
             fs::read_link(&installed_kubectl).expect("installed kubectl link should read"),
             PathBuf::from("k3s")
         );
+    }
+
+    #[test]
+    fn local_cluster_lifecycle_reports_readiness_and_returns_kubeconfig() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let guest_root = tempdir.path().join("guest-root");
+        let runtime_root = tempdir.path().join("runtime");
+        fs::create_dir_all(&guest_root).expect("guest root should exist");
+
+        let mut config = PortConfig::sample();
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let runtime_dir = runtime_root.join("demo");
+        let guest_socket = runtime_dir.join("guest-agent.sock");
+        let guest_root_for_thread = guest_root.clone();
+        thread::spawn(move || {
+            for _ in 0..200 {
+                if runtime_dir.exists() {
+                    serve_guest_agent(&guest_socket, guest_root_for_thread)
+                        .expect("guest agent should serve");
+                    return;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            panic!("cluster runtime dir did not appear in time");
+        });
+
+        let up = up_local_cluster(
+            &config,
+            ClusterUpRequest {
+                cluster_name: "demo",
+                runtime_root: &runtime_root,
+                boot_wait: Duration::from_secs(1),
+            },
+        )
+        .expect("local cluster up should succeed");
+        assert_eq!(up.cluster_name, "demo");
+        assert_eq!(up.machine_name, "demo");
+        assert_eq!(up.launch_action, "launched");
+        assert_eq!(up.status.readiness, ClusterReadinessState::Ready);
+        assert!(up.status.health_output.contains("NAME   STATUS"));
+        assert!(up.status.kubeconfig_available);
+        assert!(
+            up.status
+                .detail
+                .contains("Downstream GitOps/bootstrap convergence remains separate work.")
+        );
+
+        let status = local_cluster_status(
+            &config,
+            ClusterStatusRequest {
+                cluster_name: "demo",
+                runtime_root: &runtime_root,
+            },
+        )
+        .expect("local cluster status should succeed");
+        assert_eq!(status.readiness, ClusterReadinessState::Ready);
+        assert_eq!(status.machine_state, MachineRuntimeState::Running);
+        assert!(status.health_output.contains("NAME   STATUS"));
+        assert_eq!(status.api_forward_target, "127.0.0.1:6443");
+
+        let kubeconfig = local_cluster_kubeconfig(
+            &config,
+            ClusterStatusRequest {
+                cluster_name: "demo",
+                runtime_root: &runtime_root,
+            },
+        )
+        .expect("local cluster kubeconfig should succeed");
+        assert_eq!(kubeconfig.cluster_name, "demo");
+        assert_eq!(kubeconfig.machine_name, "demo");
+        assert_eq!(kubeconfig.api_forward_target, "127.0.0.1:6443");
+        assert!(
+            kubeconfig
+                .kubeconfig
+                .contains("server: https://127.0.0.1:6443")
+        );
+        assert!(
+            guest_root.join("etc/rancher/k3s/k3s.yaml").exists(),
+            "offline install should materialize kubeconfig in the guest root"
+        );
+
+        let down = down_local_cluster(
+            &config,
+            ClusterDownRequest {
+                cluster_name: "demo",
+                runtime_root: &runtime_root,
+                stop_wait: Duration::from_secs(1),
+            },
+        )
+        .expect("local cluster down should succeed");
+        assert_eq!(down.cluster_name, "demo");
+        assert_eq!(down.machine_name, "demo");
+        assert_eq!(down.stop.current_state, MachineRuntimeState::Stopped);
     }
 
     #[test]

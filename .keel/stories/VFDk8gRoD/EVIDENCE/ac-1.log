@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T22:03:17.932822819-07:00
+mode: manual
+---
+Ran cargo run -q -p port-cli with a temp local config plus a live port-guest-agent harness for cluster up, status, kubeconfig, and down. Port launched the local machine, reported readiness=ready, returned a kubeconfig rewritten to a Port-owned forwarded API endpoint, and cleaned up the deterministic cluster-demo-api forward during cluster down without any infra-side forwarding or kubeconfig edits.

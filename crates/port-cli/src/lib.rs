@@ -17,7 +17,8 @@ use port_model::{
     PortConfig, ProtectionMode, PvmHostKitPackage,
 };
 use port_runtime::{
-    ArtifactRequest, ClusterStageRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest,
+    ArtifactRequest, ClusterDownRequest, ClusterStageRequest, ClusterStatusRequest,
+    ClusterUpRequest, ControlPlaneServeRequest, DoctorReport, GuestCopyRequest,
     GuestForwardRequest, GuestRequest, HostedNodeBinding, HostedPvmNodePrepareRequest,
     LaunchRequest, NodeAgentServeRequest, ServiceHealthPolicy, ServiceHealthcheck, ServicePolicy,
     ServiceRestartPolicy,
@@ -210,6 +211,46 @@ pub enum ClusterCommand {
         cluster: String,
         #[arg(long, default_value = "runtime")]
         runtime_root: PathBuf,
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    #[command(about = "Launch and bootstrap one named local cluster")]
+    Up {
+        #[arg(long)]
+        cluster: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        boot_wait_secs: u64,
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    #[command(about = "Report Port-owned readiness for one named local cluster")]
+    Status {
+        #[arg(long)]
+        cluster: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    #[command(about = "Return a usable kubeconfig for one named local cluster")]
+    Kubeconfig {
+        #[arg(long)]
+        cluster: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    #[command(about = "Stop one named local cluster and clean up its API forward")]
+    Down {
+        #[arg(long)]
+        cluster: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        stop_wait_secs: u64,
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
@@ -640,7 +681,30 @@ struct RenderedClusterRecord {
     binary: String,
     guest_profile: String,
     required_commands: Vec<String>,
+    health_command: Vec<String>,
+    kubeconfig_path: String,
+    api_forward_target: String,
     boundary: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RenderedClusterKubeconfig {
+    cluster_name: String,
+    machine_name: String,
+    kubeconfig_path: String,
+    kubeconfig_surface: String,
+    forward_name: String,
+    forward_action: String,
+    forward_listen: String,
+    forward_target: String,
+    boundary: String,
+    kubeconfig: String,
+}
+
+#[derive(Debug)]
+struct EnsuredDetachedForward {
+    manifest: DetachedForwardManifest,
+    action: &'static str,
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -651,8 +715,9 @@ pub fn run(cli: Cli) -> Result<()> {
             run_artifacts(command, &config)
         }
         Command::Cluster(command) => {
-            let config = load_config(cli.config)?;
-            run_cluster(command, &config)
+            let config_path = cli.config.clone();
+            let config = load_config(config_path.clone())?;
+            run_cluster(command, config_path.as_deref(), &config)
         }
         Command::Machine(command) => run_machine(command, cli.config),
         Command::Guest(command) => {
@@ -750,7 +815,11 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn run_cluster(command: ClusterCommand, config: &PortConfig) -> Result<()> {
+fn run_cluster(
+    command: ClusterCommand,
+    config_path: Option<&Path>,
+    config: &PortConfig,
+) -> Result<()> {
     match command {
         ClusterCommand::List { format } => {
             let clusters = config
@@ -819,6 +888,12 @@ fn run_cluster(command: ClusterCommand, config: &PortConfig) -> Result<()> {
                         "required commands: {}",
                         rendered.required_commands.join(" ")
                     );
+                    println!(
+                        "health command: {}",
+                        render_shell_command(&rendered.health_command)
+                    );
+                    println!("kubeconfig path: {}", rendered.kubeconfig_path);
+                    println!("api forward target: {}", rendered.api_forward_target);
                     println!("boundary: {}", rendered.boundary);
                     Ok(())
                 }
@@ -892,6 +967,201 @@ fn run_cluster(command: ClusterCommand, config: &PortConfig) -> Result<()> {
                 }
             }
         }
+        ClusterCommand::Up {
+            cluster,
+            runtime_root,
+            boot_wait_secs,
+            format,
+        } => {
+            let result = port_runtime::up_local_cluster(
+                config,
+                ClusterUpRequest {
+                    cluster_name: &cluster,
+                    runtime_root: &runtime_root,
+                    boot_wait: Duration::from_secs(boot_wait_secs),
+                },
+            )?;
+            match format {
+                OutputFormat::Text => {
+                    println!("cluster: {}", result.cluster_name);
+                    println!("machine: {}", result.machine_name);
+                    println!("launch action: {}", result.launch_action);
+                    if let Some(launch) = &result.launch {
+                        println!("machine pid: {}", launch.pid);
+                        println!("runtime dir: {}", launch.runtime_dir.display());
+                    }
+                    println!("stage root: {}", result.stage.stage_root.display());
+                    println!("guest profile: {}", result.stage.guest_profile);
+                    print_cluster_status_report(&result.status);
+                    println!("boundary: {}", result.boundary);
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&result)
+                            .context("failed to encode cluster up result")?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        ClusterCommand::Status {
+            cluster,
+            runtime_root,
+            format,
+        } => {
+            let result = port_runtime::local_cluster_status(
+                config,
+                ClusterStatusRequest {
+                    cluster_name: &cluster,
+                    runtime_root: &runtime_root,
+                },
+            )?;
+            match format {
+                OutputFormat::Text => {
+                    print_cluster_status_report(&result);
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&result)
+                            .context("failed to encode cluster status result")?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        ClusterCommand::Kubeconfig {
+            cluster,
+            runtime_root,
+            format,
+        } => {
+            let result = port_runtime::local_cluster_kubeconfig(
+                config,
+                ClusterStatusRequest {
+                    cluster_name: &cluster,
+                    runtime_root: &runtime_root,
+                },
+            )?;
+            let forward_name = cluster_forward_name(&cluster);
+            let forward = ensure_detached_forward(
+                config_path,
+                config,
+                &result.machine_name,
+                &runtime_root,
+                &result.api_forward_target,
+                &forward_name,
+            )?;
+            let rewritten = rewrite_kubeconfig_server(
+                &result.kubeconfig,
+                &format!("https://{}", forward.manifest.listen),
+            )?;
+            let rendered = RenderedClusterKubeconfig {
+                cluster_name: result.cluster_name,
+                machine_name: result.machine_name,
+                kubeconfig_path: result.kubeconfig_path.display().to_string(),
+                kubeconfig_surface: result.kubeconfig_surface,
+                forward_name: forward.manifest.name,
+                forward_action: forward.action.to_string(),
+                forward_listen: forward.manifest.listen,
+                forward_target: forward.manifest.target,
+                boundary: result.boundary,
+                kubeconfig: rewritten,
+            };
+            match format {
+                OutputFormat::Text => {
+                    println!("cluster: {}", rendered.cluster_name);
+                    println!("machine: {}", rendered.machine_name);
+                    println!("kubeconfig path: {}", rendered.kubeconfig_path);
+                    println!("kubeconfig surface: {}", rendered.kubeconfig_surface);
+                    println!("forward name: {}", rendered.forward_name);
+                    println!("forward action: {}", rendered.forward_action);
+                    println!("forward listen: {}", rendered.forward_listen);
+                    println!("forward target: {}", rendered.forward_target);
+                    println!("boundary: {}", rendered.boundary);
+                    println!("kubeconfig:");
+                    print!("{}", rendered.kubeconfig);
+                    if !rendered.kubeconfig.ends_with('\n') {
+                        println!();
+                    }
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&rendered)
+                            .context("failed to encode cluster kubeconfig result")?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        ClusterCommand::Down {
+            cluster,
+            runtime_root,
+            stop_wait_secs,
+            format,
+        } => {
+            let cluster_record = config
+                .clusters
+                .get(&cluster)
+                .with_context(|| format!("cluster '{}' not found in config", cluster))?;
+            let forward_name = cluster_forward_name(&cluster);
+            let forward_cleanup = stop_detached_forward_if_present(
+                config,
+                &cluster_record.machine,
+                &runtime_root,
+                &forward_name,
+            )?;
+            let result = port_runtime::down_local_cluster(
+                config,
+                ClusterDownRequest {
+                    cluster_name: &cluster,
+                    runtime_root: &runtime_root,
+                    stop_wait: Duration::from_secs(stop_wait_secs),
+                },
+            )?;
+            let forward_cleanup = forward_cleanup.map_or_else(
+                || format!("{forward_name} not-present"),
+                |manifest| format!("{} stopped", manifest.name),
+            );
+            match format {
+                OutputFormat::Text => {
+                    println!("cluster: {}", result.cluster_name);
+                    println!("machine: {}", result.machine_name);
+                    println!("forward cleanup: {}", forward_cleanup);
+                    println!("previous state: {}", result.stop.previous_state);
+                    println!("current state: {}", result.stop.current_state);
+                    println!(
+                        "machine pid: {}",
+                        result
+                            .stop
+                            .pid
+                            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+                    );
+                    println!("runtime dir: {}", result.stop.runtime_dir.display());
+                    println!("detail: {}", result.stop.detail);
+                    println!("boundary: {}", result.boundary);
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "cluster_name": result.cluster_name,
+                            "machine_name": result.machine_name,
+                            "forward_cleanup": forward_cleanup,
+                            "stop": result.stop,
+                            "boundary": result.boundary,
+                        }))
+                        .context("failed to encode cluster down result")?
+                    );
+                    Ok(())
+                }
+            }
+        }
     }
 }
 
@@ -909,10 +1179,46 @@ fn render_cluster_record(name: &str, cluster: &port_model::ClusterSpec) -> Rende
         binary: cluster.bootstrap.binary.display().to_string(),
         guest_profile: cluster.bootstrap.guest_profile.name.clone(),
         required_commands: cluster.bootstrap.guest_profile.required_commands.clone(),
+        health_command: cluster.lifecycle.health_command.clone(),
+        kubeconfig_path: cluster.lifecycle.kubeconfig_path.display().to_string(),
+        api_forward_target: cluster.lifecycle.api_forward_target.clone(),
         boundary: String::from(
             "single-node local K3s only in this slice; multi-node, hosted, and aws lanes remain follow-on work",
         ),
     }
+}
+
+fn print_cluster_status_report(report: &port_runtime::ClusterStatusReport) {
+    println!("cluster: {}", report.cluster_name);
+    println!("machine: {}", report.machine_name);
+    println!("runtime dir: {}", report.runtime_dir.display());
+    println!("machine state: {}", report.machine_state);
+    println!(
+        "pid: {}",
+        report
+            .pid
+            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+    );
+    println!("readiness: {}", report.readiness);
+    println!(
+        "health command: {}",
+        render_shell_command(&report.health_command)
+    );
+    if report.health_output.is_empty() {
+        println!("health output: (none)");
+    } else {
+        println!("health output:");
+        print!("{}", report.health_output);
+        if !report.health_output.ends_with('\n') {
+            println!();
+        }
+    }
+    println!("kubeconfig path: {}", report.kubeconfig_path.display());
+    println!("kubeconfig available: {}", report.kubeconfig_available);
+    println!("api forward target: {}", report.api_forward_target);
+    println!("kubeconfig surface: {}", report.kubeconfig_surface);
+    println!("boundary: {}", report.boundary);
+    println!("detail: {}", report.detail);
 }
 
 fn render_shell_command(command: &[String]) -> String {
@@ -2337,6 +2643,75 @@ fn start_detached_forward(
     Ok(manifest)
 }
 
+fn cluster_forward_name(cluster_name: &str) -> String {
+    format!("cluster-{cluster_name}-api")
+}
+
+fn detached_forward_manifest_path(
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    name: &str,
+) -> Result<PathBuf> {
+    Ok(
+        port_runtime::guest_forward_state_dir(config, machine, runtime_root)?
+            .join(format!("{name}.json")),
+    )
+}
+
+fn load_detached_forward_manifest(
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    name: &str,
+) -> Result<Option<DetachedForwardManifest>> {
+    let manifest_path = detached_forward_manifest_path(config, machine, runtime_root, name)?;
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&manifest_path)
+        .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
+    let manifest: DetachedForwardManifest = serde_json::from_slice(&bytes)
+        .with_context(|| format!("failed to parse '{}'", manifest_path.display()))?;
+    Ok(Some(manifest))
+}
+
+fn ensure_detached_forward(
+    config_path: Option<&Path>,
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    target: &str,
+    name: &str,
+) -> Result<EnsuredDetachedForward> {
+    let existing = load_detached_forward_manifest(config, machine, runtime_root, name)?;
+    if let Some(manifest) = existing.as_ref() {
+        if pid_is_live(manifest.pid) && manifest.target == target {
+            return Ok(EnsuredDetachedForward {
+                manifest: manifest.clone(),
+                action: "reused",
+            });
+        }
+    }
+
+    let action = if existing.is_some() {
+        stop_detached_forward_if_present(config, machine, runtime_root, name)?;
+        "restarted"
+    } else {
+        "started"
+    };
+    let manifest = start_detached_forward(
+        config_path,
+        config,
+        machine,
+        runtime_root,
+        "127.0.0.1:0",
+        target,
+        Some(name),
+    )?;
+    Ok(EnsuredDetachedForward { manifest, action })
+}
+
 fn wait_for_detached_forward_manifest(
     manifest_path: &Path,
     fallback: DetachedForwardManifest,
@@ -2358,6 +2733,31 @@ fn wait_for_detached_forward_manifest(
     }
 
     Ok(fallback)
+}
+
+fn remove_detached_forward_resources(
+    manifest_path: &Path,
+    manifest: &DetachedForwardManifest,
+) -> Result<()> {
+    if pid_is_live(manifest.pid) {
+        kill_pid(manifest.pid)?;
+    }
+    if let Some(socket_path) = manifest.listen.strip_prefix("unix:") {
+        let socket_path = Path::new(socket_path);
+        if socket_path.exists() {
+            fs::remove_file(socket_path).with_context(|| {
+                format!(
+                    "failed to remove detached forward socket '{}'",
+                    socket_path.display()
+                )
+            })?;
+        }
+    }
+    if manifest_path.exists() {
+        fs::remove_file(manifest_path)
+            .with_context(|| format!("failed to remove '{}'", manifest_path.display()))?;
+    }
+    Ok(())
 }
 
 fn list_detached_forwards(config: &PortConfig, machine: &str, runtime_root: &Path) -> Result<()> {
@@ -2412,35 +2812,31 @@ fn stop_detached_forward(
     runtime_root: &Path,
     name: &str,
 ) -> Result<()> {
-    let state_dir = port_runtime::guest_forward_state_dir(config, machine, runtime_root)?;
-    let manifest_path = state_dir.join(format!("{name}.json"));
-    let bytes = fs::read(&manifest_path)
-        .with_context(|| format!("failed to read '{}'", manifest_path.display()))?;
-    let manifest: DetachedForwardManifest = serde_json::from_slice(&bytes)
-        .with_context(|| format!("failed to parse '{}'", manifest_path.display()))?;
-
-    if pid_is_live(manifest.pid) {
-        kill_pid(manifest.pid)?;
-    }
-    if let Some(socket_path) = manifest.listen.strip_prefix("unix:") {
-        let socket_path = Path::new(socket_path);
-        if socket_path.exists() {
-            fs::remove_file(socket_path).with_context(|| {
-                format!(
-                    "failed to remove detached forward socket '{}'",
-                    socket_path.display()
-                )
-            })?;
-        }
-    }
-    fs::remove_file(&manifest_path)
-        .with_context(|| format!("failed to remove '{}'", manifest_path.display()))?;
+    let manifest = stop_detached_forward_if_present(config, machine, runtime_root, name)?
+        .with_context(|| {
+            format!("detached forward '{name}' was not found for machine '{machine}'")
+        })?;
 
     println!("forward name: {}", manifest.name);
     println!("forward lifecycle: detached");
     println!("forward state: stopped");
     println!("forward pid: {}", manifest.pid);
     Ok(())
+}
+
+fn stop_detached_forward_if_present(
+    config: &PortConfig,
+    machine: &str,
+    runtime_root: &Path,
+    name: &str,
+) -> Result<Option<DetachedForwardManifest>> {
+    let manifest_path = detached_forward_manifest_path(config, machine, runtime_root, name)?;
+    let Some(manifest) = load_detached_forward_manifest(config, machine, runtime_root, name)?
+    else {
+        return Ok(None);
+    };
+    remove_detached_forward_resources(&manifest_path, &manifest)?;
+    Ok(Some(manifest))
 }
 
 fn run_forward_daemon(
@@ -2514,6 +2910,29 @@ fn unix_timestamp() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+fn rewrite_kubeconfig_server(kubeconfig: &str, server: &str) -> Result<String> {
+    let mut rewritten = Vec::new();
+    let mut replaced = false;
+    for line in kubeconfig.lines() {
+        if !replaced && line.trim_start().starts_with("server: ") {
+            let indent_len = line.len() - line.trim_start().len();
+            let indent = &line[..indent_len];
+            rewritten.push(format!("{indent}server: {server}"));
+            replaced = true;
+        } else {
+            rewritten.push(line.to_string());
+        }
+    }
+    if !replaced {
+        bail!("kubeconfig does not contain a server field to rewrite");
+    }
+    let mut output = rewritten.join("\n");
+    if kubeconfig.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
 }
 
 fn load_config(path: Option<PathBuf>) -> Result<PortConfig> {
@@ -2913,6 +3332,106 @@ mod tests {
                 assert_eq!(cluster, "demo");
                 assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
                 assert_eq!(format, super::OutputFormat::Json);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let up = Cli::parse_from([
+            "port",
+            "cluster",
+            "up",
+            "--cluster",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--boot-wait-secs",
+            "9",
+            "--format",
+            "json",
+        ]);
+        match up.command {
+            Command::Cluster(ClusterCommand::Up {
+                cluster,
+                runtime_root,
+                boot_wait_secs,
+                format,
+            }) => {
+                assert_eq!(cluster, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(boot_wait_secs, 9);
+                assert_eq!(format, super::OutputFormat::Json);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let status = Cli::parse_from([
+            "port",
+            "cluster",
+            "status",
+            "--cluster",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+        ]);
+        match status.command {
+            Command::Cluster(ClusterCommand::Status {
+                cluster,
+                runtime_root,
+                format,
+            }) => {
+                assert_eq!(cluster, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(format, super::OutputFormat::Text);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let kubeconfig = Cli::parse_from([
+            "port",
+            "cluster",
+            "kubeconfig",
+            "--cluster",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--format",
+            "json",
+        ]);
+        match kubeconfig.command {
+            Command::Cluster(ClusterCommand::Kubeconfig {
+                cluster,
+                runtime_root,
+                format,
+            }) => {
+                assert_eq!(cluster, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(format, super::OutputFormat::Json);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let down = Cli::parse_from([
+            "port",
+            "cluster",
+            "down",
+            "--cluster",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--stop-wait-secs",
+            "5",
+        ]);
+        match down.command {
+            Command::Cluster(ClusterCommand::Down {
+                cluster,
+                runtime_root,
+                stop_wait_secs,
+                format,
+            }) => {
+                assert_eq!(cluster, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(stop_wait_secs, 5);
+                assert_eq!(format, super::OutputFormat::Text);
             }
             other => panic!("unexpected command: {other:?}"),
         }

@@ -27,12 +27,12 @@ started_at: 2026-03-28T20:42:11
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Add Cluster CLI And Config Contract](../../../../stories/VFDk8fqnH/README.md) | feat | done |
 | [Stage Offline K3s Artifacts And Guest Profile](../../../../stories/VFDk8gGoC/README.md) | feat | done |
-| [Implement Cluster Lifecycle Health And Kubeconfig Surfaces](../../../../stories/VFDk8gRoD/README.md) | feat | backlog |
+| [Implement Cluster Lifecycle Health And Kubeconfig Surfaces](../../../../stories/VFDk8gRoD/README.md) | feat | done |
 | [Publish Cluster Operator Contract And Infra Handoff Proof](../../../../stories/VFDk8ggoV/README.md) | feat | backlog |
 <!-- END GENERATED -->

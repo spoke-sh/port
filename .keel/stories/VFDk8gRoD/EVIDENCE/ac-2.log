@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T22:03:20.841663491-07:00
+mode: manual
+---
+Ran just quality and a direct port cluster status proof against the same local harness. The status output kept Port-owned readiness separate from downstream work by limiting success to local machine launch, guest bootstrap, guest-reported node visibility, and kubeconfig handoff while explicitly stating that downstream GitOps/bootstrap convergence, richer networking, and multi-node expansion remain follow-on work.

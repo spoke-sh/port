@@ -580,6 +580,18 @@ binary = "examples/bootstrap/demo-k3s/k3s"
 name = "kube-ready"
 required_commands = ["sh", "install", "ln", "chmod"]
 
+[clusters.demo.lifecycle]
+health_command = [
+  "opt/port/clusters/demo/bin/k3s",
+  "kubectl",
+  "get",
+  "nodes",
+  "-o",
+  "wide",
+]
+kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
+api_forward_target = "127.0.0.1:6443"
+
 # Service reliability workflow (repo-local hosted proof):
 # export PORT_DEMO_TOKEN=demo-token
 # port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t

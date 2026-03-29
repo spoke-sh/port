@@ -25,3 +25,7 @@ Completed VFDk8fqnH: added the cluster contract surface, sample config, and fail
 ## 2026-03-28T21:35:31
 
 Accepted VFDk8gGoC after adding the offline local cluster bootstrap contract, repo-owned demo K3s kit, `port cluster stage`, and proof-backed repo-local verification without guest-side live fetches.
+
+## 2026-03-28T22:04:21
+
+Accepted VFDk8gRoD. Port now owns local cluster lifecycle status, kubeconfig handoff, and deterministic API forward cleanup for the first single-node K3s slice. Direct operator proof and just quality both passed.
