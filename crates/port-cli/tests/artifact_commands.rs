@@ -330,6 +330,135 @@ fn install_fake_oras_script(root: &Path, body: &str) -> PathBuf {
 }
 
 #[test]
+fn cli_artifact_list_reports_local_and_cached_variants() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let local_root = temp.path().join("local-artifacts");
+    let store_root = temp.path().join("artifact-store");
+    let cache_root = temp.path().join("artifact-cache");
+
+    let mut config = PortConfig::sample();
+    let (kernel_local_path, _, _) = configure_kernel_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Standard,
+    );
+    let (_, guest_cache_path, _) = configure_guest_paths(
+        &mut config,
+        &local_root,
+        &store_root,
+        &cache_root,
+        ProtectionMode::Standard,
+    );
+    write_config(&config_path, &config);
+
+    fs::create_dir_all(
+        kernel_local_path
+            .parent()
+            .expect("kernel local parent should exist"),
+    )
+    .expect("kernel local parent should exist");
+    fs::write(&kernel_local_path, "demo-kernel-bytes").expect("kernel artifact should write");
+
+    fs::create_dir_all(
+        guest_cache_path
+            .parent()
+            .expect("guest cache parent should exist"),
+    )
+    .expect("guest cache parent should exist");
+    fs::write(&guest_cache_path, "demo-guest-cache").expect("guest cache should write");
+
+    let list = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("list")
+        .output()
+        .expect("list command");
+    assert!(list.status.success(), "{list:?}");
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("artifact: demo-kernel"),
+        "{list_stdout}"
+    );
+    assert!(
+        list_stdout.contains("artifact: demo-guest"),
+        "{list_stdout}"
+    );
+    assert!(
+        list_stdout.contains(
+            "variant: x86_64/firecracker/standard\tavailability=local\tlocal=true\tcache=false"
+        ),
+        "{list_stdout}"
+    );
+    assert!(
+        list_stdout.contains(&kernel_local_path.display().to_string()),
+        "{list_stdout}"
+    );
+    assert!(
+        list_stdout.contains(
+            "variant: x86_64/firecracker/standard\tavailability=cache-only\tlocal=false\tcache=true"
+        ),
+        "{list_stdout}"
+    );
+    assert!(
+        list_stdout.contains(&guest_cache_path.display().to_string()),
+        "{list_stdout}"
+    );
+
+    let json = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("artifacts")
+        .arg("list")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("list json command");
+    assert!(json.status.success(), "{json:?}");
+    let inventory: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("artifact inventory should decode");
+    let records = inventory.as_array().expect("inventory should be an array");
+    let kernel = records
+        .iter()
+        .find(|record| record["name"] == "demo-kernel")
+        .expect("kernel record should exist");
+    let kernel_variant = kernel["variants"]
+        .as_array()
+        .expect("kernel variants should be an array")
+        .iter()
+        .find(|variant| {
+            variant["selector"]["architecture"] == "x86_64"
+                && variant["selector"]["substrate"] == "firecracker"
+                && variant["selector"]["protection_mode"] == "standard"
+        })
+        .expect("kernel standard variant should exist");
+    assert_eq!(kernel_variant["availability"], "local");
+    assert_eq!(kernel_variant["local_present"], true);
+    assert_eq!(kernel_variant["cache_present"], false);
+
+    let guest = records
+        .iter()
+        .find(|record| record["name"] == "demo-guest")
+        .expect("guest record should exist");
+    let guest_variant = guest["variants"]
+        .as_array()
+        .expect("guest variants should be an array")
+        .iter()
+        .find(|variant| {
+            variant["selector"]["architecture"] == "x86_64"
+                && variant["selector"]["substrate"] == "firecracker"
+                && variant["selector"]["protection_mode"] == "standard"
+        })
+        .expect("guest standard variant should exist");
+    assert_eq!(guest_variant["availability"], "cache-only");
+    assert_eq!(guest_variant["local_present"], false);
+    assert_eq!(guest_variant["cache_present"], true);
+}
+
+#[test]
 fn cli_artifact_push_and_pull_round_trip_variant_contract() {
     let temp = tempdir().expect("tempdir should exist");
     let config_path = temp.path().join("port.toml");

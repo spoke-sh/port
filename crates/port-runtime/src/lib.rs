@@ -759,6 +759,47 @@ pub struct ArtifactTransfer {
     pub bytes_copied: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArtifactAvailabilityState {
+    Local,
+    LocalAndCache,
+    CacheOnly,
+    Missing,
+}
+
+impl std::fmt::Display for ArtifactAvailabilityState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Local => "local",
+            Self::LocalAndCache => "local+cache",
+            Self::CacheOnly => "cache-only",
+            Self::Missing => "missing",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArtifactVariantInventory {
+    pub selector: ArtifactSelector,
+    pub path: PathBuf,
+    pub local_present: bool,
+    pub cache_path: PathBuf,
+    pub cache_present: bool,
+    pub availability: ArtifactAvailabilityState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ArtifactInventoryRecord {
+    pub name: String,
+    pub kind: ArtifactKind,
+    pub reference: ArtifactReference,
+    pub build_command: String,
+    pub validate_command: String,
+    pub variants: Vec<ArtifactVariantInventory>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ArtifactStoreContract {
     FileSystem {
@@ -950,6 +991,25 @@ pub fn validate_artifact(
     request: ArtifactRequest<'_>,
 ) -> Result<ArtifactMetadata> {
     run_artifact_pipeline(config, request, ArtifactAction::Validate)
+}
+
+pub fn list_artifacts(config: &PortConfig) -> Vec<ArtifactInventoryRecord> {
+    let mut inventory = Vec::new();
+    inventory.extend(
+        config
+            .artifacts
+            .kernels
+            .iter()
+            .map(|(name, spec)| artifact_inventory_record(name, ArtifactKind::Kernel, spec)),
+    );
+    inventory.extend(
+        config
+            .artifacts
+            .guest_images
+            .iter()
+            .map(|(name, spec)| artifact_inventory_record(name, ArtifactKind::GuestImage, spec)),
+    );
+    inventory
 }
 
 pub fn push_artifact(
@@ -8737,6 +8797,51 @@ fn resolve_native_standard_variant(spec: &port_model::ArtifactSpec) -> Option<&A
     )
 }
 
+fn artifact_inventory_record(
+    name: &str,
+    kind: ArtifactKind,
+    spec: &port_model::ArtifactSpec,
+) -> ArtifactInventoryRecord {
+    let variants = spec
+        .variants
+        .iter()
+        .map(|variant| {
+            let cache_path = cache_path_for(spec, variant);
+            let local_present = variant.path.exists();
+            let cache_present = cache_path.exists();
+            ArtifactVariantInventory {
+                selector: variant.selector,
+                path: variant.path.clone(),
+                local_present,
+                cache_path,
+                cache_present,
+                availability: artifact_availability_state(local_present, cache_present),
+            }
+        })
+        .collect();
+
+    ArtifactInventoryRecord {
+        name: name.to_string(),
+        kind,
+        reference: spec.reference.clone(),
+        build_command: spec.build.clone(),
+        validate_command: spec.validate.clone(),
+        variants,
+    }
+}
+
+fn artifact_availability_state(
+    local_present: bool,
+    cache_present: bool,
+) -> ArtifactAvailabilityState {
+    match (local_present, cache_present) {
+        (true, true) => ArtifactAvailabilityState::LocalAndCache,
+        (true, false) => ArtifactAvailabilityState::Local,
+        (false, true) => ArtifactAvailabilityState::CacheOnly,
+        (false, false) => ArtifactAvailabilityState::Missing,
+    }
+}
+
 fn resolve_artifact_metadata(
     config: &PortConfig,
     request: ArtifactRequest<'_>,
@@ -11050,24 +11155,24 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        ArtifactAction, ArtifactRequest, AvfRuntimeMetadata, CloudHypervisorRuntimeMetadata,
-        ClusterDownRequest, ClusterReadinessState, ClusterStageRequest, ClusterStatusRequest,
-        ClusterUpRequest, ControlPlaneServeRequest, DoctorCheck, DoctorHostFacts, GuestCopyRequest,
-        GuestForwardRequest, GuestRequest, HostedNodeBinding, LaunchMetadata, LaunchRequest,
-        MachineDriverKind, MachineRuntimeState, NodeAgentServeRequest, RuntimePaths,
-        ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
-        ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
-        apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
-        bootstrap_hosted_k3s_cluster, build_firecracker_config, cloud_hypervisor_api_socket_path,
-        cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
-        cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
-        copy_guest_file, delete_machine_secret, down_local_cluster, driver_for_machine,
-        ensure_native_build_lane, execute_guest_operation, hosted_k3s_cluster_access,
-        hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
-        hosted_placeholder_runtime_root, launch_local_machine, list_machine_secrets,
-        list_machine_services, list_machines, local_cluster_kubeconfig, local_cluster_status,
-        machine_monitor, machine_service_status, machine_status, machine_top, path_check,
-        prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
+        ArtifactAction, ArtifactAvailabilityState, ArtifactRequest, AvfRuntimeMetadata,
+        CloudHypervisorRuntimeMetadata, ClusterDownRequest, ClusterReadinessState,
+        ClusterStageRequest, ClusterStatusRequest, ClusterUpRequest, ControlPlaneServeRequest,
+        DoctorCheck, DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest,
+        HostedNodeBinding, LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
+        NodeAgentServeRequest, RuntimePaths, ServiceApplyRequest, ServiceDefinitionRecord,
+        ServiceDesiredState, ServiceKind, ServicePolicy, ServiceRuntimeState, ServiceSecretBinding,
+        StopResult, apply_machine_service, artifact_script, avf_local_launch_machine_with_host_os,
+        bootstrap_hosted_k3s_cluster, build_firecracker_config, cache_path_for,
+        cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
+        cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
+        collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
+        down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
+        hosted_k3s_cluster_access, hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
+        hosted_placeholder_runtime_root, launch_local_machine, list_artifacts,
+        list_machine_secrets, list_machine_services, list_machines, local_cluster_kubeconfig,
+        local_cluster_status, machine_monitor, machine_service_status, machine_status, machine_top,
+        path_check, prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
         put_machine_secret, read_json_file, read_pid_file, render_hosted_route_context, repo_root,
         resolve_artifact_metadata, resolve_artifact_store_contract, resolve_machine_architecture,
         select_firecracker_binary, serve_control_plane, serve_node_agent, service_definition_dir,
@@ -11907,6 +12012,122 @@ exit 23
 
         assert_eq!(oci_artifact.path, filesystem_artifact.path);
         assert_eq!(oci_artifact.cache_path, filesystem_artifact.cache_path);
+    }
+
+    #[test]
+    fn list_artifacts_reports_local_and_cached_variant_presence() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let local_root = tempdir.path().join("local-artifacts");
+        let cache_root = tempdir.path().join("artifact-cache");
+        let kernel_path = local_root.join("kernel-x86_64-standard");
+        let guest_path = local_root.join("guest-x86_64-standard");
+
+        let mut config = PortConfig::sample();
+        {
+            let kernel = config
+                .artifacts
+                .kernels
+                .get_mut("demo-kernel")
+                .expect("sample kernel should exist");
+            kernel.distribution.cache_root = cache_root.clone();
+            kernel
+                .variants
+                .iter_mut()
+                .find(|variant| {
+                    variant.selector.architecture == MachineArchitecture::X86_64
+                        && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                        && variant.selector.protection_mode == ProtectionMode::Standard
+                })
+                .expect("standard kernel variant should exist")
+                .path = kernel_path.clone();
+        }
+        {
+            let guest = config
+                .artifacts
+                .guest_images
+                .get_mut("demo-guest")
+                .expect("sample guest image should exist");
+            guest.distribution.cache_root = cache_root.clone();
+            guest
+                .variants
+                .iter_mut()
+                .find(|variant| {
+                    variant.selector.architecture == MachineArchitecture::X86_64
+                        && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                        && variant.selector.protection_mode == ProtectionMode::Standard
+                })
+                .expect("standard guest variant should exist")
+                .path = guest_path;
+        }
+
+        fs::create_dir_all(kernel_path.parent().expect("kernel parent should exist"))
+            .expect("kernel parent should exist");
+        fs::write(&kernel_path, b"demo-kernel-bytes").expect("kernel artifact should write");
+
+        let guest_cache_path = {
+            let guest = config
+                .artifacts
+                .guest_images
+                .get("demo-guest")
+                .expect("sample guest image should exist");
+            let variant = guest
+                .variant(
+                    MachineArchitecture::X86_64,
+                    ExecutionSubstrate::Firecracker,
+                    ProtectionMode::Standard,
+                )
+                .expect("standard guest variant should exist");
+            cache_path_for(guest, variant)
+        };
+        fs::create_dir_all(
+            guest_cache_path
+                .parent()
+                .expect("guest cache parent should exist"),
+        )
+        .expect("guest cache parent should exist");
+        fs::write(&guest_cache_path, b"demo-guest-cache").expect("guest cache should write");
+
+        let inventory = list_artifacts(&config);
+        let kernel = inventory
+            .iter()
+            .find(|record| record.name == "demo-kernel")
+            .expect("kernel record should exist");
+        let kernel_variant = kernel
+            .variants
+            .iter()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("kernel standard variant should exist");
+        assert!(kernel_variant.local_present);
+        assert!(!kernel_variant.cache_present);
+        assert_eq!(
+            kernel_variant.availability,
+            ArtifactAvailabilityState::Local
+        );
+
+        let guest = inventory
+            .iter()
+            .find(|record| record.name == "demo-guest")
+            .expect("guest record should exist");
+        let guest_variant = guest
+            .variants
+            .iter()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("guest standard variant should exist");
+        assert!(!guest_variant.local_present);
+        assert!(guest_variant.cache_present);
+        assert_eq!(
+            guest_variant.availability,
+            ArtifactAvailabilityState::CacheOnly
+        );
+        assert_eq!(guest_variant.cache_path, guest_cache_path);
     }
 
     #[test]

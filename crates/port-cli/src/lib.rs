@@ -32,6 +32,7 @@ Quick start:
   Use `--config examples/port.toml` for the checked-in repo workflow.
 
 Examples:
+  port --config examples/port.toml artifacts list
   port doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
   port --config examples/port.toml cluster show --cluster demo
@@ -166,6 +167,11 @@ impl std::fmt::Display for OutputFormat {
 
 #[derive(Debug, Subcommand)]
 pub enum ArtifactCommand {
+    #[command(about = "List configured artifacts and the variants available on local disk")]
+    List {
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
     #[command(about = "Build a named artifact from the model")]
     Build {
         #[arg(long)]
@@ -1349,6 +1355,42 @@ fn doctor(format: OutputFormat, config_path: Option<&std::path::Path>) -> Result
 
 fn run_artifacts(command: ArtifactCommand, config: &PortConfig) -> Result<()> {
     match command {
+        ArtifactCommand::List { format } => {
+            let inventory = port_runtime::list_artifacts(config);
+            if format == OutputFormat::Text {
+                if inventory.is_empty() {
+                    println!("no artifacts defined");
+                } else {
+                    for (index, artifact) in inventory.iter().enumerate() {
+                        if index > 0 {
+                            println!();
+                        }
+                        println!("artifact: {}", artifact.name);
+                        println!("kind: {}", render_artifact_kind(artifact.kind));
+                        println!("reference: {}", artifact.reference);
+                        println!("build: {}", artifact.build_command);
+                        println!("validate: {}", artifact.validate_command);
+                        for variant in &artifact.variants {
+                            println!(
+                                "variant: {}\tavailability={}\tlocal={}\tcache={}\tpath={}\tcache_path={}",
+                                render_selector(variant.selector),
+                                variant.availability,
+                                variant.local_present,
+                                variant.cache_present,
+                                variant.path.display(),
+                                variant.cache_path.display()
+                            );
+                        }
+                    }
+                }
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&inventory)
+                        .context("failed to encode artifact inventory")?
+                );
+            }
+        }
         ArtifactCommand::Build {
             artifact,
             selection,
@@ -3073,6 +3115,7 @@ mod tests {
             "examples/port.toml",
             "Quick start:",
             "Examples:",
+            "port --config examples/port.toml artifacts list",
             "port doctor",
             "port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native",
             "port --config examples/port.toml cluster show --cluster demo",
@@ -3555,6 +3598,18 @@ mod tests {
                 assert_eq!(selection.architecture, ArchitectureArg::X86_64);
                 assert_eq!(selection.substrate, SubstrateArg::Firecracker);
                 assert_eq!(selection.protection_mode, ProtectionModeArg::Standard);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_artifact_list_with_json_output() {
+        let cli = Cli::parse_from(["port", "artifacts", "list", "--format", "json"]);
+
+        match cli.command {
+            Command::Artifacts(ArtifactCommand::List { format }) => {
+                assert_eq!(format, super::OutputFormat::Json);
             }
             other => panic!("unexpected command: {other:?}"),
         }
