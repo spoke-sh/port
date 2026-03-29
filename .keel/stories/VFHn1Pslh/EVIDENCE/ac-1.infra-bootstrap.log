@@ -1,0 +1,97 @@
+spoke infra dev shell
+tools: just infra keel cargo rustfmt clippy flux pulumi kubectl helm aws sops age node pnpm
++ nix develop . --command port --config /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/port-k3s.toml doctor
+building '/nix/store/b1r49123mj38mqa6vix4bg49nlb6p963-port-0.1.0.drv'...
+building '/nix/store/ij0pq3p4k25prxkwk2aw6hs51qm3zqdp-nix-shell-env.drv'...
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/c9bn9jz0f89hhy5n1m7k4svlb79i33r5-iproute2-6.18.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/s657hsrj1cknm7c4cbi87f6w7f3mlv11-iptables-1.8.11/bin/iptables' with expected identity.
+check[ok]: artifact:demo-kernel (required=true) - Artifact variant '/home/alex/workspace/spoke-sh/port/artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux' exists.
+check[ok]: artifact:demo-guest (required=true) - Artifact variant '/home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' exists.
+check[ok]: machine:demo (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.
+note: Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.
+note: Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.
+note: Cloud Hypervisor readiness is reported through its own host-platform, architecture, protection-mode, and binary checks; Port does not silently fall back to Firecracker when that lane is selected.
+note: AVF install and help surfaces stay on the canonical port CLI: set PORT_AVF_LAUNCHER to an external launcher helper for local macOS workflows, and do not expect a bundled macOS-only fallback workflow in this slice.
++ nix develop . --command port --config /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/port-k3s.toml cluster up --cluster demo --runtime-root /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/runtime --format json
++ nix develop . --command port --config /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/port-k3s.toml cluster kubeconfig --cluster demo --runtime-root /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/runtime --format json
++ kubectl --kubeconfig /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml get nodes -o wide
+NAME   STATUS   ROLES                  AGE    VERSION         INTERNAL-IP   EXTERNAL-IP   OS-IMAGE   KERNEL-VERSION   CONTAINER-RUNTIME
+demo   Ready    control-plane,master   131m   v1.32.13+k3s1   10.66.0.1     10.66.0.1     Unknown    6.19.10          containerd://2.1.5-k3s1.32
+GITHUB_TOKEN is not set; installing Flux controllers without GitHub bootstrap for local health checks
++ flux install --namespace flux-system --network-policy=false --kubeconfig /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml
+✚ generating manifests
+✔ manifests build completed
+► installing components in flux-system namespace
+CustomResourceDefinition/alerts.notification.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/buckets.source.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/externalartifacts.source.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/gitrepositories.source.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/helmcharts.source.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/helmreleases.helm.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/helmrepositories.source.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/kustomizations.kustomize.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/ocirepositories.source.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/providers.notification.toolkit.fluxcd.io unchanged
+CustomResourceDefinition/receivers.notification.toolkit.fluxcd.io unchanged
+Namespace/flux-system unchanged
+ClusterRole/crd-controller-flux-system unchanged
+ClusterRole/flux-edit-flux-system unchanged
+ClusterRole/flux-view-flux-system unchanged
+ClusterRoleBinding/cluster-reconciler-flux-system unchanged
+ClusterRoleBinding/crd-controller-flux-system unchanged
+ResourceQuota/flux-system/critical-pods-flux-system unchanged
+ServiceAccount/flux-system/helm-controller unchanged
+ServiceAccount/flux-system/kustomize-controller unchanged
+ServiceAccount/flux-system/notification-controller unchanged
+ServiceAccount/flux-system/source-controller unchanged
+Service/flux-system/notification-controller unchanged
+Service/flux-system/source-controller unchanged
+Service/flux-system/webhook-receiver unchanged
+Deployment/flux-system/helm-controller unchanged
+Deployment/flux-system/kustomize-controller unchanged
+Deployment/flux-system/notification-controller unchanged
+Deployment/flux-system/source-controller unchanged
+◎ verifying installation
+✔ helm-controller: deployment ready
+✔ kustomize-controller: deployment ready
+✔ notification-controller: deployment ready
+✔ source-controller: deployment ready
+✔ install finished
++ helm upgrade --install pulumi-kubernetes-operator oci://ghcr.io/pulumi/helm-charts/pulumi-kubernetes-operator --version 2.5.1 --namespace pulumi-kubernetes-operator --create-namespace --kubeconfig /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml
+Pulled: ghcr.io/pulumi/helm-charts/pulumi-kubernetes-operator:2.5.1
+Digest: sha256:cccfd8867fb443d0425d7693a64fb9e3d4e866fdc864ad5d602894d5d2744bb3
+Release "pulumi-kubernetes-operator" has been upgraded. Happy Helming!
+NAME: pulumi-kubernetes-operator
+LAST DEPLOYED: Sun Mar 29 16:29:02 2026
+NAMESPACE: pulumi-kubernetes-operator
+STATUS: deployed
+REVISION: 2
+TEST SUITE: None
++ kubectl --kubeconfig /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml apply -f -
+serviceaccount/pulumi unchanged
+clusterrolebinding.rbac.authorization.k8s.io/pulumi-stack-admin unchanged
++ kubectl --kubeconfig /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml -n pulumi-kubernetes-operator get pods
+NAME                                                             READY   STATUS    RESTARTS   AGE
+pulumi-kubernetes-operator-controller-manager-768ff686b8-xdcxv   1/1     Running   0          130m
++ kubectl --kubeconfig /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml get crd stacks.pulumi.com
+NAME                CREATED AT
+stacks.pulumi.com   2026-03-29T21:18:17Z
+Bootstrap complete for local.
+
+Cluster:      demo
+Machine:      demo
+Launch:       already-running
+Forward:      cluster-demo-api (reused)
+Port config:  /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/port-k3s.toml
+Kubeconfig:   /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/kubeconfig.yaml
+Runtime root: /home/alex/workspace/spoke-sh/infra/.local/bootstrap/local/runtime
+Boundary:     Port readiness in this slice covers local machine launch, guest bootstrap, guest-reported node visibility, and kubeconfig handoff. Downstream GitOps/bootstrap convergence, richer networking, and multi-node expansion remain follow-on work.

@@ -1,0 +1,6 @@
+spoke infra dev shell
+tools: just infra keel cargo rustfmt clippy flux pulumi kubectl helm aws sops age node pnpm
+unhealthy: local
+- Pulumi operator is missing
+Error: health check failed
+error: Recipe `health` failed on line 23 with exit code 1

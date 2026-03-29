@@ -34,5 +34,5 @@ started_at: 2026-03-29T12:27:56
 | [Replace Demo Local Cluster Stub With Real K3s Control Plane](../../../../stories/VFHn1OVki/README.md) | feat | done |
 | [Harden Kubeconfig Handoff And Kubernetes Discovery](../../../../stories/VFHn1Ozkj/README.md) | feat | done |
 | [Prove Flux And Pulumi Operator Install Against Port Kubeconfig](../../../../stories/VFHn1PHka/README.md) | feat | done |
-| [Verify Unchanged Downstream Infra GitOps Handoff](../../../../stories/VFHn1Pslh/README.md) | feat | backlog |
+| [Verify Unchanged Downstream Infra GitOps Handoff](../../../../stories/VFHn1Pslh/README.md) | feat | icebox |
 <!-- END GENERATED -->

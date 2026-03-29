@@ -18,3 +18,7 @@ Captured VFHn1Ozkj proof showing the Port kubeconfig works with host kubectl unc
 ## 2026-03-29T16:27:10
 
 Captured VFHn1PHka proof showing Flux installs cleanly and the Pulumi operator Helm release deploys against the same Port-handed kubeconfig; nix build .#port also succeeds with the packaged bootstrap assets.
+
+## 2026-03-29T16:30:22
+
+Iced VFHn1Pslh after reproducing the unchanged downstream boundary: infra just bootstrap passes, but infra just health still fails because the consumer probes deployment pulumi-kubernetes-operator while Helm installs pulumi-kubernetes-operator-controller-manager.
