@@ -15,6 +15,8 @@ pub struct PortConfig {
     pub host_groups: BTreeMap<String, HostedHostGroupSpec>,
     pub machines: BTreeMap<String, MachineSpec>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub clusters: BTreeMap<String, ClusterSpec>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub k3s_clusters: BTreeMap<String, K3sClusterSpec>,
 }
 
@@ -375,6 +377,18 @@ impl PortConfig {
             ),
         ]);
 
+        let clusters = BTreeMap::from([(
+            String::from("demo"),
+            ClusterSpec {
+                flavor: ClusterFlavor::K3s,
+                provider: ClusterProvider::Local,
+                count: 1,
+                machine: String::from("demo"),
+                version: String::from("v1.32.2+k3s1"),
+                args: vec![String::from("--disable=traefik")],
+            },
+        )]);
+
         Self {
             artifacts,
             control_planes,
@@ -382,6 +396,7 @@ impl PortConfig {
             nodes,
             host_groups,
             machines,
+            clusters,
             k3s_clusters: BTreeMap::new(),
         }
     }
@@ -956,6 +971,9 @@ impl PortConfig {
                     issues.join(" ")
                 )));
             }
+        }
+        for (cluster_name, cluster) in &self.clusters {
+            validate_cluster(self, cluster_name, cluster)?;
         }
         for (cluster_name, cluster) in &self.k3s_clusters {
             validate_k3s_cluster(self, cluster_name, cluster)?;
@@ -1840,6 +1858,54 @@ pub struct GuestControl {
     pub vsock_cid: u32,
     pub control_port: u16,
     pub console_log: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterSpec {
+    pub flavor: ClusterFlavor,
+    pub provider: ClusterProvider,
+    #[serde(default = "default_cluster_count")]
+    pub count: u16,
+    pub machine: String,
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClusterFlavor {
+    K3s,
+}
+
+impl std::fmt::Display for ClusterFlavor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::K3s => f.write_str("k3s"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClusterProvider {
+    Local,
+    Hosted,
+    Aws,
+}
+
+impl std::fmt::Display for ClusterProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Local => f.write_str("local"),
+            Self::Hosted => f.write_str("hosted"),
+            Self::Aws => f.write_str("aws"),
+        }
+    }
+}
+
+const fn default_cluster_count() -> u16 {
+    1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3040,6 +3106,86 @@ fn validate_hosted_host_group(
     Ok(())
 }
 
+fn cluster_local_lane_supported(host: &HostSpec, machine: &MachineSpec) -> bool {
+    matches!(host.connection, HostConnection::Local)
+        && host.provider == HostProvider::Local
+        && host.platform == HostPlatform::Linux
+        && machine.substrate == ExecutionSubstrate::Firecracker
+        && machine.protection_mode == ProtectionMode::Standard
+}
+
+fn validate_cluster(
+    config: &PortConfig,
+    cluster_name: &str,
+    cluster: &ClusterSpec,
+) -> Result<(), ValidationError> {
+    if cluster.provider != ClusterProvider::Local {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' requests provider '{}'; only provider 'local' is supported in this slice",
+            cluster_name, cluster.provider
+        )));
+    }
+    if cluster.count != 1 {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' requests count = {}; only count = 1 is supported in this slice",
+            cluster_name, cluster.count
+        )));
+    }
+    if cluster.machine.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' must declare a non-empty machine",
+            cluster_name
+        )));
+    }
+    if cluster.version.trim().is_empty() {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' must declare a non-empty version",
+            cluster_name
+        )));
+    }
+    if cluster.args.iter().any(|arg| arg.trim().is_empty()) {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' args must not contain empty values",
+            cluster_name
+        )));
+    }
+
+    let machine = config.machines.get(&cluster.machine).ok_or_else(|| {
+        ValidationError::new(format!(
+            "cluster '{}' references unknown machine '{}'",
+            cluster_name, cluster.machine
+        ))
+    })?;
+    let host = config.hosts.get(&machine.host).ok_or_else(|| {
+        ValidationError::new(format!(
+            "cluster '{}' machine '{}' references unknown host '{}'",
+            cluster_name, cluster.machine, machine.host
+        ))
+    })?;
+
+    if !cluster_local_lane_supported(host, machine) {
+        let control = MachineControlContract::for_connection(&host.connection);
+        return Err(ValidationError::new(format!(
+            "cluster '{}' machine '{}' targets host '{}' provider '{}' through launch route '{}' with substrate '{}' and protection mode '{}'; clusters only support the local Linux Firecracker standard lane in this slice",
+            cluster_name,
+            cluster.machine,
+            machine.host,
+            host_provider_label(host.provider),
+            control.launch_route,
+            execution_substrate_label(machine.substrate),
+            protection_mode_label(machine.protection_mode)
+        )));
+    }
+    if machine.rootfs_read_only {
+        return Err(ValidationError::new(format!(
+            "cluster '{}' machine '{}' must keep the guest rootfs writable for K3s bootstrap in this slice",
+            cluster_name, cluster.machine
+        )));
+    }
+
+    Ok(())
+}
+
 fn validate_k3s_cluster(
     config: &PortConfig,
     cluster_name: &str,
@@ -3453,19 +3599,21 @@ mod tests {
 
     use super::{
         ArtifactReference, ArtifactSelector, ArtifactStore, AvfConsoleTransport,
-        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ExecutionSubstrate,
-        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
-        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
-        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy, K3sClusterSpec,
-        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
-        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
-        OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
-        PvmLaneDecision, ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy,
-        ServiceRestartPolicy, hosted_artifact_store_path,
+        AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ClusterFlavor, ClusterProvider,
+        ClusterSpec, ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb,
+        HostConnection, HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
+        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
+        HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineCommandRoute,
+        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
+        MachineLifecycleOwner, MachineStatusSource, OciRegistryAuth, OciRegistryTransport,
+        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision, ServiceHealthPolicy,
+        ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
+        hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
         let mut config = PortConfig::sample();
+        config.clusters.clear();
         let machine = config
             .machines
             .get_mut("demo")
@@ -3517,6 +3665,9 @@ mod tests {
         assert!(encoded.contains("firecracker_binary_env = \"PORT_PVM_FIRECRACKER_BINARY\""));
         assert!(encoded.contains("[machines.demo.guest]"));
         assert!(encoded.contains("[machines.cloud-aws]"));
+        assert!(encoded.contains("[clusters.demo]"));
+        assert!(encoded.contains("flavor = \"k3s\""));
+        assert!(encoded.contains("provider = \"local\""));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.reference]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.distribution.push]"));
         assert!(encoded.contains("[artifacts.kernels.demo-kernel.variants]"));
@@ -3577,6 +3728,103 @@ mod tests {
         assert!(machine.volumes.is_empty());
         assert_eq!(machine.guest_image, "demo-guest");
         assert!(!machine.rootfs_read_only);
+    }
+
+    #[test]
+    fn local_cluster_contract() {
+        let sample = PortConfig::sample();
+
+        sample
+            .validate()
+            .expect("sample config with local cluster should validate");
+
+        let cluster = sample
+            .clusters
+            .get("demo")
+            .expect("sample local cluster should exist");
+        assert_eq!(
+            cluster,
+            &ClusterSpec {
+                flavor: ClusterFlavor::K3s,
+                provider: ClusterProvider::Local,
+                count: 1,
+                machine: String::from("demo"),
+                version: String::from("v1.32.2+k3s1"),
+                args: vec![String::from("--disable=traefik")],
+            }
+        );
+
+        let encoded = sample.to_toml_string().expect("sample should encode");
+        assert!(encoded.contains("[clusters.demo]"));
+        assert!(encoded.contains("count = 1"));
+        assert!(encoded.contains("machine = \"demo\""));
+        assert!(encoded.contains("version = \"v1.32.2+k3s1\""));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
+        assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn local_cluster_contract_rejects_follow_on_provider_and_count_shapes() {
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .provider = ClusterProvider::Aws;
+
+        let error = config
+            .validate()
+            .expect_err("aws cluster provider should fail validation");
+        assert!(
+            error
+                .to_string()
+                .contains("only provider 'local' is supported in this slice")
+        );
+
+        let mut config = PortConfig::sample();
+        config
+            .clusters
+            .get_mut("demo")
+            .expect("sample local cluster should exist")
+            .count = 2;
+
+        let error = config
+            .validate()
+            .expect_err("multi-node cluster should fail validation");
+        assert!(
+            error
+                .to_string()
+                .contains("only count = 1 is supported in this slice")
+        );
+    }
+
+    #[test]
+    fn local_cluster_contract_preserves_existing_machine_routes() {
+        let config = PortConfig::sample();
+
+        config
+            .validate()
+            .expect("sample config with local cluster should remain valid");
+        assert_eq!(
+            config
+                .machine_control_contract("demo")
+                .expect("local machine contract should resolve"),
+            MachineControlContract::local_runtime_root()
+        );
+        assert_eq!(
+            config
+                .machine_control_contract("cloud-aws")
+                .expect("hosted machine contract should resolve"),
+            MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            config
+                .hosted_guest_attach_contract("cloud-aws")
+                .expect("hosted guest attach contract should resolve")
+                .is_some(),
+            "hosted guest contract should remain available with local clusters present"
+        );
     }
 
     #[test]
@@ -4933,6 +5181,8 @@ mod tests {
         let config = PortConfig::from_path(&path).expect("example config should parse");
 
         assert_eq!(config.hosts["local"].provider, HostProvider::Local);
+        assert_eq!(config.clusters["demo"].provider, ClusterProvider::Local);
+        assert_eq!(config.clusters["demo"].machine, "demo");
         assert_eq!(
             config.hosts["generic-linux"].provider,
             HostProvider::GenericLinux

@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T21:03:59.622084065-07:00
+mode: manual
+---
+Verified regression safety with just quality after the cluster contract landed. The full workspace quality gate passed, including existing machine, guest, service, hosted-runtime, AVF, and hosted-K3s test suites.

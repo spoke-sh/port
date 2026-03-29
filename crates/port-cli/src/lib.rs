@@ -32,6 +32,7 @@ Quick start:
 Examples:
   port doctor
   port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native
+  port --config examples/port.toml cluster list
   port --config examples/port.toml machine launch --machine demo
   port --config examples/port.toml machine list
   port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'";
@@ -41,7 +42,7 @@ Examples:
     name = "port",
     version,
     about = "CLI-first Firecracker orchestration for local and cloud Linux hosts",
-    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the default local lane; hosted control-plane, Cloud Hypervisor, Apple Virtualization Framework, and service workflows reuse the same `artifacts`, `machine`, `guest`, and `service` verbs.",
+    long_about = "Port manages microVM-backed workloads through one canonical CLI and shared machine model. Firecracker with standard protection on Linux is the default local lane; `cluster`, `artifacts`, `machine`, `guest`, and `service` reuse the same model while hosted control-plane, Cloud Hypervisor, and Apple Virtualization Framework lanes stay explicit.",
     after_help = AFTER_HELP
 )]
 pub struct Cli {
@@ -66,6 +67,8 @@ pub enum Command {
     },
     #[command(subcommand, about = "Build and validate kernel or guest artifacts")]
     Artifacts(ArtifactCommand),
+    #[command(subcommand, about = "Inspect named cluster contracts")]
+    Cluster(ClusterCommand),
     #[command(subcommand, about = "Launch and inspect Port-managed machines")]
     Machine(MachineCommand),
     #[command(subcommand, about = "Reach guest agent capabilities")]
@@ -184,6 +187,22 @@ pub enum ArtifactCommand {
         artifact: String,
         #[command(flatten)]
         selection: ArtifactSelectionArgs,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ClusterCommand {
+    #[command(about = "List named cluster contracts from the model")]
+    List {
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    #[command(about = "Inspect one named cluster contract from the model")]
+    Show {
+        #[arg(long)]
+        cluster: String,
+        #[arg(long, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
 }
 
@@ -598,12 +617,28 @@ struct DetachedForwardManifest {
     stderr_log: PathBuf,
 }
 
+#[derive(Debug, Serialize)]
+struct RenderedClusterRecord {
+    name: String,
+    flavor: String,
+    provider: String,
+    count: u16,
+    machine: String,
+    version: String,
+    args: Vec<String>,
+    boundary: String,
+}
+
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor { format } => doctor(format, cli.config.as_deref()),
         Command::Artifacts(command) => {
             let config = load_config(cli.config)?;
             run_artifacts(command, &config)
+        }
+        Command::Cluster(command) => {
+            let config = load_config(cli.config)?;
+            run_cluster(command, &config)
         }
         Command::Machine(command) => run_machine(command, cli.config),
         Command::Guest(command) => {
@@ -698,6 +733,98 @@ pub fn run(cli: Cli) -> Result<()> {
                 Ok(())
             }
         },
+    }
+}
+
+fn run_cluster(command: ClusterCommand, config: &PortConfig) -> Result<()> {
+    match command {
+        ClusterCommand::List { format } => {
+            let clusters = config
+                .clusters
+                .iter()
+                .map(|(name, cluster)| render_cluster_record(name, cluster))
+                .collect::<Vec<_>>();
+            match format {
+                OutputFormat::Text => {
+                    if clusters.is_empty() {
+                        println!("no clusters defined");
+                    } else {
+                        for cluster in clusters {
+                            println!(
+                                "{}\tflavor={}\tprovider={}\tcount={}\tmachine={}\tversion={}",
+                                cluster.name,
+                                cluster.flavor,
+                                cluster.provider,
+                                cluster.count,
+                                cluster.machine,
+                                cluster.version
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&clusters)
+                            .context("failed to encode cluster list")?
+                    );
+                    Ok(())
+                }
+            }
+        }
+        ClusterCommand::Show { cluster, format } => {
+            let rendered = render_cluster_record(
+                &cluster,
+                config
+                    .clusters
+                    .get(&cluster)
+                    .with_context(|| format!("cluster '{}' not found in config", cluster))?,
+            );
+            match format {
+                OutputFormat::Text => {
+                    println!("cluster: {}", rendered.name);
+                    println!("flavor: {}", rendered.flavor);
+                    println!("provider: {}", rendered.provider);
+                    println!("count: {}", rendered.count);
+                    println!("machine: {}", rendered.machine);
+                    println!("version: {}", rendered.version);
+                    println!(
+                        "args: {}",
+                        if rendered.args.is_empty() {
+                            String::from("none")
+                        } else {
+                            rendered.args.join(" ")
+                        }
+                    );
+                    println!("boundary: {}", rendered.boundary);
+                    Ok(())
+                }
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&rendered)
+                            .context("failed to encode cluster record")?
+                    );
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+fn render_cluster_record(name: &str, cluster: &port_model::ClusterSpec) -> RenderedClusterRecord {
+    RenderedClusterRecord {
+        name: name.to_string(),
+        flavor: cluster.flavor.to_string(),
+        provider: cluster.provider.to_string(),
+        count: cluster.count,
+        machine: cluster.machine.clone(),
+        version: cluster.version.clone(),
+        args: cluster.args.clone(),
+        boundary: String::from(
+            "single-node local K3s only in this slice; multi-node, hosted, and aws lanes remain follow-on work",
+        ),
     }
 }
 
@@ -2348,11 +2475,11 @@ mod tests {
     use clap::Parser;
 
     use super::{
-        ArchitectureArg, ArtifactCommand, Cli, Command, ControlPlaneCommand, CopyDirectionArg,
-        GuestCommand, HostedNodeBindingArg, MachineCommand, NodeAgentCommand, ProtectionModeArg,
-        ServiceCommand, ServiceHealthPolicyArg, ServiceKindArg, ServiceRestartPolicyArg,
-        ServiceSecretCommand, SubstrateArg, format_hosted_fleet_nodes, format_machine_status,
-        render_help, render_nested_subcommand_help, render_subcommand_help,
+        ArchitectureArg, ArtifactCommand, Cli, ClusterCommand, Command, ControlPlaneCommand,
+        CopyDirectionArg, GuestCommand, HostedNodeBindingArg, MachineCommand, NodeAgentCommand,
+        ProtectionModeArg, ServiceCommand, ServiceHealthPolicyArg, ServiceKindArg,
+        ServiceRestartPolicyArg, ServiceSecretCommand, SubstrateArg, format_hosted_fleet_nodes,
+        format_machine_status, render_help, render_nested_subcommand_help, render_subcommand_help,
     };
 
     fn sample_hosted_status(
@@ -2385,6 +2512,7 @@ mod tests {
         for keyword in [
             "doctor",
             "artifacts",
+            "cluster",
             "machine",
             "guest",
             "service",
@@ -2396,6 +2524,7 @@ mod tests {
             "Examples:",
             "port doctor",
             "port --config examples/port.toml artifacts build --artifact demo-kernel --architecture native",
+            "port --config examples/port.toml cluster list",
             "port --config examples/port.toml machine launch --machine demo",
             "port --config examples/port.toml machine list",
             "port --config examples/port.toml guest exec --machine demo -- /bin/sh -lc 'cat /proc/version'",
@@ -2403,6 +2532,7 @@ mod tests {
             assert!(help.contains(keyword), "missing help keyword: {keyword}");
         }
 
+        let cluster_help = render_subcommand_help("cluster").expect("cluster help should exist");
         let machine_help = render_subcommand_help("machine").expect("machine help should exist");
 
         for keyword in ["exec", "copy", "pty", "logs", "forward"] {
@@ -2414,6 +2544,13 @@ mod tests {
 
         let artifact_help = render_nested_subcommand_help(&["artifacts", "push"])
             .expect("artifact help should exist");
+
+        for keyword in ["list", "show"] {
+            assert!(
+                cluster_help.contains(keyword),
+                "missing cluster help keyword: {keyword}"
+            );
+        }
 
         for keyword in ["launch", "list", "status", "stop", "monitor", "top"] {
             assert!(
@@ -2614,6 +2751,38 @@ mod tests {
                 assert_eq!(boot_wait_secs, 3);
                 assert_eq!(
                     cli.config.as_deref(),
+                    Some(std::path::Path::new("examples/port.toml"))
+                );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_cluster_contract_arguments() {
+        let list = Cli::parse_from(["port", "cluster", "list", "--format", "json"]);
+        match list.command {
+            Command::Cluster(ClusterCommand::List { format }) => {
+                assert_eq!(format, super::OutputFormat::Json);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let show = Cli::parse_from([
+            "port",
+            "--config",
+            "examples/port.toml",
+            "cluster",
+            "show",
+            "--cluster",
+            "demo",
+        ]);
+        match show.command {
+            Command::Cluster(ClusterCommand::Show { cluster, format }) => {
+                assert_eq!(cluster, "demo");
+                assert_eq!(format, super::OutputFormat::Text);
+                assert_eq!(
+                    show.config.as_deref(),
                     Some(std::path::Path::new("examples/port.toml"))
                 );
             }

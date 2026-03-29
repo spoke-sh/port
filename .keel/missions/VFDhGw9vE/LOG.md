@@ -17,3 +17,7 @@
 ## 2026-03-28T19:50:26
 
 Refined epic VFDhlRjOf around a cluster-first local K3s contract, planned voyage VFDk8fdnG for the first single-node local slice, and decomposed four execution stories covering cluster CLI/config, offline bootstrap inputs, lifecycle plus kubeconfig health surfaces, and docs or proof handoff. The recommendation maps to this mission directly; multi-node or AWS expansion remains explicit follow-on scope.
+
+## 2026-03-28T21:03:04
+
+Completed VFDk8fqnH: added the cluster contract surface, sample config, and fail-fast single-node local validation with cluster list/show proofs and full quality coverage.

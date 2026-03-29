@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use port_model::{
-    ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture, MachineVolumeBackend,
-    MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode,
+    ClusterProvider, ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture,
+    MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -227,6 +227,7 @@ fn spawn_hosted_server_harness_with_cleanup(
 
 fn hosted_config(runtime_root: &Path) -> PortConfig {
     let mut config = PortConfig::sample();
+    config.clusters.clear();
     config
         .nodes
         .get_mut("aws-linux-node")
@@ -285,7 +286,9 @@ fn hosted_three_node_config(
 }
 
 fn generic_hosted_config() -> PortConfig {
-    PortConfig::sample()
+    let mut config = PortConfig::sample();
+    config.clusters.clear();
+    config
 }
 
 fn prepend_path_env(path: &Path) -> PathBuf {
@@ -682,6 +685,105 @@ fn cli_help_stays_concise_without_extra_doc_or_avf_sections() {
     assert!(!stdout.contains("docs/operators.md"));
     assert!(!stdout.contains("PORT_AVF_LAUNCHER"));
     assert!(!stdout.contains("demo-avf"));
+}
+
+#[test]
+fn cli_cluster_list_and_show_surface_local_contract() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    write_config(&config_path, &PortConfig::sample());
+
+    let list = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("list")
+        .output()
+        .expect("cluster list command should run");
+    assert!(list.status.success());
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(list_stdout.contains("demo"));
+    assert!(list_stdout.contains("flavor=k3s"));
+    assert!(list_stdout.contains("provider=local"));
+    assert!(list_stdout.contains("count=1"));
+    assert!(list_stdout.contains("machine=demo"));
+
+    let show = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("cluster")
+        .arg("show")
+        .arg("--cluster")
+        .arg("demo")
+        .output()
+        .expect("cluster show command should run");
+    assert!(show.status.success());
+    let show_stdout = String::from_utf8_lossy(&show.stdout);
+    assert!(show_stdout.contains("cluster: demo"));
+    assert!(show_stdout.contains("version: v1.32.2+k3s1"));
+    assert!(show_stdout.contains("boundary: single-node local K3s only in this slice"));
+}
+
+#[test]
+fn cli_cluster_contract_rejects_hosted_aws_and_multi_node_shapes() {
+    let temp = tempdir().expect("tempdir should exist");
+
+    let mut hosted_config = PortConfig::sample();
+    hosted_config
+        .clusters
+        .get_mut("demo")
+        .expect("sample cluster should exist")
+        .provider = ClusterProvider::Hosted;
+    let hosted_path = temp.path().join("hosted-port.toml");
+    write_config(&hosted_path, &hosted_config);
+    let hosted = Command::new(port_bin())
+        .arg("--config")
+        .arg(&hosted_path)
+        .arg("cluster")
+        .arg("list")
+        .output()
+        .expect("cluster list should run for hosted boundary case");
+    assert!(!hosted.status.success());
+    let hosted_stderr = String::from_utf8_lossy(&hosted.stderr);
+    assert!(hosted_stderr.contains("only provider 'local' is supported in this slice"));
+
+    let mut aws_config = PortConfig::sample();
+    aws_config
+        .clusters
+        .get_mut("demo")
+        .expect("sample cluster should exist")
+        .provider = ClusterProvider::Aws;
+    let aws_path = temp.path().join("aws-port.toml");
+    write_config(&aws_path, &aws_config);
+    let aws = Command::new(port_bin())
+        .arg("--config")
+        .arg(&aws_path)
+        .arg("cluster")
+        .arg("list")
+        .output()
+        .expect("cluster list should run for aws boundary case");
+    assert!(!aws.status.success());
+    let aws_stderr = String::from_utf8_lossy(&aws.stderr);
+    assert!(aws_stderr.contains("only provider 'local' is supported in this slice"));
+
+    let mut multi_node_config = PortConfig::sample();
+    multi_node_config
+        .clusters
+        .get_mut("demo")
+        .expect("sample cluster should exist")
+        .count = 2;
+    let multi_node_path = temp.path().join("multi-node-port.toml");
+    write_config(&multi_node_path, &multi_node_config);
+    let multi_node = Command::new(port_bin())
+        .arg("--config")
+        .arg(&multi_node_path)
+        .arg("cluster")
+        .arg("list")
+        .output()
+        .expect("cluster list should run for multi-node boundary case");
+    assert!(!multi_node.status.success());
+    let multi_node_stderr = String::from_utf8_lossy(&multi_node.stderr);
+    assert!(multi_node_stderr.contains("only count = 1 is supported in this slice"));
 }
 
 #[test]

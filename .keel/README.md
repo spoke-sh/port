@@ -118,7 +118,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Plan Single-Node Local Cluster Surface](epics/VFDhlRjOf/voyages/VFDk8fdnG/) | planned |
+| [Plan Single-Node Local Cluster Surface](epics/VFDhlRjOf/voyages/VFDk8fdnG/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

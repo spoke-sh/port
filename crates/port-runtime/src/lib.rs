@@ -10162,6 +10162,7 @@ mod tests {
 
     fn sample_config_with_hosted_runtime_roots(root: &Path) -> PortConfig {
         let mut config = PortConfig::sample();
+        config.clusters.clear();
         config
             .nodes
             .get_mut("generic-linux-node")
@@ -11151,6 +11152,7 @@ exit 23
 
     fn sample_avf_config() -> PortConfig {
         let mut config = PortConfig::sample();
+        config.clusters.clear();
         let machine = config
             .machines
             .get_mut("demo")
@@ -15703,6 +15705,7 @@ exec sleep 30
     #[test]
     fn launch_rejects_pvm_host_kit_when_runtime_is_not_prepared() {
         let mut config = PortConfig::sample();
+        config.clusters.clear();
         config
             .machines
             .get_mut("demo")
@@ -16672,6 +16675,7 @@ exec sleep 30
 
     #[test]
     fn service_secret_backend_hosted_lifecycle_uses_runtime_file_backend() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
         config.machines.retain(|name, _| name == "cloud-aws");
@@ -16698,7 +16702,8 @@ exec sleep 30
             thread::sleep(Duration::from_millis(20));
         }
 
-        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        let config =
+            start_live_hosted_servers_inner(&config, true).expect("hosted servers should start");
 
         let secret = put_machine_secret(
             &config,

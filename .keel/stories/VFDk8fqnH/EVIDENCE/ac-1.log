@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-03-28T21:03:59.593171374-07:00
+mode: manual
+---
+Verified the new cluster contract surface by running cargo run -q -p port-cli -- --config examples/port.toml cluster show --cluster demo and by passing the new contract-focused model and CLI tests for local acceptance plus hosted/AWS/multi-node fail-fast boundaries.

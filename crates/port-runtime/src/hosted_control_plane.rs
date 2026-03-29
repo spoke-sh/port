@@ -7124,6 +7124,7 @@ mod tests {
 
     fn sample_control_plane_config(root: &std::path::Path) -> PortConfig {
         let mut config = PortConfig::sample();
+        config.clusters.clear();
         config
             .control_planes
             .get_mut("demo")

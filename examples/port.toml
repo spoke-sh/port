@@ -557,6 +557,17 @@ vsock_cid = 63
 control_port = 7000
 console_log = "runtime/cloud-azure/console.log"
 
+[clusters.demo]
+# First cluster contract:
+#   this is the single-node local K3s lane. Hosted, AWS, and multi-node
+#   expansion stay explicit follow-on work until Port owns the wider lifecycle.
+flavor = "k3s"
+provider = "local"
+count = 1
+machine = "demo"
+version = "v1.32.2+k3s1"
+args = ["--disable=traefik"]
+
 # Service reliability workflow (repo-local hosted proof):
 # export PORT_DEMO_TOKEN=demo-token
 # port --config examples/port.toml service secret put --machine cloud-aws --name demo-token --value s3cr3t
