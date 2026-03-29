@@ -1,0 +1,5 @@
+proof_root: /var/tmp/tmp.E79snC134q
+state_dir: /var/tmp/tmp.E79snC134q/state
+bootstrap_exit_status: 1
+ps_exit_status: 0
+interpretation: Port-owned cluster handoff succeeded, downstream kubectl access succeeded, and infra then stopped at its own GITHUB_TOKEN / Flux bootstrap boundary.

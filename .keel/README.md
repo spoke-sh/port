@@ -120,11 +120,11 @@
 |--------|--------|
 | [Plan Single-Node Local Cluster Surface](epics/VFDhlRjOf/voyages/VFDk8fdnG/) | done |
 
-### [Ship Bootable Local Cluster Guest And Artifact Lane](epics/VFH7YspJx/) (active)
+### [Ship Bootable Local Cluster Guest And Artifact Lane](epics/VFH7YspJx/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Boot Live Local Cluster And Fix Packaged Guest Validation](epics/VFH7YspJx/voyages/VFH7t3cG9/) | in-progress |
+| [Boot Live Local Cluster And Fix Packaged Guest Validation](epics/VFH7YspJx/voyages/VFH7t3cG9/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

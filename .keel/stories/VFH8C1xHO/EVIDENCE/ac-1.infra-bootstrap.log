@@ -1,0 +1,29 @@
+spoke infra dev shell
+tools: just infra keel cargo rustfmt clippy flux pulumi kubectl helm aws sops age node pnpm
++ nix develop . --command port --config /var/tmp/tmp.E79snC134q/state/port-k3s.toml doctor
+error (ignored): error: SQLite database '/home/alex/.cache/nix/eval-cache-v5/95a12c4eac06d9af5df9b7eb8ec278a095ea8354d29f070703building '/nix/store/qn810b9fyb1k72nvx7ncc7gsrv21j830-nix-shell-env.drv'...
+kernel protection mode: standard
+kernel source: http://spec.ccfc.min.s3.amazonaws.com/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155
+kernel sha256: e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53
+kernel artifact: /var/tmp/port-proof.ZJFMie/artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
+built kernel artifact 'demo-kernel' as demo-fs/port/demo-kernel:v1 for x86_64/firecracker/standard at /var/tmp/port-proof.ZJFMie/artifacts/kernel/demo/x86_64/firecracker/standard/vmlinux
++ nix develop . --command port --config /var/tmp/tmp.yarvdyozaC/state/port-k3s.toml artifacts build --artifact demo-guest --architecture x86-64
+building '/nix/store/gdw86933xxiia65avf6h6hw8pynzaf0n-port-0.1.0.drv'...
+error: interrupted by the user
+Error: command failed: nix develop . --command port --config /var/tmp/tmp.yarvdyozaC/state/port-k3s.toml artifacts build --artifact demo-guest --architecture x86-64
+ts/guest/demo/x86_64/firecracker/standard/rootfs.ext4' exists.
+check[ok]: machine:demo (required=false) - Machine models Firecracker/Standard/X86_64 with compatible artifacts.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.
+note: Remote Linux hosts are modeled provider-by-provider, but the MVP launch path is still local Linux only.
+note: Firecracker/PVM readiness is reported as a dedicated host-kit lane; failing PVM checks do not imply the standard Firecracker lane is a compatible fallback.
+note: Cloud Hypervisor readiness is reported through its own host-platform, architecture, protection-mode, and binary checks; Port does not silently fall back to Firecracker when that lane is selected.
+note: AVF install and help surfaces stay on the canonical port CLI: set PORT_AVF_LAUNCHER to an external launcher helper for local macOS workflows, and do not expect a bundled macOS-only fallback workflow in this slice.
++ nix develop . --command port --config /var/tmp/tmp.E79snC134q/state/port-k3s.toml cluster up --cluster demo --runtime-root /var/tmp/tmp.E79snC134q/state/runtime --format json
++ nix develop . --command port --config /var/tmp/tmp.E79snC134q/state/port-k3s.toml cluster kubeconfig --cluster demo --runtime-root /var/tmp/tmp.E79snC134q/state/runtime --format json
++ kubectl --kubeconfig /var/tmp/tmp.E79snC134q/state/kubeconfig.yaml get nodes -o wide
+NAME   STATUS   ROLES                  AGE   VERSION        INTERNAL-IP   OS-IMAGE          KERNEL-VERSION   CONTAINER-RUNTIME
+demo   Ready    control-plane,master   1m    v1.32.2+k3s1   127.0.0.1     Port Demo Guest   6.1.155          containerd://2.0.0
+Error: GITHUB_TOKEN is required for flux bootstrap github

@@ -1,0 +1,10 @@
+`infra ps` exited 0 against the temp state created by the downstream proof.
+
+The durable downstream handoff signal is anchored in `ac-1.infra-bootstrap.log`:
+- Port doctor ran successfully from `infra`
+- `port cluster up` and `port cluster kubeconfig` both completed
+- `kubectl get nodes -o wide` succeeded against the handed-off kubeconfig
+- `infra` then failed at its own `GITHUB_TOKEN` requirement for Flux bootstrap
+
+That keeps Port as the owner of cluster boot, readiness, and kubeconfig handoff,
+while GitOps/bootstrap remains downstream scope.

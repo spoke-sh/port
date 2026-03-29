@@ -1,0 +1,5 @@
+{
+  "proof_state_dir": "/var/tmp/tmp.E79snC134q/state",
+  "cleanup": "no temp-state Port runtime processes remained after the downstream proof completed",
+  "note": "the downstream verification is anchored in ac-1.infra-bootstrap.log and ac-0.infra-proof-meta.txt"
+}

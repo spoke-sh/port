@@ -22,8 +22,8 @@ mission: VFH7XN6Fi
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Boot Live Local Cluster And Fix Packaged Guest Validation](voyages/VFH7t3cG9/) | in-progress | 3/4 |
+| [Boot Live Local Cluster And Fix Packaged Guest Validation](voyages/VFH7t3cG9/) | done | 4/4 |
 <!-- END GENERATED -->

@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFH7XN6Fi
-status: active
+status: achieved
 created_at: 2026-03-29T09:38:09
-updated_at: 2026-03-29T09:41:59
+updated_at: 2026-03-29T11:30:16
 # authored
 title: Seal Healthy Local Cluster Runtime Contract
 watch: ~
 activated_at: 2026-03-29T09:41:59
+achieved_at: 2026-03-29T11:30:16
 ---
 
 # Seal Healthy Local Cluster Runtime Contract
