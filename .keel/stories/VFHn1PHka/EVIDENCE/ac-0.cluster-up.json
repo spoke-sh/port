@@ -1,0 +1,85 @@
+{
+  "cluster_name": "demo",
+  "machine_name": "demo",
+  "launch_action": "launched",
+  "launch": {
+    "machine_name": "demo",
+    "pid": 144857,
+    "launched_at_unix_s": 1774826749,
+    "runtime_dir": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo",
+    "firecracker_binary": "/nix/store/7w1ap3ns2zgqlj5044175aj3kbnf8hjd-firecracker-1.14.1/bin/firecracker",
+    "config_path": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo/firecracker-config.json",
+    "log_path": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo/firecracker.log",
+    "stdout_path": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo/console.stdout.log",
+    "stderr_path": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo/console.stderr.log",
+    "manifest_path": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo/manifest.json",
+    "attached_volumes": []
+  },
+  "stage": {
+    "cluster_name": "demo",
+    "machine_name": "demo",
+    "guest_profile": "kube-ready",
+    "required_commands": [
+      "sh",
+      "install",
+      "ln",
+      "chmod",
+      "dirname",
+      "setsid",
+      "modprobe"
+    ],
+    "stage_root": "/opt/port/clusters/demo",
+    "staged_files": [
+      {
+        "source": "examples/bootstrap/demo-k3s/install-k3s-offline.sh",
+        "destination": "/opt/port/clusters/demo/install-k3s-offline.sh",
+        "bytes_copied": 5245
+      },
+      {
+        "source": "examples/bootstrap/demo-k3s/k3s",
+        "destination": "/opt/port/clusters/demo/k3s",
+        "bytes_copied": 356
+      }
+    ],
+    "preflight_command": [
+      "/bin/sh",
+      "-lc",
+      "set -eu; command -v 'sh' >/dev/null; printf 'required-command:%s\\n' 'sh'; command -v 'install' >/dev/null; printf 'required-command:%s\\n' 'install'; command -v 'ln' >/dev/null; printf 'required-command:%s\\n' 'ln'; command -v 'chmod' >/dev/null; printf 'required-command:%s\\n' 'chmod'; command -v 'dirname' >/dev/null; printf 'required-command:%s\\n' 'dirname'; command -v 'setsid' >/dev/null; printf 'required-command:%s\\n' 'setsid'; command -v 'modprobe' >/dev/null; printf 'required-command:%s\\n' 'modprobe'; test -x 'opt/port/clusters/demo/install-k3s-offline.sh'; printf 'staged-file:%s\\n' '/opt/port/clusters/demo/install-k3s-offline.sh'; test -x 'opt/port/clusters/demo/k3s'; printf 'staged-file:%s\\n' '/opt/port/clusters/demo/k3s'; printf 'guest-profile-ok\\n';"
+    ],
+    "preflight_stdout": "required-command:sh\nrequired-command:install\nrequired-command:ln\nrequired-command:chmod\nrequired-command:dirname\nrequired-command:setsid\nrequired-command:modprobe\nstaged-file:/opt/port/clusters/demo/install-k3s-offline.sh\nstaged-file:/opt/port/clusters/demo/k3s\nguest-profile-ok\n",
+    "install_command": [
+      "/bin/sh",
+      "-lc",
+      "set -eu; PORT_K3S_BIN_DIR='opt/port/clusters/demo/bin' PORT_K3S_KUBECONFIG_PATH='etc/rancher/k3s/k3s.yaml' 'opt/port/clusters/demo/install-k3s-offline.sh' server '--disable=traefik'"
+    ],
+    "install_stdout": "k3s-server:started pid-file=opt/port/clusters/demo/bin/k3s-server.pid log=/var/log/port-k3s.log\noffline-install-ok role=server args=--disable=traefik bin-dir=/opt/port/clusters/demo/bin kubeconfig=/etc/rancher/k3s/k3s.yaml\ninstalled-binary:/opt/port/clusters/demo/bin/k3s\ninstalled-kubectl:/opt/port/clusters/demo/bin/kubectl\n",
+    "installed_binary": "/opt/port/clusters/demo/bin/k3s",
+    "installed_kubectl": "/opt/port/clusters/demo/bin/kubectl",
+    "boundary": "staged Port-owned bootstrap inputs only; cluster lifecycle, health, and kubeconfig remain follow-on work"
+  },
+  "status": {
+    "cluster_name": "demo",
+    "machine_name": "demo",
+    "runtime_dir": "/home/alex/.cache/port-proof-runtime/vfhn1phka.VPxgeq/demo",
+    "machine_state": "running",
+    "pid": 144857,
+    "readiness": "ready",
+    "health_command": [
+      "opt/port/clusters/demo/bin/k3s",
+      "kubectl",
+      "get",
+      "nodes",
+      "-o",
+      "wide",
+      "--request-timeout=15s"
+    ],
+    "health_output": "",
+    "kubeconfig_path": "/etc/rancher/k3s/k3s.yaml",
+    "kubeconfig_available": true,
+    "api_forward_target": "127.0.0.1:6443",
+    "kubeconfig_surface": "port cluster kubeconfig --cluster demo --runtime-root <runtime-root>",
+    "boundary": "Port readiness in this slice covers local machine launch, guest bootstrap, guest-reported node visibility, and kubeconfig handoff. Downstream GitOps/bootstrap convergence, richer networking, and multi-node expansion remain follow-on work.",
+    "detail": "Port owns machine launch, guest bootstrap, node-health confirmation, and kubeconfig handoff for this first local cluster slice. Downstream GitOps/bootstrap convergence remains separate work."
+  },
+  "boundary": "Port readiness in this slice covers local machine launch, guest bootstrap, guest-reported node visibility, and kubeconfig handoff. Downstream GitOps/bootstrap convergence, richer networking, and multi-node expansion remain follow-on work."
+}

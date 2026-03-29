@@ -14,3 +14,7 @@ Accepted VFHn1OVki after a clean local proof showed port cluster up/down succeed
 ## 2026-03-29T16:23:15
 
 Captured VFHn1Ozkj proof showing the Port kubeconfig works with host kubectl unchanged and Kubernetes API discovery exposes the required GitOps resources.
+
+## 2026-03-29T16:27:10
+
+Captured VFHn1PHka proof showing Flux installs cleanly and the Pulumi operator Helm release deploys against the same Port-handed kubeconfig; nix build .#port also succeeds with the packaged bootstrap assets.

@@ -1,0 +1,9 @@
+Release "pulumi-kubernetes-operator" does not exist. Installing it now.
+Pulled: ghcr.io/pulumi/helm-charts/pulumi-kubernetes-operator:2.5.1
+Digest: sha256:cccfd8867fb443d0425d7693a64fb9e3d4e866fdc864ad5d602894d5d2744bb3
+NAME: pulumi-kubernetes-operator
+LAST DEPLOYED: Sun Mar 29 16:26:36 2026
+NAMESPACE: pulumi-kubernetes-operator
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None

@@ -1,0 +1,2 @@
+NAME                                                             READY   STATUS              RESTARTS   AGE
+pulumi-kubernetes-operator-controller-manager-768ff686b8-h5f2j   0/1     ContainerCreating   0          1s
