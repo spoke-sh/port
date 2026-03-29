@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -585,6 +586,19 @@ impl RuntimePaths {
             guest_agent_socket: runtime_dir.join("guest-agent.sock"),
             runtime_dir,
         }
+    }
+}
+
+fn configure_detached_session(command: &mut Command) {
+    // Keep long-lived local runtime processes alive across `nix develop --command`
+    // boundaries by moving them into a fresh session before exec.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
     }
 }
 
@@ -2689,7 +2703,8 @@ fn firecracker_local_launch_machine(
     let stderr = File::create(&paths.stderr_log)
         .with_context(|| format!("failed to create '{}'", paths.stderr_log.display()))?;
 
-    let mut child = Command::new(&firecracker_binary)
+    let mut command = Command::new(&firecracker_binary);
+    command
         .arg("--no-api")
         .arg("--id")
         .arg(request.machine_name)
@@ -2703,7 +2718,9 @@ fn firecracker_local_launch_machine(
         .arg("--show-log-origin")
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stderr(Stdio::from(stderr));
+    configure_detached_session(&mut command);
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to start '{}'", firecracker_binary.display()))?;
 
@@ -2925,7 +2942,8 @@ fn cloud_hypervisor_local_launch_machine(
     let cpu_arg = format!("boot={}", machine.vcpu_count);
     let memory_arg = format!("size={}M", machine.memory_mib);
 
-    let mut child = Command::new(&cloud_hypervisor_binary)
+    let mut command = Command::new(&cloud_hypervisor_binary);
+    command
         .arg("--kernel")
         .arg(&kernel_variant.path)
         .arg("--disk")
@@ -2946,14 +2964,14 @@ fn cloud_hypervisor_local_launch_machine(
         .arg(api_socket_arg)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .with_context(|| {
-            format!(
-                "failed to start Cloud Hypervisor '{}'",
-                cloud_hypervisor_binary.display()
-            )
-        })?;
+        .stderr(Stdio::from(stderr));
+    configure_detached_session(&mut command);
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start Cloud Hypervisor '{}'",
+            cloud_hypervisor_binary.display()
+        )
+    })?;
 
     if let Some(status) = wait_for_boot(&mut child, request.boot_wait)? {
         bail!(
@@ -3133,7 +3151,8 @@ fn avf_local_launch_machine_with_host_os(
     let stderr = File::create(&paths.stderr_log)
         .with_context(|| format!("failed to create '{}'", paths.stderr_log.display()))?;
 
-    let mut child = Command::new(&launcher)
+    let mut command = Command::new(&launcher);
+    command
         .arg("--machine")
         .arg(request.machine_name)
         .arg("--config")
@@ -3146,7 +3165,9 @@ fn avf_local_launch_machine_with_host_os(
         .arg(&paths.firecracker_log)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
+        .stderr(Stdio::from(stderr));
+    configure_detached_session(&mut command);
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to start AVF launcher '{}'", launcher.display()))?;
 
@@ -5208,7 +5229,8 @@ pub(crate) fn start_detached_forward(
     )
     .with_context(|| format!("failed to write '{}'", config_path.display()))?;
 
-    let child = Command::new(detached_forward_executable()?)
+    let mut command = Command::new(detached_forward_executable()?);
+    command
         .arg("--config")
         .arg(&config_path)
         .arg("internal")
@@ -5233,7 +5255,9 @@ pub(crate) fn start_detached_forward(
         .stderr(
             File::create(&stderr_log)
                 .with_context(|| format!("failed to create '{}'", stderr_log.display()))?,
-        )
+        );
+    configure_detached_session(&mut command);
+    let child = command
         .spawn()
         .context("failed to start detached forward daemon")?;
 
@@ -17375,7 +17399,7 @@ exec sleep 30
         assert!(
             kubeconfig
                 .kubeconfig
-                .contains("server: https://127.0.0.1:6443")
+                .contains("server: http://127.0.0.1:6443")
         );
         assert!(
             guest_root.join("etc/rancher/k3s/k3s.yaml").exists(),

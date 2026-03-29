@@ -1,0 +1,2 @@
+NAME   STATUS   ROLES                  AGE   VERSION        INTERNAL-IP   OS-IMAGE          KERNEL-VERSION   CONTAINER-RUNTIME
+demo   Ready    control-plane,master   1m    v1.32.2+k3s1   127.0.0.1     Port Demo Guest   6.1.155          containerd://2.0.0

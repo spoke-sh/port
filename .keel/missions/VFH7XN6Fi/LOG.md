@@ -10,3 +10,7 @@ Created the mission from validated local cluster runtime failures: cluster up pa
 ## 2026-03-29T10:08:41
 
 Accepted VFH8C0wHN: repaired local Firecracker guest boot path, aligned local cluster readiness with live guest transport, and captured a green cluster-up/cluster-down proof for examples/port.toml.
+
+## 2026-03-29T10:59:55
+
+Accepted VFH8C1KHM: the local cluster lane now survives separate nix develop invocations, reports ready via cluster status, returns a usable kubeconfig, and hands off successfully to kubectl get nodes -o wide using the checked-in offline bootstrap kit.

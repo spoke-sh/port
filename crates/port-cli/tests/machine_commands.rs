@@ -946,7 +946,7 @@ fn cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down() {
         "{kubeconfig_stdout}"
     );
     assert!(
-        kubeconfig_stdout.contains("server: https://127.0.0.1:"),
+        kubeconfig_stdout.contains("server: http://127.0.0.1:"),
         "{kubeconfig_stdout}"
     );
 

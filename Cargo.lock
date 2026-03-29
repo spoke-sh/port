@@ -856,6 +856,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "libc",
  "port-agent-protocol",
  "port-guest-agent",
  "port-model",

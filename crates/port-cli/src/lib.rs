@@ -1,6 +1,7 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
@@ -1058,10 +1059,8 @@ fn run_cluster(
                 &result.api_forward_target,
                 &forward_name,
             )?;
-            let rewritten = rewrite_kubeconfig_server(
-                &result.kubeconfig,
-                &format!("https://{}", forward.manifest.listen),
-            )?;
+            let rewritten =
+                rewrite_kubeconfig_server(&result.kubeconfig, &forward.manifest.listen)?;
             let rendered = RenderedClusterKubeconfig {
                 cluster_name: result.cluster_name,
                 machine_name: result.machine_name,
@@ -2625,6 +2624,7 @@ fn start_detached_forward(
             fs::File::create(&stderr_log)
                 .with_context(|| format!("failed to create '{}'", stderr_log.display()))?,
         );
+    configure_detached_session(&mut command);
 
     let child = command
         .spawn()
@@ -2898,6 +2898,18 @@ fn pid_is_live(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+fn configure_detached_session(command: &mut ProcessCommand) {
+    // Keep detached forwards alive after the invoking CLI process exits.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 fn kill_pid(pid: u32) -> Result<()> {
     let status = ProcessCommand::new("kill")
         .args(["-TERM", &pid.to_string()])
@@ -2923,7 +2935,19 @@ fn rewrite_kubeconfig_server(kubeconfig: &str, server: &str) -> Result<String> {
         if !replaced && line.trim_start().starts_with("server: ") {
             let indent_len = line.len() - line.trim_start().len();
             let indent = &line[..indent_len];
-            rewritten.push(format!("{indent}server: {server}"));
+            let existing = line
+                .trim_start()
+                .strip_prefix("server: ")
+                .unwrap_or_default()
+                .trim();
+            let rewritten_server = if server.contains("://") {
+                server.to_string()
+            } else if let Some((scheme, _)) = existing.split_once("://") {
+                format!("{scheme}://{server}")
+            } else {
+                format!("https://{server}")
+            };
+            rewritten.push(format!("{indent}server: {rewritten_server}"));
             replaced = true;
         } else {
             rewritten.push(line.to_string());

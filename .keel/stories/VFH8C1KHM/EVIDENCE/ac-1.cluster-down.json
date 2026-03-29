@@ -1,0 +1,30 @@
+{
+  "boundary": "Port readiness in this slice covers local machine launch, guest bootstrap, guest-reported node visibility, and kubeconfig handoff. Downstream GitOps/bootstrap convergence, richer networking, and multi-node expansion remain follow-on work.",
+  "cluster_name": "demo",
+  "forward_cleanup": "cluster-demo-api stopped",
+  "machine_name": "demo",
+  "stop": {
+    "attached_volumes": [],
+    "control": {
+      "guest_broker": "local-runtime-transport",
+      "guest_route": "direct-local-runtime",
+      "inventory_owner": "local-runtime-root",
+      "inventory_route": "direct-local-runtime",
+      "inventory_scope": "local-runtime-root",
+      "launch_route": "direct-local-runtime",
+      "lifecycle_owner": "local-port-runtime",
+      "monitor_route": "direct-local-runtime",
+      "service_route": "direct-local-runtime",
+      "status_route": "direct-local-runtime",
+      "status_source": "runtime-manifest-and-host-process",
+      "stop_route": "direct-local-runtime",
+      "top_route": "direct-local-runtime"
+    },
+    "current_state": "stopped",
+    "detail": "sent SIGTERM to pid and cleaned stale runtime sockets",
+    "machine_name": "demo",
+    "pid": 3454488,
+    "previous_state": "running",
+    "runtime_dir": "/tmp/port-kubeconfig-proof.3Kpgwu/runtime/demo"
+  }
+}
