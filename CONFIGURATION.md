@@ -136,6 +136,39 @@ port --config /tmp/port-attached-volume.toml machine stop --machine demo
 | `PORT_PVM_FIRECRACKER_BINARY` | Prepared-node Firecracker/PVM binary |
 | `PORT_OCI_USER` / `PORT_OCI_PASSWORD` | OCI basic auth variables when the selected backend requires them |
 | `PORT_OCI_DEMO_CONTAINER_RUNTIME` | Repo-local demo helper override for the OCI registry proof |
+| `PORT_SHARE_ROOT` | Explicit override for the Port asset prefix (replaces packaged assets) |
+| `PORT_REPO_ROOT` | Explicit override for the Port repository root (enables development mode) |
+
+## Development and Packaging
+
+Port is designed to run both as a repo-local development tool and as a standalone
+packaged CLI.
+
+### Packaged Mode (Default)
+
+When installed via Nix or a binary package, Port detects its "packaged" status
+by looking for a `share/port` directory relative to its executable. In this
+mode:
+
+1. **Packaged Assets**: Port prefers support assets (scripts, examples, etc.)
+   bundled with the package over those in the current working directory.
+2. **Path Resolution**: Relative paths in the sample config (like
+   `examples/bootstrap/demo-k3s/k3s`) are resolved against the package prefix.
+3. **Self-Contained**: The packaged CLI is wrapped with its own runtime
+   dependencies (Firecracker, K3s, ORAS, etc.) on its PATH.
+
+### Development Mode (Override)
+
+To override the packaged behavior and use a local repository checkout:
+
+1. **`PORT_REPO_ROOT`**: Set this to your local Port checkout path (e.g.,
+   `export PORT_REPO_ROOT=.`). This enables "Development Mode," allowing Port
+   to find scripts and assets in your local tree.
+2. **`PORT_SHARE_ROOT`**: Use this for a surgical override of just the asset
+   prefix without enabling the full development search logic.
+
+Development mode is the default when running Port from a non-packaged
+installation (e.g., `cargo run`).
 
 ## Detailed Examples
 

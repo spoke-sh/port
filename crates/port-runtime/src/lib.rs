@@ -1947,6 +1947,10 @@ fn cluster_bootstrap_source_candidates(source: &Path) -> Vec<PathBuf> {
         push_cluster_bootstrap_candidate(&mut candidates, PathBuf::from(configured).join(source));
     }
 
+    if let Some(configured) = env::var_os("PORT_REPO_ROOT") {
+        push_cluster_bootstrap_candidate(&mut candidates, PathBuf::from(configured).join(source));
+    }
+
     if let Ok(current_exe) = env::current_exe() {
         if let Some(prefix_root) = current_exe.parent().and_then(Path::parent) {
             push_cluster_bootstrap_candidate(
@@ -1956,19 +1960,17 @@ fn cluster_bootstrap_source_candidates(source: &Path) -> Vec<PathBuf> {
         }
     }
 
-    if let Some(configured) = env::var_os("PORT_REPO_ROOT") {
-        push_cluster_bootstrap_candidate(&mut candidates, PathBuf::from(configured).join(source));
-    }
-
     if let Ok(current_dir) = env::current_dir() {
         for candidate in current_dir.ancestors() {
             push_cluster_bootstrap_candidate(&mut candidates, candidate.join(source));
         }
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(candidate) = manifest_dir.parent().and_then(Path::parent) {
-        push_cluster_bootstrap_candidate(&mut candidates, candidate.join(source));
+    if cfg!(debug_assertions) {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(candidate) = manifest_dir.parent().and_then(Path::parent) {
+            push_cluster_bootstrap_candidate(&mut candidates, candidate.join(source));
+        }
     }
 
     candidates
@@ -5708,12 +5710,16 @@ fn detached_forward_executable() -> Result<PathBuf> {
         return Ok(PathBuf::from(path));
     }
 
+    if let Ok(exe) = env::current_exe() {
+        return Ok(exe);
+    }
+
     let workspace_port = repo_root()?.join("target/debug/port");
     if workspace_port.exists() {
         return Ok(workspace_port);
     }
 
-    env::current_exe().context("failed to resolve the current port executable")
+    bail!("failed to resolve the current port executable")
 }
 
 fn machine_top_entry_rank(kind: MachineTopEntryKind) -> u8 {
@@ -9440,15 +9446,6 @@ fn artifact_script_candidates(script_name: &str) -> Vec<PathBuf> {
         );
     }
 
-    if let Ok(current_dir) = env::current_dir() {
-        for candidate in current_dir.ancestors() {
-            push_artifact_script_candidate(
-                &mut candidates,
-                candidate.join("scripts/artifacts").join(script_name),
-            );
-        }
-    }
-
     if let Ok(current_exe) = env::current_exe() {
         if let Some(prefix_root) = current_exe.parent().and_then(Path::parent) {
             push_artifact_script_candidate(
@@ -9460,12 +9457,23 @@ fn artifact_script_candidates(script_name: &str) -> Vec<PathBuf> {
         }
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(candidate) = manifest_dir.parent().and_then(Path::parent) {
-        push_artifact_script_candidate(
-            &mut candidates,
-            candidate.join("scripts/artifacts").join(script_name),
-        );
+    if let Ok(current_dir) = env::current_dir() {
+        for candidate in current_dir.ancestors() {
+            push_artifact_script_candidate(
+                &mut candidates,
+                candidate.join("scripts/artifacts").join(script_name),
+            );
+        }
+    }
+
+    if cfg!(debug_assertions) {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(candidate) = manifest_dir.parent().and_then(Path::parent) {
+            push_artifact_script_candidate(
+                &mut candidates,
+                candidate.join("scripts/artifacts").join(script_name),
+            );
+        }
     }
 
     candidates
@@ -9498,6 +9506,15 @@ fn resolve_artifact_script_path(
     )
 }
 
+fn is_packaged() -> bool {
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(prefix_root) = current_exe.parent().and_then(Path::parent) {
+            return prefix_root.join("share/port/scripts/artifacts").is_dir();
+        }
+    }
+    false
+}
+
 fn repo_root() -> Result<PathBuf> {
     if let Some(configured) = env::var_os("PORT_REPO_ROOT") {
         let candidate = PathBuf::from(configured);
@@ -9506,28 +9523,26 @@ fn repo_root() -> Result<PathBuf> {
         }
     }
 
-    if let Ok(current_dir) = env::current_dir() {
-        for candidate in current_dir.ancestors() {
-            if candidate.join("scripts/artifacts").is_dir() {
-                return Ok(candidate.to_path_buf());
+    if !is_packaged() {
+        if let Ok(current_dir) = env::current_dir() {
+            for candidate in current_dir.ancestors() {
+                if candidate.join("scripts/artifacts").is_dir() {
+                    return Ok(candidate.to_path_buf());
+                }
             }
         }
     }
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let candidate = manifest_dir
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .ok_or_else(|| anyhow!("failed to derive repository root from CARGO_MANIFEST_DIR"))?;
-    if candidate.join("scripts/artifacts").is_dir() {
-        Ok(candidate)
-    } else {
-        bail!(
-            "failed to resolve the Port repository root; searched PORT_REPO_ROOT, the current working directory, and '{}'",
-            candidate.display()
-        )
+    if cfg!(debug_assertions) {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(candidate) = manifest_dir.parent().and_then(Path::parent).map(Path::to_path_buf) {
+            if candidate.join("scripts/artifacts").is_dir() {
+                return Ok(candidate);
+            }
+        }
     }
+
+    bail!("failed to resolve the Port repository root; search was restricted because a packaged installation was detected. Set PORT_REPO_ROOT explicitly for development overrides.")
 }
 
 pub fn execute_guest_operation(

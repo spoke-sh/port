@@ -45,3 +45,15 @@ port doctor
 
 That confirms the host and lane boundary without requiring repo-local Cargo
 commands.
+
+### Self-Contained Package Prefix
+
+The `port` CLI package is self-contained. It includes:
+
+- The `port` binary itself
+- Required runtime assets (scripts, examples, bootstrap kits) under `share/port`
+- Wrapped execution with dependencies (Firecracker, K3s, ORAS, etc.) on its `PATH`
+
+This allows `port` to be invoked reproducibly in CI, AWS, and SRE environments
+without a repository checkout. Relative paths in the sample configuration
+automatically resolve to the package's bundled assets.

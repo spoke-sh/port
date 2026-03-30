@@ -46,11 +46,34 @@
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
         siftPkg = sift.packages.${system}.sift;
-        portPkg = pkgs.callPackage ./nix/port.nix {
+        portUnwrapped = pkgs.callPackage ./nix/port.nix {
           rustPlatform = pkgs.makeRustPlatform {
             cargo = rust;
             rustc = rust;
           };
+        };
+        portRuntimeDeps = [
+          pkgs.k3s
+          pkgs.oras
+          pkgs.gnutar
+          pkgs.gzip
+          pkgs.curl
+        ] ++ pkgs.lib.optionals isLinux [
+          pkgs.firecracker
+          pkgs.iproute2
+          pkgs.iptables
+          pkgs.busybox
+          pkgs.cpio
+          pkgs.e2fsprogs
+        ];
+        portPkg = pkgs.symlinkJoin {
+          name = "port-${portUnwrapped.version}";
+          paths = [ portUnwrapped ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/port \
+              --prefix PATH : ${pkgs.lib.makeBinPath portRuntimeDeps}
+          '';
         };
         atxtPkg = pkgs.callPackage (
           {
