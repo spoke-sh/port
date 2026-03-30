@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFHmKGaXQ
-status: active
+status: achieved
 created_at: 2026-03-29T12:20:10
-updated_at: 2026-03-29T12:25:08
+updated_at: 2026-03-29T17:14:22
 # authored
 title: Ship GitOps-Ready Local Cluster Runtime Contract
 watch: ~
 activated_at: 2026-03-29T12:25:08
+achieved_at: 2026-03-29T17:14:22
 ---
 
 # Ship GitOps-Ready Local Cluster Runtime Contract

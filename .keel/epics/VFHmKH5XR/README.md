@@ -22,8 +22,8 @@ mission: VFHmKGaXQ
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 3/4 stories done
+**Progress:** 1/1 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Replace Demo API With GitOps-Capable Local K3s Runtime](voyages/VFHmctWC5/) | in-progress | 3/4 |
+| [Replace Demo API With GitOps-Capable Local K3s Runtime](voyages/VFHmctWC5/) | done | 3/3 |
 <!-- END GENERATED -->

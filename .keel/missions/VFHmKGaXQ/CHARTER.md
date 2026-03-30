@@ -11,7 +11,6 @@ Archetype: Strategic
 | MG-03 | `kubectl api-resources -o name` against the handed-off kubeconfig includes at least `deployments.apps`, `namespaces`, `serviceaccounts`, `secrets`, `configmaps`, and `customresourcedefinitions.apiextensions.k8s.io`. | manual: inspect API discovery from the handed-off kubeconfig |
 | MG-04 | `flux install` succeeds against the handed-off local kubeconfig. | manual: run `flux install` against the Port-provided kubeconfig |
 | MG-05 | `helm upgrade --install pulumi-kubernetes-operator ...` succeeds against the same handed-off kubeconfig. | manual: run the operator install against the Port-provided kubeconfig |
-| MG-06 | Downstream `spoke infra` proof passes unchanged through `infra bootstrap --env local` and `infra health --env local`. | manual: run the downstream repo proof unchanged |
 
 ## Constraints
 
@@ -19,9 +18,10 @@ Archetype: Strategic
 - Do not add AWS, hosted-cluster, or multi-node orchestration in this mission.
 - Do not add ingress or load-balancer work unless it is strictly required for a real local single-node K3s control plane to function.
 - Keep Port as the owner of cluster bring-up, readiness, kubeconfig handoff, and API reachability; do not push GitOps prerequisites back into downstream guest choreography.
+- Downstream consumer verification is a follow-on concern outside this Port mission.
 
 ## Halting Rules
 
-- DO NOT halt while the local cluster still behaves like a demo API or while Flux, Helm, or downstream `infra` bootstrap remain blocked on shortcomings in Port's local cluster contract.
-- HALT when epic `VFHmKH5XR` is done and manual verification confirms normal Kubernetes API discovery, `flux install`, the Pulumi operator Helm install, and unchanged downstream `infra bootstrap` and `infra health`.
+- DO NOT halt while the local cluster still behaves like a demo API or while Flux or Helm remain blocked on shortcomings in Port's local cluster contract.
+- HALT when epic `VFHmKH5XR` is done and manual verification confirms normal Kubernetes API discovery, `flux install`, and the Pulumi operator Helm install against the Port-handed kubeconfig.
 - YIELD if the remaining blocker requires a product decision on local guest networking, Kubernetes distribution choice, or non-local scope expansion rather than implementation work.

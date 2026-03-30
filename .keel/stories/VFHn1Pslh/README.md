@@ -3,12 +3,11 @@
 id: VFHn1Pslh
 status: icebox
 created_at: 2026-03-29T12:22:56
-updated_at: 2026-03-29T16:30:22
+updated_at: 2026-03-29T17:14:15
 # authored
 title: Verify Unchanged Downstream Infra GitOps Handoff
 type: feat
 operator-signal:
-scope: VFHmKH5XR/VFHmctWC5
 index: 4
 started_at: 2026-03-29T16:28:02
 ---

@@ -126,11 +126,11 @@
 |--------|--------|
 | [Boot Live Local Cluster And Fix Packaged Guest Validation](epics/VFH7YspJx/voyages/VFH7t3cG9/) | done |
 
-### [Replace Demo Local Cluster Stub With Real K3s Runtime](epics/VFHmKH5XR/) (active)
+### [Replace Demo Local Cluster Stub With Real K3s Runtime](epics/VFHmKH5XR/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Replace Demo API With GitOps-Capable Local K3s Runtime](epics/VFHmKH5XR/voyages/VFHmctWC5/) | in-progress |
+| [Replace Demo API With GitOps-Capable Local K3s Runtime](epics/VFHmKH5XR/voyages/VFHmctWC5/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
