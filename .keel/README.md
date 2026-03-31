@@ -138,6 +138,12 @@
 |--------|--------|
 | [TAP Networking and Host NAT for Local Firecracker VMs](epics/VFSWpHXG1/voyages/VFSXWpO18/) | done |
 
+### [Default-On Guest Networking Activation](epics/VFTZdamHM/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Default-On Networking Activation Fix](epics/VFTZdamHM/voyages/VFTarG3Jq/) | done |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |

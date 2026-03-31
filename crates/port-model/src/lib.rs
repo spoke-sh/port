@@ -1126,7 +1126,10 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
             control_port: 7000,
             console_log: PathBuf::from(format!("runtime/{name}/console.log")),
         },
-        network: None,
+        network: Some(MachineNetworkSpec {
+            enabled: false,
+            ..MachineNetworkSpec::default()
+        }),
     }
 }
 
@@ -1909,8 +1912,21 @@ pub struct MachineNetworkSpec {
     pub prefix_len: u8,
     #[serde(default = "default_guest_mac")]
     pub guest_mac: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default = "default_dns_servers", skip_serializing_if = "Vec::is_empty")]
     pub dns_servers: Vec<String>,
+}
+
+impl Default for MachineNetworkSpec {
+    fn default() -> Self {
+        Self {
+            enabled: default_network_enabled(),
+            guest_ip: default_guest_ip(),
+            host_ip: default_host_ip(),
+            prefix_len: default_network_prefix_len(),
+            guest_mac: default_guest_mac(),
+            dns_servers: default_dns_servers(),
+        }
+    }
 }
 
 const fn default_network_enabled() -> bool {
@@ -1927,6 +1943,9 @@ const fn default_network_prefix_len() -> u8 {
 }
 fn default_guest_mac() -> String {
     String::from("AA:FC:00:00:00:01")
+}
+fn default_dns_servers() -> Vec<String> {
+    vec![String::from("8.8.8.8"), String::from("8.8.4.4")]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -2960,11 +2960,10 @@ fn firecracker_local_launch_machine(
     let runtime_guest_image_path =
         materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
 
-    if let Some(net) = &machine.network {
-        if net.enabled {
-            setup_host_networking(request.machine_name, net)
-                .context("failed to set up host-side networking for guest VM")?;
-        }
+    let effective_network = machine.network.clone().unwrap_or_default();
+    if effective_network.enabled {
+        setup_host_networking(request.machine_name, &effective_network)
+            .context("failed to set up host-side networking for guest VM")?;
     }
 
     let config_payload = build_firecracker_config(
@@ -2979,7 +2978,7 @@ fn firecracker_local_launch_machine(
         machine.guest.vsock_cid,
         paths.vsock_path.clone(),
         request.machine_name,
-        machine.network.as_ref(),
+        Some(&effective_network),
     );
     let config_json =
         serde_json::to_string_pretty(&config_payload).context("failed to encode config JSON")?;
@@ -3054,15 +3053,13 @@ fn firecracker_local_launch_machine(
         )
     })?;
 
-    if let Some(net) = &machine.network {
-        if net.enabled {
-            let state_path = network_state_path(&paths);
-            let state_json = serde_json::to_string_pretty(net)
-                .context("failed to encode network state JSON")?;
-            fs::write(&state_path, format!("{state_json}\n")).with_context(|| {
-                format!("failed to write network state '{}'", state_path.display())
-            })?;
-        }
+    if effective_network.enabled {
+        let state_path = network_state_path(&paths);
+        let state_json = serde_json::to_string_pretty(&effective_network)
+            .context("failed to encode network state JSON")?;
+        fs::write(&state_path, format!("{state_json}\n")).with_context(|| {
+            format!("failed to write network state '{}'", state_path.display())
+        })?;
     }
 
     Ok(metadata)
