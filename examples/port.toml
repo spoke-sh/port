@@ -434,6 +434,14 @@ vsock_cid = 52
 control_port = 7000
 console_log = "runtime/demo/console.log"
 
+[machines.demo.network]
+enabled = true
+guest_ip = "172.16.0.2"
+host_ip = "172.16.0.1"
+prefix_len = 24
+guest_mac = "AA:FC:00:00:00:01"
+dns_servers = ["8.8.8.8", "8.8.4.4"]
+
 [machines.demo-ch]
 # Local Cloud Hypervisor lane:
 #   `port doctor` validates the Linux host, supported architecture, and
@@ -592,6 +600,14 @@ health_command = [
 ]
 kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
 api_forward_target = "127.0.0.1:6443"
+
+[[clusters.demo.lifecycle.forwards]]
+name = "nodeport-http"
+target = "172.16.0.2:30080"
+
+[[clusters.demo.lifecycle.forwards]]
+name = "nodeport-https"
+target = "172.16.0.2:30443"
 
 # Service reliability workflow (repo-local hosted proof):
 # export PORT_DEMO_TOKEN=demo-token

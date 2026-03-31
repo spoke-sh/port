@@ -2960,6 +2960,13 @@ fn firecracker_local_launch_machine(
     let runtime_guest_image_path =
         materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
 
+    if let Some(net) = &machine.network {
+        if net.enabled {
+            setup_host_networking(request.machine_name, net)
+                .context("failed to set up host-side networking for guest VM")?;
+        }
+    }
+
     let config_payload = build_firecracker_config(
         kernel_variant.path.clone(),
         runtime_guest_image_path,
@@ -2971,6 +2978,8 @@ fn firecracker_local_launch_machine(
         machine.guest.control_port,
         machine.guest.vsock_cid,
         paths.vsock_path.clone(),
+        request.machine_name,
+        machine.network.as_ref(),
     );
     let config_json =
         serde_json::to_string_pretty(&config_payload).context("failed to encode config JSON")?;
@@ -3044,6 +3053,17 @@ fn firecracker_local_launch_machine(
             paths.manifest_path.display()
         )
     })?;
+
+    if let Some(net) = &machine.network {
+        if net.enabled {
+            let state_path = network_state_path(&paths);
+            let state_json = serde_json::to_string_pretty(net)
+                .context("failed to encode network state JSON")?;
+            fs::write(&state_path, format!("{state_json}\n")).with_context(|| {
+                format!("failed to write network state '{}'", state_path.display())
+            })?;
+        }
+    }
 
     Ok(metadata)
 }
@@ -4635,6 +4655,8 @@ fn firecracker_local_stop_machine(
 ) -> Result<StopResult> {
     let status = firecracker_local_machine_status(runtime_root, machine_name)?;
     let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+
+    teardown_host_networking_from_state(&paths, machine_name);
 
     match status.state {
         MachineRuntimeState::Running => {
@@ -11321,8 +11343,32 @@ fn build_firecracker_config(
     guest_control_port: u16,
     guest_cid: u32,
     uds_path: PathBuf,
+    machine_name: &str,
+    network: Option<&port_model::MachineNetworkSpec>,
 ) -> FirecrackerConfig {
-    let boot_args = format!("{boot_args} init=/init port.guest_control_port={guest_control_port}");
+    let mut boot_args =
+        format!("{boot_args} init=/init port.guest_control_port={guest_control_port}");
+    let (network_interfaces, _) = match network {
+        Some(net) if net.enabled => {
+            boot_args = format!(
+                "{boot_args} port.net_ip={} port.net_gateway={} port.net_prefix_len={}",
+                net.guest_ip, net.host_ip, net.prefix_len
+            );
+            if !net.dns_servers.is_empty() {
+                boot_args =
+                    format!("{boot_args} port.net_dns={}", net.dns_servers.join(","));
+            }
+            (
+                vec![NetworkInterfaceConfig {
+                    iface_id: String::from("eth0"),
+                    host_dev_name: tap_device_name(machine_name),
+                    guest_mac: net.guest_mac.clone(),
+                }],
+                true,
+            )
+        }
+        _ => (Vec::new(), false),
+    };
     let initrd_path = firecracker_initrd_path_for_rootfs(&rootfs_path);
     let mut drives = vec![DriveConfig {
         drive_id: String::from("rootfs"),
@@ -11353,7 +11399,170 @@ fn build_firecracker_config(
             guest_cid,
             uds_path,
         },
+        network_interfaces,
     }
+}
+
+fn tap_device_name(machine_name: &str) -> String {
+    let base = format!("port-{machine_name}");
+    if base.len() <= 15 {
+        base
+    } else {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        machine_name.hash(&mut hasher);
+        format!("port-{:08x}", hasher.finish() as u32)
+    }
+}
+
+fn network_state_path(paths: &RuntimePaths) -> PathBuf {
+    paths.runtime_dir.join("network-state.json")
+}
+
+fn run_network_command(program: &str, args: &[&str]) -> Result<()> {
+    let output = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .with_context(|| format!("failed to run '{program}' with args {args:?}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "'{program} {}' exited with {}: {stderr}",
+            args.join(" "),
+            output.status
+        );
+    }
+    Ok(())
+}
+
+fn default_outbound_interface() -> Result<String> {
+    let output = Command::new("ip")
+        .args(["route", "show", "default"])
+        .output()
+        .context("failed to run 'ip route show default'")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .split_whitespace()
+        .skip_while(|w| *w != "dev")
+        .nth(1)
+        .map(|s| s.to_string())
+        .context("failed to determine default outbound interface from 'ip route show default'")
+}
+
+fn setup_host_networking(
+    machine_name: &str,
+    network: &port_model::MachineNetworkSpec,
+) -> Result<()> {
+    let tap_name = tap_device_name(machine_name);
+    let host_cidr = format!("{}/{}", network.host_ip, network.prefix_len);
+    let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
+    let outbound_iface = default_outbound_interface()?;
+
+    run_network_command("ip", &["tuntap", "add", "dev", &tap_name, "mode", "tap"])
+        .with_context(|| format!("failed to create TAP device '{tap_name}'"))?;
+    run_network_command("ip", &["addr", "add", &host_cidr, "dev", &tap_name])
+        .with_context(|| format!("failed to assign address {host_cidr} to '{tap_name}'"))?;
+    run_network_command("ip", &["link", "set", &tap_name, "up"])
+        .with_context(|| format!("failed to bring up '{tap_name}'"))?;
+
+    fs::write("/proc/sys/net/ipv4/ip_forward", "1")
+        .context("failed to enable ip_forward")?;
+
+    run_network_command(
+        "iptables",
+        &[
+            "-t", "nat", "-A", "POSTROUTING", "-s", &subnet, "-o", &outbound_iface, "-j",
+            "MASQUERADE",
+        ],
+    )
+    .context("failed to add iptables MASQUERADE rule")?;
+    run_network_command(
+        "iptables",
+        &[
+            "-A", "FORWARD", "-i", &tap_name, "-o", &outbound_iface, "-j", "ACCEPT",
+        ],
+    )
+    .context("failed to add iptables FORWARD accept rule")?;
+    run_network_command(
+        "iptables",
+        &[
+            "-A",
+            "FORWARD",
+            "-i",
+            &outbound_iface,
+            "-o",
+            &tap_name,
+            "-m",
+            "state",
+            "--state",
+            "RELATED,ESTABLISHED",
+            "-j",
+            "ACCEPT",
+        ],
+    )
+    .context("failed to add iptables FORWARD established rule")?;
+
+    Ok(())
+}
+
+fn teardown_host_networking(
+    machine_name: &str,
+    network: &port_model::MachineNetworkSpec,
+) {
+    let tap_name = tap_device_name(machine_name);
+    let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
+
+    if let Ok(outbound_iface) = default_outbound_interface() {
+        let _ = run_network_command(
+            "iptables",
+            &[
+                "-t", "nat", "-D", "POSTROUTING", "-s", &subnet, "-o", &outbound_iface, "-j",
+                "MASQUERADE",
+            ],
+        );
+        let _ = run_network_command(
+            "iptables",
+            &[
+                "-D", "FORWARD", "-i", &tap_name, "-o", &outbound_iface, "-j", "ACCEPT",
+            ],
+        );
+        let _ = run_network_command(
+            "iptables",
+            &[
+                "-D",
+                "FORWARD",
+                "-i",
+                &outbound_iface,
+                "-o",
+                &tap_name,
+                "-m",
+                "state",
+                "--state",
+                "RELATED,ESTABLISHED",
+                "-j",
+                "ACCEPT",
+            ],
+        );
+    }
+
+    let _ = run_network_command("ip", &["link", "del", &tap_name]);
+}
+
+fn teardown_host_networking_from_state(paths: &RuntimePaths, machine_name: &str) {
+    let state_path = network_state_path(paths);
+    if !state_path.exists() {
+        return;
+    }
+    if let Ok(bytes) = fs::read(&state_path) {
+        if let Ok(network) = serde_json::from_slice::<port_model::MachineNetworkSpec>(&bytes) {
+            teardown_host_networking(machine_name, &network);
+        }
+    }
+    let _ = fs::remove_file(&state_path);
 }
 
 #[derive(Debug, Serialize)]
@@ -11364,6 +11573,8 @@ struct FirecrackerConfig {
     #[serde(rename = "machine-config")]
     machine_config: MachineConfig,
     vsock: VsockConfig,
+    #[serde(rename = "network-interfaces", skip_serializing_if = "Vec::is_empty")]
+    network_interfaces: Vec<NetworkInterfaceConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -11398,6 +11609,13 @@ struct MachineConfig {
 struct VsockConfig {
     guest_cid: u32,
     uds_path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+struct NetworkInterfaceConfig {
+    iface_id: String,
+    host_dev_name: String,
+    guest_mac: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -13593,6 +13811,8 @@ exec sleep 30
             7000,
             52,
             "/tmp/guest.vsock".into(),
+            "demo",
+            None,
         );
         let json = serde_json::to_string_pretty(&config).expect("config should encode");
 
@@ -13603,6 +13823,7 @@ exec sleep 30
         assert!(json.contains("init=/init"));
         assert!(json.contains("port.guest_control_port=7000"));
         assert!(!json.contains("\"initrd_path\""));
+        assert!(!json.contains("\"network-interfaces\""));
     }
 
     #[test]
@@ -13626,6 +13847,8 @@ exec sleep 30
             7000,
             52,
             tempdir.path().join("guest.vsock"),
+            "demo",
+            None,
         );
         let json = serde_json::to_string_pretty(&config).expect("config should encode");
 

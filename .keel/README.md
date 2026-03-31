@@ -132,11 +132,11 @@
 |--------|--------|
 | [Replace Demo API With GitOps-Capable Local K3s Runtime](epics/VFHmKH5XR/voyages/VFHmctWC5/) | done |
 
-### [Guest VM Outbound Networking](epics/VFSWpHXG1/) (active)
+### [Guest VM Outbound Networking](epics/VFSWpHXG1/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [TAP Networking and Host NAT for Local Firecracker VMs](epics/VFSWpHXG1/voyages/VFSXWpO18/) | planned |
+| [TAP Networking and Host NAT for Local Firecracker VMs](epics/VFSWpHXG1/voyages/VFSXWpO18/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

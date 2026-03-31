@@ -992,6 +992,21 @@ fn run_cluster(
                     boot_wait: Duration::from_secs(boot_wait_secs),
                 },
             )?;
+
+            if let Some(cluster_record) = config.clusters.get(&cluster) {
+                for fwd in &cluster_record.lifecycle.forwards {
+                    let fwd_name = service_forward_name(&cluster, &fwd.name);
+                    let _ = ensure_detached_forward(
+                        config_path,
+                        config,
+                        &result.machine_name,
+                        &runtime_root,
+                        &fwd.target,
+                        &fwd_name,
+                    );
+                }
+            }
+
             match format {
                 OutputFormat::Text => {
                     println!("cluster: {}", result.cluster_name);
@@ -1117,6 +1132,15 @@ fn run_cluster(
                 .clusters
                 .get(&cluster)
                 .with_context(|| format!("cluster '{}' not found in config", cluster))?;
+            for fwd in &cluster_record.lifecycle.forwards {
+                let fwd_name = service_forward_name(&cluster, &fwd.name);
+                let _ = stop_detached_forward_if_present(
+                    config,
+                    &cluster_record.machine,
+                    &runtime_root,
+                    &fwd_name,
+                );
+            }
             let forward_name = cluster_forward_name(&cluster);
             let forward_cleanup = stop_detached_forward_if_present(
                 config,
@@ -2691,6 +2715,10 @@ fn start_detached_forward(
 
 fn cluster_forward_name(cluster_name: &str) -> String {
     format!("cluster-{cluster_name}-api")
+}
+
+fn service_forward_name(cluster_name: &str, forward_name: &str) -> String {
+    format!("cluster-{cluster_name}-{forward_name}")
 }
 
 fn detached_forward_manifest_path(

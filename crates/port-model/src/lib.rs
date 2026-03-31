@@ -417,6 +417,7 @@ impl PortConfig {
                     ],
                     kubeconfig_path: PathBuf::from("/etc/rancher/k3s/k3s.yaml"),
                     api_forward_target: String::from("127.0.0.1:6443"),
+                    forwards: Vec::new(),
                 },
             },
         )]);
@@ -1125,6 +1126,7 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
             control_port: 7000,
             console_log: PathBuf::from(format!("runtime/{name}/console.log")),
         },
+        network: None,
     }
 }
 
@@ -1864,6 +1866,8 @@ pub struct MachineSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub volumes: Vec<MachineVolumeSpec>,
     pub guest: GuestControl,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<MachineNetworkSpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1891,6 +1895,38 @@ pub struct GuestControl {
     pub vsock_cid: u32,
     pub control_port: u16,
     pub console_log: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineNetworkSpec {
+    #[serde(default = "default_network_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_guest_ip")]
+    pub guest_ip: String,
+    #[serde(default = "default_host_ip")]
+    pub host_ip: String,
+    #[serde(default = "default_network_prefix_len")]
+    pub prefix_len: u8,
+    #[serde(default = "default_guest_mac")]
+    pub guest_mac: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dns_servers: Vec<String>,
+}
+
+const fn default_network_enabled() -> bool {
+    true
+}
+fn default_guest_ip() -> String {
+    String::from("172.16.0.2")
+}
+fn default_host_ip() -> String {
+    String::from("172.16.0.1")
+}
+const fn default_network_prefix_len() -> u8 {
+    24
+}
+fn default_guest_mac() -> String {
+    String::from("AA:FC:00:00:00:01")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1928,6 +1964,14 @@ pub struct ClusterLifecycleSpec {
     pub health_command: Vec<String>,
     pub kubeconfig_path: PathBuf,
     pub api_forward_target: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forwards: Vec<ServiceForwardSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceForwardSpec {
+    pub name: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -3935,6 +3979,7 @@ mod tests {
                     ],
                     kubeconfig_path: PathBuf::from("/etc/rancher/k3s/k3s.yaml"),
                     api_forward_target: String::from("127.0.0.1:6443"),
+                    forwards: Vec::new(),
                 },
             }
         );

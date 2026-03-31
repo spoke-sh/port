@@ -227,7 +227,7 @@ if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
     "$initrd_dir" \
     "${kmod_store}/bin/modprobe" \
     "bin/modprobe"
-  for applet in cat echo mkdir mount sh sleep switch_root; do
+  for applet in cat echo ip mkdir mount sh sleep switch_root; do
     ln -sf busybox "$initrd_dir/bin/$applet"
   done
   cp -a "${kernel_modules_store}/lib/modules" "$initrd_dir/lib/"
@@ -248,6 +248,7 @@ mount -t sysfs sysfs /sys 2>/dev/null || true
 /bin/modprobe -d / -S "$kernel_release" ext4
 /bin/modprobe -d / -S "$kernel_release" vsock || true
 /bin/modprobe -d / -S "$kernel_release" vmw_vsock_virtio_transport || true
+/bin/modprobe -d / -S "$kernel_release" virtio_net || true
 
 for _ in 1 2 3 4 5; do
   if mount -t ext4 -o rw /dev/vda /newroot 2>/dev/null; then
@@ -276,7 +277,7 @@ copy_binary_with_libs \
   "${CARGO_TARGET_DIR:-$repo_root/target}/release/port-guest-agent" \
   "usr/bin/port-guest-agent"
 
-for applet in cat chmod cp dirname echo env grep head install kill ln ls mkdir mount mknod mv ps pwd readlink rm sed setsid sh sleep stat sync tail touch uname; do
+for applet in cat chmod cp dirname echo env grep head install ip kill ln ls mkdir mount mknod mv ps pwd readlink rm sed setsid sh sleep stat sync tail touch uname; do
   ln -sf busybox "$staging_dir/bin/$applet"
 done
 
@@ -310,10 +311,26 @@ mkdir -p /etc/rancher/k3s /opt/cni/bin /var/lib/cni /var/lib/kubelet /var/lib/ra
 
 guest_control_port=7000
 protection_mode="$(cat /etc/port-protection-mode 2>/dev/null || echo unknown)"
+net_ip=""
+net_gateway=""
+net_prefix_len="24"
+net_dns=""
 for token in $(cat /proc/cmdline); do
   case "$token" in
     port.guest_control_port=*)
       guest_control_port="${token#port.guest_control_port=}"
+      ;;
+    port.net_ip=*)
+      net_ip="${token#port.net_ip=}"
+      ;;
+    port.net_gateway=*)
+      net_gateway="${token#port.net_gateway=}"
+      ;;
+    port.net_prefix_len=*)
+      net_prefix_len="${token#port.net_prefix_len=}"
+      ;;
+    port.net_dns=*)
+      net_dns="${token#port.net_dns=}"
       ;;
   esac
 done
@@ -327,6 +344,39 @@ if [ -f /etc/port-k3s-version ]; then
   echo "port k3s version: ${k3s_version}" >/dev/console
   echo "port k3s version: ${k3s_version}" >>/var/log/port-agent.log
 fi
+
+if [ -n "$net_ip" ] && [ -n "$net_gateway" ]; then
+  for _ in 1 2 3 4 5; do
+    if ip link show eth0 >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  if ip link show eth0 >/dev/null 2>&1; then
+    ip addr add "${net_ip}/${net_prefix_len}" dev eth0
+    ip link set eth0 up
+    ip route add default via "$net_gateway" dev eth0
+    echo "port guest network: ${net_ip}/${net_prefix_len} via ${net_gateway}" >/dev/console
+    echo "port guest network: ${net_ip}/${net_prefix_len} via ${net_gateway}" >>/var/log/port-agent.log
+  else
+    echo "port guest network: eth0 not found, skipping network setup" >/dev/console
+    echo "port guest network: eth0 not found, skipping network setup" >>/var/log/port-agent.log
+  fi
+
+  if [ -n "$net_dns" ]; then
+    : >/etc/resolv.conf
+    old_IFS="$IFS"
+    IFS=','
+    for server in $net_dns; do
+      printf 'nameserver %s\n' "$server" >>/etc/resolv.conf
+    done
+    IFS="$old_IFS"
+    echo "port guest dns: configured $(cat /etc/resolv.conf | tr '\n' ' ')" >/dev/console
+    echo "port guest dns: configured $(cat /etc/resolv.conf | tr '\n' ' ')" >>/var/log/port-agent.log
+  fi
+fi
+
 /usr/bin/port-guest-agent --socket /run/port/guest-agent.sock --vsock-port "$guest_control_port" --root / >>/var/log/port-agent.log 2>&1 &
 echo "port-guest-agent launched on vsock port $guest_control_port" >/dev/console
 echo "port-guest-agent launched on vsock port $guest_control_port" >>/var/log/port-agent.log
