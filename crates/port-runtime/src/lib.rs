@@ -13854,6 +13854,98 @@ exec sleep 30
     }
 
     #[test]
+    fn firecracker_config_includes_network_interface_with_default_network_spec() {
+        let net = port_model::MachineNetworkSpec::default();
+        assert!(net.enabled, "default MachineNetworkSpec should have enabled=true");
+        assert_eq!(net.guest_ip, "172.16.0.2");
+        assert_eq!(net.host_ip, "172.16.0.1");
+        assert_eq!(net.dns_servers, vec!["8.8.8.8", "8.8.4.4"]);
+
+        let config = build_firecracker_config(
+            "/tmp/vmlinux".into(),
+            "/tmp/rootfs.ext4".into(),
+            &[],
+            2,
+            512,
+            String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
+            false,
+            7000,
+            52,
+            "/tmp/guest.vsock".into(),
+            "demo",
+            Some(&net),
+        );
+        let json = serde_json::to_string_pretty(&config).expect("config should encode");
+
+        assert!(
+            json.contains("\"network-interfaces\""),
+            "config JSON must contain network-interfaces key but got:\n{json}"
+        );
+        assert!(
+            json.contains("\"host_dev_name\": \"port-demo\""),
+            "config JSON must contain TAP device name"
+        );
+        assert!(
+            json.contains("\"guest_mac\": \"AA:FC:00:00:00:01\""),
+            "config JSON must contain guest MAC"
+        );
+        assert!(
+            json.contains("port.net_ip=172.16.0.2"),
+            "boot_args must contain guest IP"
+        );
+        assert!(
+            json.contains("port.net_gateway=172.16.0.1"),
+            "boot_args must contain gateway"
+        );
+        assert!(
+            json.contains("port.net_dns=8.8.8.8,8.8.4.4"),
+            "boot_args must contain DNS servers"
+        );
+    }
+
+    #[test]
+    fn firecracker_config_omits_network_when_none_is_explicitly_disabled() {
+        let net = port_model::MachineNetworkSpec {
+            enabled: false,
+            ..Default::default()
+        };
+        let config = build_firecracker_config(
+            "/tmp/vmlinux".into(),
+            "/tmp/rootfs.ext4".into(),
+            &[],
+            2,
+            512,
+            String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
+            false,
+            7000,
+            52,
+            "/tmp/guest.vsock".into(),
+            "demo",
+            Some(&net),
+        );
+        let json = serde_json::to_string_pretty(&config).expect("config should encode");
+
+        assert!(
+            !json.contains("\"network-interfaces\""),
+            "config JSON must NOT contain network-interfaces when disabled"
+        );
+        assert!(
+            !json.contains("port.net_ip"),
+            "boot_args must NOT contain network params when disabled"
+        );
+    }
+
+    #[test]
+    fn default_network_activates_via_unwrap_or_default() {
+        let machine_network: Option<port_model::MachineNetworkSpec> = None;
+        let effective = machine_network.unwrap_or_default();
+        assert!(effective.enabled, "unwrap_or_default on None should produce enabled=true");
+        assert_eq!(effective.guest_ip, "172.16.0.2");
+        assert_eq!(effective.host_ip, "172.16.0.1");
+        assert_eq!(effective.dns_servers, vec!["8.8.8.8", "8.8.4.4"]);
+    }
+
+    #[test]
     fn path_checks_report_missing_artifacts() {
         let tempdir = tempdir().expect("tempdir should exist");
         let existing = tempdir.path().join("present");
