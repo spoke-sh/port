@@ -1007,6 +1007,11 @@ fn run_cluster(
                 }
             }
 
+            port_runtime::chown_runtime_to_sudo_caller(
+                &runtime_root.join(&result.machine_name),
+            )
+            .context("failed to transfer runtime ownership to invoking user")?;
+
             match format {
                 OutputFormat::Text => {
                     println!("cluster: {}", result.cluster_name);

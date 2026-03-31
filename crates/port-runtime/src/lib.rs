@@ -11562,6 +11562,52 @@ fn teardown_host_networking_from_state(paths: &RuntimePaths, machine_name: &str)
     let _ = fs::remove_file(&state_path);
 }
 
+/// Transfer ownership of a runtime directory tree to the user who invoked
+/// `sudo`, identified by `SUDO_UID` / `SUDO_GID`.  No-op when not running
+/// under sudo.
+pub fn chown_runtime_to_sudo_caller(dir: &Path) -> Result<()> {
+    let (uid, gid) = match sudo_caller_ids() {
+        Some(ids) => ids,
+        None => return Ok(()),
+    };
+    chown_recursive(dir, uid, gid)
+        .with_context(|| format!("failed to chown '{}' to {uid}:{gid}", dir.display()))
+}
+
+fn sudo_caller_ids() -> Option<(u32, u32)> {
+    let uid: u32 = env::var("SUDO_UID").ok()?.parse().ok()?;
+    let gid: u32 = env::var("SUDO_GID").ok()?.parse().ok()?;
+    Some((uid, gid))
+}
+
+fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
+    chown_path(path, uid, gid)?;
+    if path.is_dir() {
+        for entry in fs::read_dir(path)
+            .with_context(|| format!("failed to read directory '{}'", path.display()))?
+        {
+            let entry = entry
+                .with_context(|| format!("failed to read entry in '{}'", path.display()))?;
+            chown_recursive(&entry.path(), uid, gid)?;
+        }
+    }
+    Ok(())
+}
+
+fn chown_path(path: &Path, uid: u32, gid: u32) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .context("path contains interior null byte")?;
+    if unsafe { libc::chown(c_path.as_ptr(), uid, gid) } != 0 {
+        bail!(
+            "chown '{}' to {uid}:{gid}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 struct FirecrackerConfig {
     #[serde(rename = "boot-source")]
@@ -11711,7 +11757,8 @@ mod tests {
         ServiceDesiredState, ServiceKind, ServicePolicy, ServiceRuntimeState, ServiceSecretBinding,
         StopResult, apply_machine_service, artifact_pipeline_workdir, artifact_script,
         avf_local_launch_machine_with_host_os, bootstrap_hosted_k3s_cluster,
-        build_firecracker_config, cache_path_for, cloud_hypervisor_api_socket_path,
+        build_firecracker_config, cache_path_for, chown_recursive, chown_runtime_to_sudo_caller,
+        cloud_hypervisor_api_socket_path,
         cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
         cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
         copy_guest_file, delete_machine_secret, down_local_cluster, driver_for_machine,
@@ -11725,8 +11772,8 @@ mod tests {
         resolve_artifact_metadata, resolve_artifact_script_path, resolve_artifact_store_contract,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
-        stage_local_cluster_bootstrap, stop_machine, stop_machine_service, up_local_cluster,
-        uses_repo_managed_guest_image_pipeline,
+        stage_local_cluster_bootstrap, stop_machine, stop_machine_service, sudo_caller_ids,
+        up_local_cluster, uses_repo_managed_guest_image_pipeline,
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
@@ -13943,6 +13990,46 @@ exec sleep 30
         assert_eq!(effective.guest_ip, "172.16.0.2");
         assert_eq!(effective.host_ip, "172.16.0.1");
         assert_eq!(effective.dns_servers, vec!["8.8.8.8", "8.8.4.4"]);
+    }
+
+    #[test]
+    fn sudo_caller_ids_returns_none_without_env() {
+        // Clear env vars if they happen to be set in the test runner.
+        unsafe { std::env::remove_var("SUDO_UID") };
+        unsafe { std::env::remove_var("SUDO_GID") };
+        assert!(sudo_caller_ids().is_none());
+    }
+
+    #[test]
+    fn chown_runtime_is_noop_without_sudo() {
+        unsafe { std::env::remove_var("SUDO_UID") };
+        unsafe { std::env::remove_var("SUDO_GID") };
+        let dir = tempdir().expect("tempdir");
+        let file = dir.path().join("artifact.json");
+        fs::write(&file, "{}").expect("write");
+        // Should be a no-op when not running under sudo.
+        chown_runtime_to_sudo_caller(dir.path()).expect("chown_runtime_to_sudo_caller");
+    }
+
+    #[test]
+    fn chown_recursive_changes_ownership_of_tree() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempdir().expect("tempdir");
+        let sub = dir.path().join("sub");
+        fs::create_dir(&sub).expect("mkdir");
+        fs::write(sub.join("file.txt"), "data").expect("write");
+
+        let uid = unsafe { libc::getuid() };
+        let gid = unsafe { libc::getgid() };
+        // Re-chown to our own uid/gid — this always succeeds for the owner.
+        chown_recursive(dir.path(), uid, gid).expect("chown_recursive");
+
+        let meta = fs::metadata(dir.path()).expect("stat root");
+        assert_eq!(meta.uid(), uid);
+        assert_eq!(meta.gid(), gid);
+        let meta = fs::metadata(sub.join("file.txt")).expect("stat file");
+        assert_eq!(meta.uid(), uid);
+        assert_eq!(meta.gid(), gid);
     }
 
     #[test]
