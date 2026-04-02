@@ -1,0 +1,65 @@
+---
+title: Install Port
+description: Choose the right installation and verification path for Port on Linux, macOS, or Windows-backed operator environments.
+---
+
+# Install Port
+
+Port’s first installable slice is intentionally small: ship the canonical
+`port` CLI as a versioned package, keep `port doctor` as the first verification
+surface, and make unsupported environments explicit instead of hiding them.
+
+## Supported Package Targets
+
+| Target | Current support |
+|--------|-----------------|
+| `x86_64-unknown-linux-gnu` | Primary CLI package for local Firecracker workflows, hosted control-plane demos, and the strongest Port runtime path |
+| `x86_64-apple-darwin` | macOS CLI package for the AVF local lane on Intel Macs |
+| `aarch64-apple-darwin` | macOS CLI package for the AVF local lane on Apple Silicon |
+| Windows native package | Not shipped in the first installable slice |
+
+## Choose The Right Installation Story
+
+### Linux
+
+Linux is the best place to start if you want the deepest Port runtime story.
+It is the only host that can run the first local Firecracker lane directly.
+
+### macOS
+
+macOS is a real local operator path through Apple Virtualization Framework.
+You still use the same `port` commands, but AVF requires an external
+`PORT_AVF_LAUNCHER` helper.
+
+### Windows
+
+Windows should be treated as a workstation story in the current slice. Use WSL
+or a remote Linux host, then run the canonical Port commands from there.
+
+## First Verification Step
+
+No matter which supported path you choose, the first command should be:
+
+```bash
+port doctor
+```
+
+That tells you whether the current host can support the lane you are asking for.
+
+## Repo-Local Development Path
+
+If you are evaluating Port from this repository instead of an installable
+package, the checked-in sample configuration is the canonical starting point:
+
+```bash
+port doctor
+port --config examples/port.toml machine list
+port --config examples/port.toml cluster show --cluster demo
+```
+
+## What To Read Next
+
+- [Local First](./local-first.mdx) for the fastest path to a useful operator proof
+- [Linux Host Guide](../hosts/linux.mdx) if Linux is your execution host
+- [macOS Host Guide](../hosts/macos.mdx) if your local path is AVF
+- [Windows Host Guide](../hosts/windows.mdx) if you are operating through WSL or remote Linux

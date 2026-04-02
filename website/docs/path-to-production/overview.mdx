@@ -1,0 +1,59 @@
+---
+title: Path To Production
+description: Understand Port’s staged path from local proof to a hosted, provider-shaped rollout.
+---
+
+# Path To Production
+
+Port’s production story is not “skip local and jump straight to cloud.”
+The stronger pattern is:
+
+1. prove the workload locally
+2. freeze the operator vocabulary
+3. move the same machine and guest verbs behind a hosted control plane
+4. harden the provider-specific lane you care about
+
+That is why this site puts the local narrative first.
+
+## The Port Production Arc
+
+| Stage | What changes | What stays the same |
+|------|---------------|---------------------|
+| Local proof | You own the runtime root directly on the execution host | `port doctor`, `port machine`, `port guest`, `port cluster` |
+| Artifact discipline | You build, validate, push, and pull the exact kernel and guest-image variants you intend to run | Artifact names, machine identities, and validation surfaces |
+| Hosted control plane | A control plane and node agent take over lifecycle ownership for remote execution | Core Port verbs and the operator mental model |
+| Provider track | AWS, GCP, or another environment adds provider identity and inventory constraints | The same CLI surface, proof style, and route visibility |
+
+## Strongest Current Cloud Narrative
+
+The clearest public path today is the hosted standard lane on Linux-backed AWS
+or GCP nodes:
+
+- `port control-plane serve` owns the hosted API shape
+- `port node-agent serve` owns execution on the selected host
+- `port machine launch`, `status`, and `stop` stay canonical
+- the external-project proof demonstrates a minimal hosted application flow
+
+Azure remains an explicit planning boundary for the Firecracker MVP. This site
+still gives Azure a narrative track so teams can plan honestly, but it does not
+pretend that the current hosted lane is already shipped there.
+
+## The Production Checklist
+
+Before calling a Port rollout “production-shaped,” make sure you can answer all
+of these clearly:
+
+- Which host runs the control plane?
+- Which host or host group runs the node agent?
+- Which artifact variants are validated and available on that host?
+- Which machine identity is the canonical rollout target?
+- Which host guide matches the operators who will actually run the system?
+- Which proof demonstrates that the application is reachable from outside the guest?
+
+## Choose Your Provider Track
+
+- [AWS](./aws.mdx) if you want the strongest current hosted narrative
+- [GCP](./gcp.mdx) if your provider decision is already on Google Cloud but you
+  want the same Port operating model
+- [Azure](./azure.mdx) if you need an honest boundary doc for a provider that
+  is modeled but not shipped in the current Firecracker MVP

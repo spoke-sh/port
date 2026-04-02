@@ -1,0 +1,47 @@
+---
+title: Windows Host Guide
+description: Use Windows as a Port workstation through WSL or a remote Linux host while keeping the runtime boundary explicit.
+---
+
+# Windows Host Guide
+
+Windows is a real Port operator environment in the current slice, but it is not
+a native-runtime host. Treat Windows as a workstation story backed by Linux.
+
+## The Windows Contract
+
+Today that means one of two paths:
+
+- run Port inside WSL
+- run Port against a remote Linux host
+
+Both paths keep the runtime boundary honest while preserving the same `port`
+commands and docs.
+
+## Recommended Workflow
+
+1. Open a Linux-backed environment through WSL or SSH.
+2. Run `port doctor`.
+3. Follow the same local or hosted Port narrative you would follow on Linux.
+
+```bash
+port doctor
+port --config examples/port.toml cluster show --cluster demo
+```
+
+## Why This Still Matters
+
+The important Port promise is not “native Windows Firecracker.” The important
+promise is that Windows-based operators can still participate in the same Port
+workflow without learning a second control surface.
+
+## Boundaries
+
+- no native Windows package in the first installable slice
+- no native local Firecracker or AVF runtime story
+- the runtime truth is still Linux-backed
+
+## Best Next Step
+
+Read the [Linux host guide](./linux.mdx) next. That tells you what the actual
+runtime host must support even when your daily workstation is Windows.

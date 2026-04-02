@@ -1,0 +1,66 @@
+---
+title: Local First
+description: Follow Port’s local-first narrative from host verification to a proof-backed operator workflow.
+---
+
+# Local First
+
+The local narrative is the right way to learn Port because it keeps the system
+small while preserving the real operator contract. You can validate the machine
+lane, the guest lane, and the cluster handoff without introducing a hosted
+control plane too early.
+
+## The Best Local Starting Point
+
+If you have a Linux host, start there.
+
+```bash
+port doctor
+port --config examples/port.toml cluster show --cluster demo
+port --config examples/port.toml cluster up --cluster demo --runtime-root /tmp/port-runtime
+port --config examples/port.toml cluster status --cluster demo --runtime-root /tmp/port-runtime
+port --config examples/port.toml cluster kubeconfig --cluster demo --runtime-root /tmp/port-runtime --format json
+port --config examples/port.toml cluster down --cluster demo --runtime-root /tmp/port-runtime
+```
+
+That path shows the strongest local Port contract today:
+
+- one named local cluster
+- one Firecracker `standard` machine
+- Port-owned bootstrap and readiness
+- explicit kubeconfig handoff for downstream tooling
+
+## If You Are On macOS
+
+Port’s local story on macOS goes through Apple Virtualization Framework, not
+through local Firecracker.
+
+```bash
+port doctor
+PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+port --config examples/port.toml machine status --machine demo-avf
+port --config examples/port.toml machine stop --machine demo-avf
+```
+
+The commands stay canonical. Only the substrate changes.
+
+## If You Are On Windows
+
+Use WSL or a remote Linux host for the first Port runtime workflow. The goal is
+still to land on the same `port doctor`, `port cluster`, and `port machine`
+commands, but the execution environment must be Linux-backed.
+
+## What Local Proof Gives You
+
+By the end of the local-first path you should know:
+
+- whether the host can support the runtime lane you chose
+- how Port expresses machine and cluster lifecycle
+- what a downstream handoff looks like when Port owns readiness
+- where the boundary is between local proof and hosted rollout
+
+## The Next Move
+
+Once the local contract is clear, move directly into the
+[path-to-production overview](../path-to-production/overview.mdx). That is the
+bridge from “this works on my box” to “this has a cloud-shaped operating story.”

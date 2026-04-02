@@ -1,0 +1,18 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#F6F1E6"/>
+  <circle cx="1042" cy="110" r="180" fill="#DCEEEA"/>
+  <circle cx="164" cy="106" r="148" fill="#F0D9C9"/>
+  <rect x="78" y="86" width="1044" height="458" rx="40" fill="#FFF9F0" stroke="#D8CEC1" stroke-width="2"/>
+  <rect x="118" y="126" width="964" height="378" rx="30" fill="#113336"/>
+  <rect x="164" y="174" width="210" height="210" rx="38" fill="#F8F2E8"/>
+  <path d="M190 236C190 215.013 207.013 198 228 198H310C330.987 198 348 215.013 348 236V252H190V236Z" fill="#14796C"/>
+  <path d="M190 272H348V309C348 352.63 312.63 388 269 388C225.37 388 190 352.63 190 309V272Z" fill="#D9EDE8"/>
+  <path d="M235 314H303" stroke="#113336" stroke-width="20" stroke-linecap="round"/>
+  <path d="M269 247V356" stroke="#B9693C" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="269" cy="248" r="24" fill="#FFF8EE" stroke="#113336" stroke-width="12"/>
+  <text x="422" y="248" fill="#FFF9F0" font-family="Geist, Arial, sans-serif" font-size="88" font-weight="700">Port</text>
+  <text x="422" y="322" fill="#D2E8E2" font-family="Geist, Arial, sans-serif" font-size="34" font-weight="600">One operator vocabulary for local and hosted microVM compute</text>
+  <text x="422" y="386" fill="#F0E5D8" font-family="Geist, Arial, sans-serif" font-size="28" font-weight="500">Local narrative. AWS, GCP, Azure production paths. Linux, macOS, Windows guides.</text>
+  <rect x="422" y="430" width="306" height="52" rx="26" fill="#14796C"/>
+  <text x="454" y="464" fill="#FFFDF7" font-family="Geist, Arial, sans-serif" font-size="26" font-weight="700">port.spoke.sh/docs</text>
+</svg>

@@ -1,0 +1,73 @@
+---
+title: Azure Path To Production
+description: Understand what an Azure production narrative can honestly claim today and what Port still needs before Azure becomes a shipped Firecracker lane.
+---
+
+# Azure Path To Production
+
+Azure needs a different kind of production narrative today: one that is useful
+for planning without pretending that the current Firecracker MVP is already a
+shipped Azure execution lane.
+
+## Current Truth
+
+Port models Azure explicitly through `cloud-azure`, but the current Firecracker
+MVP does **not** ship Azure as a supported hosted provider lane.
+
+That means the correct public story is:
+
+- Azure is visible in the model
+- Azure is a real planning target
+- Port should fail fast instead of implying support that is not there yet
+
+## What You Can Still Do Today
+
+You can still use Port productively while Azure remains a boundary:
+
+- run the local narrative on Linux or macOS
+- use Linux hosts for the strongest hosted runtime path today
+- treat Azure as an operator-planning and architecture track instead of a
+  currently-shipped Firecracker provider lane
+
+## The Azure Readiness Narrative
+
+An honest Azure production path has three phases:
+
+### 1. Design
+
+Define how Azure would satisfy the execution-host contract:
+
+- Linux execution host
+- supportable virtualization story for the intended Port substrate
+- explicit artifact availability
+- clear node ownership and control-plane routing
+
+### 2. Validation
+
+Before Port should claim Azure support, the team needs proof for:
+
+- node registration
+- machine placement
+- machine launch and stop
+- guest access
+- an application-level reachability proof
+
+### 3. Activation
+
+Only after those proofs exist should Azure move from “modeled boundary” to a
+real public production lane in Port docs.
+
+## Practical Recommendation
+
+If Azure is a hard requirement right now, do not frame the current Port story as
+“Azure-ready Firecracker.” Instead:
+
+- keep the workload and operator contract local first
+- use the AWS or GCP hosted pages as examples of the **shape** Port wants
+- keep Azure-specific rollout claims gated behind explicit proof work
+
+## Why This Page Exists
+
+Teams still need a narrative for Azure even when the answer is “not yet.”
+This page gives that narrative without forcing readers to infer support from a
+machine name in the sample config.

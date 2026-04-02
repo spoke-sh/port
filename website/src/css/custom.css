@@ -1,0 +1,195 @@
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+
+:root {
+  --ifm-color-primary: #14796c;
+  --ifm-color-primary-dark: #126d61;
+  --ifm-color-primary-darker: #11675b;
+  --ifm-color-primary-darkest: #0d544b;
+  --ifm-color-primary-light: #178577;
+  --ifm-color-primary-lighter: #198b7c;
+  --ifm-color-primary-lightest: #21a08e;
+  --ifm-background-color: #f6f1e6;
+  --ifm-background-surface-color: rgba(255, 252, 247, 0.96);
+  --ifm-navbar-background-color: rgba(15, 67, 71, 0.94);
+  --ifm-navbar-link-color: rgba(246, 241, 230, 0.86);
+  --ifm-navbar-link-hover-color: #ffffff;
+  --ifm-navbar-link-active-color: #ffffff;
+  --ifm-footer-background-color: #113336;
+  --ifm-footer-color: rgba(241, 234, 223, 0.82);
+  --ifm-footer-link-color: #fff7ea;
+  --ifm-footer-title-color: rgba(241, 234, 223, 0.58);
+  --ifm-heading-color: #10272f;
+  --ifm-link-color: #0c6a78;
+  --ifm-link-hover-color: #084d57;
+  --ifm-code-font-size: 89%;
+  --ifm-font-family-base: "Geist Variable", "Geist", "Avenir Next", sans-serif;
+  --ifm-font-family-monospace:
+    "Geist Mono Variable", "Geist Mono", "SFMono-Regular", monospace;
+  --ifm-container-width-xl: 1440px;
+  --ifm-menu-color-background-active: rgba(20, 121, 108, 0.12);
+  --ifm-menu-color-background-hover: rgba(20, 121, 108, 0.08);
+  --ifm-table-head-background: rgba(20, 121, 108, 0.08);
+  --ifm-table-stripe-background: rgba(255, 255, 255, 0.42);
+  --ifm-toc-border-color: rgba(16, 39, 47, 0.12);
+  --docusaurus-highlighted-code-line-bg: rgba(12, 106, 120, 0.1);
+  --port-sand: #f6f1e6;
+  --port-sand-strong: #efe5d4;
+  --port-foam: #fffaf2;
+  --port-ink: #10272f;
+  --port-ink-soft: #54656a;
+  --port-deep: #113336;
+  --port-harbor: #14796c;
+  --port-harbor-soft: #1f8f84;
+  --port-water: #dceeea;
+  --port-water-strong: #c9e4de;
+  --port-copper: #b9693c;
+  --port-border: rgba(16, 39, 47, 0.12);
+  --port-border-strong: rgba(16, 39, 47, 0.2);
+  --port-shadow:
+    0 28px 54px rgba(17, 51, 54, 0.12),
+    0 10px 22px rgba(17, 51, 54, 0.08);
+  --port-shadow-soft:
+    0 18px 36px rgba(17, 51, 54, 0.1),
+    0 6px 16px rgba(17, 51, 54, 0.06);
+}
+
+html {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(185, 105, 60, 0.09), transparent 28%),
+    radial-gradient(circle at top right, rgba(31, 143, 132, 0.11), transparent 34%),
+    linear-gradient(180deg, #f8f3eb 0%, #f6f1e6 28%, #f3ecdf 100%);
+  color: var(--port-ink);
+  font-family: var(--ifm-font-family-base);
+  letter-spacing: -0.012em;
+}
+
+.main-wrapper {
+  background: transparent;
+}
+
+.navbar {
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 24px rgba(17, 51, 54, 0.16);
+}
+
+.navbar__title,
+.footer__title,
+.footer__link-item {
+  font-weight: 600;
+}
+
+.navbar__brand:hover {
+  color: #fffdf7;
+}
+
+.footer {
+  background:
+    linear-gradient(135deg, rgba(17, 51, 54, 0.98), rgba(12, 61, 66, 0.98)),
+    linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.06));
+}
+
+.theme-doc-markdown {
+  max-width: 76ch;
+}
+
+.theme-doc-markdown h1,
+.theme-doc-markdown h2,
+.theme-doc-markdown h3 {
+  letter-spacing: -0.03em;
+}
+
+.theme-doc-markdown h1 {
+  font-size: clamp(2.4rem, 4vw, 3.6rem);
+}
+
+.theme-doc-markdown h2 {
+  font-size: clamp(1.7rem, 2.4vw, 2.3rem);
+  margin-top: 3rem;
+}
+
+.theme-doc-markdown p,
+.theme-doc-markdown li {
+  color: rgba(16, 39, 47, 0.88);
+}
+
+.theme-doc-markdown a {
+  font-weight: 600;
+}
+
+.theme-doc-markdown code {
+  border: 1px solid rgba(16, 39, 47, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 0.55rem;
+  padding: 0.12rem 0.42rem;
+}
+
+.theme-doc-markdown pre code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.theme-doc-markdown blockquote {
+  border-left: 4px solid var(--port-copper);
+  background: rgba(255, 250, 242, 0.86);
+  border-radius: 0.85rem;
+  padding: 1rem 1.2rem;
+}
+
+.theme-doc-markdown table {
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: var(--port-shadow-soft);
+}
+
+.table-of-contents__link,
+.menu__link {
+  font-weight: 500;
+}
+
+.pagination-nav__link {
+  border-radius: 1rem;
+  border: 1px solid rgba(16, 39, 47, 0.08);
+  box-shadow: var(--port-shadow-soft);
+}
+
+.button.button--secondary {
+  color: var(--port-ink);
+  background: linear-gradient(135deg, #fffdf8, #efe5d4);
+  border: 1px solid rgba(16, 39, 47, 0.1);
+  box-shadow: var(--port-shadow-soft);
+}
+
+.button.button--secondary:hover {
+  color: var(--port-ink);
+  border-color: rgba(16, 39, 47, 0.18);
+  transform: translateY(-1px);
+}
+
+.button.button--primary {
+  background: linear-gradient(135deg, #14796c, #0d6057);
+  border: 0;
+  box-shadow: var(--port-shadow-soft);
+}
+
+.alert {
+  border-radius: 1rem;
+  box-shadow: var(--port-shadow-soft);
+}
+
+.hero {
+  background: transparent;
+}
+
+@media (max-width: 996px) {
+  .theme-doc-markdown {
+    max-width: none;
+  }
+}

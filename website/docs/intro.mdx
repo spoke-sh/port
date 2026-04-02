@@ -1,0 +1,67 @@
+---
+title: Port, Explained
+sidebar_position: 1
+description: Understand what Port is, how to read its current support boundaries, and where to start if you want a local or cloud-shaped operator path.
+---
+
+# Port, Explained
+
+Port is a CLI-first system for building, launching, and operating isolated Linux
+workloads in microVMs across local and hosted environments. The important part
+is not just the hypervisor. The important part is the operator contract:
+Port keeps one vocabulary across lanes instead of forcing a different toolchain
+for every environment.
+
+That means the docs should be read as an operator narrative, not only as a set
+of feature pages.
+
+## What Port Optimizes For
+
+Port is designed for teams that want to move through these steps without
+changing the mental model on every hop:
+
+- prove the workload locally
+- package or validate the artifacts that define the runtime
+- move into a hosted control-plane shape when local proof is not enough
+- keep machine, guest, and service verbs legible while provider choices change
+
+The strongest current story is still a Linux-hosted runtime with an honest local
+on-ramp. This site keeps that truth visible.
+
+## What To Expect Today
+
+Port already has a useful set of paths, but they are not all equally mature.
+
+| Area | Current story |
+|------|---------------|
+| Local Linux | Strongest runtime lane today: Firecracker `standard`, local cluster workflow, and the clearest direct execution path |
+| Local macOS | First-class local path through Apple Virtualization Framework, using the same `port machine` and `port guest` verbs |
+| Windows | Workstation path through WSL or a remote Linux host; no native Windows install package in the first slice |
+| Hosted AWS/GCP | Clearest cloud-shaped path-to-production narrative today through the hosted control plane plus node agent |
+| Hosted Azure | Modeled explicitly, but not a shipped Firecracker MVP lane yet |
+
+## Read The Docs In This Order
+
+1. [Install Port](./start-here/install-port.mdx) and verify your environment with `port doctor`.
+2. Follow the [local-first narrative](./start-here/local-first.mdx) to prove the operator contract on a machine you control.
+3. Read the [path-to-production overview](./path-to-production/overview.mdx) to see how local proof turns into a hosted rollout.
+4. Pick the provider track that matches your target environment:
+   [AWS](./path-to-production/aws.mdx),
+   [GCP](./path-to-production/gcp.mdx),
+   or [Azure](./path-to-production/azure.mdx).
+5. Read the host guide for the workstation and runtime host you actually have:
+   [Linux](./hosts/linux.mdx),
+   [macOS](./hosts/macos.mdx),
+   or [Windows](./hosts/windows.mdx).
+
+## Keep The Boundaries Visible
+
+:::info Honest Product Surface
+Port’s public docs are intentionally explicit about what is shipped, what is
+partial, and what is still a planning boundary. The goal is a usable operator
+story, not a vague promise of “runs everywhere.”
+:::
+
+If you need the contract-first source of truth, finish with the
+[foundational docs](./reference/foundational-docs.mdx) and the root repository
+documents they reference.

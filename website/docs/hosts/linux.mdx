@@ -1,0 +1,51 @@
+---
+title: Linux Host Guide
+description: Use Linux as Port’s primary runtime and operator host for local Firecracker, local clusters, and hosted control-plane workflows.
+---
+
+# Linux Host Guide
+
+Linux is the primary Port runtime host. If you want the deepest current Port
+story, use Linux.
+
+## What Linux Covers Best
+
+| Capability | Linux status |
+|-----------|--------------|
+| Local Firecracker `standard` lane | Strongest local runtime path today |
+| Local cluster workflow | First-class, proof-backed path |
+| Hosted control plane | Supported repo-local demo shape |
+| Node agent ownership | Supported repo-local demo shape |
+| SSH-managed remote Linux | Explicit operator workflow |
+
+## Canonical Linux Starting Point
+
+```bash
+port doctor
+port --config examples/port.toml machine list
+port --config examples/port.toml cluster show --cluster demo
+```
+
+From there, choose either the local-first workflow or the hosted path.
+
+## When Linux Is The Right Choice
+
+Choose Linux when:
+
+- you want the clearest local Firecracker feedback loop
+- you want to evaluate hosted control-plane behavior on a real execution host
+- you need the strongest path toward AWS or GCP hosted rollout
+- you want `port doctor` to validate the actual runtime lane instead of only a workstation boundary
+
+## Linux In The Production Story
+
+Even when the operators sit on macOS or Windows workstations, Linux remains the
+runtime truth in the current Port product shape. That is why the cloud paths in
+this site all assume Linux execution hosts.
+
+## Related Docs
+
+- [Local First](../start-here/local-first.mdx)
+- [Path To Production](../path-to-production/overview.mdx)
+- [AWS Path](../path-to-production/aws.mdx)
+- [GCP Path](../path-to-production/gcp.mdx)

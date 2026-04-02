@@ -1,0 +1,91 @@
+---
+title: AWS Path To Production
+description: Follow Port’s clearest current cloud narrative from local proof to an AWS-shaped hosted rollout.
+---
+
+# AWS Path To Production
+
+AWS is the clearest current public cloud narrative for Port because the
+repository already ships a concrete hosted machine identity (`cloud-aws`), node
+identity (`aws-linux-node`), host group (`aws-builders`), and an external
+project proof path that routes through the hosted control plane.
+
+## The Narrative In One Sentence
+
+Prove the workload locally, stand up the hosted control plane, register an AWS
+Linux node, launch `cloud-aws`, then use Port’s guest and service surfaces to
+publish the application without changing the operator vocabulary.
+
+## Phase 1: Prove The Contract Locally
+
+Start with the [local-first narrative](../start-here/local-first.mdx). The goal
+is to prove the workload and the artifact assumptions before you distribute the
+ownership model across multiple machines.
+
+## Phase 2: Stand Up The Hosted Shape
+
+The first live hosted loop uses the same sample config and one token-driven
+control-plane contract:
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve \
+  --control-plane demo \
+  --bind 127.0.0.1:7040
+
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve \
+  --node aws-linux-node \
+  --bind 127.0.0.1:9234 \
+  --token node-secret
+```
+
+## Phase 3: Launch The AWS-Shaped Machine
+
+Once the node is registered and the standard artifacts are available, the
+canonical machine lifecycle stays simple:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+```
+
+That is the key Port promise: the control plane changes the ownership model,
+not the meaning of the operator verbs.
+
+## Phase 4: Prove An Application Path
+
+For the repo’s current hosted application proof, use:
+
+```bash
+bash scripts/hosted-external-project-demo.sh
+```
+
+That workflow keeps the app-hosting contract explicit:
+
+- one hosted machine
+- one hosted node
+- one staged project snapshot
+- one Port-managed guest/service path
+- one host-side `curl` proving the payload is reachable
+
+## What “Production” Means Here
+
+For Port today, an AWS production path means:
+
+- Linux execution hosts are real and explicit
+- the hosted control plane is the system of record for remote lifecycle
+- the node agent owns the hypervisor processes on the selected AWS host
+- artifacts are built and validated before launch
+- proof exists that the application can be reached from outside the guest
+
+It does **not** mean that Port already ships a full multi-tenant platform,
+autoscaling story, or broad cloud-provider abstraction layer.
+
+## Boundaries To Keep Explicit
+
+- this is the hosted `standard` Firecracker lane, not the PVM lane
+- scheduler and broader fleet-policy work remain follow-on scope
+- cloud networking, storage, and higher-level platform guarantees still need
+  provider-specific hardening above the first Port proof path

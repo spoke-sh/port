@@ -7,3 +7,6 @@
 /runtime/
 /target/
 .keel/cache/
+/website/node_modules/
+/website/.docusaurus/
+/website/build/

@@ -1,0 +1,52 @@
+---
+title: macOS Host Guide
+description: Use macOS as a first-class AVF operator path and as a control workstation for Linux-backed Port environments.
+---
+
+# macOS Host Guide
+
+macOS is not a second-class Port story. It is a first-class local operator lane
+through Apple Virtualization Framework.
+
+## What macOS Means In Port
+
+Port keeps the same command model on macOS, but the substrate changes:
+
+- local macOS path: AVF
+- local Linux path: Firecracker
+
+That distinction matters because the user-facing contract should stay stable
+even when the runtime implementation changes underneath it.
+
+## Canonical AVF Flow
+
+```bash
+port doctor
+PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+port --config examples/port.toml machine status --machine demo-avf
+port --config examples/port.toml machine stop --machine demo-avf
+```
+
+## What macOS Is Good For
+
+- local evaluation through AVF
+- operator work on Apple hardware
+- controlling Linux-hosted Port environments from a workstation that is not the runtime host
+
+## Boundaries
+
+- local Firecracker launch remains Linux-only
+- distributed macOS targets remain bounded by Apple virtualization entitlement requirements
+- AVF uses an explicit launcher helper through `PORT_AVF_LAUNCHER`
+
+## When To Switch To Linux
+
+If your next question is about the strongest current production runtime path,
+switch from the local AVF story to the Linux-hosted path. That is the bridge
+from a great macOS workstation experience to the clearest current cloud story.
+
+## Related Docs
+
+- [Local First](../start-here/local-first.mdx)
+- [Linux Host Guide](./linux.mdx)
+- [AWS Path](../path-to-production/aws.mdx)

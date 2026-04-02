@@ -119,6 +119,7 @@
         sharedInputs = [
           rust
           portPkg
+          pkgs.nodejs_22
           pkgs.k3s
           pkgs.kubernetes-helm
           pkgs.fluxcd

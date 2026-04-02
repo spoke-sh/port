@@ -1,0 +1,80 @@
+---
+title: GCP Path To Production
+description: Carry Port’s hosted operating model into a GCP-shaped rollout without changing the core command vocabulary.
+---
+
+# GCP Path To Production
+
+GCP uses the same hosted Port operating model as AWS. The difference is the
+provider identity and the specific hosted machine and node names:
+
+- machine: `cloud-gcp`
+- node: `gcp-linux-node`
+
+That is useful when the provider decision is already on Google Cloud but the
+team still wants one consistent Port contract.
+
+## The Production Arc
+
+The sequence is the same:
+
+1. prove the workload locally
+2. run the hosted control plane
+3. register the GCP Linux node
+4. launch `cloud-gcp`
+5. validate the guest and service path
+
+## Stand Up The Hosted GCP Shape
+
+```bash
+export PORT_DEMO_TOKEN=demo-token
+
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml control-plane serve \
+  --control-plane demo \
+  --bind 127.0.0.1:7040
+
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve \
+  --node gcp-linux-node \
+  --bind 127.0.0.1:9234 \
+  --token node-secret
+```
+
+## Launch And Inspect The GCP Machine
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-gcp
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-gcp
+PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-gcp
+```
+
+## Why The GCP Story Matters
+
+The public docs should not force a second cloud-specific control language.
+GCP stays readable because Port keeps these concepts stable:
+
+- machine identity
+- node ownership
+- hosted route context
+- artifact compatibility
+- operator proof
+
+That stability is what makes the provider narrative useful instead of just
+duplicating the AWS page with new marketing labels.
+
+## Production Checklist For GCP
+
+Before you call the GCP rollout ready, verify:
+
+- `gcp-linux-node` is the explicit runtime owner
+- the selected artifacts match the intended substrate and architecture
+- the control-plane auth contract is configured from a real token source
+- the machine can be launched, inspected, and stopped through the hosted route
+- there is an application-level proof path, not only a lifecycle proof
+
+## Boundaries
+
+The same honesty rules apply here as on AWS:
+
+- this is a hosted standard lane, not a claim of universal cloud parity
+- GCP-specific hardening above the first Port lane is still follow-on work
+- broader scheduler, policy, and platform features remain separate stories

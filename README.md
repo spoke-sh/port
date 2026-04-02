@@ -53,6 +53,8 @@ surface, and current
 boundaries also live in [`docs/operators.md`](docs/operators.md).
 The first installable release contract and support matrix live in
 [`docs/install.md`](docs/install.md).
+The public user-facing MDX docs site now lives in [`website/`](website/) and
+can be run locally with `just docs-dev`.
 Packaged macOS AVF workflows still use the canonical `port` CLI plus an
 external `PORT_AVF_LAUNCHER` helper; distributed macOS targets remain bounded
 by Apple's virtualization entitlement requirements described in
@@ -102,6 +104,7 @@ repo-level review surface:
 | [`RELEASE.md`](RELEASE.md) | Current release contract and validation checklist |
 | [`EVALUATIONS.md`](EVALUATIONS.md) | Verification and evidence expectations |
 | [`AGENTS.md`](AGENTS.md) | Shared AI-agent workflow contract |
+| [`website/`](website/) | Public Docusaurus site and user-facing MDX docs |
 
 ### Focused Guides
 
