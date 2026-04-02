@@ -11,8 +11,11 @@ members = [
 resolver = "2"
 
 [workspace.package]
+authors = ["Port contributors"]
 edition = "2024"
+homepage = "https://github.com/spoke-sh/port"
 license = "MIT"
+repository = "https://github.com/spoke-sh/port"
 rust-version = "1.85"
 version = "0.1.0"
 
@@ -29,3 +32,7 @@ tempfile = "3.23.0"
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread", "net"] }
 toml = "0.8.23"
 vsock = "0.5.3"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

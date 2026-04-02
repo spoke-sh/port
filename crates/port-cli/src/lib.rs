@@ -26,6 +26,8 @@ use port_runtime::{
 };
 use serde::{Deserialize, Serialize};
 
+mod upgrade;
+
 const AFTER_HELP: &str = "\
 Quick start:
   `port` uses the built-in sample model when `--config` is omitted.
@@ -69,6 +71,8 @@ pub enum Command {
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
+    #[command(about = "Install the latest Port release or a specific git revision")]
+    Upgrade(UpgradeCommand),
     #[command(subcommand, about = "Build and validate kernel or guest artifacts")]
     Artifacts(ArtifactCommand),
     #[command(
@@ -91,6 +95,25 @@ pub enum Command {
     NodeAgent(NodeAgentCommand),
     #[command(subcommand, hide = true)]
     Internal(InternalCommand),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct UpgradeCommand {
+    #[arg(
+        long,
+        value_name = "TAG",
+        conflicts_with = "sha",
+        help = "Build and install a specific git tag from source"
+    )]
+    pub tag: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "SHA",
+        conflicts_with = "tag",
+        help = "Build and install a specific git commit from source"
+    )]
+    pub sha: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -721,6 +744,7 @@ struct EnsuredDetachedForward {
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor { format } => doctor(format, cli.config.as_deref()),
+        Command::Upgrade(command) => upgrade::run(command),
         Command::Artifacts(command) => {
             let config = load_config(cli.config)?;
             run_artifacts(command, &config)

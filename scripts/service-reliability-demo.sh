@@ -117,7 +117,7 @@ wait_for_service_status() {
 
 mkdir -p "$GUEST_ROOT/workspace" "$MACHINE_DIR" "$BOGUS_RUNTIME_ROOT"
 
-(cd "$REPO_ROOT" && cargo build -q -p port-cli --bin port)
+(cd "$REPO_ROOT" && cargo build -q -p port --bin port)
 (cd "$REPO_ROOT" && cargo build -q -p port-guest-agent --bin port-guest-agent)
 
 cp "$REPO_ROOT/examples/port.toml" "$SERVER_CONFIG"

@@ -103,6 +103,9 @@ chmod 755 "$installed_binary"
 copy_if_present "$package_root/README.md" "$prefix_root/share/port/README.md"
 copy_if_present "$package_root/RELEASE.md" "$prefix_root/share/port/RELEASE.md"
 copy_if_present "$package_root/docs/install.md" "$prefix_root/share/port/docs/install.md"
+copy_if_present \
+  "$package_root/scripts/install-local-port.sh" \
+  "$prefix_root/share/port/scripts/install-local-port.sh"
 copy_tree_if_present "$package_root/scripts/artifacts" "$prefix_root/share/port/scripts/artifacts"
 copy_if_present "$package_root/PACKAGE_METADATA.txt" "$prefix_root/share/port/PACKAGE_METADATA.txt"
 copy_if_present "$package_root/PACKAGE_MANIFEST.txt" "$prefix_root/share/port/PACKAGE_MANIFEST.txt"

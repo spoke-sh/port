@@ -5,18 +5,40 @@ description: Choose the right installation and verification path for Port on Lin
 
 # Install Port
 
-Port’s first installable slice is intentionally small: ship the canonical
-`port` CLI as a versioned package, keep `port doctor` as the first verification
-surface, and make unsupported environments explicit instead of hiding them.
+Port publishes release artifacts through cargo-dist, keeps `port doctor` as the
+first verification surface, and makes unsupported environments explicit instead
+of hiding them.
 
 ## Supported Package Targets
 
 | Target | Current support |
 |--------|-----------------|
-| `x86_64-unknown-linux-gnu` | Primary CLI package for local Firecracker workflows, hosted control-plane demos, and the strongest Port runtime path |
-| `x86_64-apple-darwin` | macOS CLI package for the AVF local lane on Intel Macs |
-| `aarch64-apple-darwin` | macOS CLI package for the AVF local lane on Apple Silicon |
+| `x86_64-unknown-linux-gnu` | Primary release target for local Firecracker workflows, hosted control-plane demos, and the strongest Port runtime path |
+| `x86_64-apple-darwin` | macOS release target for the AVF local lane on Intel Macs |
+| `aarch64-apple-darwin` | macOS release target for the AVF local lane on Apple Silicon |
 | Windows native package | Not shipped in the first installable slice |
+
+## Install The Latest Release
+
+Use the published shell installer:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/spoke-sh/port/releases/latest/download/port-installer.sh | sh
+port doctor
+```
+
+Once Port is installed, the canonical upgrade path is:
+
+```bash
+port upgrade
+```
+
+If you need a pinned source-built revision:
+
+```bash
+port upgrade --tag <tag>
+port upgrade --sha <git-sha>
+```
 
 ## Choose The Right Installation Story
 

@@ -144,6 +144,12 @@
 |--------|--------|
 | [Default-On Networking Activation Fix](epics/VFTZdamHM/voyages/VFTarG3Jq/) | done |
 
+### [Ship Cargo-Dist Release And Upgrade Path](epics/VFdgQWhbn/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Mirror Keel And Sift Cargo-Dist Release Contract](epics/VFdgQWhbn/voyages/VFdgVAzQc/) | done |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |

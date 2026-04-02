@@ -381,8 +381,8 @@ Provider mapping for the shipped sample machines:
 Repository-local proof for the shipped standard hosted lane:
 
 ```bash
-cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
-cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
+cargo test -q -p port --test machine_commands cli_hosted_standard_cloud_launch_round_trip
+cargo test -q -p port --test machine_commands cli_hosted_standard_status_and_stop_round_trip
 ```
 
 Prepared-node PVM remains a second hosted launch contract layered on the same

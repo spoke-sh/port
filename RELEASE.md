@@ -1,63 +1,71 @@
 # Release Process
 
-Port is still in an early product phase, but the release contract should stay
-explicit.
+This project uses [cargo-dist](https://opensource.axo.dev/cargo-dist/) to
+publish release archives and installers when a version tag is pushed. Port
+keeps the supported target matrix explicit and ships one canonical upgrade
+surface through `port upgrade`.
 
-## Current State
+## Supported Release Targets
 
-Port currently ships as a Rust workspace with:
-
-- a CLI binary surface in `port-cli`
-- a shared model/runtime split
-- proof-backed local and hosted workflow slices
-- board-managed verification evidence for major delivery work
-
-Distribution automation is still follow-on work. The release contract today is
-mostly about versioning, validation, package boundaries, and support surfaces.
-
-## Supported Install Targets
-
-| Target triple | Current role | Boundary |
+| Target triple | Release role | Boundary |
 |---------------|--------------|----------|
-| `x86_64-unknown-linux-gnu` | Primary CLI package for local Firecracker workflows and hosted proof lanes on Linux. | Firecracker still requires a Linux host; PVM remains a prepared-node x86_64 lane rather than a generic local fallback. |
-| `x86_64-apple-darwin` | Intel macOS CLI package for the AVF local lane. | AVF requires a local macOS host plus an external launcher helper set through `PORT_AVF_LAUNCHER`. |
-| `aarch64-apple-darwin` | Apple Silicon macOS CLI package for the AVF local lane. | Distributed targets still need Apple's virtualization entitlement and related sandbox entitlements when applicable. |
-| Windows | No native install package in this slice. | Use WSL or a remote Linux host for Linux-backed workflows. |
+| `x86_64-unknown-linux-gnu` | Primary release target for local Firecracker workflows and hosted proof lanes on Linux | Firecracker still requires a Linux host; PVM remains a prepared-node `x86_64` lane rather than a generic fallback |
+| `x86_64-apple-darwin` | Intel macOS release target for the AVF local lane | AVF still requires an external `PORT_AVF_LAUNCHER` helper |
+| `aarch64-apple-darwin` | Apple Silicon macOS release target for the AVF local lane | Distributed targets remain bounded by Apple's virtualization entitlement requirements |
+| Windows | No native release target in this slice | Use WSL or a remote Linux host for Linux-backed workflows |
 
-## First Package Contract
+## Install And Upgrade Contract
 
-The first installable Port package is a versioned tarball per supported target:
+Latest release install:
 
-- `port-<version>-<target-triple>.tar.gz`
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/spoke-sh/port/releases/latest/download/port-installer.sh | sh
+port doctor
+```
 
-The package contract for this slice is:
+Latest release upgrade:
 
-- ship the canonical `port` CLI binary
-- include release metadata and install guidance alongside the binary
-- keep `port doctor` as the first post-install verification step
-- keep macOS AVF on the canonical `port` CLI plus an external
-  `PORT_AVF_LAUNCHER` helper rather than a bundled macOS-only launcher
-  workflow
-- leave native installers, Homebrew taps, and automated publication as
-  follow-on work
+```bash
+port upgrade
+```
+
+Source-built revision install:
+
+```bash
+port upgrade --tag <tag>
+port upgrade --sha <git-sha>
+```
+
+The source-install flow reuses a cached checkout under `~/.cache/port`, builds
+with a supported local Rust toolchain, and installs the built binary plus the
+bundled runtime assets into the standard Cargo-style prefix.
+
+## Release Workflow
+
+Pushing a tag that starts with `v` or otherwise matches the repository's
+version-tag pattern triggers [.github/workflows/release.yml](.github/workflows/release.yml).
+The workflow will:
+
+- run `dist plan` on pull requests and `dist host --steps=create` on tagged pushes
+- build release archives and the shell installer for Port's supported targets
+- publish the resulting release artifacts to GitHub Releases
+- update a Homebrew tap when `HOMEBREW_TAP_REPO` and `HOMEBREW_TAP_TOKEN` are configured
 
 ## Release Checklist
 
-1. Update the crate version metadata that should move with the release.
-2. Review release notes, docs, and support boundaries, including
-   `docs/install.md` and `docs/avf.md`.
+1. Update the workspace version in `Cargo.toml`.
+2. Review release notes and support boundaries in `docs/install.md` and `docs/avf.md`.
 3. Run the canonical validation path:
 
 ```bash
 keel mission show <mission-id>
 just test
 just doctest
-just package x86_64-unknown-linux-gnu
 just package-proof x86_64-unknown-linux-gnu
+dist plan
 ```
 
-4. Confirm the packaged verification entrypoint still works from the installed
-   proof prefix:
+4. Confirm the packaged verification entrypoint still works from the installed proof prefix:
 
 ```bash
 artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
@@ -69,7 +77,7 @@ artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
 keel doctor
 ```
 
-6. Commit the release metadata and tag the revision.
+6. Commit the release metadata, push the change, create a version tag, and push the tag.
 
 ## Validation Expectations
 
@@ -77,15 +85,8 @@ Release validation should confirm:
 
 - the workspace tests pass
 - doctests pass
-- the canonical package and package-proof commands pass
+- the repo-local package proof still passes
+- `dist plan` succeeds with the checked-in cargo-dist config
 - the packaged `port doctor` check remains the post-install gate
 - the board is doctor-clean
-- the current mission signal is legible through `keel mission show <mission-id>`
 - top-level docs and help surfaces match shipped behavior
-
-## Open Release Work
-
-- packaged binaries and installers
-- checksums or signatures
-- automated release publication
-- a stricter support matrix by target triple

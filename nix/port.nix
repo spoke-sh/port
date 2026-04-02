@@ -15,7 +15,7 @@ rustPlatform.buildRustPackage {
 
   cargoBuildFlags = [
     "--package"
-    "port-cli"
+    "port"
     "--bin"
     "port"
   ];

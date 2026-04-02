@@ -110,7 +110,7 @@ if [[ -n "$binary_source" ]]; then
   fi
 else
   require_tool cargo "$cargo_cmd"
-  if ! "$cargo_cmd" build -p port-cli --release --target "$target"; then
+  if ! "$cargo_cmd" build -p port --release --target "$target"; then
     fail "cargo build failed for target '$target'. Ensure the Rust toolchain and target support are installed, then rerun \`just package $target\`."
   fi
 
@@ -125,6 +125,7 @@ rm -rf "$stage_dir"
 mkdir -p \
   "$stage_dir/bin" \
   "$stage_dir/docs" \
+  "$stage_dir/scripts" \
   "$stage_dir/scripts/artifacts" \
   "$output_dir" \
   "$staging_root"
@@ -136,6 +137,9 @@ copy_package_file "$repo_root/README.md" "$stage_dir/README.md"
 copy_package_file "$repo_root/RELEASE.md" "$stage_dir/RELEASE.md"
 copy_package_file "$repo_root/docs/install.md" "$stage_dir/docs/install.md"
 copy_package_file \
+  "$repo_root/scripts/install-local-port.sh" \
+  "$stage_dir/scripts/install-local-port.sh"
+copy_package_file \
   "$repo_root/scripts/artifacts/validate-kernel.sh" \
   "$stage_dir/scripts/artifacts/validate-kernel.sh"
 copy_package_file \
@@ -146,6 +150,7 @@ chmod 755 \
   "$stage_dir/bin" \
   "$stage_dir/docs" \
   "$stage_dir/scripts" \
+  "$stage_dir/scripts/install-local-port.sh" \
   "$stage_dir/scripts/artifacts" \
   "$stage_dir/scripts/artifacts/validate-kernel.sh" \
   "$stage_dir/scripts/artifacts/validate-guest-image.sh"
@@ -167,6 +172,7 @@ bin/port
 README.md
 RELEASE.md
 docs/install.md
+scripts/install-local-port.sh
 scripts/artifacts/validate-kernel.sh
 scripts/artifacts/validate-guest-image.sh
 PACKAGE_METADATA.txt
@@ -178,6 +184,7 @@ $package_name/bin/port
 $package_name/README.md
 $package_name/RELEASE.md
 $package_name/docs/install.md
+$package_name/scripts/install-local-port.sh
 $package_name/scripts/artifacts/validate-kernel.sh
 $package_name/scripts/artifacts/validate-guest-image.sh
 $package_name/PACKAGE_METADATA.txt
@@ -193,6 +200,7 @@ for path in \
   "$stage_dir/docs" \
   "$stage_dir/docs/install.md" \
   "$stage_dir/scripts" \
+  "$stage_dir/scripts/install-local-port.sh" \
   "$stage_dir/scripts/artifacts" \
   "$stage_dir/scripts/artifacts/validate-kernel.sh" \
   "$stage_dir/scripts/artifacts/validate-guest-image.sh" \
@@ -216,6 +224,7 @@ printf '  - %s\n' \
   'README.md' \
   'RELEASE.md' \
   'docs/install.md' \
+  'scripts/install-local-port.sh' \
   'scripts/artifacts/validate-kernel.sh' \
   'scripts/artifacts/validate-guest-image.sh' \
   'PACKAGE_METADATA.txt' \

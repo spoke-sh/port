@@ -1957,6 +1957,7 @@ fn cluster_bootstrap_source_candidates(source: &Path) -> Vec<PathBuf> {
                 &mut candidates,
                 prefix_root.join("share/port").join(source),
             );
+            push_cluster_bootstrap_candidate(&mut candidates, prefix_root.join(source));
         }
     }
 
@@ -9450,9 +9451,13 @@ fn artifact_script_candidates(script_name: &str) -> Vec<PathBuf> {
     if let Some(configured) = env::var_os("PORT_SHARE_ROOT") {
         push_artifact_script_candidate(
             &mut candidates,
-            PathBuf::from(configured)
+            PathBuf::from(configured.clone())
                 .join("scripts/artifacts")
                 .join(script_name),
+        );
+        push_artifact_script_candidate(
+            &mut candidates,
+            PathBuf::from(configured).join("artifacts").join(script_name),
         );
     }
 
@@ -9472,6 +9477,14 @@ fn artifact_script_candidates(script_name: &str) -> Vec<PathBuf> {
                 prefix_root
                     .join("share/port/scripts/artifacts")
                     .join(script_name),
+            );
+            push_artifact_script_candidate(
+                &mut candidates,
+                prefix_root.join("scripts/artifacts").join(script_name),
+            );
+            push_artifact_script_candidate(
+                &mut candidates,
+                prefix_root.join("artifacts").join(script_name),
             );
         }
     }
@@ -9528,7 +9541,9 @@ fn resolve_artifact_script_path(
 fn is_packaged() -> bool {
     if let Ok(current_exe) = env::current_exe() {
         if let Some(prefix_root) = current_exe.parent().and_then(Path::parent) {
-            return prefix_root.join("share/port/scripts/artifacts").is_dir();
+            return prefix_root.join("share/port/scripts/artifacts").is_dir()
+                || prefix_root.join("scripts/artifacts").is_dir()
+                || prefix_root.join("artifacts").is_dir();
         }
     }
     false
@@ -14081,6 +14096,37 @@ exec sleep 30
         let packaged_script = tempdir
             .path()
             .join("share/port/scripts/artifacts/validate-guest-image.sh");
+        fs::create_dir_all(
+            packaged_script
+                .parent()
+                .expect("packaged script parent should exist"),
+        )
+        .expect("packaged script parent should exist");
+        fs::write(&packaged_script, "#!/bin/sh\nexit 0\n").expect("packaged script should write");
+        let mut permissions = fs::metadata(&packaged_script)
+            .expect("packaged script metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&packaged_script, permissions)
+            .expect("packaged script should be executable");
+
+        let root = repo_root().expect("repo root should resolve");
+        let resolved = resolve_artifact_script_path(
+            "validate-guest-image.sh",
+            [
+                packaged_script.clone(),
+                root.join("scripts/artifacts/validate-guest-image.sh"),
+            ],
+        )
+        .expect("packaged validate script should resolve");
+
+        assert_eq!(resolved, packaged_script);
+    }
+
+    #[test]
+    fn artifact_scripts_resolve_from_packaged_root_candidates() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let packaged_script = tempdir.path().join("artifacts/validate-guest-image.sh");
         fs::create_dir_all(
             packaged_script
                 .parent()

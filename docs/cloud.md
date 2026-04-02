@@ -101,8 +101,8 @@ Use the hosted control-plane lane to run the shipped standard cloud workflow.
 6. Use the repo-local proof to verify the shipped standard lane without hand-running the full server harness:
 
    ```bash
-   cargo test -q -p port-cli --test machine_commands cli_hosted_standard_cloud_launch_round_trip
-   cargo test -q -p port-cli --test machine_commands cli_hosted_standard_status_and_stop_round_trip
+   cargo test -q -p port --test machine_commands cli_hosted_standard_cloud_launch_round_trip
+   cargo test -q -p port --test machine_commands cli_hosted_standard_status_and_stop_round_trip
    ```
 
 7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist.
@@ -130,9 +130,9 @@ Repository-local proof for the shipped local lane:
 cargo test -q -p port-runtime cloud_hypervisor_launch_status_and_stop_write_canonical_runtime_state
 cargo test -q -p port-runtime cloud_hypervisor_launch_surfaces_missing_binary_preflight
 cargo test -q -p port-runtime guest_exec_uses_cloud_hypervisor_vsock_tunnel_when_runtime_socket_is_absent
-cargo test -q -p port-cli --test machine_commands cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally
-cargo test -q -p port-cli --test machine_commands cli_machine_launch_surfaces_missing_cloud_hypervisor_binary
-cargo test -q -p port-cli --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
+cargo test -q -p port --test machine_commands cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally
+cargo test -q -p port --test machine_commands cli_machine_launch_surfaces_missing_cloud_hypervisor_binary
+cargo test -q -p port --test guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
 ```
 
 ## Hosted Cloud Hypervisor Workflow
@@ -164,9 +164,9 @@ Repository-local proof for the hosted Cloud Hypervisor lane:
 cargo test -q -p port-runtime hosted_cloud_hypervisor_launch_status_stop_route_through_live_control_plane
 cargo test -q -p port-runtime hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
 cargo test -q -p port-runtime hosted_guest_exec_routes_cloud_hypervisor_machine_through_node_runtime_root
-cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
-cargo test -q -p port-cli --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
-cargo test -q -p port-cli --test guest_commands cli_guest_commands_cover_hosted_cloud_hypervisor_runtime
+cargo test -q -p port --test machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+cargo test -q -p port --test machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+cargo test -q -p port --test guest_commands cli_guest_commands_cover_hosted_cloud_hypervisor_runtime
 ```
 
 Unsupported boundaries stay explicit:

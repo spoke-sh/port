@@ -82,7 +82,7 @@ mkdir -p "$GUEST_ROOT/var/log" "$MACHINE_DIR" "$BOGUS_RUNTIME_ROOT"
 printf 'first\nsecond\n' >"$GUEST_ROOT/var/log/app.log"
 printf 'copy-ok' >"$HOST_SOURCE"
 
-(cd "$REPO_ROOT" && cargo build -q -p port-cli --bin port)
+(cd "$REPO_ROOT" && cargo build -q -p port --bin port)
 (cd "$REPO_ROOT" && cargo build -q -p port-guest-agent --bin port-guest-agent)
 
 cp "$REPO_ROOT/examples/port.toml" "$SERVER_CONFIG"

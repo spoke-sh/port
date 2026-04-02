@@ -68,7 +68,7 @@ def write_cast(
 env = os.environ.copy()
 
 subprocess.run(
-    ["cargo", "build", "-q", "-p", "port-cli", "--bin", "port"],
+    ["cargo", "build", "-q", "-p", "port", "--bin", "port"],
     cwd=repo_root,
     env=env,
     check=True,

@@ -105,6 +105,11 @@ fn package_proof_installs_packaged_port_and_runs_version_and_doctor_from_prefix(
     );
     assert!(
         proof_root
+            .join("prefix/share/port/scripts/install-local-port.sh")
+            .exists()
+    );
+    assert!(
+        proof_root
             .join("prefix/share/port/scripts/artifacts/validate-kernel.sh")
             .exists()
     );

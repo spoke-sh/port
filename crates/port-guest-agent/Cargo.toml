@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[package.metadata.dist]
+dist = false
+
 [[bin]]
 name = "port-guest-agent"
 path = "src/main.rs"
