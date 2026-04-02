@@ -3,7 +3,7 @@
 id: VFTb0RCmf
 status: done
 created_at: 2026-03-31T12:50:29
-updated_at: 2026-03-31T12:56:18
+updated_at: 2026-03-31T12:56:19
 # authored
 title: Make Guest Networking Default-On for Local Firecracker VMs
 type: fix
@@ -12,7 +12,7 @@ scope: VFTZdamHM/VFTarG3Jq
 index: 1
 started_at: 2026-03-31T12:51:34
 submitted_at: 2026-03-31T12:56:18
-completed_at: 2026-03-31T12:56:18
+completed_at: 2026-03-31T12:56:19
 ---
 
 # Make Guest Networking Default-On for Local Firecracker VMs
