@@ -1,15 +1,16 @@
 ---
 # system-managed
 id: VFaUi3lnT
-status: needs-human-verification
+status: done
 created_at: 2026-04-01T17:09:22
-updated_at: 2026-04-01T17:17:57
+updated_at: 2026-04-01T17:34:25
 # authored
 title: Publish Docusaurus User Docs For Port
 type: feat
 operator-signal:
 started_at: 2026-04-01T17:10:02
 submitted_at: 2026-04-01T17:17:57
+completed_at: 2026-04-01T17:34:25
 ---
 
 # Publish Docusaurus User Docs For Port
