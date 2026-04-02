@@ -30,31 +30,30 @@ It keeps one operator vocabulary across lanes:
 - Additional proof-backed lanes: Cloud Hypervisor `standard`, AVF `standard`,
   and prepared-node Firecracker/PVM on `x86_64`
 
-## Install
+## Installation
 
-Install the latest released Port CLI with the cargo-dist shell installer:
+### One-liner Install (macOS and Linux)
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/spoke-sh/port/releases/latest/download/port-installer.sh | sh
 port doctor
 ```
 
-Once Port is installed, the canonical upgrade command is:
+### Upgrade an Existing Install
 
 ```bash
 port upgrade
-```
-
-For a source-built revision, use:
-
-```bash
 port upgrade --tag <tag>
 port upgrade --sha <git-sha>
 ```
 
-Port currently publishes installable releases for Linux `x86_64` and macOS
-`x86_64`/`aarch64`. Windows remains a workstation path through WSL or a remote
-Linux host.
+### Manual Download
+
+Download the latest pre-built binaries and installers for your platform from the
+[GitHub Releases](https://github.com/spoke-sh/port/releases) page. We provide:
+- **Linux:** `.tar.xz` archives plus the cross-platform shell installer
+- **macOS:** `.tar.xz` archives plus the cross-platform shell installer
+- **Windows:** not shipped in this slice; use WSL or a remote Linux host
 
 ## Quick Start
 
