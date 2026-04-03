@@ -157,6 +157,18 @@
 | [AWS PVM Host Kit Preparation](epics/VFgcPDfEj/voyages/VFgclbAzD/) | done |
 | [Cloud Aws PVM Runtime Proof](epics/VFgcPDfEj/voyages/VFgclbQzC/) | done |
 
+### [Guest Session Identity And Audit Surface](epics/VFgtgGEog/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Guest Session Identity Contract](epics/VFgtgGEog/voyages/VFgu7Bd7U/) | planned |
+
+### [Shell Driver Integration Contract For Upstream Control Planes](epics/VFgtgGWoh/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Upstream Shell Driver Contract](epics/VFgtgGWoh/voyages/VFgu7Bp7V/) | planned |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
