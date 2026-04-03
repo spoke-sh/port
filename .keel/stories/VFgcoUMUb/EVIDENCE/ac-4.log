@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T18:32:52.053822382-07:00
+mode: manual
+---
+The contract stays AWS-only in the published surfaces: docs/pvm.md and docs/hosted.md now make cloud-aws/aws-linux-node canonical, keep cloud-generic as denial-only, and explicitly state that aarch64 plus GCP/Azure do not inherit this hosted PVM contract.

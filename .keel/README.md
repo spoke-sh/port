@@ -154,7 +154,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [AWS PVM Host Kit Preparation](epics/VFgcPDfEj/voyages/VFgclbAzD/) | planned |
+| [AWS PVM Host Kit Preparation](epics/VFgcPDfEj/voyages/VFgclbAzD/) | in-progress |
 | [Cloud Aws PVM Runtime Proof](epics/VFgcPDfEj/voyages/VFgclbQzC/) | planned |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)

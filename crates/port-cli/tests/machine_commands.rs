@@ -11,6 +11,7 @@ use std::time::Duration;
 use port_model::{
     ClusterProvider, ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture,
     MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode,
+    PvmCapabilityState,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -228,64 +229,6 @@ fn spawn_hosted_server_harness_preserving_state(
         extra_node_env,
         false,
     )
-}
-
-fn spawn_hosted_server_harness_for_node(
-    server_config_path: &Path,
-    node_name: &str,
-    node_addr: &str,
-    control_plane_addr: &str,
-    extra_node_env: &[(&str, &Path)],
-) -> HostedServerHarness {
-    let lock = hosted_server_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    cleanup_hosted_registration_state();
-
-    let mut control_command = Command::new(port_bin());
-    control_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(server_config_path)
-        .arg("control-plane")
-        .arg("serve")
-        .arg("--control-plane")
-        .arg("demo")
-        .arg("--bind")
-        .arg(control_plane_addr)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let control_plane = ChildGuard::spawn("control-plane", control_command);
-    wait_for_tcp(control_plane_addr);
-
-    let mut node_command = Command::new(port_bin());
-    node_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .arg("--config")
-        .arg(server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg(node_name)
-        .arg("--bind")
-        .arg(node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    for (name, value) in extra_node_env {
-        node_command.env(name, value);
-    }
-    let node = ChildGuard::spawn("node-agent", node_command);
-    wait_for_tcp(node_addr);
-
-    HostedServerHarness {
-        _lock: lock,
-        _control_plane: control_plane,
-        _node: node,
-    }
 }
 
 fn spawn_hosted_server_harness_with_cleanup(
@@ -2317,26 +2260,28 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
 }
 
 #[test]
-fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
+fn cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch() {
     let temp = tempdir().expect("tempdir should exist");
-    let hosted_runtime_root = temp.path().join("hosted/generic-linux-node");
-    let bogus_runtime_root = temp.path().join("bogus/generic-linux-node");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
     let server_config_path = temp.path().join("server-port.toml");
     let client_config_path = temp.path().join("client-port.toml");
     let node_addr = reserve_addr();
     let control_plane_addr = reserve_addr();
 
-    let mut server_config = generic_hosted_config();
+    let mut server_config = hosted_config(&hosted_runtime_root);
     server_config
         .machines
-        .get_mut("cloud-generic")
-        .expect("cloud-generic should exist")
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
         .protection_mode = ProtectionMode::Pvm;
     server_config
         .nodes
-        .get_mut("generic-linux-node")
-        .expect("generic-linux-node should exist")
-        .runtime_root = hosted_runtime_root.clone();
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .capabilities
+        .pvm_lanes[0]
+        .state = PvmCapabilityState::Planned;
     server_config
         .control_planes
         .get_mut("demo")
@@ -2364,15 +2309,14 @@ fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
     let mut client_config = server_config.clone();
     client_config
         .nodes
-        .get_mut("generic-linux-node")
-        .expect("generic-linux-node should exist")
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
         .runtime_root = bogus_runtime_root;
     write_config(&client_config_path, &client_config);
 
     let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker-pvm");
-    let _servers = spawn_hosted_server_harness_for_node(
+    let _servers = spawn_hosted_server_harness(
         &server_config_path,
-        "generic-linux-node",
         &node_addr,
         &control_plane_addr,
         &[("PORT_TEST_CLI_PVM_FIRECRACKER", fake_binary.as_path())],
@@ -2387,11 +2331,11 @@ fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
         .arg("--control-plane")
         .arg("demo")
         .arg("--node")
-        .arg("generic-linux-node")
+        .arg("aws-linux-node")
         .arg("--architecture")
         .arg("x86-64")
         .arg("--provenance")
-        .arg("inventory/generic-linux-node.json")
+        .arg("inventory/aws-linux-node.json")
         .arg("--package-name")
         .arg(&package.name)
         .arg("--package-version")
@@ -2404,7 +2348,7 @@ fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
         .expect("prepare-pvm-node command should run");
     assert!(prepare.status.success(), "{prepare:?}");
     let prepare_stdout = String::from_utf8_lossy(&prepare.stdout);
-    assert!(prepare_stdout.contains("prepared hosted pvm node: generic-linux-node"));
+    assert!(prepare_stdout.contains("prepared hosted pvm node: aws-linux-node"));
     assert!(prepare_stdout.contains("firecracker-pvm-host-kit@2026.03"));
 
     let imported_inventory: serde_json::Value = serde_json::from_slice(
@@ -2413,11 +2357,11 @@ fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
     )
     .expect("imported inventory state should decode");
     assert_eq!(
-        imported_inventory["nodes"]["generic-linux-node"]["provenance"].as_str(),
-        Some("inventory/generic-linux-node.json")
+        imported_inventory["nodes"]["aws-linux-node"]["provenance"].as_str(),
+        Some("inventory/aws-linux-node.json")
     );
     assert_eq!(
-        imported_inventory["nodes"]["generic-linux-node"]["capability_summary"]["pvm_lanes"][0]
+        imported_inventory["nodes"]["aws-linux-node"]["capability_summary"]["pvm_lanes"][0]
             ["state"]
             .as_str(),
         Some("ready")
@@ -2430,25 +2374,21 @@ fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
         .arg("machine")
         .arg("launch")
         .arg("--machine")
-        .arg("cloud-generic")
+        .arg("cloud-aws")
         .output()
         .expect("launch command should run");
     assert!(launch.status.success(), "{launch:?}");
     let launch_stdout = String::from_utf8_lossy(&launch.stdout);
-    assert!(launch_stdout.contains("launched machine: cloud-generic"));
+    assert!(launch_stdout.contains("launched machine: cloud-aws"));
     assert!(launch_stdout.contains(fake_binary.to_string_lossy().as_ref()));
 
-    let pid_path = hosted_runtime_root.join("cloud-generic/firecracker.pid");
+    let pid_path = hosted_runtime_root.join("cloud-aws/firecracker.pid");
     let pid = fs::read_to_string(&pid_path)
         .expect("pid file should exist")
         .trim()
         .parse::<u32>()
         .expect("pid should parse");
-    assert!(
-        hosted_runtime_root
-            .join("cloud-generic/manifest.json")
-            .exists()
-    );
+    assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
 
     let placement_state: serde_json::Value = serde_json::from_slice(
         &fs::read(".port/hosted/demo/machine-placements.json")
@@ -2456,11 +2396,11 @@ fn cli_control_plane_prepare_pvm_node_enables_generic_hosted_pvm_launch() {
     )
     .expect("machine placement state should decode");
     assert_eq!(
-        placement_state["machines"]["cloud-generic"]["node_name"].as_str(),
-        Some("generic-linux-node")
+        placement_state["machines"]["cloud-aws"]["node_name"].as_str(),
+        Some("aws-linux-node")
     );
     assert_eq!(
-        placement_state["machines"]["cloud-generic"]["runtime_root"].as_str(),
+        placement_state["machines"]["cloud-aws"]["runtime_root"].as_str(),
         Some(hosted_runtime_root.to_string_lossy().as_ref())
     );
 

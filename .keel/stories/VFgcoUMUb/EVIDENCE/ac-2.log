@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T18:32:30.885156746-07:00
+mode: manual
+---
+The authored contract now keeps x86_64 AWS hosted PVM explicit: cloud-generic remains the denial-only generic example, and docs call out that aarch64 and GCP/Azure do not inherit the AWS prepared-host contract.

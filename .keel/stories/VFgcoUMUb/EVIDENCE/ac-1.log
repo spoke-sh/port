@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T18:32:30.867246030-07:00
+mode: manual
+---
+Made cloud-aws on aws-linux-node the canonical hosted PVM contract in docs/pvm.md, docs/hosted.md, and docs/cloud.md, and pinned it with cargo test -p port-model hosted_pvm_summary_keeps_aws_contract_provider_aware plus cargo test -p port --test machine_commands cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch.

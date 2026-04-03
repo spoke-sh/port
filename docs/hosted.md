@@ -114,27 +114,29 @@ Repository-local hosted PVM proof:
 
 1. Copy `examples/port.toml` to `/tmp/port-pvm.toml`.
 2. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
-3. Switch `machines.cloud-generic.protection_mode` to `pvm`.
+3. Switch `machines.cloud-aws.protection_mode` to `pvm`.
 4. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at
-   prepared artifact paths visible to `generic-linux-node`.
+   prepared artifact paths visible to `aws-linux-node`.
 5. Export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm`
-   binary on the prepared node host.
+   binary on the prepared AWS node host.
 
 ```bash
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
 ```
 
-Before `prepare-pvm-node`, the same `cloud-generic` launch is denied because
-`generic-linux-node` is only `planned`. `prepare-pvm-node` writes the imported
-ready record under `.port/hosted/<control-plane>/imported-inventory.json`;
-that imported record is the canonical repo-local proof that the node moved from
-planned to ready. `aarch64/firecracker/pvm` remains research-only and is not a
-supported hosted preparation or launch lane.
+`cloud-generic` on `generic-linux-node` remains the explicit denial path for an
+unprepared hosted PVM lane because that sample node still advertises
+`planned`. `cloud-aws` on `aws-linux-node` is the canonical provider-backed
+surface. `prepare-pvm-node` writes the imported ready record under
+`.port/hosted/<control-plane>/imported-inventory.json`; that imported record is
+the canonical repo-local proof that the prepared AWS node is ready for the
+hosted PVM lane. `aarch64/firecracker/pvm` remains research-only and GCP/Azure
+do not inherit the AWS prepared-host contract.
 
 ## Hosted API Identity Contract
 

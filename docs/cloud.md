@@ -105,7 +105,7 @@ Use the hosted control-plane lane to run the shipped standard cloud workflow.
    cargo test -q -p port --test machine_commands cli_hosted_standard_status_and_stop_round_trip
    ```
 
-7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist.
+7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared AWS host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist. `cloud-generic` remains the generic denial path rather than the canonical hosted PVM surface.
 
 ## Local Cloud Hypervisor Workflow
 

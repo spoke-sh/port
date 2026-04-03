@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFgclbAzD
-status: planned
+status: in-progress
 epic: VFgcPDfEj
 created_at: 2026-04-02T18:19:01
 # authored
 title: AWS PVM Host Kit Preparation
 index: 1
 updated_at: 2026-04-02T18:20:56
+started_at: 2026-04-02T18:25:37
 ---
 
 # AWS PVM Host Kit Preparation
@@ -26,10 +27,10 @@ updated_at: 2026-04-02T18:20:56
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Define AWS PVM Prepared Host Contract](../../../../stories/VFgcoUMUb/README.md) | feat | backlog |
+| [Define AWS PVM Prepared Host Contract](../../../../stories/VFgcoUMUb/README.md) | feat | done |
 | [Implement AWS Node Preparation Workflow](../../../../stories/VFgcoUWUa/README.md) | feat | backlog |
 <!-- END GENERATED -->

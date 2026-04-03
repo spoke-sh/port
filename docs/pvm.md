@@ -119,41 +119,44 @@ launch through the hosted control plane.
 Start from a copy of `examples/port.toml` and make these temporary changes:
 
 - point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`
-- switch `machines.cloud-generic.protection_mode` to `pvm`
+- switch `machines.cloud-aws.protection_mode` to `pvm`
 - point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
-  prepared artifact paths available on the node host
+  prepared artifact paths available on the AWS node host
 - export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm` binary
-  on that prepared node
+  on that prepared AWS node
 
 ```bash
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-generic
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
 ```
 
 Interpret those sample hosts this way:
 
-- before `control-plane prepare-pvm-node`, the same `cloud-generic` workflow
-  is the denial path. Port reports the machine as `malformed` with placement
-  detail because `generic-linux-node` advertises a PVM lane in `planned` state
-  rather than `ready`.
+- `cloud-generic` on `generic-linux-node` stays the denial-only proof for an
+  unprepared hosted PVM lane. It remains useful because Port reports the
+  machine as `malformed` with placement detail when the node only advertises a
+  `planned` PVM lane rather than `ready`.
+- `cloud-aws` on `aws-linux-node` is the canonical provider-backed hosted PVM
+  contract. The checked-in sample inventory keeps AWS explicit so the host-kit,
+  imported readiness, and failure surfaces remain provider-aware.
 - `control-plane prepare-pvm-node` writes the imported ready record under
   `.port/hosted/<control-plane>/imported-inventory.json`; that imported record
-  is the canonical repo-local proof that the node moved from planned to ready.
+  is the canonical repo-local proof that the prepared AWS node is advertising a
+  ready hosted PVM lane.
 - once you provide the prepared artifact paths plus `firecracker-pvm`, Port
-  accepts placement because `generic-linux-node` now advertises a `ready`
-  x86_64 PVM lane and then launches through the live control-plane and
-  node-agent path.
+  accepts placement because `aws-linux-node` advertises or imports a `ready`
+  x86_64 PVM lane and then launches `cloud-aws` through the live control-plane
+  and node-agent path.
 - missing `firecracker-pvm`, missing host boot prerequisites, or missing PVM
-  artifact paths fail explicitly; Port does not silently fall back to the
-  standard Firecracker lane.
+  artifact paths fail explicitly for `cloud-aws`; Port does not silently fall
+  back to the standard Firecracker lane.
 - `aarch64/firecracker/pvm` stays research-only; there is no supported
-  `prepare-pvm-node` or launch proof for that architecture.
-- other hosted launch paths still return provider-aware guidance until their
-  runtime lanes ship.
+  `prepare-pvm-node` or launch proof for that architecture, and the current
+  hosted contract does not claim the AWS lane for GCP or Azure.
 
 ## Preserved Standard Lane
 

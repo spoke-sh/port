@@ -5009,6 +5009,32 @@ mod tests {
     }
 
     #[test]
+    fn hosted_pvm_summary_keeps_aws_contract_provider_aware() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = ProtectionMode::Pvm;
+
+        let summary = config
+            .hosted_machine_summary_contract("cloud-aws")
+            .expect("cloud-aws hosted pvm summary should resolve")
+            .expect("cloud-aws should be hosted");
+
+        assert_eq!(summary.host_name, "aws-linux");
+        assert_eq!(summary.provider, HostProvider::Aws);
+        assert_eq!(
+            summary.candidate_nodes,
+            vec![String::from("aws-linux-node")]
+        );
+        assert!(summary.rejected_nodes.is_empty());
+        assert!(summary.placement_detail.contains("aws-linux-node"));
+        assert!(summary.placement_detail.contains("provider 'aws'"));
+        assert!(!summary.placement_detail.contains("generic-linux-node"));
+    }
+
+    #[test]
     fn hosted_standard_summary_tracks_host_and_provider_for_each_demo_lane() {
         let config = PortConfig::sample();
 
