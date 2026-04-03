@@ -49,6 +49,9 @@ What stays explicit:
   plane, node agent, guest, and service contract
 - AWS PVM is the stronger production-oriented narrative because it carries the
   real prepared-host and no-fallback contract
+- the Port flake now exports `nixosModules.aws-pvm-host` and
+  `packages.x86_64-linux.firecracker-pvm-host-kit` as the supported downstream
+  AWS PVM host-kit handoff
 - Port still does not claim EC2 provisioning, IAM, VPC wiring, DNS, or arm64
   Firecracker/PVM support
 
@@ -155,6 +158,7 @@ repo-level review surface:
 |----------------|------------|
 | the strongest current cloud narrative | [`docs/aws.md`](docs/aws.md) |
 | the public narrative site | [`website/docs/path-to-production/aws.mdx`](website/docs/path-to-production/aws.mdx) |
+| the downstream AWS AMI host-kit handoff | [`docs/aws.md`](docs/aws.md) |
 | the local-first operator path | [`docs/operators.md`](docs/operators.md) |
 | installation and support matrix | [`docs/install.md`](docs/install.md) |
 
@@ -174,7 +178,7 @@ repo-level review surface:
 
 | Document | Purpose |
 |----------|---------|
-| [`docs/aws.md`](docs/aws.md) | Canonical AWS deployment and hosted PVM production contract |
+| [`docs/aws.md`](docs/aws.md) | Canonical AWS deployment, hosted PVM production contract, and downstream Nix host-kit handoff |
 | [`docs/operators.md`](docs/operators.md) | Operator-oriented overview and platform guidance |
 | [`docs/install.md`](docs/install.md) | Installable release contract, support matrix, and package boundaries |
 | [`docs/hosted.md`](docs/hosted.md) | Hosted control-plane, node-agent, and service workflows |

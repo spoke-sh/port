@@ -52,6 +52,24 @@ The stronger AWS path depends on a stricter runtime contract:
 - dedicated `x86_64/firecracker/pvm` kernel and guest-image variants
 - imported readiness that marks `aws-linux-node` as ready for the PVM lane
 
+Port now exports that host contract directly for downstream image builders:
+
+- `port.nixosModules.aws-pvm-host`
+- `port.packages.x86_64-linux.firecracker-pvm-host-kit`
+
+Use that package output as the handoff into a downstream AMI pipeline:
+
+```bash
+HOST_KIT=$(nix build github:spoke-sh/port#firecracker-pvm-host-kit --print-out-paths --no-link)
+export INFRA_AWS_PVM_HOST_KIT_MODULE="$HOST_KIT/share/port/nixos/aws-pvm-host.nix"
+
+infra image --env prod build-pvm-ami
+```
+
+That keeps the split clean: Port owns the host-kit module, manifest, boot-line
+contract, and canonical `firecracker-pvm` surface; downstream infra owns image
+build/import orchestration and AMI consumption.
+
 The readiness bridge is explicit:
 
 ```bash

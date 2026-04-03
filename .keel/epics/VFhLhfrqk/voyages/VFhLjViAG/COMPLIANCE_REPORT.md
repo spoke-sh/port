@@ -1,0 +1,10 @@
+# COMPLIANCE REPORT: Export And Prove AWS PVM Host Kit Module
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [VFhLmKkbA](../../../../stories/VFhLmKkbA/README.md) | [ac-1.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-6.log) |
+| SRS-02 | ✓ VERIFIED | [VFhLmKkbA](../../../../stories/VFhLmKkbA/README.md) | [ac-1.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-6.log) |
+| SRS-03 | ✓ VERIFIED | [VFhLmKkbA](../../../../stories/VFhLmKkbA/README.md) | [ac-1.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-6.log) |
+| SRS-04 | ✓ VERIFIED | [VFhLmKkbA](../../../../stories/VFhLmKkbA/README.md) | [ac-1.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhLmKkbA/EVIDENCE/ac-6.log) |

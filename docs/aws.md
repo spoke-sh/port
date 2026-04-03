@@ -56,7 +56,54 @@ The AWS node must satisfy the PVM host kit before the lane is honest:
 
 Port should treat those as blocking requirements, not hints.
 
-### 3. AWS Artifact Kit Contract
+### 3. Port-Owned Nix Host Kit Export
+
+Port now exports the AWS `x86_64` PVM host contract directly from the Port
+flake:
+
+- `port.nixosModules.aws-pvm-host`
+- `port.packages.x86_64-linux.firecracker-pvm-host-kit`
+
+Use that module as the supported downstream source of truth for AMI builds.
+The companion package publishes:
+
+- `bin/firecracker-pvm`
+- `share/port/aws-pvm-host-kit.json`
+- `share/port/nixos/aws-pvm-host.nix`
+
+Minimal downstream import:
+
+```nix
+{
+  inputs.port.url = "github:spoke-sh/port";
+
+  outputs = { nixpkgs, port, ... }: {
+    nixosConfigurations.aws-pvm-host = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        port.nixosModules.aws-pvm-host
+        {
+          system.stateVersion = "24.11";
+
+          # Replace these with the concrete PVM-capable builds used for the
+          # production image when they live outside the Port repo.
+          # port.awsPvmHost.kernelPackages = pkgs.linuxPackagesFor myPortPvmKernel;
+          # port.awsPvmHost.firecrackerPackage = myFirecrackerPvm;
+        }
+      ];
+    };
+  };
+}
+```
+
+The module owns the Port contract: the expected kernel release identity,
+`pti=off`, the canonical `firecracker-pvm` env surface, and the on-host manifest
+path. If your image pipeline already carries the concrete patched kernel or VMM
+derivations, override `port.awsPvmHost.kernelPackages` and
+`port.awsPvmHost.firecrackerPackage` rather than cloning the module into a
+downstream repo.
+
+### 4. AWS Artifact Kit Contract
 
 The AWS PVM lane also needs dedicated guest artifacts:
 
@@ -68,7 +115,7 @@ This is the operational reason the AWS PVM lane is stronger than the generic
 hosted standard lane: the runtime, the host kit, and the artifacts are all
 explicitly bound together.
 
-### 4. Canonical Machine And Node Identities
+### 5. Canonical Machine And Node Identities
 
 The checked-in sample already names the production-oriented AWS path:
 
@@ -82,6 +129,25 @@ generic hosted node remains useful as a denial path, not as the canonical AWS
 surface.
 
 ## Canonical Workflow
+
+### Downstream AMI Handoff
+
+The supported downstream seam is now "consume Port's module output", not
+"author a repo-local replacement module":
+
+```bash
+HOST_KIT=$(nix build github:spoke-sh/port#firecracker-pvm-host-kit --print-out-paths --no-link)
+export INFRA_AWS_PVM_HOST_KIT_MODULE="$HOST_KIT/share/port/nixos/aws-pvm-host.nix"
+
+infra image --env prod build-pvm-ami
+```
+
+That keeps responsibility split cleanly:
+
+- Port owns the AWS PVM host-kit module, manifest, boot-line contract, and
+  canonical `firecracker-pvm` surface.
+- downstream `infra` owns AMI build, upload, VM Import/Export, publication, and
+  later consumption of the resulting `ami-...` ID.
 
 Start from a copy of `examples/port.toml` and harden only the AWS path:
 

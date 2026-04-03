@@ -36,7 +36,24 @@
     atxt,
     keel,
   }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let
+      awsPvmHostKit = import ./nix/nixos/aws-pvm-host-kit-contract.nix;
+      exampleConfig = builtins.fromTOML (builtins.readFile ./examples/port.toml);
+      exampleAwsPvmLane =
+        let
+          matches = builtins.filter
+            (lane: lane.architecture == awsPvmHostKit.architecture)
+            exampleConfig.nodes."aws-linux-node".capabilities.pvm_lanes;
+        in
+          if matches == [ ] then
+            throw "examples/port.toml does not define the canonical aws-linux-node x86_64 PVM lane"
+          else
+            builtins.head matches;
+      exampleAwsPvmHostKit = exampleAwsPvmLane.host_kit;
+      _awsPvmHostKitSync = assert awsPvmHostKit == exampleAwsPvmHostKit; true;
+      awsPvmHostModule = import ./nix/nixos/aws-pvm-host.nix;
+    in
+      flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
@@ -116,6 +133,44 @@
           exec ${atxtPkg}/bin/atext "$@"
         '';
         keelPkg = keel.packages.${system}.keel;
+        awsPvmHostKitPkg = pkgs.callPackage ./nix/firecracker-pvm-host-kit.nix {
+          firecracker = pkgs.firecracker;
+        };
+        awsPvmHostModuleEval = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules = [
+            awsPvmHostModule
+            {
+              system.stateVersion = "24.11";
+            }
+          ];
+        };
+        _awsPvmHostKitPkgAssertions = assert awsPvmHostKitPkg.passthru.hostKit == awsPvmHostKit; true;
+        _awsPvmHostKitPkgAssertions2 =
+          assert awsPvmHostKitPkg.passthru.modulePath
+            == "/share/port/nixos/aws-pvm-host.nix"; true;
+        _awsPvmHostKitPkgAssertions3 =
+          assert awsPvmHostKitPkg.passthru.manifestPath
+            == "/share/port/aws-pvm-host-kit.json"; true;
+        _awsPvmHostModuleAssertions = assert awsPvmHostModuleEval.config.port.awsPvmHost.hostKit == awsPvmHostKit; true;
+        _awsPvmHostModuleAssertions2 = assert builtins.elem "pti=off" awsPvmHostModuleEval.config.boot.kernelParams; true;
+        _awsPvmHostModuleAssertions3 =
+          assert awsPvmHostModuleEval.config.environment.variables.PORT_PVM_FIRECRACKER_BINARY
+            == "/run/current-system/sw/bin/firecracker-pvm"; true;
+        _awsPvmHostModuleAssertions4 =
+          assert builtins.any
+            (pkg: pkg == awsPvmHostModuleEval.config.port.awsPvmHost.package)
+            awsPvmHostModuleEval.config.environment.systemPackages; true;
+        _ = [
+          _awsPvmHostKitSync
+          _awsPvmHostKitPkgAssertions
+          _awsPvmHostKitPkgAssertions2
+          _awsPvmHostKitPkgAssertions3
+          _awsPvmHostModuleAssertions
+          _awsPvmHostModuleAssertions2
+          _awsPvmHostModuleAssertions3
+          _awsPvmHostModuleAssertions4
+        ];
         sharedInputs = [
           rust
           portPkg
@@ -153,6 +208,23 @@
           atxt = atxtAliasPkg;
           keel = keelPkg;
           default = portPkg;
+        } // pkgs.lib.optionalAttrs isLinux {
+          firecracker-pvm-host-kit = awsPvmHostKitPkg;
+        };
+
+        checks = pkgs.lib.optionalAttrs isLinux {
+          aws-pvm-host-module-eval = pkgs.writeText "aws-pvm-host-module-eval.json" (
+            builtins.toJSON {
+              module = "aws-pvm-host";
+              bootKernelParams = awsPvmHostModuleEval.config.boot.kernelParams;
+              firecrackerBinary = awsPvmHostModuleEval.config.environment.variables.PORT_PVM_FIRECRACKER_BINARY;
+              manifestPath = awsPvmHostModuleEval.config.port.awsPvmHost.manifestPath;
+              hostKit = awsPvmHostModuleEval.config.port.awsPvmHost.hostKit;
+              hostKitPackage = awsPvmHostModuleEval.config.port.awsPvmHost.package.pname
+                or awsPvmHostModuleEval.config.port.awsPvmHost.package.name;
+              modulePath = "${awsPvmHostKitPkg}${awsPvmHostKitPkg.passthru.modulePath}";
+            }
+          );
         };
 
         devShells.default = pkgs.mkShell {
@@ -168,5 +240,15 @@
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"
           '';
         };
-      });
+      })
+      // {
+        lib = {
+          awsPvmHostKit = awsPvmHostKit;
+        };
+
+        nixosModules = {
+          aws-pvm-host = awsPvmHostModule;
+          default = awsPvmHostModule;
+        };
+      };
 }

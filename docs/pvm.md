@@ -51,6 +51,32 @@ Required contract:
 Port should treat those requirements as blocking, not advisory. If the PVM host
 kit is absent, `port doctor` and any future PVM launch flow should fail fast.
 
+## First-Class Nix Host Kit Surface
+
+Port now exports the x86_64 AWS host-kit contract as first-class Nix surfaces:
+
+- `nixosModules.aws-pvm-host`
+- `packages.x86_64-linux.firecracker-pvm-host-kit`
+
+That companion package carries the canonical downstream handoff assets:
+
+- `bin/firecracker-pvm`
+- `share/port/aws-pvm-host-kit.json`
+- `share/port/nixos/aws-pvm-host.nix`
+
+The NixOS module sets the Port-owned host contract directly:
+
+- boot args include `pti=off`
+- `PORT_PVM_FIRECRACKER_BINARY` resolves to the canonical
+  `firecracker-pvm` path surface
+- `/etc/port/aws-pvm-host-kit.json` records the host-kit identity expected by
+  `prepare-pvm-node`
+
+If an image pipeline already carries concrete PVM-capable kernel or Firecracker
+derivations, override `port.awsPvmHost.kernelPackages` and
+`port.awsPvmHost.firecrackerPackage` there. Do not fork the module into a
+downstream repo just to restate Port's host-kit contract.
+
 ## x86_64 Artifact Kit Contract
 
 The PVM lane also needs dedicated artifacts.

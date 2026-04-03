@@ -175,6 +175,12 @@
 |--------|--------|
 | [Foundational AWS PVM Docs Refresh](epics/VFhICYohO/voyages/VFhIVMVEF/) | done |
 
+### [AWS PVM Host Kit Nix Surface](epics/VFhLhfrqk/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Export And Prove AWS PVM Host Kit Module](epics/VFhLhfrqk/voyages/VFhLjViAG/) | done |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |

@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T21:36:15.333560929-07:00
+mode: manual
+---
+Verification:
+- `docs/aws.md` explicitly keeps AMI build, upload, VM Import/Export, publication, and AMI consumption in downstream infra scope.
+- The Nix module option descriptions in `nix/nixos/aws-pvm-host.nix` make the concrete patched kernel and Firecracker derivations overridable inputs instead of silently claiming that Port now owns downstream image orchestration.
+- The implementation exports the host-kit contract and packaged handoff without taking over EC2, IAM, DNS, or bootstrap policy.

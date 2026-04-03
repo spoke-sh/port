@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T21:36:15.130462887-07:00
+mode: manual
+---
+Verification:
+- The evaluated module proof at `/nix/store/xda8ajv8i0qzxiawzcngcdnlcz6f7rhx-aws-pvm-host-module-eval.json` contains `bootKernelParams = [ ..., "pti=off" ]`.
+- The same proof records `firecrackerBinary = "/run/current-system/sw/bin/firecracker-pvm"`.
+- The module also publishes `manifestPath = "/etc/port/aws-pvm-host-kit.json"`, matching the Port-owned readiness manifest surface.

@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T21:36:15.264355625-07:00
+mode: manual
+---
+Verification:
+- `flake.nix` imports `nix/nixos/aws-pvm-host-kit-contract.nix`, parses `examples/port.toml`, and asserts the exported Nix host-kit contract matches the canonical AWS x86_64 PVM lane in the sample config.
+- `flake.nix` also asserts the companion package passthru `hostKit`, `modulePath`, and `manifestPath` stay aligned with that same contract.
+- `nix eval .#lib.awsPvmHostKit --json --option eval-cache false` returned the same canonical identity used by the runtime/readiness contract.

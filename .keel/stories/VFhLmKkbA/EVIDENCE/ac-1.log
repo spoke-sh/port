@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T21:36:15.014449986-07:00
+mode: manual
+---
+Verification:
+- `nix build .#checks.x86_64-linux.aws-pvm-host-module-eval --no-link --print-out-paths --option eval-cache false` succeeded.
+- The check builds a `nixpkgs.lib.nixosSystem { modules = [ port.nixosModules.aws-pvm-host { system.stateVersion = "24.11"; } ]; }` evaluation and produced `/nix/store/xda8ajv8i0qzxiawzcngcdnlcz6f7rhx-aws-pvm-host-module-eval.json`.
+- That proves the downstream import shape evaluates successfully through the exported module surface.

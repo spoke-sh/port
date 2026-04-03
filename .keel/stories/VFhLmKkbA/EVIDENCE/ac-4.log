@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T21:36:15.192336954-07:00
+mode: manual
+---
+Verification:
+- Root docs now point at the AWS PVM host-kit handoff in `README.md`.
+- `docs/aws.md` now documents both `port.nixosModules.aws-pvm-host` and `port.packages.x86_64-linux.firecracker-pvm-host-kit`, plus the downstream `INFRA_AWS_PVM_HOST_KIT_MODULE="$HOST_KIT/share/port/nixos/aws-pvm-host.nix"` handoff.
+- `docs/pvm.md` and `website/docs/path-to-production/aws.mdx` were updated to present the same Port-owned downstream module/package surface instead of a repo-local replacement module.
