@@ -1936,7 +1936,7 @@ async fn guest_forward_detached_start(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    proxy_machine_route(
+    proxy_guest_machine_route(
         &state,
         &headers,
         &machine,
@@ -1945,6 +1945,7 @@ async fn guest_forward_detached_start(
         }),
         Method::POST,
         Some(body),
+        None,
     )
     .await
 }
@@ -1954,7 +1955,7 @@ async fn guest_forward_detached_list(
     Path(machine): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
+    proxy_guest_machine_route(
         &state,
         &headers,
         &machine,
@@ -1962,6 +1963,7 @@ async fn guest_forward_detached_list(
             machine_name: machine.clone(),
         }),
         Method::GET,
+        None,
         None,
     )
     .await
@@ -1972,16 +1974,17 @@ async fn guest_forward_detached_stop(
     Path((machine, forward)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    proxy_machine_route(
+    proxy_guest_machine_route(
         &state,
         &headers,
         &machine,
         HostedNodeRoute::DetachedForward(HostedDetachedForwardRoute::Stop {
             machine_name: machine.clone(),
-            forward_name: forward,
+            forward_name: forward.clone(),
         }),
         Method::POST,
         None,
+        Some(forward),
     )
     .await
 }
@@ -2353,6 +2356,7 @@ fn stored_service_route_context(service: &crate::ServiceDefinitionStatus) -> Hos
         inventory_owner: Some(service.control.inventory_owner),
         lifecycle_owner: Some(service.control.lifecycle_owner),
         guest_broker: Some(service.control.guest_broker),
+        guest_session: None,
     }
 }
 
@@ -2405,7 +2409,7 @@ async fn proxy_guest_route(
     verb: HostedGuestVerb,
     body: Bytes,
 ) -> Response {
-    proxy_machine_route(
+    proxy_guest_machine_route(
         state,
         headers,
         machine,
@@ -2415,6 +2419,7 @@ async fn proxy_guest_route(
         }),
         Method::POST,
         Some(body),
+        None,
     )
     .await
 }
@@ -2435,8 +2440,20 @@ async fn proxy_guest_stream_route(
         Err(response) => return response,
     };
     let (binding, route_context) = match resolve_node_binding(state, &summary) {
-        Ok(result) => result,
+        Ok((binding, route_context)) => {
+            let route_context =
+                match control_plane_guest_route_context(state, machine, route_context) {
+                    Ok(route_context) => route_context,
+                    Err(response) => return response,
+                };
+            (binding, route_context)
+        }
         Err((route_context, message)) => {
+            let route_context =
+                match control_plane_guest_route_context(state, machine, route_context) {
+                    Ok(route_context) => route_context,
+                    Err(response) => return response,
+                };
             return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
         }
     };
@@ -2465,6 +2482,81 @@ async fn proxy_guest_stream_route(
             },
         ),
         Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route_context)),
+    }
+}
+
+async fn proxy_guest_machine_route(
+    state: &ControlPlaneState,
+    headers: &HeaderMap,
+    machine: &str,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+    forward_name: Option<String>,
+) -> Response {
+    if let Some(response) = authorize(state, headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(state, machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+    let (binding, route_context) = match resolve_node_binding(state, &summary) {
+        Ok((binding, route_context)) => {
+            let route_context =
+                match control_plane_guest_route_context(state, machine, route_context) {
+                    Ok(route_context) => route_context,
+                    Err(response) => return response,
+                };
+            (binding, route_context)
+        }
+        Err((route_context, message)) => {
+            let route_context =
+                match control_plane_guest_route_context(state, machine, route_context) {
+                    Ok(route_context) => route_context,
+                    Err(response) => return response,
+                };
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
+        }
+    };
+
+    let route_context = if let Some(forward_name) = forward_name {
+        route_context.with_forward_name(forward_name)
+    } else {
+        route_context
+    };
+
+    proxy_raw(state, &binding, route, method, body, route_context).await
+}
+
+fn control_plane_guest_route_context(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    route_context: HostedRouteContext,
+) -> Result<HostedRouteContext, Response> {
+    match state
+        .inner
+        .config
+        .hosted_guest_attach_contract(machine_name)
+    {
+        Ok(Some(contract)) => Ok(route_context.with_guest_session_contract(&contract)),
+        Ok(None) => Err(error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' does not publish a hosted guest-session contract for machine '{}'",
+                state.inner.control_plane, machine_name
+            ),
+            Some(route_context),
+        )),
+        Err(error) => Err(error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "control plane '{}' could not derive a hosted guest-session contract for machine '{}': {error}",
+                state.inner.control_plane, machine_name
+            ),
+            Some(route_context),
+        )),
     }
 }
 
@@ -4250,6 +4342,15 @@ async fn node_guest_forward_detached_start(
         return response;
     }
 
+    let parse_route = match node_guest_route_context(
+        &state,
+        &machine,
+        node_route_context(&state, Some(machine.clone())),
+    ) {
+        Ok(route) => route,
+        Err(response) => return response,
+    };
+
     let request: HostedDetachedForwardStartRequest = match serde_json::from_slice(&body) {
         Ok(request) => request,
         Err(error) => {
@@ -4259,21 +4360,27 @@ async fn node_guest_forward_detached_start(
                     "node '{}' received invalid detached forward JSON: {error}",
                     state.inner.node_name
                 ),
-                Some(node_route_context(&state, Some(machine))),
+                Some(parse_route),
             );
         }
     };
 
     let (localized, route) = match localize_machine_for_node(&state, &machine) {
-        Ok((localized, route)) => (
-            localized,
-            route.with_forward_name(
-                request
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| String::from("(generated)")),
-            ),
-        ),
+        Ok((localized, route)) => {
+            let route = match node_guest_route_context(&state, &machine, route) {
+                Ok(route) => route,
+                Err(response) => return response,
+            };
+            (
+                localized,
+                route.with_forward_name(
+                    request
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| String::from("(generated)")),
+                ),
+            )
+        }
         Err(response) => return response,
     };
 
@@ -4317,7 +4424,13 @@ async fn node_guest_forward_detached_list(
     }
 
     let (localized, route) = match localize_machine_for_node(&state, &machine) {
-        Ok(value) => value,
+        Ok((localized, route)) => {
+            let route = match node_guest_route_context(&state, &machine, route) {
+                Ok(route) => route,
+                Err(response) => return response,
+            };
+            (localized, route)
+        }
         Err(response) => return response,
     };
 
@@ -4344,7 +4457,13 @@ async fn node_guest_forward_detached_stop(
     }
 
     let (localized, route) = match localize_machine_for_node(&state, &machine) {
-        Ok((localized, route)) => (localized, route.with_forward_name(forward.clone())),
+        Ok((localized, route)) => {
+            let route = match node_guest_route_context(&state, &machine, route) {
+                Ok(route) => route,
+                Err(response) => return response,
+            };
+            (localized, route.with_forward_name(forward.clone()))
+        }
         Err(response) => return response,
     };
 
@@ -4849,6 +4968,15 @@ fn node_guest_operation_response(
         return response;
     }
 
+    let parse_route = match node_guest_route_context(
+        state,
+        machine_name,
+        node_route_context(state, Some(machine_name.to_string())),
+    ) {
+        Ok(route) => route,
+        Err(response) => return response,
+    };
+
     let operation: GuestOperation = match serde_json::from_slice(&body) {
         Ok(operation) => operation,
         Err(error) => {
@@ -4858,13 +4986,19 @@ fn node_guest_operation_response(
                     "node '{}' received invalid guest JSON: {error}",
                     state.inner.node_name
                 ),
-                Some(node_route_context(state, Some(machine_name.to_string()))),
+                Some(parse_route),
             );
         }
     };
 
     let (localized, route) = match localize_machine_for_node(state, machine_name) {
-        Ok(value) => value,
+        Ok((localized, route)) => {
+            let route = match node_guest_route_context(state, machine_name, route) {
+                Ok(route) => route,
+                Err(response) => return response,
+            };
+            (localized, route)
+        }
         Err(response) => return response,
     };
 
@@ -4941,8 +5075,23 @@ fn node_guest_copy_stream_response(
         return response;
     }
 
+    let parse_route = match node_guest_route_context(
+        state,
+        machine_name,
+        node_route_context(state, Some(machine_name.to_string())),
+    ) {
+        Ok(route) => route,
+        Err(response) => return response,
+    };
+
     let (localized, route) = match localize_machine_for_node(state, machine_name) {
-        Ok(value) => value,
+        Ok((localized, route)) => {
+            let route = match node_guest_route_context(state, machine_name, route) {
+                Ok(route) => route,
+                Err(response) => return response,
+            };
+            (localized, route)
+        }
         Err(response) => return response,
     };
 
@@ -4956,7 +5105,7 @@ fn node_guest_copy_stream_response(
                     "node '{}' received an invalid guest copy stream payload: {error}",
                     state.inner.node_name
                 ),
-                Some(route),
+                Some(parse_route),
             );
         }
     };
@@ -5060,6 +5209,36 @@ fn relay_guest_copy_stream(
     }
 
     Ok(response_bytes)
+}
+
+fn node_guest_route_context(
+    state: &NodeAgentState,
+    machine_name: &str,
+    route_context: HostedRouteContext,
+) -> Result<HostedRouteContext, Response> {
+    match state
+        .inner
+        .config
+        .hosted_guest_attach_contract(machine_name)
+    {
+        Ok(Some(contract)) => Ok(route_context.with_guest_session_contract(&contract)),
+        Ok(None) => Err(error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' does not publish a hosted guest-session contract for machine '{}'",
+                state.inner.node_name, machine_name
+            ),
+            Some(route_context),
+        )),
+        Err(error) => Err(error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "node '{}' could not derive a hosted guest-session contract for machine '{}': {error}",
+                state.inner.node_name, machine_name
+            ),
+            Some(route_context),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -5809,6 +5988,16 @@ mod tests {
                 .and_then(|route| route.node_name.as_deref()),
             Some("aws-linux-node")
         );
+        let guest_session = error
+            .route
+            .as_ref()
+            .and_then(|route| route.guest_session.as_ref())
+            .expect("guest session contract should exist");
+        assert_eq!(
+            guest_session.id,
+            format!("port-hosted://{control_plane}/machines/cloud-aws/guest-session")
+        );
+        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -6953,6 +7142,14 @@ mod tests {
             route.runtime_root,
             Some(tempdir.path().join("hosted/aws-linux-node"))
         );
+        let guest_session = route
+            .guest_session
+            .expect("guest session contract should exist");
+        assert_eq!(
+            guest_session.id,
+            "port-hosted://demo/machines/cloud-aws/guest-session"
+        );
+        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
     }
 
     async fn serve_test_control_plane(

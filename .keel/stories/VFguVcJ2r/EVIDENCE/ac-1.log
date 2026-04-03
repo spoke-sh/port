@@ -1,0 +1,56 @@
+---
+recorded_at: 2026-04-02T20:00:43.474169402-07:00
+mode: manual
+files: [".keel/stories/VFguVcJ2r/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+docs/sdk.md:42:- hosted guest responses surface `HostedSuccess::route.guest_session`, which
+docs/sdk.md:129:    .guest_session
+docs/sdk.md:131:assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+docs/hosted.md:581:- `session.id = "port-hosted://demo/machines/cloud-aws/guest-session"`
+crates/port-sdk/src/lib.rs:290:    if let Some(guest_session) = &route.guest_session {
+crates/port-sdk/src/lib.rs:291:        parts.push(format!("session={}", guest_session.id));
+crates/port-sdk/src/lib.rs:292:        parts.push(format!("session-scope={}", guest_session.scope));
+crates/port-sdk/src/lib.rs:293:        parts.push(format!("driver={}", guest_session.driver.id));
+crates/port-sdk/src/lib.rs:294:        parts.push(format!("driver-route={}", guest_session.driver.route));
+crates/port-sdk/src/lib.rs:295:        parts.push(format!("driver-broker={}", guest_session.driver.broker));
+crates/port-sdk/src/lib.rs:296:        parts.push(format!("driver-protocol={}", guest_session.driver.protocol));
+crates/port-sdk/src/lib.rs:297:        if !guest_session.driver.command_surface.is_empty() {
+crates/port-sdk/src/lib.rs:300:                guest_session
+crates/port-sdk/src/lib.rs:1225:                        guest_session: Some(port_hosted_protocol::HostedGuestSessionContract {
+crates/port-sdk/src/lib.rs:1226:                            id: String::from("port-hosted://demo/machines/cloud-aws/guest-session"),
+crates/port-sdk/src/lib.rs:1267:        assert!(message.contains("session=port-hosted://demo/machines/cloud-aws/guest-session"));
+crates/port-hosted-protocol/src/lib.rs:317:    pub guest_session: Option<HostedGuestSessionContract>,
+crates/port-hosted-protocol/src/lib.rs:344:pub struct HostedGuestSessionContract {
+crates/port-hosted-protocol/src/lib.rs:350:impl HostedGuestSessionContract {
+crates/port-hosted-protocol/src/lib.rs:355:                "port-hosted://{}/machines/{}/guest-session",
+crates/port-hosted-protocol/src/lib.rs:389:            guest_session: None,
+crates/port-hosted-protocol/src/lib.rs:396:        context.with_guest_session_contract(contract)
+crates/port-hosted-protocol/src/lib.rs:400:    pub fn with_guest_session_contract(mut self, contract: &HostedGuestAttachContract) -> Self {
+crates/port-hosted-protocol/src/lib.rs:402:        self.guest_session = Some(HostedGuestSessionContract::from_guest_attach(contract));
+crates/port-hosted-protocol/src/lib.rs:896:        assert!(summary_context.guest_session.is_none());
+crates/port-hosted-protocol/src/lib.rs:911:        let guest_session = selected
+crates/port-hosted-protocol/src/lib.rs:912:            .guest_session
+crates/port-hosted-protocol/src/lib.rs:916:            guest_session.id,
+crates/port-hosted-protocol/src/lib.rs:917:            "port-hosted://demo/machines/cloud-aws/guest-session"
+crates/port-hosted-protocol/src/lib.rs:919:        assert_eq!(guest_session.scope, crate::HostedGuestSessionScope::Machine);
+crates/port-hosted-protocol/src/lib.rs:920:        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
+crates/port-hosted-protocol/src/lib.rs:922:            guest_session.driver.route,
+crates/port-hosted-protocol/src/lib.rs:926:            guest_session.driver.broker,
+crates/port-hosted-protocol/src/lib.rs:930:            guest_session.driver.protocol,
+crates/port-hosted-protocol/src/lib.rs:934:            guest_session
+crates/port-runtime/src/hosted_control_plane.rs:2359:        guest_session: None,
+crates/port-runtime/src/hosted_control_plane.rs:2543:        Ok(Some(contract)) => Ok(route_context.with_guest_session_contract(&contract)),
+crates/port-runtime/src/hosted_control_plane.rs:5224:        Ok(Some(contract)) => Ok(route_context.with_guest_session_contract(&contract)),
+crates/port-runtime/src/hosted_control_plane.rs:5991:        let guest_session = error
+crates/port-runtime/src/hosted_control_plane.rs:5994:            .and_then(|route| route.guest_session.as_ref())
+crates/port-runtime/src/hosted_control_plane.rs:5997:            guest_session.id,
+crates/port-runtime/src/hosted_control_plane.rs:5998:            format!("port-hosted://{control_plane}/machines/cloud-aws/guest-session")
+crates/port-runtime/src/hosted_control_plane.rs:6000:        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
+crates/port-runtime/src/hosted_control_plane.rs:7145:        let guest_session = route
+crates/port-runtime/src/hosted_control_plane.rs:7146:            .guest_session
+crates/port-runtime/src/hosted_control_plane.rs:7149:            guest_session.id,
+crates/port-runtime/src/hosted_control_plane.rs:7150:            "port-hosted://demo/machines/cloud-aws/guest-session"
+crates/port-runtime/src/hosted_control_plane.rs:7152:        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
+

@@ -1,0 +1,37 @@
+---
+recorded_at: 2026-04-02T20:00:43.541338213-07:00
+mode: manual
+files: [".keel/stories/VFguVcJ2r/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+docs/sdk.md:132:assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+docs/hosted.md:583:- `session.driver.id = "port-guest-shell-driver-v1"`
+crates/port-sdk/src/lib.rs:294:        parts.push(format!("driver-route={}", guest_session.driver.route));
+crates/port-sdk/src/lib.rs:295:        parts.push(format!("driver-broker={}", guest_session.driver.broker));
+crates/port-sdk/src/lib.rs:296:        parts.push(format!("driver-protocol={}", guest_session.driver.protocol));
+crates/port-sdk/src/lib.rs:299:                "driver-commands={}",
+crates/port-sdk/src/lib.rs:1228:                            driver: port_hosted_protocol::HostedShellDriverContract {
+crates/port-sdk/src/lib.rs:1229:                                id: String::from("port-guest-shell-driver-v1"),
+crates/port-sdk/src/lib.rs:1268:        assert!(message.contains("driver=port-guest-shell-driver-v1"));
+crates/port-sdk/src/lib.rs:1269:        assert!(message.contains("driver-route=hosted-control-plane"));
+crates/port-hosted-protocol/src/lib.rs:335:pub struct HostedShellDriverContract {
+crates/port-hosted-protocol/src/lib.rs:347:    pub driver: HostedShellDriverContract,
+crates/port-hosted-protocol/src/lib.rs:359:            driver: HostedShellDriverContract {
+crates/port-hosted-protocol/src/lib.rs:360:                id: String::from("port-guest-shell-driver-v1"),
+crates/port-hosted-protocol/src/lib.rs:920:        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
+crates/port-runtime/src/lib.rs:10558:        parts.push(format!("driver-route={}", guest_session.driver.route));
+crates/port-runtime/src/lib.rs:10559:        parts.push(format!("driver-broker={}", guest_session.driver.broker));
+crates/port-runtime/src/lib.rs:10560:        parts.push(format!("driver-protocol={}", guest_session.driver.protocol));
+crates/port-runtime/src/lib.rs:10563:                "driver-commands={}",
+crates/port-runtime/src/lib.rs:16638:                            driver: port_hosted_protocol::HostedShellDriverContract {
+crates/port-runtime/src/lib.rs:16639:                                id: String::from("port-guest-shell-driver-v1"),
+crates/port-runtime/src/lib.rs:16713:            message.contains("driver=port-guest-shell-driver-v1"),
+crates/port-runtime/src/lib.rs:16717:            message.contains("driver-route=hosted-control-plane"),
+crates/port-runtime/src/lib.rs:16721:            message.contains("driver-broker=control-plane-node-agent-tunnel"),
+crates/port-runtime/src/lib.rs:16844:                            driver: port_hosted_protocol::HostedShellDriverContract {
+crates/port-runtime/src/lib.rs:16845:                                id: String::from("port-guest-shell-driver-v1"),
+crates/port-runtime/src/lib.rs:16918:            message.contains("driver=port-guest-shell-driver-v1"),
+crates/port-runtime/src/lib.rs:16922:            message.contains("driver-route=hosted-control-plane"),
+crates/port-runtime/src/lib.rs:16926:            message.contains("driver-broker=control-plane-node-agent-tunnel"),
+

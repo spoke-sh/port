@@ -6,3 +6,7 @@
 ## 2026-04-02T19:31:48
 
 Seeded downstream creator-platform session-driver mission. Verified AWS hosted PVM mission VFgcM1Zpu and epic VFgcPDfEj remain the substrate baseline; attached epics and planned voyages cover session identity/audit and the upstream shell-driver contract.
+
+## 2026-04-02T20:03:45
+
+Closed story VFguVcJ2r by exposing hosted guest-session identity and driver metadata on canonical Port route contexts, with explicit failure surfaces and SDK/runtime/docs coverage.

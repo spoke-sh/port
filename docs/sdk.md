@@ -39,6 +39,10 @@ Shipped today:
   structured success or hosted route errors
 - `port-hosted-protocol` publishes the shared hosted HTTP route, auth-header,
   and route-context contract that the SDK now uses directly
+- hosted guest responses surface `HostedSuccess::route.guest_session`, which
+  carries the stable machine-scoped session identifier plus the canonical Port
+  shell-driver metadata for guest-backed hosted `exec`, `copy`, `pty`, `logs`,
+  and `forward`
 
 Still planned:
 
@@ -97,6 +101,35 @@ let config = PortConfig::sample();
 let client = HostedClient::from_machine_env(&config, "cloud-aws")?;
 let status: HostedSuccess<serde_json::Value> =
     client.execute_json(client.machines().status("cloud-aws"))?;
+# Ok::<(), anyhow::Error>(())
+```
+
+Hosted guest requests expose the session and driver contract through the same
+route context:
+
+```rust
+# use port_agent_protocol::ExecRequest;
+# use port_hosted_protocol::HostedSuccess;
+# use port_model::PortConfig;
+# use port_sdk::HostedClient;
+let config = PortConfig::sample();
+let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+let exec: HostedSuccess<serde_json::Value> = client.execute_json(
+    client.guest().exec(
+        "cloud-aws",
+        ExecRequest {
+            command: vec!["/bin/echo".into(), "hello".into()],
+            cwd: None,
+            env: Default::default(),
+        },
+    )?,
+)?;
+let session = exec
+    .route
+    .guest_session
+    .expect("hosted guest session contract");
+assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
 # Ok::<(), anyhow::Error>(())
 ```
 

@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use port_model::{
-    ArtifactReference, ArtifactSelector, HostedApiIdentityContract, HostedAuthScheme,
-    HostedGuestAttachContract, HostedMachineSummaryContract, HostedNodeRegistration,
-    HostedSchedulerPolicy, MachineArchitecture, MachineGuestBroker, MachineInventoryOwner,
+    ArtifactReference, ArtifactSelector, GuestCommandVerb, HostedApiIdentityContract,
+    HostedAuthScheme, HostedGuestAttachContract, HostedGuestProtocolContract,
+    HostedMachineSummaryContract, HostedNodeRegistration, HostedSchedulerPolicy,
+    MachineArchitecture, MachineCommandRoute, MachineGuestBroker, MachineInventoryOwner,
     MachineLifecycleOwner, PvmHostKitPackage,
 };
 use serde::{Deserialize, Serialize};
@@ -312,6 +313,58 @@ pub struct HostedRouteContext {
     pub inventory_owner: Option<MachineInventoryOwner>,
     pub lifecycle_owner: Option<MachineLifecycleOwner>,
     pub guest_broker: Option<MachineGuestBroker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_session: Option<HostedGuestSessionContract>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedGuestSessionScope {
+    Machine,
+}
+
+impl std::fmt::Display for HostedGuestSessionScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Machine => f.write_str("machine"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedShellDriverContract {
+    pub id: String,
+    pub route: MachineCommandRoute,
+    pub broker: MachineGuestBroker,
+    pub protocol: HostedGuestProtocolContract,
+    pub command_surface: Vec<GuestCommandVerb>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedGuestSessionContract {
+    pub id: String,
+    pub scope: HostedGuestSessionScope,
+    pub driver: HostedShellDriverContract,
+}
+
+impl HostedGuestSessionContract {
+    #[must_use]
+    pub fn from_guest_attach(contract: &HostedGuestAttachContract) -> Self {
+        Self {
+            id: format!(
+                "port-hosted://{}/machines/{}/guest-session",
+                contract.machine.control_plane, contract.machine.machine_name
+            ),
+            scope: HostedGuestSessionScope::Machine,
+            driver: HostedShellDriverContract {
+                id: String::from("port-guest-shell-driver-v1"),
+                route: contract.guest_route,
+                broker: contract.guest_broker,
+                protocol: contract.protocol,
+                command_surface: contract.command_surface.clone(),
+            },
+        }
+    }
 }
 
 impl HostedRouteContext {
@@ -333,14 +386,21 @@ impl HostedRouteContext {
             inventory_owner: Some(summary.control.inventory_owner),
             lifecycle_owner: Some(summary.control.lifecycle_owner),
             guest_broker: Some(summary.control.guest_broker),
+            guest_session: None,
         }
     }
 
     #[must_use]
     pub fn from_guest_attach(contract: &HostedGuestAttachContract) -> Self {
-        let mut context = Self::from_machine_summary(&contract.machine);
-        context.guest_broker = Some(contract.guest_broker);
-        context
+        let context = Self::from_machine_summary(&contract.machine);
+        context.with_guest_session_contract(contract)
+    }
+
+    #[must_use]
+    pub fn with_guest_session_contract(mut self, contract: &HostedGuestAttachContract) -> Self {
+        self.guest_broker = Some(contract.guest_broker);
+        self.guest_session = Some(HostedGuestSessionContract::from_guest_attach(contract));
+        self
     }
 
     #[must_use]
@@ -833,6 +893,7 @@ mod tests {
             summary_context.guest_broker,
             Some(MachineGuestBroker::ControlPlaneNodeAgentTunnel)
         );
+        assert!(summary_context.guest_session.is_none());
         assert_eq!(
             summary_context.host_group_policies["aws-builders"],
             HostedSchedulerPolicy::DeterministicFirstFit
@@ -846,6 +907,37 @@ mod tests {
         assert_eq!(
             selected.runtime_root,
             Some(PathBuf::from("runtime/hosted/aws-linux-node"))
+        );
+        let guest_session = selected
+            .guest_session
+            .as_ref()
+            .expect("guest session contract should exist");
+        assert_eq!(
+            guest_session.id,
+            "port-hosted://demo/machines/cloud-aws/guest-session"
+        );
+        assert_eq!(guest_session.scope, crate::HostedGuestSessionScope::Machine);
+        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
+        assert_eq!(
+            guest_session.driver.route,
+            port_model::MachineCommandRoute::HostedControlPlane
+        );
+        assert_eq!(
+            guest_session.driver.broker,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel
+        );
+        assert_eq!(
+            guest_session.driver.protocol,
+            port_model::HostedGuestProtocolContract::PortAgentProtocol
+        );
+        assert_eq!(
+            guest_session
+                .driver
+                .command_surface
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["exec", "copy", "pty", "logs", "forward"]
         );
         let forwarded = selected.with_forward_name("demo-web");
         assert_eq!(forwarded.forward_name.as_deref(), Some("demo-web"));

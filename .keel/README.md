@@ -157,11 +157,11 @@
 | [AWS PVM Host Kit Preparation](epics/VFgcPDfEj/voyages/VFgclbAzD/) | done |
 | [Cloud Aws PVM Runtime Proof](epics/VFgcPDfEj/voyages/VFgclbQzC/) | done |
 
-### [Guest Session Identity And Audit Surface](epics/VFgtgGEog/) (active)
+### [Guest Session Identity And Audit Surface](epics/VFgtgGEog/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Guest Session Identity Contract](epics/VFgtgGEog/voyages/VFgu7Bd7U/) | planned |
+| [Guest Session Identity Contract](epics/VFgtgGEog/voyages/VFgu7Bd7U/) | done |
 
 ### [Shell Driver Integration Contract For Upstream Control Planes](epics/VFgtgGWoh/) (active)
 

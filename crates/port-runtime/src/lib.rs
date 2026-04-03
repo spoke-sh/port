@@ -10551,6 +10551,26 @@ fn render_hosted_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(placement_detail) = &route.placement_detail {
         parts.push(format!("placement={placement_detail}"));
     }
+    if let Some(guest_session) = &route.guest_session {
+        parts.push(format!("session={}", guest_session.id));
+        parts.push(format!("session-scope={}", guest_session.scope));
+        parts.push(format!("driver={}", guest_session.driver.id));
+        parts.push(format!("driver-route={}", guest_session.driver.route));
+        parts.push(format!("driver-broker={}", guest_session.driver.broker));
+        parts.push(format!("driver-protocol={}", guest_session.driver.protocol));
+        if !guest_session.driver.command_surface.is_empty() {
+            parts.push(format!(
+                "driver-commands={}",
+                guest_session
+                    .driver
+                    .command_surface
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+    }
     if parts.is_empty() {
         String::new()
     } else {
@@ -16428,6 +16448,7 @@ exec sleep 30
             "{rendered}"
         );
         assert!(rendered.contains("placement="), "{rendered}");
+        assert!(!rendered.contains("session="), "{rendered}");
 
         server_guest
             .join()
@@ -16611,6 +16632,24 @@ exec sleep 30
                         runtime_root: Some(PathBuf::from(
                             "/runtime/hosted/aws-linux-node/cloud-aws",
                         )),
+                        guest_session: Some(port_hosted_protocol::HostedGuestSessionContract {
+                            id: String::from("port-hosted://demo/machines/cloud-aws/guest-session"),
+                            scope: port_hosted_protocol::HostedGuestSessionScope::Machine,
+                            driver: port_hosted_protocol::HostedShellDriverContract {
+                                id: String::from("port-guest-shell-driver-v1"),
+                                route: port_model::MachineCommandRoute::HostedControlPlane,
+                                broker: port_model::MachineGuestBroker::ControlPlaneNodeAgentTunnel,
+                                protocol:
+                                    port_model::HostedGuestProtocolContract::PortAgentProtocol,
+                                command_surface: vec![
+                                    port_model::GuestCommandVerb::Exec,
+                                    port_model::GuestCommandVerb::Copy,
+                                    port_model::GuestCommandVerb::Pty,
+                                    port_model::GuestCommandVerb::Logs,
+                                    port_model::GuestCommandVerb::Forward,
+                                ],
+                            },
+                        }),
                         ..HostedRouteContext::default()
                     }),
                     message: String::from("stream route deliberately unavailable"),
@@ -16666,6 +16705,22 @@ exec sleep 30
         assert!(message.contains("control-plane=demo"), "{message}");
         assert!(message.contains("machine=cloud-aws"), "{message}");
         assert!(message.contains("node=aws-linux-node"), "{message}");
+        assert!(
+            message.contains("session=port-hosted://demo/machines/cloud-aws/guest-session"),
+            "{message}"
+        );
+        assert!(
+            message.contains("driver=port-guest-shell-driver-v1"),
+            "{message}"
+        );
+        assert!(
+            message.contains("driver-route=hosted-control-plane"),
+            "{message}"
+        );
+        assert!(
+            message.contains("driver-broker=control-plane-node-agent-tunnel"),
+            "{message}"
+        );
         assert!(
             message.contains("/runtime/hosted/aws-linux-node/cloud-aws"),
             "{message}"
@@ -16783,6 +16838,24 @@ exec sleep 30
                         runtime_root: Some(PathBuf::from(
                             "/runtime/hosted/aws-linux-node/cloud-aws",
                         )),
+                        guest_session: Some(port_hosted_protocol::HostedGuestSessionContract {
+                            id: String::from("port-hosted://demo/machines/cloud-aws/guest-session"),
+                            scope: port_hosted_protocol::HostedGuestSessionScope::Machine,
+                            driver: port_hosted_protocol::HostedShellDriverContract {
+                                id: String::from("port-guest-shell-driver-v1"),
+                                route: port_model::MachineCommandRoute::HostedControlPlane,
+                                broker: port_model::MachineGuestBroker::ControlPlaneNodeAgentTunnel,
+                                protocol:
+                                    port_model::HostedGuestProtocolContract::PortAgentProtocol,
+                                command_surface: vec![
+                                    port_model::GuestCommandVerb::Exec,
+                                    port_model::GuestCommandVerb::Copy,
+                                    port_model::GuestCommandVerb::Pty,
+                                    port_model::GuestCommandVerb::Logs,
+                                    port_model::GuestCommandVerb::Forward,
+                                ],
+                            },
+                        }),
                         ..HostedRouteContext::default()
                     }),
                     message: String::from("forward route deliberately unavailable"),
@@ -16837,6 +16910,22 @@ exec sleep 30
         assert!(message.contains("control-plane=demo"), "{message}");
         assert!(message.contains("machine=cloud-aws"), "{message}");
         assert!(message.contains("node=aws-linux-node"), "{message}");
+        assert!(
+            message.contains("session=port-hosted://demo/machines/cloud-aws/guest-session"),
+            "{message}"
+        );
+        assert!(
+            message.contains("driver=port-guest-shell-driver-v1"),
+            "{message}"
+        );
+        assert!(
+            message.contains("driver-route=hosted-control-plane"),
+            "{message}"
+        );
+        assert!(
+            message.contains("driver-broker=control-plane-node-agent-tunnel"),
+            "{message}"
+        );
         assert!(
             message.contains("/runtime/hosted/aws-linux-node/cloud-aws"),
             "{message}"

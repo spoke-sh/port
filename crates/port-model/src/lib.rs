@@ -1761,7 +1761,8 @@ pub struct HostedGuestAttachContract {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum GuestCommandVerb {
     Exec,
     Copy,
@@ -1770,9 +1771,32 @@ pub enum GuestCommandVerb {
     Forward,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl std::fmt::Display for GuestCommandVerb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Exec => "exec",
+            Self::Copy => "copy",
+            Self::Pty => "pty",
+            Self::Logs => "logs",
+            Self::Forward => "forward",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum HostedGuestProtocolContract {
     PortAgentProtocol,
+}
+
+impl std::fmt::Display for HostedGuestProtocolContract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::PortAgentProtocol => "port-agent-protocol",
+        };
+        f.write_str(label)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

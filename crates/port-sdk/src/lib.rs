@@ -287,6 +287,26 @@ fn render_route_context(route: Option<&HostedRouteContext>) -> String {
     if let Some(placement_detail) = &route.placement_detail {
         parts.push(format!("placement={placement_detail}"));
     }
+    if let Some(guest_session) = &route.guest_session {
+        parts.push(format!("session={}", guest_session.id));
+        parts.push(format!("session-scope={}", guest_session.scope));
+        parts.push(format!("driver={}", guest_session.driver.id));
+        parts.push(format!("driver-route={}", guest_session.driver.route));
+        parts.push(format!("driver-broker={}", guest_session.driver.broker));
+        parts.push(format!("driver-protocol={}", guest_session.driver.protocol));
+        if !guest_session.driver.command_surface.is_empty() {
+            parts.push(format!(
+                "driver-commands={}",
+                guest_session
+                    .driver
+                    .command_surface
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+    }
     if parts.is_empty() {
         String::new()
     } else {
@@ -1202,6 +1222,24 @@ mod tests {
                         control_plane: Some(String::from("demo")),
                         machine_name: Some(String::from("cloud-aws")),
                         node_name: Some(String::from("aws-linux-node")),
+                        guest_session: Some(port_hosted_protocol::HostedGuestSessionContract {
+                            id: String::from("port-hosted://demo/machines/cloud-aws/guest-session"),
+                            scope: port_hosted_protocol::HostedGuestSessionScope::Machine,
+                            driver: port_hosted_protocol::HostedShellDriverContract {
+                                id: String::from("port-guest-shell-driver-v1"),
+                                route: port_model::MachineCommandRoute::HostedControlPlane,
+                                broker: port_model::MachineGuestBroker::ControlPlaneNodeAgentTunnel,
+                                protocol:
+                                    port_model::HostedGuestProtocolContract::PortAgentProtocol,
+                                command_surface: vec![
+                                    port_model::GuestCommandVerb::Exec,
+                                    port_model::GuestCommandVerb::Copy,
+                                    port_model::GuestCommandVerb::Pty,
+                                    port_model::GuestCommandVerb::Logs,
+                                    port_model::GuestCommandVerb::Forward,
+                                ],
+                            },
+                        }),
                         ..HostedRouteContext::default()
                     }),
                     message: String::from("node agent is unavailable"),
@@ -1226,6 +1264,9 @@ mod tests {
         assert!(message.contains("control-plane=demo"));
         assert!(message.contains("machine=cloud-aws"));
         assert!(message.contains("node=aws-linux-node"));
+        assert!(message.contains("session=port-hosted://demo/machines/cloud-aws/guest-session"));
+        assert!(message.contains("driver=port-guest-shell-driver-v1"));
+        assert!(message.contains("driver-route=hosted-control-plane"));
     }
 
     #[test]

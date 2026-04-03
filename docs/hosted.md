@@ -578,6 +578,12 @@ Hosted guest attach contract for a hosted machine such as `cloud-aws`:
 - `guest_route = "hosted-control-plane"`
 - `command_surface = ["exec", "copy", "pty", "logs", "forward"]`
 - `protocol = "port-agent-protocol"`
+- `session.id = "port-hosted://demo/machines/cloud-aws/guest-session"`
+- `session.scope = "machine"`
+- `session.driver.id = "port-guest-shell-driver-v1"`
+- `session.driver.route = "hosted-control-plane"`
+- `session.driver.broker = "control-plane-node-agent-tunnel"`
+- `session.driver.protocol = "port-agent-protocol"`
 - attach path:
   CLI -> hosted control plane -> hosted node agent -> in-guest `port-guest-agent`
 
@@ -594,6 +600,15 @@ Hosted guest attach contract for a hosted machine such as `cloud-aws`:
 That means hosted Port still uses the same guest-operation model for `exec`,
 `copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
 stream.
+
+The hosted route context now carries that session contract on both success and
+failure responses for guest-backed shell flows. The session identifier stays
+machine-scoped and stable across hosted `exec`, `pty`, `forward`, and detached
+forward lifecycle calls for the same machine, while the driver metadata keeps
+Port's canonical shell-driver vocabulary explicit for downstream systems.
+If Port cannot derive the hosted guest-session contract for a hosted guest
+route, the request fails instead of falling back to anonymous or partial
+session metadata.
 
 Hosted `guest forward` keeps the same command family and now starts a
 node-owned listener through the hosted control-plane and node-agent path.

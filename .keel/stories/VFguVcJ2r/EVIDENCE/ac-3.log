@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-04-02T20:00:43.603004096-07:00
+mode: manual
+files: [".keel/stories/VFguVcJ2r/EVIDENCE/ac-3.log"]
+---
+
+--- File: ac-3.log ---
+docs/sdk.md:21:  `port-agent-protocol` request payloads
+docs/sdk.md:42:- hosted guest responses surface `HostedSuccess::route.guest_session`, which
+docs/sdk.md:43:  carries the stable machine-scoped session identifier plus the canonical Port
+docs/hosted.md:580:- `protocol = "port-agent-protocol"`
+docs/hosted.md:586:- `session.driver.protocol = "port-agent-protocol"`
+docs/hosted.md:600:That means hosted Port still uses the same guest-operation model for `exec`,
+crates/port-model/src/lib.rs:847:                "Hosted guest attach preserves the canonical `port guest exec|copy|pty|logs|forward` surface. The control plane authorizes the attach, the node agent bridges the host-local guest transport, and the existing Port guest protocol frames continue unchanged to the in-guest agent.",
+crates/port-model/src/lib.rs:1796:            Self::PortAgentProtocol => "port-agent-protocol",
+
