@@ -3590,10 +3590,11 @@ fn hosted_fleet_node_statuses(
                     state.inner.control_plane, summary.machine_name, node_name
                 ));
             }
-            if !imported
-                .capability_summary
-                .is_subset_of(&configured.capabilities)
-            {
+            let imported_capability_contract =
+                imported.capability_summary.without_imported_pvm_readiness();
+            let configured_capability_contract =
+                configured.capabilities.without_imported_pvm_readiness();
+            if !imported_capability_contract.is_subset_of(&configured_capability_contract) {
                 return Err(format!(
                     "control plane '{}' could not merge hosted fleet state for machine '{}': affected node '{}' has imported capabilities outside the configured node contract",
                     state.inner.control_plane, summary.machine_name, node_name

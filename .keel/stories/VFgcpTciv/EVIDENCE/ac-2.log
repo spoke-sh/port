@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T19:06:48.136843680-07:00
+mode: manual
+---
+Locked provider-aware AWS hosted PVM failure behavior with cli_machine_launch_rejects_unprepared_aws_hosted_pvm_machine, cli_machine_status_surfaces_unprepared_aws_hosted_pvm_guidance, and a hosted fleet-state merge fix that accepts imported planned-to-ready PVM readiness without falling back to the standard lane.

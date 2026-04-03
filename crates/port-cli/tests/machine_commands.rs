@@ -1919,6 +1919,64 @@ fn cli_machine_status_surfaces_hosted_pvm_placement_denial() {
 }
 
 #[test]
+fn cli_machine_status_surfaces_unprepared_aws_hosted_pvm_guidance() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .protection_mode = ProtectionMode::Pvm;
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+
+    let output = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("status command should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("machine: cloud-aws"));
+    assert!(stdout.contains("state: malformed"));
+    assert!(stdout.contains("aws-linux-node"));
+    assert!(stdout.contains("provider 'aws'"));
+    assert!(stdout.contains("prepare-pvm-node"));
+    assert!(stdout.contains("planned"));
+    assert!(!stdout.contains("generic-linux-node"));
+
+    drop(_servers);
+    cleanup_hosted_registration_state();
+}
+
+#[test]
 fn cli_machine_status_prefers_stored_hosted_placement_over_live_candidate() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
@@ -2321,7 +2379,193 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
         Some(hosted_runtime_root.to_string_lossy().as_ref())
     );
 
+    drop(_servers);
+    cleanup_hosted_registration_state();
     let _ = Command::new("kill").arg(pid.to_string()).status();
+}
+
+#[test]
+fn cli_machine_launch_status_and_stop_route_hosted_pvm_through_live_control_plane() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_config(&hosted_runtime_root);
+    server_config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .protection_mode = ProtectionMode::Pvm;
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+
+    let kernel_path = temp.path().join("pvm-vmlinux");
+    let guest_path = temp.path().join("pvm-rootfs.ext4");
+    fs::write(&kernel_path, b"fake-kernel").expect("kernel variant should write");
+    fs::write(&guest_path, b"fake-rootfs").expect("guest variant should write");
+
+    server_config
+        .artifacts
+        .kernels
+        .get_mut("demo-kernel")
+        .expect("demo-kernel should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Pvm
+        })
+        .expect("pvm kernel variant should exist")
+        .path = kernel_path;
+    server_config
+        .artifacts
+        .guest_images
+        .get_mut("demo-guest")
+        .expect("demo-guest should exist")
+        .variants
+        .iter_mut()
+        .find(|variant| {
+            variant.selector.architecture == MachineArchitecture::X86_64
+                && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                && variant.selector.protection_mode == ProtectionMode::Pvm
+        })
+        .expect("pvm guest variant should exist")
+        .path = guest_path;
+
+    let host_kit = {
+        let host_kit = server_config
+            .hosts
+            .get_mut("local")
+            .expect("local host should exist")
+            .firecracker
+            .pvm_lanes
+            .iter_mut()
+            .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+            .expect("local x86_64 PVM lane should exist")
+            .host_kit
+            .as_mut()
+            .expect("local x86_64 PVM lane should define a host-kit");
+        host_kit.requires_custom_host_kernel = false;
+        host_kit.host_boot_args.clear();
+        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+        host_kit.clone()
+    };
+    server_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .capabilities
+        .pvm_lanes[0]
+        .host_kit = Some(host_kit.clone());
+    let package = host_kit.package.clone();
+
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker-pvm");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let _servers = spawn_hosted_server_harness(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[("PORT_TEST_CLI_PVM_FIRECRACKER", fake_binary.as_path())],
+    );
+
+    let prepare = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("control-plane")
+        .arg("prepare-pvm-node")
+        .arg("--control-plane")
+        .arg("demo")
+        .arg("--node")
+        .arg("aws-linux-node")
+        .arg("--architecture")
+        .arg("x86-64")
+        .arg("--provenance")
+        .arg("inventory/aws-linux-node.json")
+        .arg("--package-name")
+        .arg(&package.name)
+        .arg("--package-version")
+        .arg(&package.version)
+        .arg("--host-kernel-release")
+        .arg(&package.host_kernel_release)
+        .arg("--firecracker-build")
+        .arg(&package.firecracker_build)
+        .output()
+        .expect("prepare-pvm-node command should run");
+    assert!(prepare.status.success(), "{prepare:?}");
+
+    let launch = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(launch.status.success(), "{launch:?}");
+    let launch_stdout = String::from_utf8_lossy(&launch.stdout);
+    assert!(launch_stdout.contains("launched machine: cloud-aws"));
+    assert!(launch_stdout.contains(fake_binary.to_string_lossy().as_ref()));
+
+    let status = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("status")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("machine: cloud-aws"));
+    assert!(status_stdout.contains("state: running"));
+    assert!(status_stdout.contains("detail:"));
+    assert!(status_stdout.contains("control plane 'demo'"));
+    assert!(status_stdout.contains("node 'aws-linux-node'"));
+    assert!(status_stdout.contains("provider 'aws'"));
+
+    let stop = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("machine")
+        .arg("stop")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("stop command should run");
+    assert!(stop.status.success(), "{stop:?}");
+    let stop_stdout = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop_stdout.contains("machine: cloud-aws"));
+    assert!(stop_stdout.contains("current state: stopped"));
+    assert!(stop_stdout.contains("detail:"));
+    assert!(stop_stdout.contains("control plane 'demo'"));
+    assert!(stop_stdout.contains("node 'aws-linux-node'"));
+    assert!(stop_stdout.contains("provider 'aws'"));
+
+    drop(_servers);
+    cleanup_hosted_registration_state();
 }
 
 #[test]
@@ -2479,6 +2723,8 @@ fn cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch() {
         Some(hosted_runtime_root.to_string_lossy().as_ref())
     );
 
+    drop(_servers);
+    cleanup_hosted_registration_state();
     let _ = Command::new("kill").arg(pid.to_string()).status();
 }
 

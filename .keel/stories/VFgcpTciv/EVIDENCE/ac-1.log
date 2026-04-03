@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-02T19:06:48.117629852-07:00
+mode: manual
+---
+Verified canonical cloud-aws launch/status/stop through the live hosted control-plane and node-agent path with cargo test -p port --test machine_commands -- --test-threads=1 and cargo test -p port-runtime hosted_pvm -- --test-threads=1.

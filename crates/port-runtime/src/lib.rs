@@ -17032,6 +17032,7 @@ exec sleep 30
 
     #[test]
     fn hosted_pvm_launch_routes_through_live_control_plane_and_prepared_node() {
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
         config
@@ -17134,6 +17135,157 @@ exec sleep 30
         assert!(metadata.manifest_path.exists());
 
         let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
+    fn hosted_pvm_status_stop_route_through_live_control_plane_and_prepared_node() {
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = ProtectionMode::Pvm;
+
+        let kernel_path = tempdir.path().join("pvm-vmlinux");
+        let guest_path = tempdir.path().join("pvm-rootfs.ext4");
+        fs::write(&kernel_path, b"fake-kernel").expect("kernel variant should write");
+        fs::write(&guest_path, b"fake-rootfs").expect("guest variant should write");
+
+        config
+            .artifacts
+            .kernels
+            .get_mut("demo-kernel")
+            .expect("demo-kernel should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Pvm
+            })
+            .expect("pvm kernel variant should exist")
+            .path = kernel_path.clone();
+        config
+            .artifacts
+            .guest_images
+            .get_mut("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter_mut()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Pvm
+            })
+            .expect("pvm guest variant should exist")
+            .path = guest_path.clone();
+
+        let host_kit = {
+            let host_kit = config
+                .hosts
+                .get_mut("local")
+                .expect("local host should exist")
+                .firecracker
+                .pvm_lanes
+                .iter_mut()
+                .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+                .expect("local x86_64 PVM lane should exist")
+                .host_kit
+                .as_mut()
+                .expect("local x86_64 PVM lane should define a host-kit");
+            host_kit.requires_custom_host_kernel = false;
+            host_kit.host_boot_args.clear();
+            host_kit.firecracker_binary_env =
+                Some(String::from("PORT_TEST_HOSTED_PVM_FIRECRACKER"));
+            host_kit.clone()
+        };
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .host_kit = Some(host_kit.clone());
+        let package = host_kit.package.clone();
+        let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker-pvm");
+        unsafe {
+            std::env::set_var("PORT_TEST_HOSTED_PVM_FIRECRACKER", &fake_binary);
+        }
+
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        crate::prepare_hosted_pvm_node(
+            &config,
+            crate::HostedPvmNodePrepareRequest {
+                control_plane: String::from("demo"),
+                node_name: String::from("aws-linux-node"),
+                architecture: MachineArchitecture::X86_64,
+                provenance: String::from("inventory/aws-linux-node.json"),
+                package,
+            },
+        )
+        .expect("aws hosted PVM preparation should succeed");
+        let metadata = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect("hosted pvm launch should route through live control plane");
+
+        assert_eq!(metadata.machine_name, "cloud-aws");
+        assert_eq!(metadata.firecracker_binary, fake_binary);
+        assert!(metadata.manifest_path.exists());
+
+        let status = machine_status(&config, tempdir.path(), "cloud-aws")
+            .expect("hosted pvm status should load");
+        assert_eq!(status.machine_name, "cloud-aws");
+        assert_eq!(status.state, MachineRuntimeState::Running);
+        assert_eq!(
+            status.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            status.detail.contains("control plane 'demo'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("provider 'aws'"),
+            "{}",
+            status.detail
+        );
+
+        let stop = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(1))
+            .expect("hosted pvm stop should succeed");
+        assert_eq!(stop.machine_name, "cloud-aws");
+        assert_eq!(stop.previous_state, MachineRuntimeState::Running);
+        assert_eq!(stop.current_state, MachineRuntimeState::Stopped);
+        assert_eq!(
+            stop.control,
+            port_model::MachineControlContract::hosted_control_plane()
+        );
+        assert!(
+            stop.detail.contains("control plane 'demo'"),
+            "{}",
+            stop.detail
+        );
+        assert!(
+            stop.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            stop.detail
+        );
+        assert!(stop.detail.contains("provider 'aws'"), "{}", stop.detail);
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
     }
 
     #[test]
