@@ -1,0 +1,81 @@
+docs/cloud.md:6:Linux lifecycle slice, prepared-node Firecracker/PVM on `x86_64`, and Cloud
+docs/cloud.md:62:| Firecracker + `standard` | `x86_64`, `aarch64`, `native` | Supported today | The only shipped execution lane behind the current Linux launch workflow |
+docs/cloud.md:63:| Firecracker + `pvm` | `x86_64` | Hosted / partial | Strategic lane for cloud cost control; requires a prepared host kit, dedicated artifact variants, and the hosted control-plane plus node-agent path |
+docs/cloud.md:64:| Firecracker + `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path |
+docs/cloud.md:65:| Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Local + hosted / partial | Lifecycle and guest flows now reuse the canonical machine and guest verbs through the local driver boundary and the hosted control-plane plus node-agent path |
+docs/cloud.md:66:| AVF + `standard` | macOS `arm64` or `x86_64` | Local / partial | First-class macOS lane; keeps the canonical guest protocol over AVF virtio sockets and console capture over AVF serial ports |
+docs/cloud.md:74:| `aws` | `aws-linux` | `cloud-aws` | Hosted standard lane / partial implementation | `port doctor` reports AWS readiness detail; with `port control-plane serve`, a registered `aws-linux-node`, and standard artifacts, `port machine launch --machine cloud-aws` routes through the hosted control plane and selected node |
+docs/cloud.md:75:| `gcp` | `gcp-linux` | `cloud-gcp` | Hosted standard lane / partial implementation | `port doctor` reports GCP readiness detail; with `port control-plane serve`, a registered `gcp-linux-node`, and standard artifacts, `port machine launch --machine cloud-gcp` routes through the hosted control plane and selected node |
+docs/cloud.md:76:| `azure` | `azure-linux` | `cloud-azure` | Unsupported for MVP | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
+docs/cloud.md:108:7. Prepared-node PVM remains a second hosted lane: switch `cloud-aws` to `protection_mode = "pvm"` only when the prepared AWS host kit and PVM artifact paths from [`pvm.md`](pvm.md) exist. `cloud-generic` remains the generic denial path rather than the canonical hosted PVM surface.
+docs/cloud.md:146:3. Set `machines.cloud-aws.architecture = "x86_64"`.
+docs/cloud.md:177:- Azure remains unsupported for the current hosted Linux MVP
+docs/cloud.md:178:- `aarch64` Cloud Hypervisor remains modeled in artifacts and machine contracts,
+docs/cloud.md:179:  but the published hosted proof is the `x86_64` sample lane
+docs/cloud.md:213:- Firecracker/PVM on `x86_64` is the near-term implementation lane.
+docs/cloud.md:214:- That x86_64 lane depends on a prepared host kit: custom host kernel,
+docs/cloud.md:216:- Firecracker/PVM on `aarch64` remains a research lane until Port has a
+docs/cloud.md:226:The repo-local hosted AWS PVM proof command is:
+docs/cloud.md:229:bash scripts/hosted-pvm-demo.sh
+docs/cloud.md:235:./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+docs/cloud.md:238:Those proof surfaces stay explicit about the current boundary: `x86_64` AWS
+docs/cloud.md:239:hosted PVM only, with no generic fallback and no inherited GCP, Azure, or
+docs/pvm.md:9:- keep `x86_64` Firecracker/PVM as the first Port implementation lane
+docs/pvm.md:11:- keep `aarch64` Firecracker/PVM research-only until Port has a supportable
+docs/pvm.md:18:| `x86_64` | Keep / prepared-node launch | Port now launches this lane through prepared Linux nodes, but it still depends on a custom host kernel, a patched Firecracker build, `pti=off`, and dedicated guest images |
+docs/pvm.md:19:| `aarch64` | Research-only | Upstream arm64 protected-virtualization work is real, but Port does not yet have a vendor-grade Firecracker/PVM runtime contract to ship or validate |
+docs/pvm.md:34:## x86_64 Host Kit Contract
+docs/pvm.md:36:The x86_64 Firecracker/PVM lane needs a dedicated host kit.
+docs/pvm.md:40:- Linux `x86_64` execution host
+docs/pvm.md:50:## x86_64 Artifact Kit Contract
+docs/pvm.md:56:- kernel variant selected as `x86_64/firecracker/pvm`
+docs/pvm.md:57:- guest-image variant selected as `x86_64/firecracker/pvm`
+docs/pvm.md:66:Future Port validation for the x86_64 PVM lane should check all of the
+docs/pvm.md:69:1. Host architecture is Linux `x86_64`.
+docs/pvm.md:100:- the model resolves dedicated `x86_64/firecracker/pvm` kernel and guest-image
+docs/pvm.md:104:- `port doctor` reports the `pvm:local:x86_64:*` host-kit checks for Linux
+docs/pvm.md:105:  platform, `x86_64` architecture, `pti=off`, and the patched
+docs/pvm.md:107:- a local PVM launch still blocks until the prepared x86_64 Linux host really
+docs/pvm.md:111:usable. Building or validating `x86_64/firecracker/pvm` artifacts does not
+docs/pvm.md:112:replace the standard `x86_64/firecracker/standard` artifacts or their paths.
+docs/pvm.md:122:bash scripts/hosted-pvm-demo.sh
+docs/pvm.md:128:./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+docs/pvm.md:135:- point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
+docs/pvm.md:136:  prepared artifact paths available on the AWS node host
+docs/pvm.md:138:  on that prepared AWS node
+docs/pvm.md:143:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+docs/pvm.md:156:  contract. The checked-in sample inventory keeps AWS explicit so the host-kit,
+docs/pvm.md:158:- `control-plane prepare-pvm-node` writes the imported ready record under
+docs/pvm.md:160:  is the canonical repo-local proof that the prepared AWS node is advertising a
+docs/pvm.md:164:  x86_64 PVM lane and then launches `cloud-aws` through the live control-plane
+docs/pvm.md:169:- `aarch64/firecracker/pvm` stays research-only; there is no supported
+docs/pvm.md:170:  `prepare-pvm-node` or launch proof for that architecture, and the current
+docs/pvm.md:171:  hosted contract does not claim the AWS lane for GCP or Azure.
+docs/pvm.md:208:1. Build and package the x86_64 PVM host kit.
+docs/pvm.md:210:3. Add x86_64/firecracker/pvm kernel and guest-image pipelines plus validation.
+docs/hosted.md:18:- prepared-node x86_64 Firecracker/PVM launch through `port machine launch`
+docs/hosted.md:111:through `port control-plane prepare-pvm-node`.
+docs/hosted.md:116:bash scripts/hosted-pvm-demo.sh
+docs/hosted.md:122:./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+docs/hosted.md:128:4. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at
+docs/hosted.md:131:   binary on the prepared AWS node host.
+docs/hosted.md:136:PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+docs/hosted.md:145:surface. `prepare-pvm-node` writes the imported ready record under
+docs/hosted.md:147:the canonical repo-local proof that the prepared AWS node is ready for the
+docs/hosted.md:148:hosted PVM lane. `aarch64/firecracker/pvm` remains research-only and GCP/Azure
+docs/hosted.md:149:do not inherit the AWS prepared-host contract.
+docs/hosted.md:235:notes = ["AWS stays explicit because later host-group and PVM planning will care about provider identity."]
+docs/hosted.md:241:architectures = ["x86_64"]
+docs/hosted.md:501:        "architectures": ["x86_64"],
+README.md:31:  and prepared-node Firecracker/PVM on `x86_64`
+README.md:79:The first hosted AWS PVM prepare-plus-launch proof path and review artifact
+README.md:115:- it keeps hosted, multi-node, AWS, richer networking, ingress, and storage
+docs/operators.md:187:- no hosted, multi-node, or AWS cluster orchestration
+docs/operators.md:256:## Hosted AWS PVM Repo-local Proof
+docs/operators.md:261:bash scripts/hosted-pvm-demo.sh
+docs/operators.md:267:./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+docs/operators.md:274:- one canonical readiness step: `port control-plane prepare-pvm-node`
+docs/operators.md:276:- one repo-local fake `firecracker-pvm` plus temporary `x86_64/firecracker/pvm`
+docs/operators.md:281:- `x86_64` AWS hosted PVM only
+docs/operators.md:282:- no generic fallback and no inheritance to GCP or Azure
+docs/operators.md:285:  external AWS infrastructure provisioning

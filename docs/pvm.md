@@ -116,6 +116,18 @@ replace the standard `x86_64/firecracker/standard` artifacts or their paths.
 Hosted PVM work is now explicit about placement, host-kit readiness, and live
 launch through the hosted control plane.
 
+Runnable repo-local proof:
+
+```bash
+bash scripts/hosted-pvm-demo.sh
+```
+
+Human-reviewable artifact:
+
+```bash
+./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+```
+
 Start from a copy of `examples/port.toml` and make these temporary changes:
 
 - point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`

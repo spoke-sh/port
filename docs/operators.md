@@ -253,6 +253,37 @@ First-slice boundaries stay explicit:
 - this slice does not ship ingress, public exposure, multi-service
   orchestration, autoscaling, tenancy, or production-hosting guarantees
 
+## Hosted AWS PVM Repo-local Proof
+
+Runnable hosted workflow:
+
+```bash
+bash scripts/hosted-pvm-demo.sh
+```
+
+Human-reviewable artifact:
+
+```bash
+./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+```
+
+That proof path keeps the operator contract explicit:
+
+- one hosted machine: `cloud-aws`
+- one hosted node: `aws-linux-node`
+- one canonical readiness step: `port control-plane prepare-pvm-node`
+- one imported ready record under `.port/hosted/demo/imported-inventory.json`
+- one repo-local fake `firecracker-pvm` plus temporary `x86_64/firecracker/pvm`
+  kernel and guest artifact paths so the proof stays reproducible
+
+Current boundaries stay explicit:
+
+- `x86_64` AWS hosted PVM only
+- no generic fallback and no inheritance to GCP or Azure
+- no arm64 Firecracker/PVM claim
+- this remains a repo-local hosted control-plane plus node-agent proof, not
+  external AWS infrastructure provisioning
+
 ## SSH Repo-local Proof
 
 The checked-in proof command for this workflow is:

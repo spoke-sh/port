@@ -112,6 +112,16 @@ through `port control-plane prepare-pvm-node`.
 
 Repository-local hosted PVM proof:
 
+```bash
+bash scripts/hosted-pvm-demo.sh
+```
+
+Human-reviewable artifact:
+
+```bash
+./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+```
+
 1. Copy `examples/port.toml` to `/tmp/port-pvm.toml`.
 2. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
 3. Switch `machines.cloud-aws.protection_mode` to `pvm`.

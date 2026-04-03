@@ -22,9 +22,9 @@ mission: VFgcM1Zpu
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 3/4 stories done
+**Progress:** 2/2 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [AWS PVM Host Kit Preparation](voyages/VFgclbAzD/) | done | 2/2 |
-| [Cloud Aws PVM Runtime Proof](voyages/VFgclbQzC/) | in-progress | 1/2 |
+| [Cloud Aws PVM Runtime Proof](voyages/VFgclbQzC/) | done | 2/2 |
 <!-- END GENERATED -->

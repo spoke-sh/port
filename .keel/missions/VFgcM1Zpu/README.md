@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VFgcM1Zpu
-status: active
+status: achieved
 created_at: 2026-04-02T18:17:22
-updated_at: 2026-04-02T18:21:01
+updated_at: 2026-04-02T19:18:03
 # authored
 title: Seal Hosted AWS PVM Runtime Contract
 watch: ~
 activated_at: 2026-04-02T18:21:01
+achieved_at: 2026-04-02T19:18:03
 ---
 
 # Seal Hosted AWS PVM Runtime Contract

@@ -76,6 +76,8 @@ The first direct-runtime attached-volume workflow and proof command live in
 The first hosted external-project deployment proof path, repo-level review
 surface, and current
 boundaries also live in [`docs/operators.md`](docs/operators.md).
+The first hosted AWS PVM prepare-plus-launch proof path and review artifact
+also live in [`docs/operators.md`](docs/operators.md).
 The first installable release contract and support matrix live in
 [`docs/install.md`](docs/install.md).
 The public user-facing MDX docs site now lives in [`website/`](website/) and

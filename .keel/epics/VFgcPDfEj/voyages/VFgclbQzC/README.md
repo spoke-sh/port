@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VFgclbQzC
-status: in-progress
+status: done
 epic: VFgcPDfEj
 created_at: 2026-04-02T18:19:01
 # authored
@@ -9,6 +9,7 @@ title: Cloud Aws PVM Runtime Proof
 index: 2
 updated_at: 2026-04-02T18:20:56
 started_at: 2026-04-02T18:56:49
+completed_at: 2026-04-02T19:17:50
 ---
 
 # Cloud Aws PVM Runtime Proof
@@ -22,15 +23,17 @@ started_at: 2026-04-02T18:56:49
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 stories complete
+**Progress:** 2/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Publish Hosted AWS PVM Operator Proof](../../../../stories/VFgcoUoUd/README.md) | feat | backlog |
+| [Publish Hosted AWS PVM Operator Proof](../../../../stories/VFgcoUoUd/README.md) | feat | done |
 | [Route Cloud Aws PVM Launch Through Prepared AWS Node](../../../../stories/VFgcpTciv/README.md) | feat | done |
 <!-- END GENERATED -->

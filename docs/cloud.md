@@ -223,6 +223,22 @@ explicitly narrower contract than Port's overall architecture story:
 See [`pvm.md`](pvm.md) for the explicit host-kit, artifact-kit, validation, and
 follow-on implementation contract.
 
+The repo-local hosted AWS PVM proof command is:
+
+```bash
+bash scripts/hosted-pvm-demo.sh
+```
+
+The human-reviewable render path is:
+
+```bash
+./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
+```
+
+Those proof surfaces stay explicit about the current boundary: `x86_64` AWS
+hosted PVM only, with no generic fallback and no inherited GCP, Azure, or
+arm64 claim.
+
 That is the intended product posture: no hidden promises, no silent fallback,
 and no conflation of "arm64 protected virtualization exists upstream" with
 "Port ships an arm64 Firecracker/PVM runtime today."

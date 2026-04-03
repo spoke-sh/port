@@ -150,12 +150,12 @@
 |--------|--------|
 | [Mirror Keel And Sift Cargo-Dist Release Contract](epics/VFdgQWhbn/voyages/VFdgVAzQc/) | done |
 
-### [AWS Hosted PVM Preparation And Launch](epics/VFgcPDfEj/) (active)
+### [AWS Hosted PVM Preparation And Launch](epics/VFgcPDfEj/) (done)
 
 | Voyage | Status |
 |--------|--------|
 | [AWS PVM Host Kit Preparation](epics/VFgcPDfEj/voyages/VFgclbAzD/) | done |
-| [Cloud Aws PVM Runtime Proof](epics/VFgcPDfEj/voyages/VFgclbQzC/) | in-progress |
+| [Cloud Aws PVM Runtime Proof](epics/VFgcPDfEj/voyages/VFgclbQzC/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
