@@ -13,13 +13,17 @@ use port_hosted_protocol::{
     HostedRouteContext, HostedServiceRoute, PORT_ARTIFACT_TRANSFER_HEADER,
 };
 use port_model::{
-    HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, PortConfig,
+    HostedApiIdentityContract, HostedAuthTokenSource, MachineCommandRoute, MachineGuestBroker,
+    PortConfig,
 };
 use reqwest::blocking::Client as BlockingClient;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use port_hosted_protocol::{
+    HostedGuestSessionContract, HostedGuestSessionScope, HostedShellDriverContract,
+};
 pub use port_model::{
     ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy,
     ServiceRestartPolicy, ServiceSecretBackend, ServiceSecretBinding, ServiceSecretMaterialization,
@@ -64,6 +68,7 @@ pub struct HostedApiStreamRequest {
 pub struct HostedClient {
     base_url: String,
     auth_headers: HostedClientHeaders,
+    control_plane_name: Option<String>,
 }
 
 impl HostedClient {
@@ -77,6 +82,7 @@ impl HostedClient {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             auth_headers: HostedClientHeaders::new(auth_header, auth_value, audience),
+            control_plane_name: None,
         }
     }
 
@@ -219,12 +225,15 @@ impl HostedClient {
 
     fn from_identity(contract: HostedApiIdentityContract, token: String) -> Self {
         let headers = HostedClientHeaders::from_identity(&contract, token);
-        Self::new(
-            contract.endpoint,
-            contract.audience,
-            contract.auth.header,
-            headers.auth_value,
-        )
+        Self {
+            base_url: contract.endpoint.trim_end_matches('/').to_string(),
+            auth_headers: HostedClientHeaders::new(
+                contract.auth.header,
+                headers.auth_value,
+                contract.audience,
+            ),
+            control_plane_name: Some(contract.control_plane),
+        }
     }
 
     fn request(
@@ -479,6 +488,24 @@ pub struct ArtifactClient<'a> {
 }
 
 impl<'a> GuestClient<'a> {
+    pub fn shell_driver_contract(&self, machine_name: &str) -> Result<HostedGuestSessionContract> {
+        let control_plane = self
+            .client
+            .control_plane_name
+            .as_deref()
+            .with_context(|| {
+                "hosted shell-driver contract requires a client created from Port control-plane configuration"
+            })?;
+        Ok(HostedGuestSessionContract::machine_scoped(
+            control_plane,
+            machine_name,
+            HostedShellDriverContract::canonical(
+                MachineCommandRoute::HostedControlPlane,
+                MachineGuestBroker::ControlPlaneNodeAgentTunnel,
+            ),
+        ))
+    }
+
     pub fn exec(&self, machine_name: &str, request: ExecRequest) -> Result<HostedApiRequest> {
         self.operation(machine_name, "exec", GuestOperation::Exec(request))
     }
@@ -785,13 +812,14 @@ mod tests {
     use axum::{Json, Router};
     use port_agent_protocol::{CopyDirection, CopyRequest, ExecRequest, LogsRequest, PtyRequest};
     use port_hosted_protocol::{
-        HostedDetachedForwardStartRequest, HostedError, HostedGuestStreamProtocol,
-        HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
+        HostedDetachedForwardStartRequest, HostedError, HostedGuestSessionScope,
+        HostedGuestStreamProtocol, HostedRouteContext, HostedSuccess, PORT_AUDIENCE_HEADER,
     };
     use port_model::{
-        ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy,
-        ServiceRestartPolicy, ServiceSecretBackend, ServiceSecretBinding,
-        ServiceSecretMaterialization, ServiceSecretSourceStatus,
+        MachineCommandRoute, MachineGuestBroker, PortConfig, ServiceHealthPolicy,
+        ServiceHealthState, ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
+        ServiceSecretBackend, ServiceSecretBinding, ServiceSecretMaterialization,
+        ServiceSecretSourceStatus,
     };
     use serde_json::json;
 
@@ -1152,6 +1180,66 @@ mod tests {
             "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached/demo-web/stop"
         );
         assert!(stop.body.is_none());
+    }
+
+    #[test]
+    fn hosted_guest_shell_driver_contract_is_machine_scoped_and_canonical() {
+        let client = HostedClient::from_machine(&PortConfig::sample(), "cloud-aws", "demo-token")
+            .expect("client should resolve from machine config");
+
+        let session = client
+            .guest()
+            .shell_driver_contract("cloud-aws")
+            .expect("shell driver contract should resolve");
+
+        assert_eq!(
+            session.id,
+            "port-hosted://demo/machines/cloud-aws/guest-session"
+        );
+        assert_eq!(session.scope, HostedGuestSessionScope::Machine);
+        assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+        assert_eq!(
+            session.driver.route,
+            MachineCommandRoute::HostedControlPlane
+        );
+        assert_eq!(
+            session.driver.broker,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel
+        );
+        assert_eq!(
+            session.driver.protocol,
+            port_model::HostedGuestProtocolContract::PortAgentProtocol
+        );
+        assert_eq!(
+            session
+                .driver
+                .command_surface
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["exec", "copy", "pty", "logs", "forward"]
+        );
+    }
+
+    #[test]
+    fn hosted_guest_shell_driver_contract_requires_control_plane_identity() {
+        let client = HostedClient::new(
+            "https://port.example.internal",
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+
+        let error = client
+            .guest()
+            .shell_driver_contract("cloud-aws")
+            .expect_err("generic client should not synthesize shell-driver identity");
+        assert!(
+            error
+                .to_string()
+                .contains("requires a client created from Port control-plane configuration"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -22,8 +22,8 @@ mission: VFgtZtnzb
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Upstream Shell Driver Contract](voyages/VFgu7Bp7V/) | planned | 0/1 |
+| [Upstream Shell Driver Contract](voyages/VFgu7Bp7V/) | done | 1/1 |
 <!-- END GENERATED -->

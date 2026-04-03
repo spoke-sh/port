@@ -1,0 +1,41 @@
+---
+recorded_at: 2026-04-02T20:11:33.122778119-07:00
+mode: manual
+files: [".keel/stories/VFguVcU2m/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+crates/port-sdk/examples/hosted-sdk.rs:11:    let shell_driver = client.guest().shell_driver_contract("cloud-aws")?;
+docs/sdk.md:46:- `guest().shell_driver_contract(machine)` derives that same canonical
+docs/sdk.md:135:assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+docs/sdk.md:136:assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+docs/sdk.md:148:let session = client.guest().shell_driver_contract("cloud-aws")?;
+docs/sdk.md:149:assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+docs/sdk.md:150:assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+docs/sdk.md:160:| `pty` | `guest().pty_stream()` and `port guest pty` | Bidirectional stream until guest exit | `guest().shell_driver_contract(machine)` before stream open |
+docs/sdk.md:161:| `forward` | `guest().forward_stream()` or detached helpers and `port guest forward` | Byte stream or detached listener lifecycle | `guest().shell_driver_contract(machine)` before start/list/stop |
+docs/hosted.md:581:- `session.id = "port-hosted://demo/machines/cloud-aws/guest-session"`
+docs/hosted.md:583:- `session.driver.id = "port-guest-shell-driver-v1"`
+docs/hosted.md:609:If Port cannot derive the hosted guest-session contract for a hosted guest
+docs/hosted.md:629:- missing hosted guest-session metadata fails immediately instead of degrading
+crates/port-hosted-protocol/src/lib.rs:347:            id: String::from("port-guest-shell-driver-v1"),
+crates/port-hosted-protocol/src/lib.rs:389:                "port-hosted://{}/machines/{}/guest-session",
+crates/port-hosted-protocol/src/lib.rs:957:            "port-hosted://demo/machines/cloud-aws/guest-session"
+crates/port-hosted-protocol/src/lib.rs:960:        assert_eq!(guest_session.driver.id, "port-guest-shell-driver-v1");
+crates/port-hosted-protocol/src/lib.rs:987:    fn canonical_shell_driver_contract_uses_port_guest_surface() {
+crates/port-hosted-protocol/src/lib.rs:988:        let driver = HostedShellDriverContract::canonical(
+crates/port-hosted-protocol/src/lib.rs:995:        assert_eq!(driver.id, "port-guest-shell-driver-v1");
+crates/port-hosted-protocol/src/lib.rs:1015:            "port-hosted://demo/machines/cloud-aws/guest-session"
+crates/port-sdk/src/lib.rs:491:    pub fn shell_driver_contract(&self, machine_name: &str) -> Result<HostedGuestSessionContract> {
+crates/port-sdk/src/lib.rs:502:            HostedShellDriverContract::canonical(
+crates/port-sdk/src/lib.rs:1186:    fn hosted_guest_shell_driver_contract_is_machine_scoped_and_canonical() {
+crates/port-sdk/src/lib.rs:1192:            .shell_driver_contract("cloud-aws")
+crates/port-sdk/src/lib.rs:1197:            "port-hosted://demo/machines/cloud-aws/guest-session"
+crates/port-sdk/src/lib.rs:1200:        assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+crates/port-sdk/src/lib.rs:1225:    fn hosted_guest_shell_driver_contract_requires_control_plane_identity() {
+crates/port-sdk/src/lib.rs:1235:            .shell_driver_contract("cloud-aws")
+crates/port-sdk/src/lib.rs:1314:                            id: String::from("port-hosted://demo/machines/cloud-aws/guest-session"),
+crates/port-sdk/src/lib.rs:1317:                                id: String::from("port-guest-shell-driver-v1"),
+crates/port-sdk/src/lib.rs:1355:        assert!(message.contains("session=port-hosted://demo/machines/cloud-aws/guest-session"));
+crates/port-sdk/src/lib.rs:1356:        assert!(message.contains("driver=port-guest-shell-driver-v1"));
+

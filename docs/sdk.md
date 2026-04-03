@@ -43,6 +43,10 @@ Shipped today:
   carries the stable machine-scoped session identifier plus the canonical Port
   shell-driver metadata for guest-backed hosted `exec`, `copy`, `pty`, `logs`,
   and `forward`
+- `guest().shell_driver_contract(machine)` derives that same canonical
+  machine-scoped shell-driver contract ahead of time for streamed `pty` and
+  `forward` integrations that need a stable identity before opening the hosted
+  byte stream
 
 Still planned:
 
@@ -132,6 +136,33 @@ assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
 assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
 # Ok::<(), anyhow::Error>(())
 ```
+
+For streamed hosted requests, derive the same contract before opening the
+transport:
+
+```rust
+# use port_model::PortConfig;
+# use port_sdk::HostedClient;
+let config = PortConfig::sample();
+let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+let session = client.guest().shell_driver_contract("cloud-aws")?;
+assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+# Ok::<(), anyhow::Error>(())
+```
+
+That helper is the canonical upstream shell-driver contract for hosted guest
+integration:
+
+| Operation | Canonical Port surface | Lifecycle model | Stable contract surface |
+|-----------|------------------------|-----------------|-------------------------|
+| `exec` | `guest().exec()` and `port guest exec` | Request/response via `HostedClient::execute_json` | `HostedSuccess::route.guest_session` on hosted responses |
+| `pty` | `guest().pty_stream()` and `port guest pty` | Bidirectional stream until guest exit | `guest().shell_driver_contract(machine)` before stream open |
+| `forward` | `guest().forward_stream()` or detached helpers and `port guest forward` | Byte stream or detached listener lifecycle | `guest().shell_driver_contract(machine)` before start/list/stop |
+
+The helper is only available when the client is created from Port control-plane
+configuration, because generic `HostedClient::new(...)` callers do not know the
+stable control-plane name needed for the session identifier.
 
 See `crates/port-sdk/examples/hosted-sdk.rs` for the in-repo sample program.
 

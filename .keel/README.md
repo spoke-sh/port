@@ -163,11 +163,11 @@
 |--------|--------|
 | [Guest Session Identity Contract](epics/VFgtgGEog/voyages/VFgu7Bd7U/) | done |
 
-### [Shell Driver Integration Contract For Upstream Control Planes](epics/VFgtgGWoh/) (active)
+### [Shell Driver Integration Contract For Upstream Control Planes](epics/VFgtgGWoh/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Upstream Shell Driver Contract](epics/VFgtgGWoh/voyages/VFgu7Bp7V/) | planned |
+| [Upstream Shell Driver Contract](epics/VFgtgGWoh/voyages/VFgu7Bp7V/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

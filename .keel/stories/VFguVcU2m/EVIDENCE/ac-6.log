@@ -1,0 +1,38 @@
+---
+recorded_at: 2026-04-02T20:11:33.453784364-07:00
+mode: manual
+files: [".keel/stories/VFguVcU2m/EVIDENCE/ac-6.log"]
+---
+
+--- File: ac-6.log ---
+$ cargo test -p port-hosted-protocol canonical_shell_driver_contract_uses_port_guest_surface -- --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_hosted_protocol-c5eae3a7d0e60680)
+
+running 1 test
+test tests::canonical_shell_driver_contract_uses_port_guest_surface ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 0.00s
+
+
+$ cargo test -p port-sdk shell_driver_contract -- --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_sdk-2bb9946bd1b8ccd8)
+
+running 2 tests
+test tests::hosted_guest_shell_driver_contract_is_machine_scoped_and_canonical ... ok
+test tests::hosted_guest_shell_driver_contract_requires_control_plane_identity ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+
+$ cargo test -p port-sdk hosted_client_surfaces_placement_detail_from_live_errors -- --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_sdk-2bb9946bd1b8ccd8)
+
+running 1 test
+test tests::hosted_client_surfaces_placement_detail_from_live_errors ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+

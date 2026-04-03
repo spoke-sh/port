@@ -240,4 +240,32 @@ fn cli_routes_hosted_machine_and_guest_commands_through_live_http_transport() {
         String::from_utf8_lossy(&exec.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&exec.stdout), "hosted-http-ok");
+
+    let pty = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("guest")
+        .arg("pty")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-lc")
+        .arg("printf hosted-http-pty-ok")
+        .output()
+        .expect("guest pty command should run");
+    assert_eq!(
+        pty.status.code(),
+        Some(0),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&pty.stdout),
+        String::from_utf8_lossy(&pty.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&pty.stdout).contains("hosted-http-pty-ok"),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&pty.stdout),
+        String::from_utf8_lossy(&pty.stderr)
+    );
 }

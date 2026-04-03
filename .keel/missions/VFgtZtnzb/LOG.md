@@ -10,3 +10,11 @@ Seeded downstream creator-platform session-driver mission. Verified AWS hosted P
 ## 2026-04-02T20:03:45
 
 Closed story VFguVcJ2r by exposing hosted guest-session identity and driver metadata on canonical Port route contexts, with explicit failure surfaces and SDK/runtime/docs coverage.
+
+## 2026-04-02T20:12:17
+
+Closed story VFguVcU2m by surfacing a canonical upstream hosted shell-driver contract in port-sdk, documenting exec/pty/forward lifecycle expectations, and proving canonical CLI/runtime success plus provider-aware failures.
+
+## 2026-04-02T20:12:17
+
+Mission achieved by local system user 'alex'

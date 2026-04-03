@@ -1,0 +1,24 @@
+---
+recorded_at: 2026-04-02T20:11:33.191764413-07:00
+mode: manual
+files: [".keel/stories/VFguVcU2m/EVIDENCE/ac-2.log"]
+---
+
+--- File: ac-2.log ---
+docs/hosted.md:579:- `command_surface = ["exec", "copy", "pty", "logs", "forward"]`
+docs/hosted.md:580:- `protocol = "port-agent-protocol"`
+docs/hosted.md:586:- `session.driver.protocol = "port-agent-protocol"`
+crates/port-hosted-protocol/src/lib.rs:340:    pub command_surface: Vec<GuestCommandVerb>,
+crates/port-hosted-protocol/src/lib.rs:351:            command_surface: vec![
+crates/port-hosted-protocol/src/lib.rs:367:            command_surface: contract.command_surface.clone(),
+crates/port-hosted-protocol/src/lib.rs:976:                .command_surface
+crates/port-hosted-protocol/src/lib.rs:1007:                .command_surface
+docs/sdk.md:20:- `guest()` mirrors `port guest exec|copy|pty|logs|forward` using the existing
+docs/sdk.md:21:  `port-agent-protocol` request payloads
+crates/port-model/src/lib.rs:816:            command_surface: vec![
+crates/port-model/src/lib.rs:847:                "Hosted guest attach preserves the canonical `port guest exec|copy|pty|logs|forward` surface. The control plane authorizes the attach, the node agent bridges the host-local guest transport, and the existing Port guest protocol frames continue unchanged to the in-guest agent.",
+crates/port-model/src/lib.rs:1758:    pub command_surface: Vec<GuestCommandVerb>,
+crates/port-model/src/lib.rs:1796:            Self::PortAgentProtocol => "port-agent-protocol",
+crates/port-model/src/lib.rs:5194:            contract.command_surface,
+crates/port-model/src/lib.rs:5235:                .contains("port guest exec|copy|pty|logs|forward")
+

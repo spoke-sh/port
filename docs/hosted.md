@@ -610,6 +610,25 @@ If Port cannot derive the hosted guest-session contract for a hosted guest
 route, the request fails instead of falling back to anonymous or partial
 session metadata.
 
+For upstream control planes, that is one shell-driver contract rather than
+three protocol variants:
+
+| Flow | Canonical Port surface | Lifecycle contract | Stable identity surface |
+|------|-------------------------|--------------------|-------------------------|
+| `exec` | `port guest exec` | One request and one completed result | Hosted success or error route carries `session.id` and `session.driver.*` |
+| `pty` | `port guest pty` | One streamed terminal session until guest exit | `port-sdk` derives the same machine-scoped shell-driver contract before the stream opens |
+| `forward` | `port guest forward` | One streamed listener or detached start/list/stop lifecycle | The same machine-scoped shell-driver contract applies across forward start/list/stop |
+
+Provider-aware failures stay explicit on that same contract surface:
+
+- wrong-lane or unplaceable hosted targets return placement guidance instead of
+  silently falling back to the standard local lane
+- missing AWS host-kit preparation, missing patched PVM VMM support, or missing
+  PVM artifacts fail with `cloud-aws`-specific guidance from the hosted control
+  plane and node-agent path
+- missing hosted guest-session metadata fails immediately instead of degrading
+  to anonymous shell state
+
 Hosted `guest forward` keeps the same command family and now starts a
 node-owned listener through the hosted control-plane and node-agent path.
 Hosted detached lifecycle now ships through the same surface: `--lifecycle

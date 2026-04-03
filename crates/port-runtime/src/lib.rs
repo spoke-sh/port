@@ -15996,6 +15996,82 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_guest_pty_routes_through_live_control_plane() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest agent socket should bind");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("pty accept");
+            let reader_stream = stream.try_clone().expect("pty clone");
+            let mut reader = BufReader::new(reader_stream);
+            let request: RequestEnvelope = read_frame(&mut reader).expect("pty request");
+            let GuestOperation::Pty(request) = request.operation else {
+                panic!("unexpected hosted pty operation");
+            };
+            assert_eq!(
+                request.command,
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("printf hosted-pty-ok"),
+                ]
+            );
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Accepted {
+                    id: 1,
+                    stream: StreamKind::Pty,
+                    size_bytes: None,
+                },
+            )
+            .expect("pty accepted should encode");
+            write_frame(
+                &mut stream,
+                &StreamResponseFrame::Data {
+                    channel: port_agent_protocol::StreamOutputChannel::Stdout,
+                    data: String::from("hosted-pty-ok"),
+                },
+            )
+            .expect("pty data should encode");
+            write_frame(&mut stream, &StreamResponseFrame::Exit { exit_code: 0 })
+                .expect("pty exit should encode");
+        });
+
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        let result = execute_guest_operation(
+            &config,
+            GuestRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                operation: GuestOperation::Pty(PtyRequest {
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("printf hosted-pty-ok"),
+                    ],
+                    cols: 80,
+                    rows: 24,
+                }),
+            },
+        )
+        .expect("hosted guest pty should succeed");
+
+        let OperationResult::Pty(result) = result else {
+            panic!("unexpected hosted pty result: {result:?}");
+        };
+        assert_eq!(result.transcript, "hosted-pty-ok");
+
+        server.join().expect("server thread should complete");
+    }
+
+    #[test]
     fn hosted_guest_exec_explains_unresolved_node_routing() {
         let config = start_live_hosted_servers(&PortConfig::sample(), false)
             .expect("hosted control plane should start");

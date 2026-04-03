@@ -1,0 +1,27 @@
+---
+recorded_at: 2026-04-02T20:11:33.389371199-07:00
+mode: manual
+files: [".keel/stories/VFguVcU2m/EVIDENCE/ac-5.log"]
+---
+
+--- File: ac-5.log ---
+$ cargo test -p port --test hosted_transport cli_routes_hosted_machine_and_guest_commands_through_live_http_transport -- --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/hosted_transport.rs (/home/alex/.cache/cargo-target/port/debug/deps/hosted_transport-62aa563df8bf0aa6)
+
+running 1 test
+test cli_routes_hosted_machine_and_guest_commands_through_live_http_transport ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+
+$ cargo test -p port-runtime hosted_guest_pty_routes_through_live_control_plane -- --test-threads=1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 1 test
+test tests::hosted_guest_pty_routes_through_live_control_plane ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 142 filtered out; finished in 0.01s
+
+

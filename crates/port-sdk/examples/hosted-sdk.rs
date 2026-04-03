@@ -8,6 +8,7 @@ use port_sdk::{
 fn main() -> anyhow::Result<()> {
     let config = PortConfig::sample();
     let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+    let shell_driver = client.guest().shell_driver_contract("cloud-aws")?;
 
     let machine = client.machines().monitor("cloud-aws");
     let exec = client.guest().exec(
@@ -44,6 +45,8 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     println!("machine monitor url: {}", machine.url);
+    println!("shell driver session: {}", shell_driver.id);
+    println!("shell driver id: {}", shell_driver.driver.id);
     println!("guest exec url: {}", exec.url);
     println!("service apply url: {}", service.url);
     Ok(())

@@ -1,0 +1,191 @@
+---
+recorded_at: 2026-04-02T20:11:33.262010944-07:00
+mode: manual
+files: [".keel/stories/VFguVcU2m/EVIDENCE/ac-3.log"]
+---
+
+--- File: ac-3.log ---
+let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+let exec: HostedSuccess<serde_json::Value> = client.execute_json(
+    client.guest().exec(
+        "cloud-aws",
+        ExecRequest {
+            command: vec!["/bin/echo".into(), "hello".into()],
+            cwd: None,
+            env: Default::default(),
+        },
+    )?,
+)?;
+let session = exec
+    .route
+    .guest_session
+    .expect("hosted guest session contract");
+assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+# Ok::<(), anyhow::Error>(())
+```
+
+For streamed hosted requests, derive the same contract before opening the
+transport:
+
+```rust
+# use port_model::PortConfig;
+# use port_sdk::HostedClient;
+let config = PortConfig::sample();
+let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+let session = client.guest().shell_driver_contract("cloud-aws")?;
+assert_eq!(session.id, "port-hosted://demo/machines/cloud-aws/guest-session");
+assert_eq!(session.driver.id, "port-guest-shell-driver-v1");
+# Ok::<(), anyhow::Error>(())
+```
+
+That helper is the canonical upstream shell-driver contract for hosted guest
+integration:
+
+| Operation | Canonical Port surface | Lifecycle model | Stable contract surface |
+|-----------|------------------------|-----------------|-------------------------|
+| `exec` | `guest().exec()` and `port guest exec` | Request/response via `HostedClient::execute_json` | `HostedSuccess::route.guest_session` on hosted responses |
+| `pty` | `guest().pty_stream()` and `port guest pty` | Bidirectional stream until guest exit | `guest().shell_driver_contract(machine)` before stream open |
+| `forward` | `guest().forward_stream()` or detached helpers and `port guest forward` | Byte stream or detached listener lifecycle | `guest().shell_driver_contract(machine)` before start/list/stop |
+
+The helper is only available when the client is created from Port control-plane
+configuration, because generic `HostedClient::new(...)` callers do not know the
+stable control-plane name needed for the session identifier.
+
+See `crates/port-sdk/examples/hosted-sdk.rs` for the in-repo sample program.
+
+The streamed hosted request builders stay explicit:
+
+```rust
+# use port_agent_protocol::{ForwardRequest, LogsRequest};
+# use port_hosted_protocol::HostedDetachedForwardStartRequest;
+# use port_model::PortConfig;
+# use port_sdk::HostedClient;
+let config = PortConfig::sample();
+let client = HostedClient::from_machine(&config, "cloud-aws", "demo-token")?;
+let logs = client.guest().logs_stream(
+    "cloud-aws",
+    LogsRequest {
+        path: "/var/log/app.log".into(),
+        follow: true,
+        tail_lines: None,
+    },
+)?;
+let forward = client.guest().forward_stream(
+    "cloud-aws",
+    ForwardRequest {
+        listen: "127.0.0.1:8081".into(),
+        target: "127.0.0.1:80".into(),
+    },
+)?;
+let detached = client.guest().forward_detached_start(
+    "cloud-aws",
+    HostedDetachedForwardStartRequest {
+        listen: "unix:/tmp/cloud-aws.sock".into(),
+        target: "unix:/var/run/app.sock".into(),
+        forward_name: "demo-sock".into(),
+    },
+)?;
+let detached_list = client.guest().forward_detached_list("cloud-aws");
+let detached_stop = client
+    .guest()
+    .forward_detached_stop("cloud-aws", "demo-sock");
+assert_eq!(logs.request.url, "https://port.example.internal/v1/machines/cloud-aws/guest:logs:stream");
+assert_eq!(forward.request.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:stream");
+assert_eq!(detached.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached");
+assert_eq!(detached_list.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached");
+assert_eq!(detached_stop.url, "https://port.example.internal/v1/machines/cloud-aws/guest:forward:detached/demo-sock/stop");
+# Ok::<(), anyhow::Error>(())
+
+That means hosted Port still uses the same guest-operation model for `exec`,
+`copy`, `pty`, `logs`, and `forward`; the difference is who brokers the byte
+stream.
+
+The hosted route context now carries that session contract on both success and
+failure responses for guest-backed shell flows. The session identifier stays
+machine-scoped and stable across hosted `exec`, `pty`, `forward`, and detached
+forward lifecycle calls for the same machine, while the driver metadata keeps
+Port's canonical shell-driver vocabulary explicit for downstream systems.
+If Port cannot derive the hosted guest-session contract for a hosted guest
+route, the request fails instead of falling back to anonymous or partial
+session metadata.
+
+For upstream control planes, that is one shell-driver contract rather than
+three protocol variants:
+
+| Flow | Canonical Port surface | Lifecycle contract | Stable identity surface |
+|------|-------------------------|--------------------|-------------------------|
+| `exec` | `port guest exec` | One request and one completed result | Hosted success or error route carries `session.id` and `session.driver.*` |
+| `pty` | `port guest pty` | One streamed terminal session until guest exit | `port-sdk` derives the same machine-scoped shell-driver contract before the stream opens |
+| `forward` | `port guest forward` | One streamed listener or detached start/list/stop lifecycle | The same machine-scoped shell-driver contract applies across forward start/list/stop |
+
+Provider-aware failures stay explicit on that same contract surface:
+
+- wrong-lane or unplaceable hosted targets return placement guidance instead of
+  silently falling back to the standard local lane
+- missing AWS host-kit preparation, missing patched PVM VMM support, or missing
+  PVM artifacts fail with `cloud-aws`-specific guidance from the hosted control
+  plane and node-agent path
+- missing hosted guest-session metadata fails immediately instead of degrading
+  to anonymous shell state
+
+Hosted `guest forward` keeps the same command family and now starts a
+node-owned listener through the hosted control-plane and node-agent path.
+Hosted detached lifecycle now ships through the same surface: `--lifecycle
+detached --name <forward>`, `--list`, and `--stop --name <forward>` all route
+through the live control plane and node agent and operate on node-owned
+detached forward state under the selected runtime root.
+
+Example hosted guest workflow:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest pty \
+  --machine cloud-aws -- /bin/sh -lc 'printf hosted-pty-ok'
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest logs \
+  --machine cloud-aws --path /var/log/app.log --follow
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest copy \
+  --machine cloud-aws --direction host-to-guest \
+  --source ./host.txt --destination /workspace/host.txt
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --listen 127.0.0.1:8081 --target 127.0.0.1:80
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --listen unix:/tmp/cloud-aws.sock --target unix:/var/run/app.sock \
+  --lifecycle detached --name demo-sock
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --list
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-hosted.toml guest forward \
+  --machine cloud-aws --stop --name demo-sock
+```
+
+- `guest pty` and `guest logs --follow` stay streamed across the hosted route.
+- `guest copy` now streams bytes through the node agent instead of assuming
+  node-visible host paths.
+- `guest forward` returns the node-owned listener address and does not require
+  a repo-local guest transport fallback any more.
+- `guest forward --lifecycle detached --name <forward>` records detached state
+  under the selected node runtime root, `--list` reads that state, and
+  `--stop --name <forward>` tears the listener down through the same hosted
+  route family.
+
+What still remains after this runtime slice:
+
+- retries and richer client policies on top of the shipped transport
+- advanced auth/tenancy work on top of the same API paths
+
+## Hosted API Shape
+
+The exact wire API is not fully implemented yet, but Port now documents and
+publishes the request surface through `port-sdk`. The contract mirrors the CLI:
+
+- `machines.create`
+- `machines.list`
+- `machines.get`
+- `machines.monitor`
+- `machines.top`
+

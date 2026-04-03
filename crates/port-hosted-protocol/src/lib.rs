@@ -340,6 +340,36 @@ pub struct HostedShellDriverContract {
     pub command_surface: Vec<GuestCommandVerb>,
 }
 
+impl HostedShellDriverContract {
+    #[must_use]
+    pub fn canonical(route: MachineCommandRoute, broker: MachineGuestBroker) -> Self {
+        Self {
+            id: String::from("port-guest-shell-driver-v1"),
+            route,
+            broker,
+            protocol: HostedGuestProtocolContract::PortAgentProtocol,
+            command_surface: vec![
+                GuestCommandVerb::Exec,
+                GuestCommandVerb::Copy,
+                GuestCommandVerb::Pty,
+                GuestCommandVerb::Logs,
+                GuestCommandVerb::Forward,
+            ],
+        }
+    }
+
+    #[must_use]
+    pub fn from_guest_attach(contract: &HostedGuestAttachContract) -> Self {
+        Self {
+            route: contract.guest_route,
+            broker: contract.guest_broker,
+            protocol: contract.protocol,
+            command_surface: contract.command_surface.clone(),
+            ..Self::canonical(contract.guest_route, contract.guest_broker)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedGuestSessionContract {
     pub id: String,
@@ -349,21 +379,29 @@ pub struct HostedGuestSessionContract {
 
 impl HostedGuestSessionContract {
     #[must_use]
-    pub fn from_guest_attach(contract: &HostedGuestAttachContract) -> Self {
+    pub fn machine_scoped(
+        control_plane: impl Into<String>,
+        machine_name: impl Into<String>,
+        driver: HostedShellDriverContract,
+    ) -> Self {
         Self {
             id: format!(
                 "port-hosted://{}/machines/{}/guest-session",
-                contract.machine.control_plane, contract.machine.machine_name
+                control_plane.into(),
+                machine_name.into()
             ),
             scope: HostedGuestSessionScope::Machine,
-            driver: HostedShellDriverContract {
-                id: String::from("port-guest-shell-driver-v1"),
-                route: contract.guest_route,
-                broker: contract.guest_broker,
-                protocol: contract.protocol,
-                command_surface: contract.command_surface.clone(),
-            },
+            driver,
         }
+    }
+
+    #[must_use]
+    pub fn from_guest_attach(contract: &HostedGuestAttachContract) -> Self {
+        Self::machine_scoped(
+            contract.machine.control_plane.clone(),
+            contract.machine.machine_name.clone(),
+            HostedShellDriverContract::from_guest_attach(contract),
+        )
     }
 }
 
@@ -656,19 +694,21 @@ mod tests {
 
     use port_model::{
         ArtifactReference, ArtifactSelector, ExecutionSubstrate, HostProvider,
-        HostedImportedNodeRecord, HostedNodeRegistration, HostedPvmHostKitPackageAttachment,
-        HostedSchedulerPolicy, MachineArchitecture, MachineGuestBroker, MachineInventoryOwner,
-        MachineLifecycleOwner, PortConfig, ProtectionMode, PvmHostKitPackage,
+        HostedGuestProtocolContract, HostedImportedNodeRecord, HostedNodeRegistration,
+        HostedPvmHostKitPackageAttachment, HostedSchedulerPolicy, MachineArchitecture,
+        MachineCommandRoute, MachineGuestBroker, MachineInventoryOwner, MachineLifecycleOwner,
+        PortConfig, ProtectionMode, PvmHostKitPackage,
     };
 
     use super::{
         HostedArtifactRoute, HostedArtifactTransferRequest, HostedArtifactTransferResult,
         HostedClientHeaders, HostedControlPlaneRoute, HostedDetachedForwardRoute, HostedGuestRoute,
-        HostedGuestStreamProtocol, HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute,
-        HostedNodeAgentHeaders, HostedNodeRegistrationRequest, HostedNodeRoute,
-        HostedPreparationRoute, HostedPreparePvmNodeRequest, HostedRegistrationRoute,
-        HostedRouteContext, HostedServiceRoute, HostedSuccess, PORT_ARTIFACT_TRANSFER_HEADER,
-        PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
+        HostedGuestSessionContract, HostedGuestSessionScope, HostedGuestStreamProtocol,
+        HostedGuestStreamRoute, HostedGuestVerb, HostedMachineRoute, HostedNodeAgentHeaders,
+        HostedNodeRegistrationRequest, HostedNodeRoute, HostedPreparationRoute,
+        HostedPreparePvmNodeRequest, HostedRegistrationRoute, HostedRouteContext,
+        HostedServiceRoute, HostedShellDriverContract, HostedSuccess,
+        PORT_ARTIFACT_TRANSFER_HEADER, PORT_AUDIENCE_HEADER, PORT_NODE_AGENT_TOKEN_HEADER,
     };
 
     #[test]
@@ -941,6 +981,41 @@ mod tests {
         );
         let forwarded = selected.with_forward_name("demo-web");
         assert_eq!(forwarded.forward_name.as_deref(), Some("demo-web"));
+    }
+
+    #[test]
+    fn canonical_shell_driver_contract_uses_port_guest_surface() {
+        let driver = HostedShellDriverContract::canonical(
+            MachineCommandRoute::HostedControlPlane,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel,
+        );
+        let session =
+            HostedGuestSessionContract::machine_scoped("demo", "cloud-aws", driver.clone());
+
+        assert_eq!(driver.id, "port-guest-shell-driver-v1");
+        assert_eq!(driver.route, MachineCommandRoute::HostedControlPlane);
+        assert_eq!(
+            driver.broker,
+            MachineGuestBroker::ControlPlaneNodeAgentTunnel
+        );
+        assert_eq!(
+            driver.protocol,
+            HostedGuestProtocolContract::PortAgentProtocol
+        );
+        assert_eq!(
+            driver
+                .command_surface
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["exec", "copy", "pty", "logs", "forward"]
+        );
+        assert_eq!(
+            session.id,
+            "port-hosted://demo/machines/cloud-aws/guest-session"
+        );
+        assert_eq!(session.scope, HostedGuestSessionScope::Machine);
+        assert_eq!(session.driver, driver);
     }
 
     #[test]

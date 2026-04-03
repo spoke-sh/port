@@ -1,0 +1,10 @@
+# COMPLIANCE REPORT: Upstream Shell Driver Contract
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [VFguVcU2m](../../../../stories/VFguVcU2m/README.md) | [ac-1.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-6.log) |
+| SRS-02 | ✓ VERIFIED | [VFguVcU2m](../../../../stories/VFguVcU2m/README.md) | [ac-1.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-6.log) |
+| SRS-03 | ✓ VERIFIED | [VFguVcU2m](../../../../stories/VFguVcU2m/README.md) | [ac-1.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-6.log) |
+| SRS-04 | ✓ VERIFIED | [VFguVcU2m](../../../../stories/VFguVcU2m/README.md) | [ac-1.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFguVcU2m/EVIDENCE/ac-6.log) |
