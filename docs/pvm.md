@@ -77,6 +77,12 @@ derivations, override `port.awsPvmHost.kernelPackages` and
 `port.awsPvmHost.firecrackerPackage` there. Do not fork the module into a
 downstream repo just to restate Port's host-kit contract.
 
+The exported module uses a buildable Linux 6.12 fallback kernel by default so
+downstream NixOS image builds do not fail before the real PVM kernel is wired
+in. That fallback is only the integration seam. The actual production PVM host
+still needs the concrete patched kernel and VMM inputs to be supplied through
+those override points.
+
 ## x86_64 Artifact Kit Contract
 
 The PVM lane also needs dedicated artifacts.

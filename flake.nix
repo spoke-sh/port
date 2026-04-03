@@ -161,6 +161,9 @@
           assert builtins.any
             (pkg: pkg == awsPvmHostModuleEval.config.port.awsPvmHost.package)
             awsPvmHostModuleEval.config.environment.systemPackages; true;
+        _awsPvmHostModuleAssertions5 =
+          assert awsPvmHostModuleEval.config.boot.kernelPackages.kernel.modDirVersion
+            == awsPvmHostModuleEval.config.boot.kernelPackages.kernel.version; true;
         _ = [
           _awsPvmHostKitSync
           _awsPvmHostKitPkgAssertions
@@ -170,6 +173,7 @@
           _awsPvmHostModuleAssertions2
           _awsPvmHostModuleAssertions3
           _awsPvmHostModuleAssertions4
+          _awsPvmHostModuleAssertions5
         ];
         sharedInputs = [
           rust
@@ -222,6 +226,8 @@
               hostKit = awsPvmHostModuleEval.config.port.awsPvmHost.hostKit;
               hostKitPackage = awsPvmHostModuleEval.config.port.awsPvmHost.package.pname
                 or awsPvmHostModuleEval.config.port.awsPvmHost.package.name;
+              kernelVersion = awsPvmHostModuleEval.config.boot.kernelPackages.kernel.version;
+              kernelModDirVersion = awsPvmHostModuleEval.config.boot.kernelPackages.kernel.modDirVersion;
               modulePath = "${awsPvmHostKitPkg}${awsPvmHostKitPkg.passthru.modulePath}";
             }
           );

@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T22:15:43.123567370-07:00
+mode: manual
+---
+Verification:
+- A downstream `infra` reproduction against a clean copy of the current Port working tree used `nix build .#aws-pvm-amazon-image --no-link --override-input port path:/var/tmp/tmp.TazORPtGNg`.
+- That build no longer failed on `linux-port-pvm` with `modDirVersion 6.12.0-port-pvm ... should be 6.12.78`.
+- It progressed into the full AMI closure using the normal `linux-6.12.78` fallback kernel and only failed later in the Amazon image builder with `ERROR: cptofs failed. diskSize might be too small for closure.`, which is a separate downstream image-sizing issue.

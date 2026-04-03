@@ -1,0 +1,8 @@
+---
+recorded_at: 2026-04-02T22:15:43.185461160-07:00
+mode: manual
+---
+Verification:
+- `docs/aws.md` now documents the current downstream seam as direct Port flake import plus `infra image --env prod build-pvm-ami`, with `--override-input port path:/absolute/path/to/port` for local checkout validation.
+- `website/docs/path-to-production/aws.mdx` was updated to the same direct-flake handoff and no longer tells users to export the removed `INFRA_AWS_PVM_HOST_KIT_MODULE` path.
+- The AWS/PVM docs also now explain that the default kernel is a buildable Linux 6.12 fallback and that production images should override the kernel and Firecracker packages with concrete PVM-capable builds.

@@ -57,18 +57,29 @@ Port now exports that host contract directly for downstream image builders:
 - `port.nixosModules.aws-pvm-host`
 - `port.packages.x86_64-linux.firecracker-pvm-host-kit`
 
-Use that package output as the handoff into a downstream AMI pipeline:
+Downstream image builders should consume that module from their Port flake
+input directly:
 
 ```bash
-HOST_KIT=$(nix build github:spoke-sh/port#firecracker-pvm-host-kit --print-out-paths --no-link)
-export INFRA_AWS_PVM_HOST_KIT_MODULE="$HOST_KIT/share/port/nixos/aws-pvm-host.nix"
-
 infra image --env prod build-pvm-ami
+```
+
+When validating an unpublished Port checkout, override the flake input instead
+of inventing a second module-path seam:
+
+```bash
+nix build .#aws-pvm-amazon-image \
+  --override-input port path:/absolute/path/to/port
 ```
 
 That keeps the split clean: Port owns the host-kit module, manifest, boot-line
 contract, and canonical `firecracker-pvm` surface; downstream infra owns image
 build/import orchestration and AMI consumption.
+
+The exported module uses a buildable Linux 6.12 fallback kernel by default so
+the downstream image derivation can realize cleanly before the final PVM kernel
+is wired in. Production AMIs should still override the kernel and Firecracker
+package inputs with the concrete PVM-capable builds they intend to ship.
 
 The readiness bridge is explicit:
 

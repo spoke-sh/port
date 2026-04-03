@@ -103,6 +103,12 @@ derivations, override `port.awsPvmHost.kernelPackages` and
 `port.awsPvmHost.firecrackerPackage` rather than cloning the module into a
 downstream repo.
 
+The default `kernelPackages` value is intentionally a buildable Linux 6.12
+fallback so downstream AMI builds evaluate and realize cleanly. Treat that as
+the wiring seam, not as the final production PVM kernel. Production images
+should still override the kernel and Firecracker package inputs with the actual
+PVM-capable builds they intend to ship.
+
 ### 4. AWS Artifact Kit Contract
 
 The AWS PVM lane also needs dedicated guest artifacts:
@@ -132,14 +138,28 @@ surface.
 
 ### Downstream AMI Handoff
 
-The supported downstream seam is now "consume Port's module output", not
+The supported downstream seam is now "import Port as a flake input", not
 "author a repo-local replacement module":
 
-```bash
-HOST_KIT=$(nix build github:spoke-sh/port#firecracker-pvm-host-kit --print-out-paths --no-link)
-export INFRA_AWS_PVM_HOST_KIT_MODULE="$HOST_KIT/share/port/nixos/aws-pvm-host.nix"
+```nix
+{
+  inputs.port.url = "github:spoke-sh/port";
+}
+```
 
+Downstream `infra` can then build its AMI against the exported
+`port.nixosModules.aws-pvm-host` surface directly:
+
+```bash
 infra image --env prod build-pvm-ami
+```
+
+When you need to test a local Port checkout before pushing it, override the
+flake input instead of threading a second module path:
+
+```bash
+nix build .#aws-pvm-amazon-image \
+  --override-input port path:/absolute/path/to/port
 ```
 
 That keeps responsibility split cleanly:

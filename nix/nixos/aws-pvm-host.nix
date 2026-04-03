@@ -7,14 +7,7 @@
 let
   hostKit = import ./aws-pvm-host-kit-contract.nix;
   cfg = config.port.awsPvmHost;
-  contractKernelPackages = pkgs.linuxPackagesFor (
-    pkgs.linux_6_12.override {
-      argsOverride = {
-        pname = "linux-port-pvm";
-        modDirVersion = hostKit.package.host_kernel_release;
-      };
-    }
-  );
+  fallbackKernelPackages = pkgs.linuxPackages_6_12;
   hostKitPackage = pkgs.callPackage ../firecracker-pvm-host-kit.nix {
     firecracker = cfg.firecrackerPackage;
   };
@@ -31,12 +24,12 @@ in
 
     kernelPackages = lib.mkOption {
       type = lib.types.raw;
-      default = contractKernelPackages;
+      default = fallbackKernelPackages;
       description = ''
-        Kernel package set used for the AWS PVM host contract. Override this
-        with the concrete PVM-capable kernel derivation used by your image
-        pipeline; the default preserves Port's canonical kernel release
-        identity and boot-line contract.
+        Kernel package set used for the AWS PVM host contract. The default is a
+        buildable Linux 6.12 fallback so downstream NixOS image builds can
+        evaluate and realize cleanly; override this with the concrete
+        PVM-capable kernel derivation used by your image pipeline.
       '';
     };
 
