@@ -1,0 +1,20 @@
+Acceptance criterion: SRS-02/AC-02
+
+Verified on 2026-04-02.
+
+Evidence:
+- `docs/aws.md:47-69` explains the AWS host-kit and artifact-kit contract in
+  operational terms, including `pti=off`, patched `firecracker-pvm`, and
+  dedicated `x86_64/firecracker/pvm` variants.
+- `docs/aws.md:84-123` publishes the canonical operator flow with
+  `port doctor`, artifact validation, `port control-plane prepare-pvm-node`,
+  and `port machine launch/status/stop`.
+- `CONFIGURATION.md:82-164` shows the concrete AWS hosted PVM config shape for
+  `aws-linux`, `aws-linux-node`, `cloud-aws`, the `pvm_lanes.host_kit`
+  contract, and the no-fallback rules.
+- `website/docs/path-to-production/aws.mdx:44-81` mirrors the same operational
+  story for public docs with the prepare step and launch/status/stop commands.
+
+Conclusion:
+- The docs now explain the AWS `x86_64` hosted Firecracker/PVM lane as an
+  operator workflow rather than as scattered proof notes.

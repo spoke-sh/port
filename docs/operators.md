@@ -7,11 +7,21 @@ the human-reviewable cluster proof, while `port` remains the runtime surface
 that actually brings the cluster up, reports readiness, hands off kubeconfig,
 and tears it down.
 
+## Choose Your Starting Point
+
+- If you are evaluating a production-shaped AWS rollout, start with
+  [`aws.md`](aws.md). That is the clearest current cloud path and the canonical
+  hosted `x86_64` Firecracker/PVM narrative.
+- If you are proving the product locally first, start with the local cluster
+  slice in this guide.
+- If you are learning the hosted control-plane split before the prepared AWS
+  path, use [`hosted.md`](hosted.md).
+
 ## Platform Summary
 
 | Environment | Supported path |
 |-------------|----------------|
-| Linux | Local Firecracker, the first local cluster lifecycle slice, hosted control-plane demos, and the first SSH-managed remote lifecycle slice |
+| Linux | Local Firecracker, the first local cluster lifecycle slice, hosted control-plane demos, the first SSH-managed remote lifecycle slice, and the strongest current AWS `x86_64` hosted PVM path |
 | macOS | AVF local workflow through the same `machine` and `guest` verbs |
 | Windows | Linux-backed workflow through WSL or a remote Linux host |
 

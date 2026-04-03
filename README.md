@@ -15,8 +15,11 @@ It keeps one operator vocabulary across lanes:
 ## Current Shape
 
 - Default local lane: Firecracker with `standard` protection on Linux
-- Hosted lane: control plane plus node agent with the same `machine`, `guest`,
-  and `service` verbs
+- Hosted standard lane: control plane plus node agent with the same `machine`,
+  `guest`, and `service` verbs, plus the first live hosted proofs
+- Strongest current production-oriented cloud path: `cloud-aws` on a prepared
+  `aws-linux-node` using `x86_64` Firecracker/PVM through the hosted control
+  plane and node agent
 - SSH-managed remote lane: one bounded Linux lifecycle slice for `machine
   launch`, `status`, and `stop` through `mode = "ssh"` with explicit route and
   ownership output
@@ -29,6 +32,30 @@ It keeps one operator vocabulary across lanes:
   output
 - Additional proof-backed lanes: Cloud Hypervisor `standard`, AVF `standard`,
   and prepared-node Firecracker/PVM on `x86_64`
+
+## Production Posture
+
+If you need one cloud story to evaluate first, use the AWS hosted PVM path:
+
+- canonical machine: `cloud-aws`
+- canonical node: `aws-linux-node`
+- canonical lane: `x86_64` + `firecracker` + `pvm`
+- canonical readiness step: `port control-plane prepare-pvm-node`
+- canonical lifecycle: `port machine launch`, `status`, and `stop`
+
+What stays explicit:
+
+- hosted `standard` Firecracker remains the easiest way to prove the control
+  plane, node agent, guest, and service contract
+- AWS PVM is the stronger production-oriented narrative because it carries the
+  real prepared-host and no-fallback contract
+- Port still does not claim EC2 provisioning, IAM, VPC wiring, DNS, or arm64
+  Firecracker/PVM support
+
+Start with [`docs/aws.md`](docs/aws.md), then use
+[`CONFIGURATION.md`](CONFIGURATION.md),
+[`docs/hosted.md`](docs/hosted.md), and [`docs/pvm.md`](docs/pvm.md) for the
+deeper contract.
 
 ## Installation
 
@@ -68,6 +95,7 @@ port --config examples/port.toml machine list
 
 Use `examples/port.toml` for the checked-in repo workflow. Detailed config
 edits and longer examples now live in [`CONFIGURATION.md`](CONFIGURATION.md).
+The clearest AWS production-oriented path now lives in [`docs/aws.md`](docs/aws.md).
 The first local cluster workflow, thin downstream infra handoff, and proof
 command live in
 [`docs/operators.md`](docs/operators.md).
@@ -121,6 +149,15 @@ repo-level review surface:
 
 ## Documentation Map
 
+### Start Here
+
+| If you need... | Start here |
+|----------------|------------|
+| the strongest current cloud narrative | [`docs/aws.md`](docs/aws.md) |
+| the public narrative site | [`website/docs/path-to-production/aws.mdx`](website/docs/path-to-production/aws.mdx) |
+| the local-first operator path | [`docs/operators.md`](docs/operators.md) |
+| installation and support matrix | [`docs/install.md`](docs/install.md) |
+
 ### Root Contracts
 
 | Document | Purpose |
@@ -137,12 +174,13 @@ repo-level review surface:
 
 | Document | Purpose |
 |----------|---------|
+| [`docs/aws.md`](docs/aws.md) | Canonical AWS deployment and hosted PVM production contract |
 | [`docs/operators.md`](docs/operators.md) | Operator-oriented overview and platform guidance |
 | [`docs/install.md`](docs/install.md) | Installable release contract, support matrix, and package boundaries |
 | [`docs/hosted.md`](docs/hosted.md) | Hosted control-plane, node-agent, and service workflows |
-| [`docs/cloud.md`](docs/cloud.md) | Cloud-provider and hosted-lane boundaries |
+| [`docs/cloud.md`](docs/cloud.md) | Cloud-provider matrix, standard hosted lane, and secondary cloud boundaries |
 | [`docs/artifacts.md`](docs/artifacts.md) | Artifact references, variants, and backends |
-| [`docs/pvm.md`](docs/pvm.md) | Firecracker/PVM host-kit and artifact-kit contract |
+| [`docs/pvm.md`](docs/pvm.md) | Firecracker/PVM host-kit and artifact-kit contract behind the AWS lane |
 | [`docs/avf.md`](docs/avf.md) | Apple Virtualization Framework lane |
 | [`docs/sdk.md`](docs/sdk.md) | Hosted SDK and typed client surface |
 

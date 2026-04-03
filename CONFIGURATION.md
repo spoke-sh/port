@@ -65,6 +65,104 @@ Each machine picks:
 - a substrate/protection combination
 - any lane-specific routing detail
 
+## Deployment Paths
+
+The same config model supports several execution paths, but they do not all
+carry the same operational weight.
+
+| Path | Canonical machine | What it proves |
+|------|-------------------|----------------|
+| Local Firecracker `standard` | `demo` | Direct local runtime ownership and the default Linux operator lane |
+| Hosted Firecracker `standard` | `cloud-aws` with `protection_mode = "standard"` | Live hosted control-plane/node-agent routing and the canonical hosted guest/service surface |
+| Hosted AWS Firecracker/PVM | `cloud-aws` with `protection_mode = "pvm"` | The strongest production-oriented AWS path with a prepared host kit, dedicated PVM artifacts, and no fallback to the standard lane |
+
+If you need the AWS production-oriented path, start with [`docs/aws.md`](docs/aws.md).
+The rest of this file explains the exact config shape behind it.
+
+### AWS Hosted PVM Production Shape
+
+The checked-in sample already contains the canonical AWS entities:
+
+- control plane: `demo`
+- host: `aws-linux`
+- node: `aws-linux-node`
+- machine: `cloud-aws`
+
+The sample keeps `cloud-aws` on `protection_mode = "standard"` so the hosted
+standard lane remains runnable out of the box. For the hosted AWS PVM contract,
+copy the sample config and switch only the AWS lane details you mean to harden:
+
+```toml
+[control_planes.demo]
+endpoint = "https://port.example.internal"
+audience = "port-hosted-demo"
+
+[control_planes.demo.auth]
+scheme = "bearer"
+header = "authorization"
+
+[control_planes.demo.auth.source]
+kind = "env"
+variable = "PORT_DEMO_TOKEN"
+
+[hosts.aws-linux]
+platform = "linux"
+provider = "aws"
+
+[hosts.aws-linux.connection]
+mode = "hosted-control-plane"
+control_plane = "demo"
+
+[nodes.aws-linux-node]
+host = "aws-linux"
+runtime_root = "runtime/hosted/aws-linux-node"
+
+[nodes.aws-linux-node.capabilities]
+providers = ["aws"]
+platforms = ["linux"]
+substrates = ["firecracker"]
+architectures = ["x86_64"]
+protection_modes = ["standard", "pvm"]
+
+[[nodes.aws-linux-node.capabilities.pvm_lanes]]
+architecture = "x86_64"
+state = "planned"
+
+[nodes.aws-linux-node.capabilities.pvm_lanes.host_kit]
+package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
+host_platform = "linux"
+host_architecture = "x86_64"
+requires_custom_host_kernel = true
+requires_patched_firecracker = true
+firecracker_binary_name = "firecracker-pvm"
+firecracker_binary_env = "PORT_PVM_FIRECRACKER_BINARY"
+host_boot_args = ["pti=off"]
+
+[machines.cloud-aws]
+host = "aws-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "pvm"
+architecture = "x86_64"
+```
+
+Read that shape with these rules:
+
+- `cloud-aws` is the canonical AWS operator surface; do not switch the proof to
+  `cloud-generic` when documenting or validating this path.
+- `aws-linux-node` may begin as `state = "planned"`, but the real hosted PVM
+  lane only becomes launchable after `port control-plane prepare-pvm-node`
+  imports the prepared host state.
+- kernel and guest-image selection must resolve dedicated
+  `x86_64/firecracker/pvm` variants.
+- failure must remain explicit. Missing host kit, missing imported readiness,
+  or missing PVM artifacts must not silently fall back to the standard lane.
+
+Use [`docs/aws.md`](docs/aws.md) for the full operator narrative and
+[`docs/pvm.md`](docs/pvm.md) for the low-level host-kit and artifact-kit
+contract.
+
 ### Hosted K3s Clusters
 
 The first K3s slice adds one explicit hosted cluster catalog instead of a new

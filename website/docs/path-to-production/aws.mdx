@@ -1,20 +1,21 @@
 ---
 title: AWS Path To Production
-description: Follow Port’s clearest current cloud narrative from local proof to an AWS-shaped hosted rollout.
+description: Follow Port’s strongest current cloud narrative from local proof to the hosted AWS x86_64 Firecracker/PVM lane.
 ---
 
 # AWS Path To Production
 
 AWS is the clearest current public cloud narrative for Port because the
 repository already ships a concrete hosted machine identity (`cloud-aws`), node
-identity (`aws-linux-node`), host group (`aws-builders`), and an external
-project proof path that routes through the hosted control plane.
+identity (`aws-linux-node`), host group (`aws-builders`), and a provider-backed
+hosted PVM runtime contract.
 
 ## The Narrative In One Sentence
 
-Prove the workload locally, stand up the hosted control plane, register an AWS
-Linux node, launch `cloud-aws`, then use Port’s guest and service surfaces to
-publish the application without changing the operator vocabulary.
+Prove the workload locally, stand up the hosted control plane, prepare an AWS
+Linux `x86_64` node for Firecracker/PVM, import that readiness with
+`port control-plane prepare-pvm-node`, then use the same `port machine launch`,
+`status`, and `stop` verbs against `cloud-aws`.
 
 ## Phase 1: Prove The Contract Locally
 
@@ -24,8 +25,8 @@ ownership model across multiple machines.
 
 ## Phase 2: Stand Up The Hosted Shape
 
-The first live hosted loop uses the same sample config and one token-driven
-control-plane contract:
+The AWS PVM lane still uses the same hosted split as the simpler standard lane:
+one control plane and one node agent, with the same token-driven contract.
 
 ```bash
 export PORT_DEMO_TOKEN=demo-token
@@ -40,52 +41,83 @@ PORT_DEMO_TOKEN=demo-token port --config examples/port.toml node-agent serve \
   --token node-secret
 ```
 
-## Phase 3: Launch The AWS-Shaped Machine
+## Phase 3: Prepare The AWS PVM Lane
 
-Once the node is registered and the standard artifacts are available, the
-canonical machine lifecycle stays simple:
+The stronger AWS path depends on a stricter runtime contract:
+
+- Linux `x86_64` host
+- custom host kernel for the PVM lane
+- host boot args including `pti=off`
+- patched `firecracker-pvm`
+- dedicated `x86_64/firecracker/pvm` kernel and guest-image variants
+- imported readiness that marks `aws-linux-node` as ready for the PVM lane
+
+The readiness bridge is explicit:
 
 ```bash
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine launch --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine status --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token port --config examples/port.toml machine stop --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml control-plane prepare-pvm-node \
+  --control-plane demo \
+  --node aws-linux-node \
+  --architecture x86-64 \
+  --provenance repo-proof \
+  --package-name firecracker-pvm-host-kit \
+  --package-version 2026.03 \
+  --host-kernel-release 6.12.0-port-pvm \
+  --firecracker-build v1.12.0-port-pvm
+```
+
+That command is the difference between a modeled AWS node and a node that Port
+is willing to treat as ready for the hosted PVM lane.
+
+## Phase 4: Launch The Canonical AWS Machine
+
+Once the host kit, imported readiness, and PVM artifacts are in place, the
+canonical lifecycle stays simple:
+
+```bash
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine stop --machine cloud-aws
 ```
 
 That is the key Port promise: the control plane changes the ownership model,
 not the meaning of the operator verbs.
 
-## Phase 4: Prove An Application Path
+## Phase 5: Keep The Application Proof Honest
 
-For the repo’s current hosted application proof, use:
+Port’s strongest current AWS story is a runtime contract first. The checked-in
+hosted external-project proof remains useful, but it demonstrates the simpler
+hosted standard lane rather than the stricter PVM lane:
 
 ```bash
 bash scripts/hosted-external-project-demo.sh
 ```
 
-That workflow keeps the app-hosting contract explicit:
-
-- one hosted machine
-- one hosted node
-- one staged project snapshot
-- one Port-managed guest/service path
-- one host-side `curl` proving the payload is reachable
+That is still valuable because it proves the hosted guest and service surfaces,
+but it should not be mistaken for the full AWS PVM contract.
 
 ## What “Production” Means Here
 
-For Port today, an AWS production path means:
+For Port today, an AWS production-shaped path means:
 
 - Linux execution hosts are real and explicit
 - the hosted control plane is the system of record for remote lifecycle
 - the node agent owns the hypervisor processes on the selected AWS host
-- artifacts are built and validated before launch
-- proof exists that the application can be reached from outside the guest
+- the host kit and artifact kit are both explicit
+- proof exists that `cloud-aws` launches through the hosted PVM lane without
+  fallback to the standard hosted lane
 
-It does **not** mean that Port already ships a full multi-tenant platform,
-autoscaling story, or broad cloud-provider abstraction layer.
+It does **not** mean that Port already ships EC2 provisioning, IAM, VPC wiring,
+DNS, autoscaling, or a broad multi-provider PVM abstraction layer.
 
 ## Boundaries To Keep Explicit
 
-- this is the hosted `standard` Firecracker lane, not the PVM lane
+- this is the hosted AWS `x86_64` Firecracker/PVM lane
+- the simpler hosted `standard` Firecracker lane still exists and is useful,
+  but it is not the strongest production-oriented AWS path
+- `cloud-generic` is not the canonical AWS proof surface
+- GCP and Azure do not inherit the AWS PVM contract
+- arm64 Firecracker/PVM remains research-only
 - scheduler and broader fleet-policy work remain follow-on scope
 - cloud networking, storage, and higher-level platform guarantees still need
   provider-specific hardening above the first Port proof path

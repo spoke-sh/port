@@ -26,6 +26,20 @@ port CLI / port-sdk
           +------ guest agent ---+
 ```
 
+## Current Production Posture
+
+Port's execution hierarchy is intentionally uneven today:
+
+| Posture | Why it exists |
+|--------|----------------|
+| Local Firecracker `standard` | Default Linux lane for direct proof and operator workflow development |
+| Hosted Firecracker `standard` | Proves the live hosted control-plane/node-agent split and keeps guest/service verbs canonical |
+| Hosted AWS `x86_64` Firecracker/PVM | Strongest production-oriented cloud path because it carries the prepared-host, artifact-kit, and no-fallback contract |
+
+If you are evaluating Port for a production-shaped AWS rollout, start with
+[`docs/aws.md`](docs/aws.md). This file explains the component boundaries; the
+AWS guide explains how those boundaries come together operationally.
+
 ## Major Boundaries
 
 ### CLI And SDK
@@ -70,7 +84,7 @@ port CLI / port-sdk
 | Lane | Current role |
 |------|--------------|
 | Firecracker `standard` | Default local Linux lane |
-| Firecracker `pvm` on `x86_64` | Prepared-node hosted lane with explicit host-kit contract |
+| Firecracker `pvm` on `x86_64` | Prepared-node hosted AWS lane and strongest production-oriented cloud contract |
 | Cloud Hypervisor `standard` | Proof-backed local and hosted lane |
 | AVF `standard` | Proof-backed local macOS lane |
 
@@ -101,6 +115,8 @@ Top-level docs are intentionally split by role:
 
 - root docs define stable contracts such as configuration, architecture,
   release, and evaluations
-- focused docs cover a specific lane or subsystem
+- focused docs cover a specific lane or subsystem, with
+  [`docs/aws.md`](docs/aws.md) now acting as the canonical deployment narrative
+  for AWS hosted PVM
 - `port --help` and the README stay concise and link outward instead of
   duplicating long workflows

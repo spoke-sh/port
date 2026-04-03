@@ -169,6 +169,12 @@
 |--------|--------|
 | [Upstream Shell Driver Contract](epics/VFgtgGWoh/voyages/VFgu7Bp7V/) | done |
 
+### [AWS PVM Production Documentation Contract](epics/VFhICYohO/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Foundational AWS PVM Docs Refresh](epics/VFhICYohO/voyages/VFhIVMVEF/) | done |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |

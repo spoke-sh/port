@@ -1,0 +1,21 @@
+Acceptance criterion: SRS-01/AC-01
+
+Verified on 2026-04-02.
+
+Evidence:
+- `README.md:36-58` adds one explicit "Production Posture" section that names
+  the AWS hosted PVM lane as the first cloud story and points readers to
+  `docs/aws.md` for the deeper contract.
+- `README.md:150-185` simplifies the documentation map so `docs/aws.md` is the
+  first cloud entry in both "Start Here" and "Focused Guides".
+- `ARCHITECTURE.md:29-41` now names hosted AWS `x86_64` Firecracker/PVM as the
+  strongest production-oriented cloud posture and tells readers to start with
+  `docs/aws.md`.
+- `CONFIGURATION.md:68-80` makes the deployment-path table explicit and directs
+  AWS production readers to `docs/aws.md` before the lower-level config detail.
+- `docs/operators.md:10-18` adds a start-point section that routes production
+  AWS readers directly to `docs/aws.md`.
+
+Conclusion:
+- Foundational docs now direct readers through one canonical AWS production
+  path instead of leaving the contract scattered across repeated summaries.

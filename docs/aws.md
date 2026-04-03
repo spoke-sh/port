@@ -1,0 +1,183 @@
+# AWS Production Contract
+
+Port's clearest production-oriented cloud narrative today is the hosted AWS
+`x86_64` Firecracker/PVM lane, not the broader hosted standard demo lane.
+
+That contract is intentionally narrow:
+
+- canonical machine: `cloud-aws`
+- canonical node: `aws-linux-node`
+- canonical lane: `x86_64` + `firecracker` + `pvm`
+- canonical readiness step: `port control-plane prepare-pvm-node`
+- canonical lifecycle: `port machine launch`, `port machine status`, and
+  `port machine stop`
+
+If you need one document to answer "what is Port's strongest AWS deployment
+story?", start here.
+
+## Choose The Lane Deliberately
+
+Port now has two different AWS-shaped hosted narratives, and they should not be
+treated as equivalent.
+
+| AWS lane | What it is for | What must be true | What it is not |
+|----------|----------------|-------------------|----------------|
+| Hosted Firecracker `standard` | Proving the live control-plane/node-agent split, the hosted guest/service contract, and repo-local application proofs | a registered hosted node, standard artifacts, hosted control plane, node agent | the strongest production-oriented cloud contract |
+| Hosted Firecracker `pvm` on `x86_64` | Hardening a provider-specific AWS deployment path around a prepared node and no-fallback runtime contract | prepared AWS host kit, dedicated PVM artifacts, imported ready PVM lane, hosted control plane, node agent | EC2 provisioning, IAM, VPC, DNS, or a generic multi-provider promise |
+
+The `standard` lane still matters. It proves the hosted control-plane split and
+keeps the guest/service model honest. The PVM lane matters because it is the
+place where Port's AWS story becomes specific enough to read like production
+infrastructure instead of a generic hosted demo.
+
+## What Must Be True
+
+### 1. Hosted Control Plane Contract
+
+Port still uses the same hosted split:
+
+- a named control plane owns hosted lifecycle intent and inventory
+- a node agent owns the runtime root and hypervisor processes on the AWS host
+- the CLI and SDK keep the same `machine`, `guest`, and `service` verbs
+
+In a repo-local proof those roles run via `port control-plane serve` and
+`port node-agent serve`. In a deployed environment those roles would run
+persistently, but the Port contract stays the same.
+
+### 2. AWS Host Kit Contract
+
+The AWS node must satisfy the PVM host kit before the lane is honest:
+
+- Linux `x86_64`
+- custom PVM-capable host kernel
+- host boot line includes `pti=off`
+- patched `firecracker-pvm` binary
+- imported readiness advertising the node as `ready` for the AWS PVM lane
+
+Port should treat those as blocking requirements, not hints.
+
+### 3. AWS Artifact Kit Contract
+
+The AWS PVM lane also needs dedicated guest artifacts:
+
+- kernel selector: `x86_64/firecracker/pvm`
+- guest-image selector: `x86_64/firecracker/pvm`
+- no reuse of the `standard` Firecracker artifact variants
+
+This is the operational reason the AWS PVM lane is stronger than the generic
+hosted standard lane: the runtime, the host kit, and the artifacts are all
+explicitly bound together.
+
+### 4. Canonical Machine And Node Identities
+
+The checked-in sample already names the production-oriented AWS path:
+
+- host: `aws-linux`
+- node: `aws-linux-node`
+- machine: `cloud-aws`
+- host group: `aws-builders`
+
+Keep those identities explicit in the docs and in operator workflows. The
+generic hosted node remains useful as a denial path, not as the canonical AWS
+surface.
+
+## Canonical Workflow
+
+Start from a copy of `examples/port.toml` and harden only the AWS path:
+
+1. Keep `[control_planes.demo]` pointed at the hosted control plane you will
+   use.
+2. Switch `[machines.cloud-aws].protection_mode` to `pvm`.
+3. Switch `[machines.cloud-aws].architecture` to `x86_64` when the deployment
+   config should be explicit instead of `native`.
+4. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
+   prepared artifact paths available to `aws-linux-node`.
+5. Export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm`
+   binary on the AWS execution host.
+
+Canonical operator flow:
+
+```bash
+port --config /tmp/port-aws-pvm.toml doctor
+port --config /tmp/port-aws-pvm.toml artifacts validate --artifact demo-kernel --architecture x86-64 --substrate firecracker --protection-mode pvm
+port --config /tmp/port-aws-pvm.toml artifacts validate --artifact demo-guest --architecture x86-64 --substrate firecracker --protection-mode pvm
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
+PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine launch --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine status --machine cloud-aws
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine stop --machine cloud-aws
+```
+
+Interpret those commands this way:
+
+- `port doctor` validates that the selected config is trying to use the PVM
+  lane rather than silently drifting back to `standard`
+- artifact validation proves the required PVM variants exist before launch
+- `prepare-pvm-node` is the readiness bridge between a planned node and a real
+  prepared AWS host
+- `machine launch/status/stop` remain the canonical operator verbs even though
+  the ownership model is hosted
+
+## Failure Surfaces Must Stay Honest
+
+The AWS PVM path is only useful if failures stay provider-aware and explicit.
+
+Expect these to fail fast:
+
+- missing imported readiness for `aws-linux-node`
+- missing PVM host kernel or missing `pti=off`
+- missing patched `firecracker-pvm`
+- missing `x86_64/firecracker/pvm` kernel or guest-image variants
+- attempts to treat `cloud-generic`, GCP, or Azure as equivalent to the AWS PVM
+  contract
+
+What must never happen:
+
+- silent fallback from AWS `pvm` to AWS `standard`
+- silent fallback from AWS to generic hosted placement
+- accidental documentation drift that turns arm64 Firecracker/PVM into an
+  implied promise
+
+## Repo-Local Proof Versus Production Contract
+
+Port's repo-local proof still matters, but it is not the whole production
+story.
+
+Repo-local proof gives you:
+
+- the real command family
+- the real lane identities
+- the real readiness import step
+- human-reviewable evidence that `cloud-aws` launches through the hosted PVM
+  path
+
+It does not mean Port already ships:
+
+- EC2 instance provisioning
+- IAM setup
+- VPC or load-balancer automation
+- DNS management
+- downstream GitOps or application rollout policy
+
+Port owns the runtime contract. The surrounding AWS platform is still explicit
+follow-on scope.
+
+## Boundaries To Keep Explicit
+
+- AWS hosted PVM is `x86_64` only today
+- arm64 Firecracker/PVM remains research-only
+- GCP and Azure do not inherit the AWS PVM contract
+- hosted Firecracker `standard` still exists and remains useful as the simpler
+  hosted proof path
+
+## Related Docs
+
+- [`README.md`](../README.md) for the top-level product posture and doc map
+- [`CONFIGURATION.md`](../CONFIGURATION.md) for the config shape behind this lane
+- [`docs/hosted.md`](hosted.md) for control-plane and node-agent ownership
+- [`docs/cloud.md`](cloud.md) for the wider provider and lane matrix
+- [`docs/pvm.md`](pvm.md) for the low-level host-kit and artifact-kit contract

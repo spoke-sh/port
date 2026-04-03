@@ -1,0 +1,21 @@
+Acceptance criterion: SRS-NFR-01/AC-05
+
+Verified on 2026-04-02.
+
+Evidence:
+- `README.md:150-185` reduces navigation sprawl by grouping docs into "Start
+  Here", "Root Contracts", and "Focused Guides", with `docs/aws.md` acting as
+  the canonical AWS entry point.
+- `docs/hosted.md:7-10` and `docs/hosted.md:113-126` now point AWS production
+  readers to `docs/aws.md` instead of duplicating the full operator narrative.
+- `docs/cloud.md:8-14` turns the cloud guide into a lane matrix with explicit
+  links to `aws.md`, `hosted.md`, and `pvm.md`.
+- `docs/pvm.md:7-9` narrows the PVM guide to the host-kit and artifact-kit
+  contract and sends operator readers to `docs/aws.md`.
+- `website/docs/reference/foundational-docs.mdx:11-25` adds `docs/aws.md` to
+  the foundational-doc reference list so the public site points back at the
+  same canonical doc.
+
+Conclusion:
+- The refreshed docs reduce duplication and improve navigation through
+  deliberate cross-links around the AWS/PVM path.

@@ -1,0 +1,23 @@
+Acceptance criterion: SRS-03/AC-03
+
+Verified on 2026-04-02.
+
+Evidence:
+- `docs/aws.md:18-31` draws a direct comparison between the hosted
+  Firecracker `standard` lane and the hosted Firecracker `pvm` lane on
+  `x86_64`, including what each path is for and what each one is not.
+- `docs/aws.md:145-167` separates repo-local proof from the production
+  contract, keeping the proof useful without letting it stand in for EC2, IAM,
+  VPC, DNS, or rollout policy.
+- `docs/cloud.md:69-110` keeps the hosted standard workflow visible as the
+  simpler proof lane, while explicitly routing AWS PVM readers to `docs/aws.md`
+  for the stronger production-oriented path.
+- `docs/hosted.md:113-138` explains that AWS PVM reuses the same hosted split
+  as the standard lane but with stricter requirements.
+- `website/docs/path-to-production/aws.mdx:86-97` keeps the hosted external
+  project proof visible while stating that it demonstrates the simpler hosted
+  standard lane rather than the stricter PVM lane.
+
+Conclusion:
+- The refreshed docs distinguish the AWS PVM lane from the hosted standard lane
+  and from repo-local proof harnesses without hiding those secondary surfaces.

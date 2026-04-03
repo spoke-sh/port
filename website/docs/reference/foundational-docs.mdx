@@ -16,12 +16,13 @@ contract-first source of truth.
 | [`ARCHITECTURE.md`](https://github.com/spoke-sh/port/blob/main/ARCHITECTURE.md) | System boundaries, major components, and ownership model |
 | [`CONFIGURATION.md`](https://github.com/spoke-sh/port/blob/main/CONFIGURATION.md) | Config model, environment variables, and detailed workflow examples |
 | [`RELEASE.md`](https://github.com/spoke-sh/port/blob/main/RELEASE.md) | Release process and packaging expectations |
+| [`docs/aws.md`](https://github.com/spoke-sh/port/blob/main/docs/aws.md) | Canonical AWS deployment narrative and hosted x86_64 Firecracker/PVM production posture |
 | [`docs/install.md`](https://github.com/spoke-sh/port/blob/main/docs/install.md) | Installable package contract and support matrix |
 | [`docs/operators.md`](https://github.com/spoke-sh/port/blob/main/docs/operators.md) | Operator-focused overview, local cluster contract, and hybrid execution guidance |
 | [`docs/hosted.md`](https://github.com/spoke-sh/port/blob/main/docs/hosted.md) | Hosted control plane, node agent, and lifecycle ownership contract |
-| [`docs/cloud.md`](https://github.com/spoke-sh/port/blob/main/docs/cloud.md) | Cloud-provider boundaries, Linux support matrix, and hosted standard-lane details |
+| [`docs/cloud.md`](https://github.com/spoke-sh/port/blob/main/docs/cloud.md) | Cloud-provider boundaries, Linux support matrix, and the wider provider/lane matrix around AWS PVM |
 | [`docs/avf.md`](https://github.com/spoke-sh/port/blob/main/docs/avf.md) | Apple Virtualization Framework contract |
-| [`docs/pvm.md`](https://github.com/spoke-sh/port/blob/main/docs/pvm.md) | Firecracker PVM lane and its explicit host-kit requirements |
+| [`docs/pvm.md`](https://github.com/spoke-sh/port/blob/main/docs/pvm.md) | Firecracker PVM host-kit and artifact-kit contract behind the AWS lane |
 | [`docs/sdk.md`](https://github.com/spoke-sh/port/blob/main/docs/sdk.md) | Hosted SDK and API client surface |
 
 ## Why The Site And Root Docs Both Exist
@@ -30,7 +31,7 @@ The public docs site helps a new operator answer:
 
 - where should I start?
 - what is the current local path?
-- what is the current cloud path?
+- what is the strongest current cloud path?
 - what should I do on Linux, macOS, or Windows?
 
 The root docs answer the more exact questions:

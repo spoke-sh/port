@@ -1,0 +1,10 @@
+# COMPLIANCE REPORT: Foundational AWS PVM Docs Refresh
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [VFhIjGbxm](../../../../stories/VFhIjGbxm/README.md) | [ac-1.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-6.log) |
+| SRS-02 | ✓ VERIFIED | [VFhIjGbxm](../../../../stories/VFhIjGbxm/README.md) | [ac-1.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-6.log) |
+| SRS-03 | ✓ VERIFIED | [VFhIjGbxm](../../../../stories/VFhIjGbxm/README.md) | [ac-1.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-6.log) |
+| SRS-04 | ✓ VERIFIED | [VFhIjGbxm](../../../../stories/VFhIjGbxm/README.md) | [ac-1.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-4.log)<br>[ac-5.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-5.log)<br>[ac-6.log](../../../../stories/VFhIjGbxm/EVIDENCE/ac-6.log) |

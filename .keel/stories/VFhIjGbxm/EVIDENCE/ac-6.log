@@ -1,0 +1,28 @@
+Acceptance criterion: SRS-NFR-02/AC-06
+
+Verified on 2026-04-02.
+
+Evidence:
+- `README.md:36-58` and `docs/aws.md:3-16` describe the same foundational
+  posture: AWS hosted `x86_64` Firecracker/PVM is the strongest current
+  production-oriented cloud path.
+- `website/docs/path-to-production/overview.mdx:27-44` matches that posture in
+  the public docs by naming hosted AWS `x86_64` Firecracker/PVM as the
+  strongest current cloud narrative and by keeping the hosted standard lane as
+  the simpler proof path.
+- `website/docs/path-to-production/aws.mdx:15-123` matches the foundational
+  docs on the prepare step, canonical `cloud-aws` machine lifecycle, explicit
+  host-kit and artifact-kit requirements, and hard boundaries.
+- `website/docs/reference/foundational-docs.mdx:15-25` now lists `docs/aws.md`
+  as the canonical foundational contract for the AWS deployment story.
+
+Build verification:
+- `nix develop -c npm run build` in `website/` succeeded on 2026-04-02.
+- Terminal result:
+  > port-website@0.0.0 build
+  > docusaurus build
+  [SUCCESS] Generated static files in "build".
+
+Conclusion:
+- Public docs and foundational docs now describe the same AWS production
+  posture and boundaries, and the Docusaurus site builds successfully.

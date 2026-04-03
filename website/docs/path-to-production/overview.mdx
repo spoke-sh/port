@@ -26,17 +26,22 @@ That is why this site puts the local narrative first.
 
 ## Strongest Current Cloud Narrative
 
-The clearest public path today is the hosted standard lane on Linux-backed AWS
-or GCP nodes:
+The clearest public path today is the hosted AWS `x86_64` Firecracker/PVM lane
+on a prepared node:
 
 - `port control-plane serve` owns the hosted API shape
 - `port node-agent serve` owns execution on the selected host
-- `port machine launch`, `status`, and `stop` stay canonical
-- the external-project proof demonstrates a minimal hosted application flow
+- `port control-plane prepare-pvm-node` is the readiness bridge between a
+  planned node and a real prepared AWS host
+- `port machine launch`, `status`, and `stop` stay canonical for `cloud-aws`
+- the surrounding host-kit, artifact-kit, and no-fallback contract is what
+  makes this path more production-shaped than the simpler hosted standard lane
 
-Azure remains an explicit planning boundary for the Firecracker MVP. This site
-still gives Azure a narrative track so teams can plan honestly, but it does not
-pretend that the current hosted lane is already shipped there.
+The hosted standard lane still matters because it is the simpler proof of the
+control-plane and node-agent split. Azure remains an explicit planning boundary
+for the Firecracker MVP. This site still gives Azure a narrative track so teams
+can plan honestly, but it does not pretend that the current hosted lane is
+already shipped there.
 
 ## The Production Checklist
 
@@ -52,7 +57,8 @@ of these clearly:
 
 ## Choose Your Provider Track
 
-- [AWS](./aws.mdx) if you want the strongest current hosted narrative
+- [AWS](./aws.mdx) if you want the strongest current hosted narrative and the
+  clearest production-oriented path
 - [GCP](./gcp.mdx) if your provider decision is already on Google Cloud but you
   want the same Port operating model
 - [Azure](./azure.mdx) if you need an honest boundary doc for a provider that

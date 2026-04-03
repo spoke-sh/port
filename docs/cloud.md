@@ -1,16 +1,17 @@
 # Cloud Linux Support
 
-Port's cloud Linux story is now split across provider identity and execution
-lane. The current shipped Linux execution surface spans four proof-backed
-paths: Firecracker with `standard` protection, the first SSH-managed remote
-Linux lifecycle slice, prepared-node Firecracker/PVM on `x86_64`, and Cloud
-Hypervisor with `standard` protection. The shared model still represents
-follow-on or research-backed lanes beyond that shipped set.
+Port's cloud Linux story is intentionally layered. The strongest
+production-oriented path today is the hosted AWS `x86_64` Firecracker/PVM lane
+on a prepared node. This file exists to explain the wider provider and lane
+matrix around that path.
 
-The hosted control-plane split that will eventually carry these remote lanes is
-defined in [`docs/hosted.md`](hosted.md).
-The dedicated Firecracker/PVM host-kit contract lives in [`pvm.md`](pvm.md).
-The dedicated AVF macOS contract lives in [`avf.md`](avf.md).
+Use the focused docs this way:
+
+- [`aws.md`](aws.md) for the canonical AWS deployment narrative
+- [`hosted.md`](hosted.md) for the hosted control-plane and node-agent split
+- [`pvm.md`](pvm.md) for the low-level Firecracker/PVM host-kit and artifact-kit
+  contract
+- [`avf.md`](avf.md) for the macOS AVF lane
 
 `port doctor` reports both provider-aware and lane-aware support boundaries, and
 `port machine launch` fails fast only when you target a lane that Port still
@@ -59,8 +60,8 @@ Attached volume support is narrower than the remote execution story:
 
 | Lane | Architectures | Current status | Notes |
 |------|---------------|----------------|-------|
-| Firecracker + `standard` | `x86_64`, `aarch64`, `native` | Supported today | The only shipped execution lane behind the current Linux launch workflow |
-| Firecracker + `pvm` | `x86_64` | Hosted / partial | Strategic lane for cloud cost control; requires a prepared host kit, dedicated artifact variants, and the hosted control-plane plus node-agent path |
+| Firecracker + `standard` | `x86_64`, `aarch64`, `native` | Supported today | Default local Linux lane and the simpler hosted cloud proof lane |
+| Firecracker + `pvm` | `x86_64` | Supported today on prepared AWS hosted nodes | Strongest production-oriented cloud lane; requires a prepared host kit, dedicated artifact variants, imported readiness, and the hosted control-plane plus node-agent path |
 | Firecracker + `pvm` | `aarch64` | Research lane | Upstream protected virtualization exists, but Port does not yet claim a supportable Firecracker runtime path |
 | Cloud Hypervisor + `standard` | `x86_64`, `aarch64` | Local + hosted / partial | Lifecycle and guest flows now reuse the canonical machine and guest verbs through the local driver boundary and the hosted control-plane plus node-agent path |
 | AVF + `standard` | macOS `arm64` or `x86_64` | Local / partial | First-class macOS lane; keeps the canonical guest protocol over AVF virtio sockets and console capture over AVF serial ports |
@@ -71,13 +72,14 @@ Attached volume support is narrower than the remote execution story:
 |----------------|--------------|-----------------|------------|----------------------|
 | `local` | `local` | `demo` | Supported | `port doctor` runs full local preflight and `port machine launch --machine demo` can boot Firecracker on Linux |
 | `generic-linux` | `generic-linux` | `cloud-generic` | Hosted standard lane / partial implementation | `port doctor` reports provider and lane detail; with `port control-plane serve`, a registered `generic-linux-node`, and standard artifacts, `port machine launch --machine cloud-generic` routes through the hosted control plane and selected node |
-| `aws` | `aws-linux` | `cloud-aws` | Hosted standard lane / partial implementation | `port doctor` reports AWS readiness detail; with `port control-plane serve`, a registered `aws-linux-node`, and standard artifacts, `port machine launch --machine cloud-aws` routes through the hosted control plane and selected node |
+| `aws` | `aws-linux` | `cloud-aws` | Hosted standard plus hosted PVM | `port doctor` reports AWS readiness detail. With standard artifacts, `cloud-aws` can run the simpler hosted standard lane. When the config switches to `protection_mode = "pvm"` and `aws-linux-node` is prepared and imported as ready, the same `port machine launch --machine cloud-aws` command routes through the provider-backed AWS PVM lane instead of falling back |
 | `gcp` | `gcp-linux` | `cloud-gcp` | Hosted standard lane / partial implementation | `port doctor` reports GCP readiness detail; with `port control-plane serve`, a registered `gcp-linux-node`, and standard artifacts, `port machine launch --machine cloud-gcp` routes through the hosted control plane and selected node |
 | `azure` | `azure-linux` | `cloud-azure` | Unsupported for MVP | `port doctor` reports Azure as unsupported for Firecracker MVP and `port machine launch` rejects it immediately |
 
-## Remote Linux Workflow
+## Hosted Standard Cloud Workflow
 
-Use the hosted control-plane lane to run the shipped standard cloud workflow.
+Use this section for the simpler hosted standard cloud workflow. If you need
+the production-oriented AWS PVM path, start with [`aws.md`](aws.md) instead.
 
 1. Keep the canonical config explicit about provider identity, for example `provider = "aws"` on `hosts.aws-linux`. Remote/cloud hosts point at the named hosted control plane with `mode = "hosted-control-plane"` plus `control_plane = "demo"`.
 2. Run `port doctor --config examples/port.toml` on the Linux environment that will host the node agent and Firecracker execution.
@@ -186,11 +188,11 @@ Unsupported boundaries stay explicit:
 
 ## Hosted Mapping
 
-The planned hosted product uses the same command model, but with different
-runtime ownership:
+The hosted product uses the same command model, but with different runtime
+ownership:
 
 - `port machine list`, `status`, and `stop` are the local lifecycle surfaces
-  that a future hosted control plane will remote behind one canonical CLI
+  that the hosted control plane remotes behind one canonical CLI
   vocabulary.
 - Those lifecycle commands now publish the local control-contract fields
   directly: `local-runtime-root`, `local-port-runtime`,
@@ -207,12 +209,14 @@ The detailed hosted control contract lives in [`docs/hosted.md`](hosted.md).
 
 ## PVM Lane
 
-The PVM / protected VM / confidential VM lane is back in scope, but under an
-explicitly narrower contract than Port's overall architecture story:
+The PVM / protected VM / confidential VM lane is back in scope under an
+explicitly narrower contract than Port's overall architecture story.
 
-- Firecracker/PVM on `x86_64` is the near-term implementation lane.
-- That x86_64 lane depends on a prepared host kit: custom host kernel,
-  patched Firecracker build, `pti=off`, and dedicated PVM artifact variants.
+- Firecracker/PVM on `x86_64` is the strongest current cloud path, but only on
+  the prepared AWS hosted lane.
+- That AWS x86_64 lane depends on a prepared host kit: custom host kernel,
+  patched `firecracker-pvm`, `pti=off`, imported readiness, and dedicated PVM
+  artifact variants.
 - Firecracker/PVM on `aarch64` remains a research lane until Port has a
   supportable runtime path rather than only upstream protected-virtualization
   evidence.
@@ -220,8 +224,9 @@ explicitly narrower contract than Port's overall architecture story:
   protection-mode, or architecture combination that the current lane does not
   support yet.
 
-See [`pvm.md`](pvm.md) for the explicit host-kit, artifact-kit, validation, and
-follow-on implementation contract.
+See [`aws.md`](aws.md) for the operator narrative and [`pvm.md`](pvm.md) for
+the explicit host-kit, artifact-kit, validation, and follow-on implementation
+contract.
 
 The repo-local hosted AWS PVM proof command is:
 

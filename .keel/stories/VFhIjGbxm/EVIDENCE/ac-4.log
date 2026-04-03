@@ -1,0 +1,22 @@
+Acceptance criterion: SRS-04/AC-04
+
+Verified on 2026-04-02.
+
+Evidence:
+- `docs/aws.md:125-143` makes failure surfaces explicit: missing imported
+  readiness, missing PVM host kernel, missing `pti=off`, missing patched
+  `firecracker-pvm`, missing PVM artifact variants, and no silent fallback.
+- `docs/aws.md:169-175` keeps the hard boundaries explicit: AWS hosted PVM is
+  `x86_64` only, arm64 remains research-only, and GCP/Azure do not inherit the
+  AWS PVM contract.
+- `docs/pvm.md:51-52` states that missing host kit should fail fast.
+- `docs/pvm.md:155-177` preserves provider-aware denial behavior for
+  `cloud-generic`, canonical AWS behavior for `cloud-aws`, explicit artifact
+  and host-kit failure posture, and no GCP/Azure or arm64 inheritance.
+- `docs/cloud.md:215-249` repeats the public lane boundaries: prepared AWS
+  hosted PVM only, no generic fallback, and no inherited GCP, Azure, or arm64
+  claim.
+
+Conclusion:
+- The docs preserve explicit provider-aware and architecture-aware boundaries
+  with honest failure posture and no implied fallback.

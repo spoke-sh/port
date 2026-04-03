@@ -4,6 +4,11 @@ Port's hosted product is intentionally defined as an extension of the existing
 local command model, not as a separate product with different lifecycle or
 guest-operation semantics.
 
+If you need the strongest production-oriented AWS path, start with
+[`aws.md`](aws.md). This file explains the shared hosted control-plane and
+node-agent split that both the standard hosted lane and the AWS x86_64 PVM
+lane reuse.
+
 What is shipped today:
 
 - local Linux launch through `port machine launch`
@@ -15,9 +20,9 @@ What is shipped today:
   sample `cloud-generic`, `cloud-aws`, and `cloud-gcp` machines when a
   registered hosted node owns the target runtime root and standard artifacts
   are present
-- prepared-node x86_64 Firecracker/PVM launch through `port machine launch`
-  when a hosted machine resolves to a ready node with a real PVM host kit and
-  PVM artifact variants
+- provider-backed AWS `x86_64` Firecracker/PVM launch through
+  `port machine launch` for `cloud-aws` when `aws-linux-node` is prepared,
+  imported as ready, and backed by real PVM host-kit and artifact-kit inputs
 - `port control-plane serve` as the first live hosted HTTP server for canonical
   machine and guest routes, accepting registered node agents for the demo lane
 - `port node-agent serve` as the first live hosted node-runtime server for one
@@ -105,12 +110,22 @@ waits for node registration, then runs canonical hosted `port machine list`,
 `port machine status`, `port guest exec`, `port guest copy`, and `port guest
 logs` commands through the live hosted HTTP path.
 
-The prepared-node PVM workflow reuses that same hosted split. It consumes the
-same `port artifacts build|validate|push|pull` proof published in
-[`pvm.md`](pvm.md), then upgrades a hosted node from `planned` to `ready`
-through `port control-plane prepare-pvm-node`.
+## AWS Hosted PVM On The Same Hosted Split
 
-Repository-local hosted PVM proof:
+The AWS PVM lane does not introduce a second hosted architecture. It reuses the
+same control plane and node agent with tighter requirements:
+
+- machine: `cloud-aws`
+- node: `aws-linux-node`
+- lane: `x86_64` + `firecracker` + `pvm`
+- readiness bridge: `port control-plane prepare-pvm-node`
+- artifacts: dedicated `x86_64/firecracker/pvm` kernel and guest-image variants
+- failure posture: no fallback to the standard hosted lane
+
+Use [`aws.md`](aws.md) for the operator narrative and [`pvm.md`](pvm.md) for
+the low-level host-kit and artifact-kit contract.
+
+Repository-local hosted AWS PVM proof:
 
 ```bash
 bash scripts/hosted-pvm-demo.sh
@@ -121,32 +136,6 @@ Human-reviewable artifact:
 ```bash
 ./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
 ```
-
-1. Copy `examples/port.toml` to `/tmp/port-pvm.toml`.
-2. Point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`.
-3. Switch `machines.cloud-aws.protection_mode` to `pvm`.
-4. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at
-   prepared artifact paths visible to `aws-linux-node`.
-5. Export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm`
-   binary on the prepared AWS node host.
-
-```bash
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
-PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine status --machine cloud-aws
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-aws
-```
-
-`cloud-generic` on `generic-linux-node` remains the explicit denial path for an
-unprepared hosted PVM lane because that sample node still advertises
-`planned`. `cloud-aws` on `aws-linux-node` is the canonical provider-backed
-surface. `prepare-pvm-node` writes the imported ready record under
-`.port/hosted/<control-plane>/imported-inventory.json`; that imported record is
-the canonical repo-local proof that the prepared AWS node is ready for the
-hosted PVM lane. `aarch64/firecracker/pvm` remains research-only and GCP/Azure
-do not inherit the AWS prepared-host contract.
 
 ## Hosted API Identity Contract
 
@@ -192,9 +181,10 @@ The shared hosted HTTP route and auth contract now lives in
 - the route-context envelope that keeps control-plane, node, host-group, and
   runtime-owner context attached to hosted responses and failures
 
-This is still a contract, not a claim that the hosted API already runs. The
-current implementation uses it for validation, docs, help text, and provider-
-aware guidance rather than for real remote execution.
+This is still a narrow hosted product slice, not a claim that Port already
+ships a broad hosted platform. The current implementation does run real hosted
+machine, guest, and service routes in the repo-backed proofs, but broader
+policy, tenancy, autoscaling, and fleet management remain follow-on scope.
 
 ### Guest Agent
 
@@ -214,7 +204,7 @@ Hosted Port keeps this guest agent and its protocol semantics intact.
 | Environment | Inventory owner | Hypervisor/process owner | Guest-operation broker | Source of truth |
 |-------------|-----------------|--------------------------|------------------------|-----------------|
 | Local Port today | local runtime root plus CLI output | local `port-runtime` invocation | local CLI plus runtime transport | runtime manifests and host process state |
-| Hosted Port planned | central control plane | node agent on the selected host | control plane plus node agent tunnel | control-plane inventory plus node-agent reported runtime state |
+| Hosted Port current slice | central control plane | node agent on the selected host | control plane plus node agent tunnel | control-plane inventory plus node-agent reported runtime state |
 
 The intended rule is simple:
 
@@ -280,8 +270,8 @@ vocabulary instead of inventing a second inventory model.
 
 ## Hosted Machine Lifecycle Surface
 
-Port now ships the first hosted lifecycle runtime slice without pretending the
-full remote control plane already exists.
+Port now ships the first hosted lifecycle runtime slice without pretending it
+already solves the entire hosted-platform problem.
 
 The canonical operator verbs stay the same:
 
@@ -298,12 +288,10 @@ For a hosted machine, the shared model now derives five explicit contracts:
   and which explicit host groups include those nodes
 - launch: the placement route and runtime owner for hosted
   `port machine launch`
-- status: the status source and route for the future hosted
-  `port machine status` command
+- status: the status source and route for hosted `port machine status`
 - monitor: the runtime owner plus route for hosted `port machine monitor` and
   `port machine top`
-- stop: the lifecycle owner and route for the future hosted
-  `port machine stop` command
+- stop: the lifecycle owner and route for hosted `port machine stop`
 
 Current hosted lifecycle contract for a sample machine such as `cloud-aws`:
 
@@ -369,11 +357,14 @@ What is runnable today:
   definitions under that same runtime owner, including desired state, guest
   command, secret bindings, secret-source provenance, hosted routing context,
   and the node-owned runtime record path
+- hosted `service list|status|stop` now inspects, updates, and stops the live
+  managed process through that same hosted route while surfacing runtime state
+  back through the canonical `port service` surface
 
 ## Hosted Standard Cloud Workflow
 
-The standard hosted cloud lane keeps the same command family and only changes
-runtime ownership:
+This is the simpler hosted proof lane. It keeps the same command family and
+only changes runtime ownership:
 
 ```bash
 export PORT_DEMO_TOKEN=demo-token
@@ -399,10 +390,9 @@ cargo test -q -p port --test machine_commands cli_hosted_standard_status_and_sto
 
 Prepared-node PVM remains a second hosted launch contract layered on the same
 control-plane and node-agent route when the machine is switched to
-`protection_mode = "pvm"` and the prepared host kit exists.
-- hosted `service list|status|stop` now inspects, updates, and stops the live
-  managed process through that same hosted route while surfacing runtime state
-  back through the canonical `port service` surface
+`protection_mode = "pvm"` and the prepared AWS host kit exists. Use
+[`aws.md`](aws.md) when you need the stronger production-oriented narrative
+instead of this standard-lane proof.
 
 ## Multi-Node Hosted Service Workflow
 
@@ -562,10 +552,11 @@ Hosted control-plane contract:
 - `service_route = "hosted-control-plane"`
 - `guest_route = "hosted-control-plane"`
 
-Those tokens are the implementation-ready contract for the next hosted node
-agent and control-plane slices. The local lane already reports the local form
-through runtime status surfaces, and future hosted drivers are expected to fill
-the hosted form rather than inventing a second vocabulary.
+Those tokens are the implementation-ready contract for the current hosted slice
+and the next hosted node-agent and control-plane expansions. The local lane
+already reports the local form through runtime status surfaces, and hosted
+drivers are expected to fill the hosted form rather than inventing a second
+vocabulary.
 
 ## Guest Operation Brokerage
 

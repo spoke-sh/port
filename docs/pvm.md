@@ -4,6 +4,10 @@ Port keeps Firecracker/PVM in scope because it matters for cost-controlled
 cloud execution, but it is not a drop-in switch on top of the current
 Firecracker/KVM lane.
 
+If you need the operator-facing AWS deployment narrative, start with
+[`aws.md`](aws.md). This file is the lower-level contract for the host kit,
+artifact kit, and hard boundaries behind that lane.
+
 The implementation contract is narrower and more concrete:
 
 - keep `x86_64` Firecracker/PVM as the first Port implementation lane
@@ -15,7 +19,7 @@ The implementation contract is narrower and more concrete:
 
 | Architecture | Port decision | Why |
 |--------------|---------------|-----|
-| `x86_64` | Keep / prepared-node launch | Port now launches this lane through prepared Linux nodes, but it still depends on a custom host kernel, a patched Firecracker build, `pti=off`, and dedicated guest images |
+| `x86_64` | Keep / hosted AWS prepared-node lane | Port now launches this lane through prepared hosted AWS nodes, but it still depends on a custom host kernel, a patched Firecracker build, `pti=off`, imported readiness, and dedicated guest images |
 | `aarch64` | Research-only | Upstream arm64 protected-virtualization work is real, but Port does not yet have a vendor-grade Firecracker/PVM runtime contract to ship or validate |
 
 Actuated's public product materials also matter to this decision:
@@ -61,10 +65,10 @@ Required contract:
 That keeps the artifact story honest: PVM is a separate compatibility lane with
 its own build, pull, cache, and validation lifecycle.
 
-## Validation Expectations
+## Validation Contract
 
-Future Port validation for the x86_64 PVM lane should check all of the
-following:
+Port's x86_64 PVM lane should only be considered honest when validation checks
+all of the following:
 
 1. Host architecture is Linux `x86_64`.
 2. The host is booted into the PVM-capable kernel and the boot line contains
@@ -75,13 +79,14 @@ following:
 5. A real prepared host can boot a Firecracker/PVM guest as the final runtime
    proof.
 
-Those checks belong in the future `port doctor` and artifact validation paths.
+Those checks are the contract that `port doctor`, artifact validation, and live
+AWS hosted PVM proofs should continue to make explicit.
 
 ## Repository-Local Workflow
 
-The current foundation slice is intentionally narrower than a real PVM launch.
-It gives operators a reproducible way to prove the model, doctor, and artifact
-contracts locally:
+This workflow is intentionally narrower than the full hosted AWS deployment
+story. It gives operators a reproducible way to prove the model, doctor, and
+artifact contracts locally before they move to the hosted prepared-node lane:
 
 ```bash
 port --config examples/port.toml doctor
@@ -111,10 +116,11 @@ The same operator workflow should also leave the standard Firecracker lane
 usable. Building or validating `x86_64/firecracker/pvm` artifacts does not
 replace the standard `x86_64/firecracker/standard` artifacts or their paths.
 
-## Hosted Prepared-Node Workflow
+## AWS Hosted Prepared-Node Workflow
 
-Hosted PVM work is now explicit about placement, host-kit readiness, and live
-launch through the hosted control plane.
+This is the hosted runtime contract behind [`aws.md`](aws.md). It keeps
+placement, host-kit readiness, and live launch explicit through the hosted
+control plane.
 
 Runnable repo-local proof:
 
