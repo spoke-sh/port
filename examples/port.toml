@@ -345,9 +345,9 @@ notes = ["Generic Linux is modeled as PVM-planned but not host-kit-ready in the 
 
 [nodes.aws-linux-node]
 # Hosted PVM admission-ready example:
-#   switching [machines.cloud-aws] to protection_mode = "pvm" should pass the
-#   hosted placement gate because this node advertises a ready PVM lane and can
-#   launch once the host kit and PVM artifact paths are prepared.
+#   switching [machines.cloud-aws] to protection_mode = "pvm" keeps placement
+#   denied until `port control-plane prepare-pvm-node` imports a ready AWS PVM
+#   lane for this host-kit contract.
 # Hosted Cloud Hypervisor proof:
 #   keep the checked-in sample on the Firecracker standard lane, then copy this
 #   config and switch [machines.cloud-aws].substrate to "cloud-hypervisor",
@@ -368,8 +368,8 @@ protection_modes = ["standard", "pvm"]
 
 [[nodes.aws-linux-node.capabilities.pvm_lanes]]
 architecture = "x86_64"
-state = "ready"
-notes = ["AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit."]
+state = "planned"
+notes = ["AWS declares the sample x86_64 PVM host-kit contract and becomes ready through imported preparation."]
 
 [nodes.aws-linux-node.capabilities.pvm_lanes.host_kit]
 package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
@@ -506,8 +506,8 @@ console_log = "runtime/cloud-generic/console.log"
 [machines.cloud-aws]
 # Hosted admission-ready example:
 #   change protection_mode to "pvm" to model a hosted machine whose node
-#   inventory advertises state = "ready" for x86_64 Firecracker/PVM and can
-#   boot through the live control-plane and node-agent path once prepared.
+#   inventory only becomes state = "ready" for x86_64 Firecracker/PVM after
+#   `port control-plane prepare-pvm-node` imports the prepared AWS host state.
 # Hosted Cloud Hypervisor proof:
 #   copy this file to a temp config, point [control_planes.demo].endpoint at
 #   http://127.0.0.1:7040, switch substrate to "cloud-hypervisor", switch

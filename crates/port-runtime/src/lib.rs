@@ -3058,9 +3058,8 @@ fn firecracker_local_launch_machine(
         let state_path = network_state_path(&paths);
         let state_json = serde_json::to_string_pretty(&effective_network)
             .context("failed to encode network state JSON")?;
-        fs::write(&state_path, format!("{state_json}\n")).with_context(|| {
-            format!("failed to write network state '{}'", state_path.display())
-        })?;
+        fs::write(&state_path, format!("{state_json}\n"))
+            .with_context(|| format!("failed to write network state '{}'", state_path.display()))?;
     }
 
     Ok(metadata)
@@ -6443,12 +6442,58 @@ fn hosted_pvm_preparation_hint(
     format!("Prepare the node with `{command}`.")
 }
 
+fn hosted_pvm_target_machines(
+    config: &PortConfig,
+    node_name: &str,
+    architecture: MachineArchitecture,
+) -> Vec<String> {
+    let Some(node) = config.nodes.get(node_name) else {
+        return Vec::new();
+    };
+
+    config
+        .machines
+        .iter()
+        .filter_map(|(machine_name, machine)| {
+            if machine.host != node.host || machine.substrate != ExecutionSubstrate::Firecracker {
+                return None;
+            }
+            let machine_architecture = resolve_machine_architecture(machine.architecture).ok()?;
+            (machine_architecture == architecture && machine.protection_mode == ProtectionMode::Pvm)
+                .then(|| machine_name.clone())
+        })
+        .collect()
+}
+
+fn hosted_pvm_preparation_guidance(
+    config: &PortConfig,
+    control_plane: Option<&str>,
+    node_name: &str,
+    architecture: MachineArchitecture,
+) -> String {
+    let hint = hosted_pvm_preparation_hint(control_plane, node_name, architecture);
+    let machines = hosted_pvm_target_machines(config, node_name, architecture);
+    if machines.is_empty() {
+        hint
+    } else {
+        let targets = machines
+            .into_iter()
+            .map(|machine| format!("`{machine}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{hint} This imported readiness gates the hosted PVM lane for {targets}.")
+    }
+}
+
 fn effective_config_with_hosted_imported_inventory(config: &PortConfig) -> Result<PortConfig> {
     let mut effective = config.clone();
     let mut imported_by_control_plane =
         BTreeMap::<String, Option<HostedImportedInventoryStateFile>>::new();
 
     for node_name in config.nodes.keys() {
+        if let Some(node) = effective.nodes.get_mut(node_name) {
+            node.capabilities = node.capabilities.without_imported_pvm_readiness();
+        }
         let Some(control_plane) = hosted_control_plane_for_node(config, node_name) else {
             continue;
         };
@@ -6477,6 +6522,107 @@ fn effective_config_with_hosted_imported_inventory(config: &PortConfig) -> Resul
     }
 
     Ok(effective)
+}
+
+fn hosted_pvm_lane_check_without_imported_record(
+    config: &PortConfig,
+    node_name: &str,
+    control_plane: Option<&str>,
+    lane: &HostedPvmCapability,
+) -> DoctorCheck {
+    let name = format!(
+        "pvm:{node_name}:{}:host-kit-contract",
+        architecture_dir(lane.architecture)
+    );
+
+    match lane.state {
+        PvmCapabilityState::ResearchOnly => DoctorCheck {
+            name,
+            ok: false,
+            required: false,
+            detail: format!(
+                "Hosted node '{}' keeps the {} PVM lane research-only.",
+                node_name,
+                architecture_dir(lane.architecture)
+            ),
+        },
+        PvmCapabilityState::Planned => match lane.host_kit.as_ref() {
+            Some(host_kit) => {
+                if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
+                    DoctorCheck {
+                        name,
+                        ok: false,
+                        required: false,
+                        detail,
+                    }
+                } else {
+                    DoctorCheck {
+                        name,
+                        ok: false,
+                        required: false,
+                        detail: format!(
+                            "Hosted node '{}' declares {} but imported hosted PVM readiness is missing, so the lane remains planned. {}",
+                            node_name,
+                            pvm_host_kit_contract_detail(host_kit),
+                            hosted_pvm_preparation_guidance(
+                                config,
+                                control_plane,
+                                node_name,
+                                lane.architecture,
+                            )
+                        ),
+                    }
+                }
+            }
+            None => DoctorCheck {
+                name,
+                ok: false,
+                required: false,
+                detail: format!(
+                    "Hosted node '{}' remains PVM-planned without a provider-backed host-kit contract. Port cannot import readiness for this lane, and the standard Firecracker lane is not a fallback.",
+                    node_name
+                ),
+            },
+        },
+        PvmCapabilityState::Ready => match lane.host_kit.as_ref() {
+            Some(host_kit) => {
+                if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
+                    DoctorCheck {
+                        name,
+                        ok: false,
+                        required: false,
+                        detail,
+                    }
+                } else {
+                    DoctorCheck {
+                        name,
+                        ok: false,
+                        required: false,
+                        detail: format!(
+                            "Hosted node '{}' declares {} in configured inventory, but Port requires imported hosted PVM readiness before the lane is treated as prepared. {}",
+                            node_name,
+                            pvm_host_kit_contract_detail(host_kit),
+                            hosted_pvm_preparation_guidance(
+                                config,
+                                control_plane,
+                                node_name,
+                                lane.architecture,
+                            )
+                        ),
+                    }
+                }
+            }
+            None => DoctorCheck {
+                name,
+                ok: false,
+                required: false,
+                detail: format!(
+                    "Hosted node '{}' advertises a ready PVM lane without a host-kit contract. Imported readiness cannot be trusted until the host-kit contract is fixed.",
+                    node_name
+                ),
+            },
+        },
+    }
 }
 
 fn hosted_pvm_lane_check_from_imported_record(
@@ -8145,10 +8291,6 @@ fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
                 continue;
             }
 
-            let name = format!(
-                "pvm:{node_name}:{}:host-kit-contract",
-                architecture_dir(lane.architecture)
-            );
             if let Some(imported) = imported_record.as_ref() {
                 if let Some(imported_lane) =
                     imported.capability_summary.pvm_lane_for(lane.architecture)
@@ -8162,44 +8304,12 @@ fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
                     continue;
                 }
             }
-            match lane.host_kit.as_ref() {
-                Some(host_kit) => {
-                    if let Some(detail) = pvm_host_kit_contract_issue(lane.architecture, host_kit) {
-                        checks.push(DoctorCheck {
-                            name,
-                            ok: false,
-                            required: false,
-                            detail,
-                        });
-                    } else {
-                        checks.push(DoctorCheck {
-                            name,
-                            ok: true,
-                            required: false,
-                            detail: format!(
-                                "Hosted node '{}' advertises {}",
-                                node_name,
-                                pvm_host_kit_contract_detail(host_kit)
-                            ),
-                        });
-                    }
-                }
-                None => checks.push(DoctorCheck {
-                    name,
-                    ok: false,
-                    required: false,
-                    detail: format!(
-                        "Hosted node '{}' advertises a {:?} PVM lane without a host-kit contract. {}",
-                        node_name,
-                        lane.state,
-                        hosted_pvm_preparation_hint(
-                            hosted_control_plane,
-                            node_name,
-                            lane.architecture
-                        )
-                    ),
-                }),
-            }
+            checks.push(hosted_pvm_lane_check_without_imported_record(
+                config,
+                node_name,
+                hosted_control_plane,
+                lane,
+            ));
         }
     }
 
@@ -9457,7 +9567,9 @@ fn artifact_script_candidates(script_name: &str) -> Vec<PathBuf> {
         );
         push_artifact_script_candidate(
             &mut candidates,
-            PathBuf::from(configured).join("artifacts").join(script_name),
+            PathBuf::from(configured)
+                .join("artifacts")
+                .join(script_name),
         );
     }
 
@@ -9569,14 +9681,20 @@ fn repo_root() -> Result<PathBuf> {
 
     if cfg!(debug_assertions) {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        if let Some(candidate) = manifest_dir.parent().and_then(Path::parent).map(Path::to_path_buf) {
+        if let Some(candidate) = manifest_dir
+            .parent()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+        {
             if candidate.join("scripts/artifacts").is_dir() {
                 return Ok(candidate);
             }
         }
     }
 
-    bail!("failed to resolve the Port repository root; search was restricted because a packaged installation was detected. Set PORT_REPO_ROOT explicitly for development overrides.")
+    bail!(
+        "failed to resolve the Port repository root; search was restricted because a packaged installation was detected. Set PORT_REPO_ROOT explicitly for development overrides."
+    )
 }
 
 pub fn execute_guest_operation(
@@ -11367,8 +11485,7 @@ fn build_firecracker_config(
                 net.guest_ip, net.host_ip, net.prefix_len
             );
             if !net.dns_servers.is_empty() {
-                boot_args =
-                    format!("{boot_args} port.net_dns={}", net.dns_servers.join(","));
+                boot_args = format!("{boot_args} port.net_dns={}", net.dns_servers.join(","));
             }
             (
                 vec![NetworkInterfaceConfig {
@@ -11481,13 +11598,20 @@ fn setup_host_networking(
     run_network_command("ip", &["link", "set", &tap_name, "up"])
         .with_context(|| format!("failed to bring up '{tap_name}'"))?;
 
-    fs::write("/proc/sys/net/ipv4/ip_forward", "1")
-        .context("failed to enable ip_forward")?;
+    fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
 
     run_network_command(
         "iptables",
         &[
-            "-t", "nat", "-A", "POSTROUTING", "-s", &subnet, "-o", &outbound_iface, "-j",
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-s",
+            &subnet,
+            "-o",
+            &outbound_iface,
+            "-j",
             "MASQUERADE",
         ],
     )
@@ -11495,7 +11619,14 @@ fn setup_host_networking(
     run_network_command(
         "iptables",
         &[
-            "-A", "FORWARD", "-i", &tap_name, "-o", &outbound_iface, "-j", "ACCEPT",
+            "-A",
+            "FORWARD",
+            "-i",
+            &tap_name,
+            "-o",
+            &outbound_iface,
+            "-j",
+            "ACCEPT",
         ],
     )
     .context("failed to add iptables FORWARD accept rule")?;
@@ -11521,10 +11652,7 @@ fn setup_host_networking(
     Ok(())
 }
 
-fn teardown_host_networking(
-    machine_name: &str,
-    network: &port_model::MachineNetworkSpec,
-) {
+fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNetworkSpec) {
     let tap_name = tap_device_name(machine_name);
     let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
 
@@ -11532,14 +11660,29 @@ fn teardown_host_networking(
         let _ = run_network_command(
             "iptables",
             &[
-                "-t", "nat", "-D", "POSTROUTING", "-s", &subnet, "-o", &outbound_iface, "-j",
+                "-t",
+                "nat",
+                "-D",
+                "POSTROUTING",
+                "-s",
+                &subnet,
+                "-o",
+                &outbound_iface,
+                "-j",
                 "MASQUERADE",
             ],
         );
         let _ = run_network_command(
             "iptables",
             &[
-                "-D", "FORWARD", "-i", &tap_name, "-o", &outbound_iface, "-j", "ACCEPT",
+                "-D",
+                "FORWARD",
+                "-i",
+                &tap_name,
+                "-o",
+                &outbound_iface,
+                "-j",
+                "ACCEPT",
             ],
         );
         let _ = run_network_command(
@@ -11601,8 +11744,8 @@ fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
         for entry in fs::read_dir(path)
             .with_context(|| format!("failed to read directory '{}'", path.display()))?
         {
-            let entry = entry
-                .with_context(|| format!("failed to read entry in '{}'", path.display()))?;
+            let entry =
+                entry.with_context(|| format!("failed to read entry in '{}'", path.display()))?;
             chown_recursive(&entry.path(), uid, gid)?;
         }
     }
@@ -11773,12 +11916,11 @@ mod tests {
         StopResult, apply_machine_service, artifact_pipeline_workdir, artifact_script,
         avf_local_launch_machine_with_host_os, bootstrap_hosted_k3s_cluster,
         build_firecracker_config, cache_path_for, chown_recursive, chown_runtime_to_sudo_caller,
-        cloud_hypervisor_api_socket_path,
-        cloud_hypervisor_config_path, cloud_hypervisor_local_launch_machine,
-        cloud_hypervisor_log_path, collect_doctor_report, collect_doctor_report_with_facts,
-        copy_guest_file, delete_machine_secret, down_local_cluster, driver_for_machine,
-        ensure_native_build_lane, execute_guest_operation, hosted_k3s_cluster_access,
-        hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
+        cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
+        cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
+        collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
+        down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
+        hosted_k3s_cluster_access, hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
         hosted_placeholder_runtime_root, launch_local_machine, list_artifacts,
         list_machine_secrets, list_machine_services, list_machines, local_cluster_kubeconfig,
         local_cluster_status, machine_monitor, machine_service_status, machine_status, machine_top,
@@ -13918,7 +14060,10 @@ exec sleep 30
     #[test]
     fn firecracker_config_includes_network_interface_with_default_network_spec() {
         let net = port_model::MachineNetworkSpec::default();
-        assert!(net.enabled, "default MachineNetworkSpec should have enabled=true");
+        assert!(
+            net.enabled,
+            "default MachineNetworkSpec should have enabled=true"
+        );
         assert_eq!(net.guest_ip, "172.16.0.2");
         assert_eq!(net.host_ip, "172.16.0.1");
         assert_eq!(net.dns_servers, vec!["8.8.8.8", "8.8.4.4"]);
@@ -14001,7 +14146,10 @@ exec sleep 30
     fn default_network_activates_via_unwrap_or_default() {
         let machine_network: Option<port_model::MachineNetworkSpec> = None;
         let effective = machine_network.unwrap_or_default();
-        assert!(effective.enabled, "unwrap_or_default on None should produce enabled=true");
+        assert!(
+            effective.enabled,
+            "unwrap_or_default on None should produce enabled=true"
+        );
         assert_eq!(effective.guest_ip, "172.16.0.2");
         assert_eq!(effective.host_ip, "172.16.0.1");
         assert_eq!(effective.dns_servers, vec!["8.8.8.8", "8.8.4.4"]);
@@ -14974,8 +15122,15 @@ exec sleep 30
 
     #[test]
     fn doctor_report_includes_hosted_pvm_host_kit_contract_checks() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = ProtectionMode::Pvm;
+
         let report = collect_doctor_report_with_facts(
-            Some(&PortConfig::sample()),
+            Some(&config),
             &DoctorHostFacts {
                 host_os: String::from("linux"),
                 host_architecture: String::from("x86_64"),
@@ -14995,12 +15150,11 @@ exec sleep 30
             .find(|check| check.name == "pvm:generic-linux-node:x86_64:host-kit-contract")
             .expect("generic hosted host-kit contract check should exist");
 
-        assert!(aws.ok);
+        assert!(!aws.ok);
         assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.03"));
-        assert!(aws.detail.contains("6.12.0-port-pvm"));
-        assert!(aws.detail.contains("v1.12.0-port-pvm"));
-        assert!(aws.detail.contains("firecracker-pvm"));
-        assert!(aws.detail.contains("PORT_PVM_FIRECRACKER_BINARY"));
+        assert!(aws.detail.contains("cloud-aws"));
+        assert!(aws.detail.contains("prepare-pvm-node"));
+        assert!(aws.detail.contains("planned"));
         assert!(!generic.ok);
         assert!(generic.detail.contains("host-kit contract"));
     }
@@ -15011,20 +15165,20 @@ exec sleep 30
         let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
 
         let config = PortConfig::sample();
-        let host_kit = config.hosts["local"].firecracker.pvm_lanes[0]
+        let host_kit = config.nodes["aws-linux-node"].capabilities.pvm_lanes[0]
             .host_kit
             .clone()
-            .expect("local x86_64 PVM lane should define a host-kit");
-        let mut imported_summary = config.nodes["generic-linux-node"].capabilities.clone();
+            .expect("aws x86_64 PVM lane should define a host-kit");
+        let mut imported_summary = config.nodes["aws-linux-node"].capabilities.clone();
         imported_summary.pvm_lanes[0].state = PvmCapabilityState::Ready;
         imported_summary.pvm_lanes[0].host_kit = Some(host_kit.clone());
         write_imported_inventory_state(
             "demo",
             BTreeMap::from([(
-                String::from("generic-linux-node"),
+                String::from("aws-linux-node"),
                 HostedImportedNodeRecord {
-                    provider: HostProvider::GenericLinux,
-                    provenance: String::from("inventory/generic-linux-node.json"),
+                    provider: HostProvider::Aws,
+                    provenance: String::from("inventory/aws-linux-node.json"),
                     imported_at: 1_700_000_123,
                     capability_summary: imported_summary,
                     pvm_host_kit_packages: vec![port_model::HostedPvmHostKitPackageAttachment {
@@ -15045,17 +15199,17 @@ exec sleep 30
             },
         );
 
-        let generic = report
+        let aws = report
             .checks
             .iter()
-            .find(|check| check.name == "pvm:generic-linux-node:x86_64:host-kit-contract")
-            .expect("generic hosted host-kit contract check should exist");
+            .find(|check| check.name == "pvm:aws-linux-node:x86_64:host-kit-contract")
+            .expect("aws hosted host-kit contract check should exist");
 
-        assert!(generic.ok);
-        assert!(generic.detail.contains("inventory/generic-linux-node.json"));
-        assert!(generic.detail.contains("firecracker-pvm-host-kit@2026.03"));
-        assert!(generic.detail.contains("6.12.0-port-pvm"));
-        assert!(generic.detail.contains("v1.12.0-port-pvm"));
+        assert!(aws.ok);
+        assert!(aws.detail.contains("inventory/aws-linux-node.json"));
+        assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.03"));
+        assert!(aws.detail.contains("6.12.0-port-pvm"));
+        assert!(aws.detail.contains("v1.12.0-port-pvm"));
 
         let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
     }
@@ -16826,6 +16980,31 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_aws_pvm_status_surfaces_preparation_guidance() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+        let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+
+        let status = machine_status(&config, tempdir.path(), "cloud-aws")
+            .expect("hosted aws pvm status should load");
+
+        assert_eq!(status.state, MachineRuntimeState::Malformed);
+        assert!(status.detail.contains("cloud-aws"));
+        assert!(status.detail.contains("aws-linux-node"));
+        assert!(status.detail.contains("provider 'aws'"));
+        assert!(status.detail.contains("prepare-pvm-node"));
+        assert!(!status.detail.contains("generic-linux-node"));
+    }
+
+    #[test]
     fn hosted_pvm_launch_rejects_unplaceable_nodes_before_remote_guidance() {
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = PortConfig::sample();
@@ -16895,24 +17074,51 @@ exec sleep 30
             .expect("pvm guest variant should exist")
             .path = guest_path.clone();
 
-        let host_kit = config
+        let host_kit = {
+            let host_kit = config
+                .hosts
+                .get_mut("local")
+                .expect("local host should exist")
+                .firecracker
+                .pvm_lanes
+                .iter_mut()
+                .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+                .expect("local x86_64 PVM lane should exist")
+                .host_kit
+                .as_mut()
+                .expect("local x86_64 PVM lane should define a host-kit");
+            host_kit.requires_custom_host_kernel = false;
+            host_kit.host_boot_args.clear();
+            host_kit.firecracker_binary_env =
+                Some(String::from("PORT_TEST_HOSTED_PVM_FIRECRACKER"));
+            host_kit.clone()
+        };
+        config
             .nodes
             .get_mut("aws-linux-node")
             .expect("aws node should exist")
             .capabilities
             .pvm_lanes[0]
-            .host_kit
-            .as_mut()
-            .expect("aws node should declare a host-kit");
-        host_kit.requires_custom_host_kernel = false;
-        host_kit.host_boot_args.clear();
-        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_HOSTED_PVM_FIRECRACKER"));
+            .host_kit = Some(host_kit.clone());
+        let package = host_kit.package.clone();
         let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker-pvm");
         unsafe {
             std::env::set_var("PORT_TEST_HOSTED_PVM_FIRECRACKER", &fake_binary);
         }
 
         let config = start_live_hosted_servers(&config, true).expect("hosted servers should start");
+        let prepared = crate::prepare_hosted_pvm_node(
+            &config,
+            crate::HostedPvmNodePrepareRequest {
+                control_plane: String::from("demo"),
+                node_name: String::from("aws-linux-node"),
+                architecture: MachineArchitecture::X86_64,
+                provenance: String::from("inventory/aws-linux-node.json"),
+                package,
+            },
+        )
+        .expect("aws hosted PVM preparation should succeed");
+        assert_eq!(prepared.provenance, "inventory/aws-linux-node.json");
         let metadata = launch_local_machine(
             &config,
             &LaunchRequest {

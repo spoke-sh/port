@@ -2954,6 +2954,52 @@ fn prepare_pvm_import_record(
         .get(&configured_node.host)
         .expect("configured hosted node host should exist");
     let provider = configured_host.provider;
+    if provider != HostProvider::Aws {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted node '{}' uses provider '{}' but `prepare-pvm-node` currently seals the AWS hosted PVM contract for `cloud-aws` only",
+                request.node_name,
+                imported_provider_label(provider)
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    }
+    let Some(configured_host_kit) = configured_lane.host_kit.as_ref() else {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted node '{}' does not declare an AWS PVM host-kit contract in configured inventory; Port will not import generic prepared-node readiness for `cloud-aws`",
+                request.node_name
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    };
+    if configured_host_kit != &canonical_host_kit {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "hosted node '{}' declares an AWS PVM host-kit contract that does not match the canonical package '{}@{}' for architecture '{}'",
+                request.node_name,
+                canonical_host_kit.package.name,
+                canonical_host_kit.package.version,
+                architecture_dir(architecture)
+            ),
+            Some(HostedRouteContext {
+                control_plane: Some(state.inner.control_plane.clone()),
+                node_name: Some(request.node_name.clone()),
+                ..HostedRouteContext::default()
+            }),
+        ));
+    }
     let imported_at = current_unix_timestamp_seconds().map_err(|error| {
         error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -3096,6 +3142,9 @@ fn effective_config_with_imported_inventory(
     imported_inventory: &BTreeMap<String, ImportedNodeRecord>,
 ) -> PortConfig {
     let mut effective = config.clone();
+    for node in effective.nodes.values_mut() {
+        node.capabilities = node.capabilities.without_imported_pvm_readiness();
+    }
     for (node_name, imported) in imported_inventory {
         if let Some(node) = effective.nodes.get_mut(node_name) {
             node.capabilities = imported.capability_summary.clone();
@@ -5215,6 +5264,56 @@ mod tests {
         cleanup_registered_state(&control_plane);
     }
 
+    #[tokio::test]
+    async fn prepare_pvm_rejects_generic_node_substitution_for_cloud_aws() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("state should build");
+        let package = config.hosts["local"].firecracker.pvm_lanes[0]
+            .host_kit
+            .as_ref()
+            .expect("local x86_64 host kit should exist")
+            .package
+            .clone();
+
+        let response = prepare_pvm_import_record(
+            &state,
+            HostedPreparePvmNodeRequest {
+                control_plane: String::from("demo"),
+                node_name: String::from("generic-linux-node"),
+                architecture: MachineArchitecture::X86_64,
+                provenance: String::from("inventory/generic-linux-node.json"),
+                package,
+            },
+        )
+        .expect_err("generic prepared-node substitution should be rejected");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let error: HostedError = serde_json::from_slice(&body).expect("error should decode");
+        assert!(
+            error.message.contains("generic-linux-node"),
+            "{}",
+            error.message
+        );
+        assert!(error.message.contains("cloud-aws"), "{}", error.message);
+        assert!(error.message.contains("generic"), "{}", error.message);
+    }
+
     #[test]
     fn registered_node_state_validates_into_registered_contracts() {
         let tempdir = TempDir::new().expect("tempdir should be created");
@@ -6711,22 +6810,60 @@ mod tests {
             })
             .expect("pvm guest variant should exist")
             .path = guest_path.clone();
-        let host_kit = config
+        let host_kit = {
+            let host_kit = config
+                .hosts
+                .get_mut("local")
+                .expect("local host should exist")
+                .firecracker
+                .pvm_lanes
+                .iter_mut()
+                .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+                .expect("local x86_64 PVM lane should exist")
+                .host_kit
+                .as_mut()
+                .expect("local x86_64 PVM lane should define a host-kit");
+            host_kit.requires_custom_host_kernel = false;
+            host_kit.host_boot_args.clear();
+            host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_NODE_PVM_FIRECRACKER"));
+            host_kit.clone()
+        };
+        config
             .nodes
             .get_mut("aws-linux-node")
             .expect("aws node should exist")
             .capabilities
             .pvm_lanes[0]
-            .host_kit
-            .as_mut()
-            .expect("aws node should declare a host-kit contract");
-        host_kit.requires_custom_host_kernel = false;
-        host_kit.host_boot_args.clear();
-        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_NODE_PVM_FIRECRACKER"));
+            .host_kit = Some(host_kit.clone());
+        let package = host_kit.package.clone();
         let fake_binary = write_fake_firecracker(tempdir.path(), "firecracker-pvm");
         unsafe {
             std::env::set_var("PORT_TEST_NODE_PVM_FIRECRACKER", &fake_binary);
         }
+        cleanup_registered_state("demo");
+        let mut imported_summary = config.nodes["aws-linux-node"].capabilities.clone();
+        imported_summary.pvm_lanes[0].state = PvmCapabilityState::Ready;
+        let imported_path = imported_inventory_state_path("demo");
+        persist_imported_inventory_state(
+            &imported_path,
+            &ImportedInventoryStateFile {
+                control_plane: String::from("demo"),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    HostedImportedNodeRecord {
+                        provider: HostProvider::Aws,
+                        provenance: String::from("inventory/aws-linux-node.json"),
+                        imported_at: 123,
+                        capability_summary: imported_summary,
+                        pvm_host_kit_packages: vec![HostedPvmHostKitPackageAttachment {
+                            architecture: MachineArchitecture::X86_64,
+                            package,
+                        }],
+                    },
+                )]),
+            },
+        )
+        .expect("prepared inventory state should persist");
 
         let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
         let response = Client::new()

@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-04-02T18:54:45.116248786-07:00
+mode: manual
+---
+cargo test -p port-runtime doctor_report_includes_hosted_pvm_host_kit_contract_checks -- --test-threads=1
+cargo test -p port-runtime doctor_report_uses_imported_prepared_hosted_pvm_state -- --test-threads=1
+cargo test -p port-runtime hosted_aws_pvm_status_surfaces_preparation_guidance -- --test-threads=1
+cargo test -p port --test machine_commands cli_machine_launch_rejects_unprepared_aws_hosted_pvm_machine -- --exact --test-threads=1
+cargo test -p port --test machine_commands cli_machine_launch_routes_hosted_pvm_through_live_control_plane -- --exact --test-threads=1

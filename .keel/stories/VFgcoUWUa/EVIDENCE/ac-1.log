@@ -1,0 +1,7 @@
+---
+recorded_at: 2026-04-02T18:54:19.231609036-07:00
+mode: manual
+---
+cargo test -p port --test machine_commands cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch -- --exact --test-threads=1
+cargo test -p port-runtime prepare_pvm_rejects_generic_node_substitution_for_cloud_aws -- --test-threads=1
+cargo test -p port-runtime node_agent_launches_pvm_machine_from_prepared_host_kit -- --test-threads=1

@@ -281,10 +281,10 @@ impl PortConfig {
                         protection_modes: vec![ProtectionMode::Standard, ProtectionMode::Pvm],
                         pvm_lanes: vec![HostedPvmCapability {
                             architecture: MachineArchitecture::X86_64,
-                            state: PvmCapabilityState::Ready,
+                            state: PvmCapabilityState::Planned,
                             host_kit: Some(x86_64_firecracker_pvm_host_kit()),
                             notes: vec![String::from(
-                                "AWS is the sample hosted node that represents an x86_64 PVM-prepared host kit.",
+                                "AWS declares the sample x86_64 PVM host-kit contract and becomes ready through imported preparation.",
                             )],
                         }],
                     },
@@ -671,7 +671,9 @@ impl PortConfig {
             .map(|(node_name, _)| (*node_name).clone())
             .collect::<Vec<_>>();
         for (node_name, node) in host_nodes {
-            if let Some(reason) = hosted_node_rejection_reason(machine_name, machine, node)? {
+            if let Some(reason) =
+                hosted_node_rejection_reason(machine_name, node_name, machine, node)?
+            {
                 rejected_nodes.insert(node_name.clone(), reason);
             } else {
                 candidate_nodes.push(node_name.clone());
@@ -1458,6 +1460,17 @@ impl HostedNodeCapabilities {
         self.pvm_lanes
             .iter()
             .find(|lane| lane.architecture == architecture)
+    }
+
+    #[must_use]
+    pub fn without_imported_pvm_readiness(&self) -> Self {
+        let mut next = self.clone();
+        for lane in &mut next.pvm_lanes {
+            if lane.state == PvmCapabilityState::Ready {
+                lane.state = PvmCapabilityState::Planned;
+            }
+        }
+        next
     }
 
     #[must_use]
@@ -3638,6 +3651,7 @@ fn validate_k3s_cluster_machine(
 
 fn hosted_node_rejection_reason(
     machine_name: &str,
+    node_name: &str,
     machine: &MachineSpec,
     node: &HostedNodeContract,
 ) -> Result<Option<String>, ValidationError> {
@@ -3681,10 +3695,24 @@ fn hosted_node_rejection_reason(
             )));
         };
         if lane.state != PvmCapabilityState::Ready {
-            return Ok(Some(format!(
-                "pvm-ready state is required but node advertises {}",
-                hosted_pvm_state_label(lane.state)
-            )));
+            let detail = if lane.host_kit.is_some() {
+                format!(
+                    "pvm-ready state is required but node advertises {}. Run `port control-plane prepare-pvm-node --control-plane {} --node {} --architecture {}` before launching `{}`; Port does not silently fall back to the standard lane.",
+                    hosted_pvm_state_label(lane.state),
+                    node.control_plane,
+                    node_name,
+                    machine_architecture_label(architecture),
+                    machine_name
+                )
+            } else {
+                format!(
+                    "pvm-ready state is required but node advertises {} without a provider-backed host-kit contract. `{}` stays outside the hosted PVM lane until Port owns a prepared host contract for node '{}'; Port does not silently fall back to the standard lane.",
+                    hosted_pvm_state_label(lane.state),
+                    machine_name,
+                    node_name
+                )
+            };
+            return Ok(Some(detail));
         }
     }
 
@@ -5000,10 +5028,11 @@ mod tests {
             .expect("cloud-generic should be hosted");
 
         assert!(summary.candidate_nodes.is_empty());
-        assert_eq!(
-            summary.rejected_nodes["generic-linux-node"],
-            "pvm-ready state is required but node advertises planned"
+        assert!(
+            summary.rejected_nodes["generic-linux-node"]
+                .contains("without a provider-backed host-kit contract")
         );
+        assert!(summary.rejected_nodes["generic-linux-node"].contains("cloud-generic"));
         assert!(summary.placement_detail.contains("generic-linux-node"));
         assert!(summary.placement_detail.contains("planned"));
     }
@@ -5024,11 +5053,10 @@ mod tests {
 
         assert_eq!(summary.host_name, "aws-linux");
         assert_eq!(summary.provider, HostProvider::Aws);
-        assert_eq!(
-            summary.candidate_nodes,
-            vec![String::from("aws-linux-node")]
-        );
-        assert!(summary.rejected_nodes.is_empty());
+        assert!(summary.candidate_nodes.is_empty());
+        assert!(summary.rejected_nodes["aws-linux-node"].contains("prepare-pvm-node"));
+        assert!(summary.rejected_nodes["aws-linux-node"].contains("cloud-aws"));
+        assert!(summary.rejected_nodes["aws-linux-node"].contains("planned"));
         assert!(summary.placement_detail.contains("aws-linux-node"));
         assert!(summary.placement_detail.contains("provider 'aws'"));
         assert!(!summary.placement_detail.contains("generic-linux-node"));
@@ -5333,7 +5361,7 @@ mod tests {
 
         assert_eq!(
             inventory.nodes["aws-linux-node"].capabilities.pvm_lanes[0].state,
-            PvmCapabilityState::Ready
+            PvmCapabilityState::Planned
         );
         assert_eq!(
             inventory.nodes["generic-linux-node"].capabilities.pvm_lanes[0].state,
@@ -5357,7 +5385,7 @@ mod tests {
         let aws_host_kit = aws_lane
             .host_kit
             .as_ref()
-            .expect("ready hosted PVM lane should declare a host-kit contract");
+            .expect("planned hosted PVM lane should declare a host-kit contract");
         assert_eq!(aws_host_kit.host_platform, HostPlatform::Linux);
         assert_eq!(aws_host_kit.host_architecture, MachineArchitecture::X86_64);
         assert_eq!(
@@ -5390,7 +5418,7 @@ mod tests {
         let aws_host_kit = aws_lane
             .host_kit
             .as_ref()
-            .expect("ready hosted PVM lane should declare a host-kit contract");
+            .expect("planned hosted PVM lane should declare a host-kit contract");
 
         assert_eq!(aws_host_kit.package.name, "firecracker-pvm-host-kit");
         assert_eq!(aws_host_kit.package.version, "2026.03");
@@ -5401,6 +5429,13 @@ mod tests {
     #[test]
     fn ready_hosted_pvm_lane_requires_an_explicit_host_kit_contract() {
         let mut config = PortConfig::sample();
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .state = PvmCapabilityState::Ready;
         config
             .nodes
             .get_mut("aws-linux-node")
@@ -5423,6 +5458,13 @@ mod tests {
     #[test]
     fn ready_hosted_pvm_lane_requires_host_kit_package_identity() {
         let mut config = PortConfig::sample();
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .state = PvmCapabilityState::Ready;
         let host_kit = config
             .nodes
             .get_mut("aws-linux-node")
@@ -5563,7 +5605,7 @@ mod tests {
         );
         assert_eq!(
             config.nodes["aws-linux-node"].capabilities.pvm_lanes[0].state,
-            PvmCapabilityState::Ready
+            PvmCapabilityState::Planned
         );
         assert_eq!(
             config.nodes["aws-linux-node"].capabilities.pvm_lanes[0]

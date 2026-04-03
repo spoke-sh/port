@@ -2134,6 +2134,37 @@ fn cli_machine_launch_rejects_unplaceable_hosted_pvm_machine() {
 }
 
 #[test]
+fn cli_machine_launch_rejects_unprepared_aws_hosted_pvm_machine() {
+    let temp = tempdir().expect("tempdir should exist");
+    let config_path = temp.path().join("port.toml");
+    let mut config = PortConfig::sample();
+    config
+        .machines
+        .get_mut("cloud-aws")
+        .expect("cloud-aws should exist")
+        .protection_mode = port_model::ProtectionMode::Pvm;
+    write_config(&config_path, &config);
+
+    let output = Command::new(port_bin())
+        .arg("--config")
+        .arg(&config_path)
+        .arg("machine")
+        .arg("launch")
+        .arg("--machine")
+        .arg("cloud-aws")
+        .output()
+        .expect("launch command should run");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cloud-aws"));
+    assert!(stderr.contains("aws-linux-node"));
+    assert!(stderr.contains("provider 'aws'"));
+    assert!(stderr.contains("prepare-pvm-node"));
+    assert!(stderr.contains("planned"));
+    assert!(!stderr.contains("generic-linux-node"));
+}
+
+#[test]
 fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
@@ -2189,18 +2220,32 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
         .expect("pvm guest variant should exist")
         .path = guest_path;
 
-    let host_kit = server_config
+    let host_kit = {
+        let host_kit = server_config
+            .hosts
+            .get_mut("local")
+            .expect("local host should exist")
+            .firecracker
+            .pvm_lanes
+            .iter_mut()
+            .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+            .expect("local x86_64 PVM lane should exist")
+            .host_kit
+            .as_mut()
+            .expect("local x86_64 PVM lane should define a host-kit");
+        host_kit.requires_custom_host_kernel = false;
+        host_kit.host_boot_args.clear();
+        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+        host_kit.clone()
+    };
+    server_config
         .nodes
         .get_mut("aws-linux-node")
         .expect("aws-linux-node should exist")
         .capabilities
         .pvm_lanes[0]
-        .host_kit
-        .as_mut()
-        .expect("aws node should declare a host-kit");
-    host_kit.requires_custom_host_kernel = false;
-    host_kit.host_boot_args.clear();
-    host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+        .host_kit = Some(host_kit.clone());
+    let package = host_kit.package.clone();
 
     let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker-pvm");
     write_config(&server_config_path, &server_config);
@@ -2213,7 +2258,27 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
         .runtime_root = bogus_runtime_root;
     write_config(&client_config_path, &client_config);
 
-    let _servers = spawn_hosted_server_harness(
+    cleanup_hosted_registration_state();
+    let mut imported_summary = server_config.nodes["aws-linux-node"].capabilities.clone();
+    imported_summary.pvm_lanes[0].state = PvmCapabilityState::Ready;
+    write_imported_inventory_state(
+        "demo",
+        BTreeMap::from([(
+            String::from("aws-linux-node"),
+            port_model::HostedImportedNodeRecord {
+                provider: HostProvider::Aws,
+                provenance: String::from("inventory/aws-linux-node.json"),
+                imported_at: 1_700_000_123,
+                capability_summary: imported_summary,
+                pvm_host_kit_packages: vec![port_model::HostedPvmHostKitPackageAttachment {
+                    architecture: MachineArchitecture::X86_64,
+                    package,
+                }],
+            },
+        )]),
+    );
+
+    let _servers = spawn_hosted_server_harness_preserving_state(
         &server_config_path,
         &node_addr,
         &control_plane_addr,
@@ -2288,21 +2353,31 @@ fn cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch() {
         .expect("demo control plane should exist")
         .endpoint = format!("http://{control_plane_addr}");
     write_fake_pvm_firecracker_artifacts(&mut server_config, temp.path());
-    let host_kit = server_config
-        .hosts
-        .get_mut("local")
-        .expect("local host should exist")
-        .firecracker
-        .pvm_lanes
-        .iter_mut()
-        .find(|lane| lane.architecture == MachineArchitecture::X86_64)
-        .expect("local x86_64 PVM lane should exist")
-        .host_kit
-        .as_mut()
-        .expect("local x86_64 PVM lane should define a host-kit");
-    host_kit.requires_custom_host_kernel = false;
-    host_kit.host_boot_args.clear();
-    host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+    let host_kit = {
+        let host_kit = server_config
+            .hosts
+            .get_mut("local")
+            .expect("local host should exist")
+            .firecracker
+            .pvm_lanes
+            .iter_mut()
+            .find(|lane| lane.architecture == MachineArchitecture::X86_64)
+            .expect("local x86_64 PVM lane should exist")
+            .host_kit
+            .as_mut()
+            .expect("local x86_64 PVM lane should define a host-kit");
+        host_kit.requires_custom_host_kernel = false;
+        host_kit.host_boot_args.clear();
+        host_kit.firecracker_binary_env = Some(String::from("PORT_TEST_CLI_PVM_FIRECRACKER"));
+        host_kit.clone()
+    };
+    server_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .capabilities
+        .pvm_lanes[0]
+        .host_kit = Some(host_kit.clone());
     let package = host_kit.package.clone();
     write_config(&server_config_path, &server_config);
 
