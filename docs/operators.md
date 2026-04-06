@@ -244,8 +244,8 @@ Human-reviewable artifact:
 
 The current proof prerequisites are intentionally narrow:
 
-- run from the repo dev shell so `port`, `port-guest-agent`, `busybox`, `curl`,
-  and `agg` are available
+- run from the repo dev shell so `port`, `port-guest-agent`, `curl`, and `agg`
+  are available and `PORT_BUSYBOX_BIN` is set, or install `busybox` on the host
 - keep `PORT_DEMO_TOKEN` available for the repo-local hosted control-plane
   contract, or rely on the script's repo-default `demo-token`
 - treat the shipped workflow as a repo-local proof lane, not external hosted

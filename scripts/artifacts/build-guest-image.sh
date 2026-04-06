@@ -9,6 +9,7 @@ fi
 output_path="$1"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
+busybox_bin="${PORT_BUSYBOX_BIN:-$(command -v busybox || true)}"
 
 case "$output_path" in
   */x86_64/firecracker/standard/*)
@@ -33,7 +34,12 @@ case "$output_path" in
     ;;
 esac
 
-for tool in busybox cargo e2fsck ldd mkfs.ext4 nix nix-store; do
+if [[ -z "$busybox_bin" ]]; then
+  echo "missing required tool for guest image build: busybox (set PORT_BUSYBOX_BIN or install busybox on the host)" >&2
+  exit 1
+fi
+
+for tool in cargo e2fsck ldd mkfs.ext4 nix nix-store; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "missing required tool for guest image build: $tool" >&2
     exit 1
@@ -221,7 +227,7 @@ if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
   mkdir -p "$initrd_dir/bin" "$initrd_dir/dev" "$initrd_dir/etc" "$initrd_dir/lib" "$initrd_dir/newroot" "$initrd_dir/proc" "$initrd_dir/sys"
   copy_binary_with_libs_into \
     "$initrd_dir" \
-    "$(readlink -f "$(command -v busybox)")" \
+    "$(readlink -f "$busybox_bin")" \
     "bin/busybox"
   copy_binary_with_libs_into \
     "$initrd_dir" \
@@ -271,7 +277,7 @@ fi
 cargo build -p port-guest-agent --release
 
 copy_binary_with_libs \
-  "$(readlink -f "$(command -v busybox)")" \
+  "$(readlink -f "$busybox_bin")" \
   "bin/busybox"
 copy_binary_with_libs \
   "${CARGO_TARGET_DIR:-$repo_root/target}/release/port-guest-agent" \

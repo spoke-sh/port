@@ -19,6 +19,14 @@
       inputs.keel.follows = "keel";
       inputs.sift.follows = "sift";
     };
+    paddles = {
+      url = "git+ssh://git@github.com/spoke-sh/paddles.git?ref=main";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+      inputs.flake-utils.follows = "flake-utils";
+      inputs.keel.follows = "keel";
+      inputs.sift.follows = "sift";
+    };
     keel = {
       url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -34,6 +42,7 @@
     flake-utils,
     sift,
     atxt,
+    paddles,
     keel,
   }:
     let
@@ -132,6 +141,7 @@
         atxtAliasPkg = pkgs.writeShellScriptBin "atxt" ''
           exec ${atxtPkg}/bin/atext "$@"
         '';
+        paddlesPkg = paddles.packages.${system}.paddles;
         keelPkg = keel.packages.${system}.keel;
         awsPvmHostKitPkg = pkgs.callPackage ./nix/firecracker-pvm-host-kit.nix {
           firecracker = pkgs.firecracker;
@@ -183,6 +193,7 @@
           pkgs.kubernetes-helm
           pkgs.fluxcd
           pkgs.just
+          pkgs.less
           pkgs.gnutar
           pkgs.gzip
           pkgs.vhs
@@ -192,6 +203,7 @@
           siftPkg
           atxtAliasPkg
           atxtPkg
+          paddlesPkg
           keelPkg
           pkgs.curl
         ];
@@ -199,7 +211,6 @@
           pkgs.firecracker
           pkgs.iproute2
           pkgs.iptables
-          pkgs.busybox
           pkgs.cpio
           pkgs.e2fsprogs
           pkgs.mold
@@ -242,6 +253,7 @@
             export TMPDIR=/var/tmp
             echo "Port's macOS dev shell provides repo tooling only; Linux-only runtime tools such as firecracker, iproute2, and iptables remain available only on Linux hosts."
           '' + pkgs.lib.optionalString isLinux ''
+            export PORT_BUSYBOX_BIN="${pkgs.busybox}/bin/busybox"
             export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"
           '';

@@ -11,7 +11,7 @@ export PORT_DEMO_TOKEN="${PORT_DEMO_TOKEN:-demo-token}"
 TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
 PORT_BIN="$TARGET_DIR/debug/port"
 GUEST_AGENT_BIN="$TARGET_DIR/debug/port-guest-agent"
-BUSYBOX_BIN="$(command -v busybox || true)"
+BUSYBOX_BIN="${PORT_BUSYBOX_BIN:-$(command -v busybox || true)}"
 
 SERVER_CONFIG="$WORKDIR/server-port.toml"
 CLIENT_CONFIG="$WORKDIR/client-port.toml"
@@ -146,7 +146,7 @@ require_contains() {
 }
 
 if [[ -z "$BUSYBOX_BIN" ]]; then
-  echo "busybox is required for the hosted HTTP app proof workflow" >&2
+  echo "busybox is required for the hosted HTTP app proof workflow; set PORT_BUSYBOX_BIN or install busybox on the host" >&2
   exit 1
 fi
 

@@ -247,9 +247,9 @@ for that lane lives in
 
 - Run the artifact workflows from the repository root so
   `examples/port.toml` resolves correctly.
-- `nix develop` is one way to provide `curl`, `busybox`, `mkfs.ext4`,
-  `debugfs`, and related tooling, but it is optional. Port also works when
-  those tools are installed directly on the host.
+- `nix develop` is one way to provide `curl`, `mkfs.ext4`, `debugfs`, and
+  related tooling, and it exports `PORT_BUSYBOX_BIN` for workflows that need
+  BusyBox. Port also works when those tools are installed directly on the host.
 - `push` and `pull` are the canonical artifact-mobility verbs even though the
   shipped runtime now implements the file-backed, hosted-api, and oci-registry
   backends.

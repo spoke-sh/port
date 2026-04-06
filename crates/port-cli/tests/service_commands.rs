@@ -178,17 +178,26 @@ fn fetch_http_response(addr: &str, path: &str) -> String {
 }
 
 fn busybox_bin() -> String {
-    let output = Command::new("/bin/sh")
-        .arg("-lc")
-        .arg("command -v busybox")
-        .output()
-        .expect("busybox lookup should run");
-    assert!(
-        output.status.success(),
-        "busybox should be available in the dev shell"
-    );
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let path = std::env::var("PORT_BUSYBOX_BIN")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| {
+            let output = Command::new("/bin/sh")
+                .arg("-lc")
+                .arg("command -v busybox")
+                .output()
+                .expect("busybox lookup should run");
+            assert!(
+                output.status.success(),
+                "busybox should be configured via PORT_BUSYBOX_BIN or installed on PATH"
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        });
     assert!(!path.is_empty(), "busybox lookup should return a path");
+    assert!(
+        Path::new(&path).exists(),
+        "busybox path should exist: {path}"
+    );
     path
 }
 

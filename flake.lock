@@ -156,12 +156,46 @@
         "type": "github"
       }
     },
+    "paddles": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "keel": [
+          "keel"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ],
+        "sift": [
+          "sift"
+        ]
+      },
+      "locked": {
+        "lastModified": 1775509441,
+        "narHash": "sha256-sWqmfHgeaVKwnxq/4inJyLkyVgRkO6wUunf8zJHOv3A=",
+        "ref": "main",
+        "rev": "8a55040c120958581c4d28500ccb84daee3ac695",
+        "revCount": 338,
+        "type": "git",
+        "url": "ssh://git@github.com/spoke-sh/paddles.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "ssh://git@github.com/spoke-sh/paddles.git"
+      }
+    },
     "root": {
       "inputs": {
         "atxt": "atxt",
         "flake-utils": "flake-utils",
         "keel": "keel",
         "nixpkgs": "nixpkgs",
+        "paddles": "paddles",
         "rust-overlay": "rust-overlay",
         "sift": "sift"
       }
