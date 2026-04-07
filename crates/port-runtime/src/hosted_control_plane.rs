@@ -3964,7 +3964,10 @@ fn error_response(
 }
 
 pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    // Hosted node-agent handlers can perform blocking launch and guest operations.
+    // Keep a second worker available so registration refreshes do not go stale.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
         .context("failed to build node-agent runtime")?;
@@ -5969,6 +5972,182 @@ mod tests {
         );
 
         cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn node_agent_refresh_stays_live_while_guest_exec_is_in_flight() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("node-refresh-exec");
+        let token_var = unique_test_env("PORT_TEST_NODE_REFRESH_EXEC_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        let control_bind = reserve_test_addr();
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .endpoint = format!("http://{control_bind}");
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        write_manifest(&paths, "cloud-aws", 424242);
+        std::fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest socket should bind");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("guest socket should accept");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => {
+                    assert_eq!(
+                        request.command,
+                        vec![String::from("/bin/echo"), String::from("node-refresh")]
+                    );
+                }
+                other => panic!("unexpected operation: {other:?}"),
+            }
+            std::thread::sleep(Duration::from_secs(6));
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: 1,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout: String::from("node-refresh\n"),
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        });
+
+        let control_config = config.clone();
+        let control_plane_name = control_plane.clone();
+        let control_bind_for_thread = control_bind.clone();
+        std::thread::spawn(move || {
+            let _ = serve_control_plane(
+                control_config,
+                ControlPlaneServeRequest {
+                    control_plane: control_plane_name,
+                    bind: control_bind_for_thread,
+                    node_bindings: Vec::new(),
+                },
+            );
+        });
+
+        wait_for_http_ready(
+            control_bind.parse().expect("control bind should parse"),
+            "/v1/machines",
+            &[("authorization", "Bearer demo-token")],
+            true,
+        )
+        .await;
+
+        let node_bind = reserve_test_addr();
+        let node_config = config.clone();
+        let node_bind_for_thread = node_bind.clone();
+        std::thread::spawn(move || {
+            let _ = serve_node_agent(
+                node_config,
+                NodeAgentServeRequest {
+                    node_name: String::from("aws-linux-node"),
+                    bind: node_bind_for_thread,
+                    token: String::from("node-secret"),
+                },
+            );
+        });
+
+        let state_path = registered_node_state_path(&control_plane);
+        wait_for(Duration::from_secs(5), Duration::from_millis(100), || {
+            std::fs::read(&state_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RegisteredNodeStateFile>(&bytes).ok())
+                .and_then(|state| state.nodes.get("aws-linux-node").cloned())
+                .is_some()
+        });
+        let first: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&state_path).expect("registered state should read"),
+        )
+        .expect("registered state should decode");
+        let first_seen = first.nodes["aws-linux-node"].refreshed_at;
+
+        let client = Client::new();
+        let mut exec = tokio::spawn(async move {
+            let response = client
+                .post(format!(
+                    "http://{node_bind}/v1/node/machines/cloud-aws/guest:exec"
+                ))
+                .header("x-port-node-agent-token", "node-secret")
+                .header(CONTENT_TYPE, "application/json")
+                .body(
+                    serde_json::to_vec(&GuestOperation::Exec(ExecRequest {
+                        command: vec![String::from("/bin/echo"), String::from("node-refresh")],
+                        cwd: None,
+                        env: BTreeMap::new(),
+                    }))
+                    .expect("guest exec request should encode"),
+                )
+                .send()
+                .await
+                .expect("guest exec request should complete");
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .expect("guest exec body should decode");
+            (status, body)
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(4), &mut exec)
+                .await
+                .is_err(),
+            "guest exec should still be in flight before the first registration refresh",
+        );
+
+        wait_for(Duration::from_secs(8), Duration::from_millis(100), || {
+            std::fs::read(&state_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RegisteredNodeStateFile>(&bytes).ok())
+                .and_then(|state| {
+                    state
+                        .nodes
+                        .get("aws-linux-node")
+                        .map(|registration| registration.refreshed_at > first_seen)
+                })
+                .unwrap_or(false)
+        });
+
+        let refreshed: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&state_path).expect("registered state should read"),
+        )
+        .expect("registered state should decode");
+        assert!(
+            refreshed.nodes["aws-linux-node"].refreshed_at > first_seen,
+            "expected a later refresh than {first_seen}, got {}",
+            refreshed.nodes["aws-linux-node"].refreshed_at
+        );
+
+        let (status, body) = exec.await.expect("guest exec task should join");
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let success: HostedSuccess<OperationResult> =
+            serde_json::from_str(&body).expect("guest exec body should decode");
+        match success.result {
+            OperationResult::Exec(result) => assert_eq!(result.stdout, "node-refresh\n"),
+            other => panic!("unexpected guest exec result: {other:?}"),
+        }
+
+        cleanup_registered_state(&control_plane);
+        server.join().expect("guest server thread should complete");
         unsafe {
             std::env::remove_var(&token_var);
         }
