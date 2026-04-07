@@ -221,6 +221,7 @@ host_group = "aws-builders"
 server_machines = ["cloud-aws-a", "cloud-aws-b", "cloud-aws-c"]
 worker_machines = ["cloud-aws-worker-a", "cloud-aws-worker-b"]
 api_endpoint = "https://demo-k3s.internal:6443"
+control_plane_scheduler = "spread"
 version = "v1.32.0+k3s1"
 server_args = ["--disable=traefik"]
 worker_args = ["--node-label=role=worker"]
@@ -241,6 +242,8 @@ Interpret that contract this way:
 - the execution hosts, including AWS PVM hosts, run Port node-agent ownership
 - the K3s control-plane and worker nodes are the guest microVMs named in
   `server_machines` and `worker_machines`
+- `control_plane_scheduler = "spread"` tells Port not to reuse an already
+  occupied execution host for a new control-plane microVM
 - `api_endpoint` must already front the control-plane microVMs through an
   external load balancer or VIP
 

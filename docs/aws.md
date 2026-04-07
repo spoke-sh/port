@@ -219,6 +219,8 @@ explicit:
 - launch the K3s control-plane and worker nodes as guest microVMs on that fleet
 - front the control-plane microVMs with an external load balancer or VIP and
   publish that stable HTTPS address as `api_endpoint` in `[k3s_clusters.*]`
+- set `control_plane_scheduler = "spread"` so new control-plane microVM
+  placements fail instead of reusing an already occupied prepared host
 - do not count "multiple microVMs on one prepared host" as real HA
 
 Interpret those commands this way:

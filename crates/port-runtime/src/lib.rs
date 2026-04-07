@@ -2430,6 +2430,17 @@ fn hosted_k3s_topology_note(cluster: &K3sClusterSpec) -> String {
     }
 }
 
+fn hosted_k3s_scheduler_note(cluster: &K3sClusterSpec) -> String {
+    match cluster.control_plane_scheduler {
+        HostedSchedulerPolicy::DeterministicFirstFit => String::from(
+            "Control-plane scheduler 'deterministic-first-fit' will reuse the earliest eligible execution host when capacity matches.",
+        ),
+        HostedSchedulerPolicy::Spread => String::from(
+            "Control-plane scheduler 'spread' requires newly placed control-plane microVMs to land on distinct eligible execution hosts and fails placement instead of collapsing onto an already used host.",
+        ),
+    }
+}
+
 fn hosted_k3s_runtime_ha_note(
     cluster: &K3sClusterSpec,
     machine_access: &[HostedK3sMachineAccess],
@@ -2482,6 +2493,7 @@ fn hosted_k3s_report_boundary_notes(
 ) -> Vec<String> {
     let mut notes = hosted_k3s_boundary_notes();
     notes.push(hosted_k3s_topology_note(cluster));
+    notes.push(hosted_k3s_scheduler_note(cluster));
     if let Some(note) = hosted_k3s_runtime_ha_note(cluster, machine_access) {
         notes.push(note);
     }
@@ -2491,6 +2503,7 @@ fn hosted_k3s_report_boundary_notes(
 fn hosted_k3s_cluster_boundary_notes(cluster: &K3sClusterSpec) -> Vec<String> {
     let mut notes = hosted_k3s_boundary_notes();
     notes.push(hosted_k3s_topology_note(cluster));
+    notes.push(hosted_k3s_scheduler_note(cluster));
     notes
 }
 
@@ -13336,6 +13349,7 @@ exit 23
                 server_machines: vec![String::from("cloud-aws")],
                 worker_machines: vec![String::from("cloud-aws-worker")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: port_model::HostedSchedulerPolicy::DeterministicFirstFit,
                 version: String::from("v1.32.0+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: vec![String::from("--node-label=role=worker")],

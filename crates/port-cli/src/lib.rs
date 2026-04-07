@@ -728,6 +728,7 @@ struct RenderedHostedK3sClusterRecord {
     provider: String,
     control_plane: String,
     host_group: String,
+    control_plane_scheduler: String,
     control_plane_machines: Vec<String>,
     worker_machines: Vec<String>,
     api_endpoint: String,
@@ -924,13 +925,14 @@ fn run_cluster(
                         }
                         for cluster in hosted_clusters {
                             println!(
-                                "{}\tflavor={}\tprovider={}\tcontrol-planes={}\tworkers={}\tapi-endpoint={}\tversion={}",
+                                "{}\tflavor={}\tprovider={}\tcontrol-planes={}\tworkers={}\tapi-endpoint={}\tscheduler={}\tversion={}",
                                 cluster.name,
                                 cluster.flavor,
                                 cluster.provider,
                                 cluster.control_plane_machines.len(),
                                 cluster.worker_machines.len(),
                                 cluster.api_endpoint,
+                                cluster.control_plane_scheduler,
                                 cluster.version
                             );
                         }
@@ -968,6 +970,7 @@ fn run_cluster(
                             "provider": cluster.provider,
                             "control_plane": cluster.control_plane,
                             "host_group": cluster.host_group,
+                            "control_plane_scheduler": cluster.control_plane_scheduler,
                             "control_plane_machines": cluster.control_plane_machines,
                             "worker_machines": cluster.worker_machines,
                             "api_endpoint": cluster.api_endpoint,
@@ -1041,6 +1044,10 @@ fn run_cluster(
                         println!("provider: {}", rendered.provider);
                         println!("control plane: {}", rendered.control_plane);
                         println!("host group: {}", rendered.host_group);
+                        println!(
+                            "control-plane scheduler: {}",
+                            rendered.control_plane_scheduler
+                        );
                         println!(
                             "control-plane machines: {}",
                             rendered.control_plane_machines.join(" ")
@@ -1593,6 +1600,7 @@ fn render_hosted_k3s_cluster_record(
         provider: String::from("hosted"),
         control_plane: cluster.control_plane.clone(),
         host_group: cluster.host_group.clone(),
+        control_plane_scheduler: render_scheduler_policy(cluster.control_plane_scheduler),
         control_plane_machines: cluster.server_machines.clone(),
         worker_machines: cluster.worker_machines.clone(),
         api_endpoint: cluster.api_endpoint.clone(),
@@ -2717,6 +2725,7 @@ fn parse_secret_bindings(values: Vec<String>) -> Result<Vec<port_runtime::Servic
 fn render_scheduler_policy(policy: HostedSchedulerPolicy) -> String {
     match policy {
         HostedSchedulerPolicy::DeterministicFirstFit => String::from("deterministic-first-fit"),
+        HostedSchedulerPolicy::Spread => String::from("spread"),
     }
 }
 

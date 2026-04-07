@@ -186,6 +186,7 @@ host_group = "aws-builders"
 server_machines = ["cloud-aws-a", "cloud-aws-b", "cloud-aws-c"]
 worker_machines = ["cloud-aws-worker-a", "cloud-aws-worker-b"]
 api_endpoint = "https://demo-k3s.internal:6443"
+control_plane_scheduler = "spread"
 version = "v1.32.0+k3s1"
 server_args = ["--disable=traefik"]
 worker_args = ["--node-label=role=worker"]
@@ -197,6 +198,7 @@ Hosted K3s is a microVM-backed cluster contract:
 - Firecracker guest microVMs are the K3s nodes
 - the host lane, including AWS PVM, is the execution host for those microVMs, not the K3s node itself
 - stateless machines only
+- `control_plane_scheduler = "spread"` tells Port to fail placement instead of reusing an already occupied execution host for a new control-plane microVM
 - `port cluster up|status|kubeconfig|down` is the canonical lifecycle surface
 
 Real-HA boundary:

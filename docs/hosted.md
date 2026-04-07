@@ -36,8 +36,8 @@ What is planned:
 - a long-lived node agent that owns hypervisor processes on each execution host
 - broader hosted rollout beyond the single-node demo lane, including durable
   inventory, placement, and policy
-- automatic control-plane spread, external API endpoint management, and the
-  surrounding load-balancer or VIP contract needed for real HA K3s
+- external API endpoint management and the surrounding load-balancer or VIP
+  contract needed for real HA K3s
 - a client/API path so the same `port` verbs can target local or hosted
   environments without changing their core meaning
 
@@ -166,8 +166,11 @@ Real HA is stricter than "multiple control-plane guests":
 Port now models the K3s topology and the stable API endpoint in the shared
 config and lifecycle reports. Port does not yet ship the external load
 balancer, VIP, DNS, or ingress layer that fronts that endpoint, and it does
-not yet claim an automatic host-spread scheduler for those control-plane
-microVMs.
+not ship the infrastructure layer around that endpoint for you. The hosted K3s
+contract now does include an explicit control-plane scheduler:
+`control_plane_scheduler = "spread"` requires new control-plane microVM
+placements to land on distinct eligible execution hosts instead of collapsing
+back onto an already used host.
 
 ## Hosted API Identity Contract
 

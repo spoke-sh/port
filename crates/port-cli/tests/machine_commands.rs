@@ -310,6 +310,26 @@ fn hosted_config(runtime_root: &Path) -> PortConfig {
 
 fn hosted_k3s_config(runtime_root: &Path) -> PortConfig {
     let mut config = hosted_config(runtime_root);
+    let mut alternate = config
+        .nodes
+        .get("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .clone();
+    alternate.runtime_root = runtime_root
+        .parent()
+        .expect("runtime_root should have parent")
+        .join("aws-linux-node-b");
+    config
+        .nodes
+        .insert(String::from("aws-linux-node-b"), alternate);
+    config
+        .host_groups
+        .get_mut("aws-builders")
+        .expect("aws-builders should exist")
+        .nodes = vec![
+        String::from("aws-linux-node"),
+        String::from("aws-linux-node-b"),
+    ];
     let server_b = {
         let mut machine = config
             .machines
@@ -332,6 +352,7 @@ fn hosted_k3s_config(runtime_root: &Path) -> PortConfig {
             server_machines: vec![String::from("cloud-aws"), String::from("cloud-aws-b")],
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
+            control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
             version: String::from("v1.32.0+k3s1"),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
@@ -962,6 +983,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     assert!(show.status.success(), "{show:?}");
     let show_stdout = String::from_utf8_lossy(&show.stdout);
     assert!(show_stdout.contains("provider: hosted"));
+    assert!(show_stdout.contains("control-plane scheduler: spread"));
     assert!(show_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
     assert!(show_stdout.contains("worker machines: none"));
     assert!(show_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
@@ -977,21 +999,45 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     assert!(list.status.success(), "{list:?}");
     let list_stdout = String::from_utf8_lossy(&list.stdout);
     assert!(list_stdout.contains("provider=hosted"));
+    assert!(list_stdout.contains("scheduler=spread"));
     assert!(list_stdout.contains("control-planes=2"));
     assert!(list_stdout.contains("api-endpoint=https://demo-k3s.internal:6443"));
 
     let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
     write_fake_network_binaries(temp.path());
     let joined_path = prepend_path_env(temp.path());
+    let second_node_addr = reserve_addr();
     let _servers = spawn_hosted_server_harness(
         &server_config_path,
         &node_addr,
         &control_plane_addr,
         &[("PATH", joined_path.as_path())],
     );
+    let mut second_node_command = Command::new(port_bin());
+    second_node_command
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .env("PATH", &joined_path)
+        .arg("--config")
+        .arg(&server_config_path)
+        .arg("node-agent")
+        .arg("serve")
+        .arg("--node")
+        .arg("aws-linux-node-b")
+        .arg("--bind")
+        .arg(&second_node_addr)
+        .arg("--token")
+        .arg("node-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let _second_node = ChildGuard::spawn("node-agent-b", second_node_command);
+    wait_for_tcp(&second_node_addr);
 
     let server_a = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
-    let server_b = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws-b");
+    let server_b = port_runtime::RuntimePaths::for_machine(
+        &server_config.nodes["aws-linux-node-b"].runtime_root,
+        "cloud-aws-b",
+    );
     let server_a_guest = spawn_hosted_exec_sequence_server(
         server_a,
         vec![

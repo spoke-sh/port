@@ -3315,7 +3315,11 @@ fn resolve_node_binding(
     }
 
     let mut stale_registrations = Vec::new();
-    for node_name in &summary.candidate_nodes {
+    let candidate_nodes = match scheduled_candidate_nodes(state, summary) {
+        Ok(nodes) => nodes,
+        Err(detail) => return Err((route_context, detail)),
+    };
+    for node_name in &candidate_nodes {
         match resolve_known_node_binding(state, node_name) {
             Ok(Some((binding, runtime_root))) => {
                 return Ok((
@@ -3342,6 +3346,60 @@ fn resolve_node_binding(
     }
     detail.push_str(&format!(" {}", summary.placement_detail));
     Err((route_context, detail))
+}
+
+fn scheduled_candidate_nodes(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+) -> Result<Vec<String>, String> {
+    let Some((cluster_name, cluster)) = state
+        .inner
+        .config
+        .k3s_clusters
+        .iter()
+        .find(|(_, cluster)| {
+            cluster
+                .server_machines
+                .iter()
+                .any(|machine| machine == &summary.machine_name)
+        })
+    else {
+        return Ok(summary.candidate_nodes.clone());
+    };
+
+    if cluster.control_plane_scheduler != port_model::HostedSchedulerPolicy::Spread {
+        return Ok(summary.candidate_nodes.clone());
+    }
+
+    let placements = refresh_machine_placements(state)?;
+    let occupied_nodes = cluster
+        .server_machines
+        .iter()
+        .filter(|machine| *machine != &summary.machine_name)
+        .filter_map(|machine| placements.get(machine).map(|placement| placement.node_name.clone()))
+        .collect::<BTreeSet<_>>();
+    if occupied_nodes.is_empty() {
+        return Ok(summary.candidate_nodes.clone());
+    }
+
+    let distinct = summary
+        .candidate_nodes
+        .iter()
+        .filter(|node_name| !occupied_nodes.contains(*node_name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if distinct.is_empty() {
+        return Err(format!(
+            "control plane '{}' cannot place control-plane machine '{}' for hosted k3s cluster '{}' with scheduler 'spread' because existing control-plane placements already occupy candidate nodes {} and no distinct execution host remains. {}",
+            state.inner.control_plane,
+            summary.machine_name,
+            cluster_name,
+            occupied_nodes.into_iter().collect::<Vec<_>>().join(", "),
+            summary.placement_detail
+        ));
+    }
+
+    Ok(distinct)
 }
 
 fn resolve_service_apply_binding(
@@ -6485,6 +6543,275 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("aaa-linux-node")
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn hosted_k3s_spread_scheduler_places_control_planes_on_distinct_nodes() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("k3s-spread");
+        let token_var = unique_test_env("PORT_TEST_K3S_SPREAD_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut secondary_node = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws node should exist")
+            .clone();
+        secondary_node.runtime_root = tempdir.path().join("hosted/aws-linux-node-b");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-b"), secondary_node.clone());
+        config
+            .host_groups
+            .get_mut("aws-builders")
+            .expect("aws-builders should exist")
+            .nodes = vec![
+            String::from("aws-linux-node"),
+            String::from("aws-linux-node-b"),
+        ];
+
+        let mut server_b = config
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist")
+            .clone();
+        server_b.guest.vsock_cid = 62;
+        server_b.guest.control_port = 7002;
+        server_b.guest.console_log = PathBuf::from("runtime/cloud-aws-b/console.log");
+        config
+            .machines
+            .insert(String::from("cloud-aws-b"), server_b);
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: control_plane.clone(),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws"), String::from("cloud-aws-b")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        let primary_state = MockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: config.nodes["aws-linux-node"].runtime_root.clone(),
+            pid: 1111,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let secondary_state = MockNodeState {
+            node_name: String::from("aws-linux-node-b"),
+            runtime_root: config.nodes["aws-linux-node-b"].runtime_root.clone(),
+            pid: 2222,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let primary_addr = serve_mock_node_agent_named(primary_state.clone()).await;
+        let secondary_addr = serve_mock_node_agent_named(secondary_state.clone()).await;
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        persist_registered_node_state(
+            &registered_node_state_path(&control_plane),
+            &RegisteredNodeStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([
+                    (
+                        String::from("aws-linux-node"),
+                        HostedNodeRegistration {
+                            endpoint: format!("http://{primary_addr}"),
+                            token: String::from("node-secret"),
+                            registered_at: now,
+                            refreshed_at: now,
+                            ttl_seconds: 30,
+                        },
+                    ),
+                    (
+                        String::from("aws-linux-node-b"),
+                        HostedNodeRegistration {
+                            endpoint: format!("http://{secondary_addr}"),
+                            token: String::from("node-secret"),
+                            registered_at: now,
+                            refreshed_at: now,
+                            ttl_seconds: 30,
+                        },
+                    ),
+                ]),
+            },
+        )
+        .expect("registered state should persist");
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let client = Client::new();
+
+        let first = client
+            .post(format!("http://{control_addr}/v1/machines/cloud-aws:launch"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("first launch should complete");
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body: HostedSuccess<LaunchMetadata> =
+            first.json().await.expect("first launch body should decode");
+        assert_eq!(first_body.route.node_name.as_deref(), Some("aws-linux-node"));
+
+        let second = client
+            .post(format!("http://{control_addr}/v1/machines/cloud-aws-b:launch"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("second launch should complete");
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_body: HostedSuccess<LaunchMetadata> =
+            second.json().await.expect("second launch body should decode");
+        assert_eq!(second_body.route.node_name.as_deref(), Some("aws-linux-node-b"));
+
+        let placements: MachinePlacementStateFile = serde_json::from_slice(
+            &std::fs::read(machine_placement_state_path(&control_plane))
+                .expect("machine placement state should read"),
+        )
+        .expect("machine placement state should decode");
+        assert_eq!(placements.machines["cloud-aws"].node_name, "aws-linux-node");
+        assert_eq!(
+            placements.machines["cloud-aws-b"].node_name,
+            "aws-linux-node-b"
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn hosted_k3s_spread_scheduler_rejects_reusing_an_occupied_host() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("k3s-spread-reject");
+        let token_var = unique_test_env("PORT_TEST_K3S_SPREAD_REJECT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut secondary_node = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws node should exist")
+            .clone();
+        secondary_node.runtime_root = tempdir.path().join("hosted/aws-linux-node-b");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-b"), secondary_node);
+        config
+            .host_groups
+            .get_mut("aws-builders")
+            .expect("aws-builders should exist")
+            .nodes = vec![
+            String::from("aws-linux-node"),
+            String::from("aws-linux-node-b"),
+        ];
+
+        let mut server_b = config
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist")
+            .clone();
+        server_b.guest.vsock_cid = 62;
+        server_b.guest.control_port = 7002;
+        server_b.guest.console_log = PathBuf::from("runtime/cloud-aws-b/console.log");
+        config
+            .machines
+            .insert(String::from("cloud-aws-b"), server_b);
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: control_plane.clone(),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws"), String::from("cloud-aws-b")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        let node_state = MockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: config.nodes["aws-linux-node"].runtime_root.clone(),
+            pid: 1111,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let node_addr = serve_mock_node_agent_named(node_state).await;
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        persist_registered_node_state(
+            &registered_node_state_path(&control_plane),
+            &RegisteredNodeStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    HostedNodeRegistration {
+                        endpoint: format!("http://{node_addr}"),
+                        token: String::from("node-secret"),
+                        registered_at: now,
+                        refreshed_at: now,
+                        ttl_seconds: 30,
+                    },
+                )]),
+            },
+        )
+        .expect("registered state should persist");
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let client = Client::new();
+
+        let first = client
+            .post(format!("http://{control_addr}/v1/machines/cloud-aws:launch"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("first launch should complete");
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let second = client
+            .post(format!("http://{control_addr}/v1/machines/cloud-aws-b:launch"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("second launch should complete");
+        assert_eq!(second.status(), StatusCode::BAD_GATEWAY);
+        let body: HostedError = second
+            .json()
+            .await
+            .expect("spread rejection should decode as hosted error");
+        assert!(
+            body.message.contains("aws-linux-node-b"),
+            "{}",
+            body.message
+        );
+        assert!(
+            body.message.contains("live registered node-agent endpoint"),
+            "{}",
+            body.message
         );
 
         cleanup_registered_state(&control_plane);

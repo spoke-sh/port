@@ -29,8 +29,8 @@ It keeps one operator vocabulary across lanes:
   kubeconfig
 - Hosted K3s cluster slice: named hosted K3s clusters under the same
   `port cluster` verbs, with Firecracker guest microVMs as the K3s nodes,
-  explicit control-plane and worker machine sets, and an operator-supplied
-  HTTPS API endpoint
+  explicit control-plane and worker machine sets, an explicit control-plane
+  scheduler, and an operator-supplied HTTPS API endpoint
 - Attached volume first slice: one persistent `host-file` attached volume on
   the local Firecracker `standard` lane with explicit host path and ownership
   output

@@ -1551,6 +1551,7 @@ pub enum HostedPlacementPolicy {
 #[serde(rename_all = "kebab-case")]
 pub enum HostedSchedulerPolicy {
     DeterministicFirstFit,
+    Spread,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2066,6 +2067,14 @@ const fn default_cluster_count() -> u16 {
     1
 }
 
+const fn default_control_plane_scheduler() -> HostedSchedulerPolicy {
+    HostedSchedulerPolicy::DeterministicFirstFit
+}
+
+fn control_plane_scheduler_is_default(policy: &HostedSchedulerPolicy) -> bool {
+    *policy == HostedSchedulerPolicy::DeterministicFirstFit
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct K3sClusterSpec {
     pub control_plane: String,
@@ -2073,6 +2082,11 @@ pub struct K3sClusterSpec {
     pub server_machines: Vec<String>,
     pub worker_machines: Vec<String>,
     pub api_endpoint: String,
+    #[serde(
+        default = "default_control_plane_scheduler",
+        skip_serializing_if = "control_plane_scheduler_is_default"
+    )]
+    pub control_plane_scheduler: HostedSchedulerPolicy,
     pub version: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub server_args: Vec<String>,
@@ -3506,6 +3520,7 @@ fn validate_k3s_cluster(
     }
 
     let mut seen = BTreeSet::new();
+    let mut server_summaries = Vec::with_capacity(cluster.server_machines.len());
     for server_machine in &cluster.server_machines {
         if server_machine.trim().is_empty() {
             return Err(ValidationError::new(format!(
@@ -3519,7 +3534,7 @@ fn validate_k3s_cluster(
                 cluster_name, server_machine
             )));
         }
-        validate_k3s_cluster_machine(
+        let summary = validate_k3s_cluster_machine(
             config,
             cluster_name,
             &cluster.control_plane,
@@ -3527,6 +3542,7 @@ fn validate_k3s_cluster(
             server_machine,
             "control-plane",
         )?;
+        server_summaries.push(summary);
     }
 
     for worker_machine in &cluster.worker_machines {
@@ -3550,6 +3566,27 @@ fn validate_k3s_cluster(
             worker_machine,
             "worker",
         )?;
+    }
+
+    if cluster.control_plane_scheduler == HostedSchedulerPolicy::Spread {
+        let distinct_candidates = server_summaries
+            .iter()
+            .flat_map(|summary| summary.candidate_nodes.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        if distinct_candidates.len() < cluster.server_machines.len() {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' requires {} distinct hosted candidate nodes for control-plane scheduler 'spread', but only {} are available across host group '{}': {}",
+                cluster_name,
+                cluster.server_machines.len(),
+                distinct_candidates.len(),
+                cluster.host_group,
+                if distinct_candidates.is_empty() {
+                    String::from("(none)")
+                } else {
+                    distinct_candidates.into_iter().collect::<Vec<_>>().join(", ")
+                }
+            )));
+        }
     }
 
     Ok(())
@@ -3598,7 +3635,7 @@ fn validate_k3s_cluster_machine(
     host_group: &str,
     machine_name: &str,
     role: &str,
-) -> Result<(), ValidationError> {
+) -> Result<HostedMachineSummaryContract, ValidationError> {
     let machine = config.machines.get(machine_name).ok_or_else(|| {
         ValidationError::new(format!(
             "k3s cluster '{}' references unknown {} machine '{}'",
@@ -3617,9 +3654,12 @@ fn validate_k3s_cluster_machine(
             cluster_name, role, machine_name
         )));
     }
-    if machine.protection_mode != ProtectionMode::Standard {
+    if !matches!(
+        machine.protection_mode,
+        ProtectionMode::Standard | ProtectionMode::Pvm
+    ) {
         return Err(ValidationError::new(format!(
-            "k3s cluster '{}' {} machine '{}' must use protection mode 'standard' for the first slice",
+            "k3s cluster '{}' {} machine '{}' must use Firecracker protection mode 'standard' or 'pvm'",
             cluster_name, role, machine_name
         )));
     }
@@ -3690,7 +3730,7 @@ fn validate_k3s_cluster_machine(
         )));
     }
 
-    Ok(())
+    Ok(summary)
 }
 
 fn hosted_node_rejection_reason(
@@ -4246,6 +4286,7 @@ mod tests {
                 server_machines: vec![String::from("cloud-generic")],
                 worker_machines: vec![String::from("cloud-aws")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: HostedSchedulerPolicy::Spread,
                 version: String::from("v1.32.0+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
@@ -4268,6 +4309,7 @@ mod tests {
                 server_machines: vec![String::from("cloud-generic")],
                 worker_machines: vec![String::from("cloud-aws")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: HostedSchedulerPolicy::Spread,
                 version: String::from("v1.32.0+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
@@ -4280,10 +4322,84 @@ mod tests {
         assert!(encoded.contains("server_machines = [\"cloud-generic\"]"));
         assert!(encoded.contains("worker_machines = [\"cloud-aws\"]"));
         assert!(encoded.contains("api_endpoint = \"https://demo-k3s.internal:6443\""));
+        assert!(encoded.contains("control_plane_scheduler = \"spread\""));
         assert!(encoded.contains("version = \"v1.32.0+k3s1\""));
 
         let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
         assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn hosted_k3s_spread_scheduler_requires_distinct_candidate_nodes() {
+        let mut sample = PortConfig::sample();
+        let mut server_b = sample
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist")
+            .clone();
+        server_b.guest.vsock_cid = 62;
+        server_b.guest.control_port = 7002;
+        server_b.guest.console_log = PathBuf::from("runtime/cloud-aws-b/console.log");
+        sample
+            .machines
+            .insert(String::from("cloud-aws-b"), server_b);
+        sample.k3s_clusters.insert(
+            String::from("demo"),
+            K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws"), String::from("cloud-aws-b")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: HostedSchedulerPolicy::Spread,
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        let error = sample
+            .validate()
+            .expect_err("spread should fail when only one candidate node exists");
+        let message = error.to_string();
+        assert!(message.contains("control-plane scheduler 'spread'"));
+        assert!(message.contains("distinct hosted candidate nodes"));
+        assert!(message.contains("aws-builders"));
+    }
+
+    #[test]
+    fn hosted_k3s_cluster_accepts_pvm_control_plane_machines() {
+        let mut sample = PortConfig::sample();
+        sample
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .capabilities
+            .pvm_lanes[0]
+            .state = PvmCapabilityState::Ready;
+        sample
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = ProtectionMode::Pvm;
+        sample.k3s_clusters.insert(
+            String::from("demo"),
+            K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: HostedSchedulerPolicy::Spread,
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        sample
+            .validate()
+            .expect("hosted k3s should accept Firecracker PVM control-plane machines");
     }
 
     #[test]
