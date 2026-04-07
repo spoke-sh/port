@@ -46,13 +46,35 @@ for tool in cargo e2fsck ldd mkfs.ext4 nix nix-store; do
   fi
 done
 
-if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
-  for tool in cpio gzip skopeo; do
+build_firecracker_initrd=0
+copy_kernel_modules_into_guest=0
+stage_preloaded_k3s_images=0
+case "$output_path" in
+  */x86_64/firecracker/standard/*)
+    build_firecracker_initrd=1
+    copy_kernel_modules_into_guest=1
+    stage_preloaded_k3s_images=1
+    ;;
+  */x86_64/firecracker/pvm/*)
+    build_firecracker_initrd=1
+    stage_preloaded_k3s_images=1
+    ;;
+esac
+
+if [[ "$build_firecracker_initrd" -eq 1 ]]; then
+  for tool in cpio gzip; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "missing required tool for guest image build: $tool" >&2
       exit 1
     fi
   done
+fi
+
+if [[ "$stage_preloaded_k3s_images" -eq 1 ]]; then
+  if ! command -v skopeo >/dev/null 2>&1; then
+    echo "missing required tool for guest image build: skopeo" >&2
+    exit 1
+  fi
 fi
 
 case "$guest_architecture" in
@@ -205,7 +227,7 @@ kmod_store="$(copy_store_closure "$kmod_attr")"
 ln -sf "${kmod_store}/bin/modprobe" "$staging_dir/usr/bin/modprobe"
 ln -sf "${kmod_store}/bin/lsmod" "$staging_dir/usr/bin/lsmod"
 
-if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
+if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
   kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.modules)"
   if [[ ! -d "${kernel_modules_store}/lib/modules" ]]; then
     echo "missing kernel modules in ${kernel_modules_store}/lib/modules" >&2
@@ -220,50 +242,86 @@ if [[ "$output_path" == */x86_64/firecracker/standard/* ]]; then
     exit 1
   fi
   printf '%s\n' "$kernel_release" >"$staging_dir/etc/port-kernel-modules-release"
+fi
+
+if [[ "$stage_preloaded_k3s_images" -eq 1 ]]; then
   stage_preloaded_images \
     "$repo_root/examples/bootstrap/demo-k3s/preloaded-images.txt" \
     "${PORT_PRELOADED_IMAGE_CACHE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/port/preloaded-images}"
+fi
 
+if [[ "$build_firecracker_initrd" -eq 1 ]]; then
   mkdir -p "$initrd_dir/bin" "$initrd_dir/dev" "$initrd_dir/etc" "$initrd_dir/lib" "$initrd_dir/newroot" "$initrd_dir/proc" "$initrd_dir/sys"
   copy_binary_with_libs_into \
     "$initrd_dir" \
     "$(readlink -f "$busybox_bin")" \
     "bin/busybox"
-  copy_binary_with_libs_into \
-    "$initrd_dir" \
-    "${kmod_store}/bin/modprobe" \
-    "bin/modprobe"
   for applet in cat echo ip mkdir mount sh sleep switch_root; do
     ln -sf busybox "$initrd_dir/bin/$applet"
   done
-  cp -a "${kernel_modules_store}/lib/modules" "$initrd_dir/lib/"
-  chmod -R u+w "$initrd_dir/lib/modules"
-  printf '%s\n' "$kernel_release" >"$initrd_dir/etc/port-kernel-modules-release"
+  if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
+    copy_binary_with_libs_into \
+      "$initrd_dir" \
+      "${kmod_store}/bin/modprobe" \
+      "bin/modprobe"
+    cp -a "${kernel_modules_store}/lib/modules" "$initrd_dir/lib/"
+    chmod -R u+w "$initrd_dir/lib/modules"
+    printf '%s\n' "$kernel_release" >"$initrd_dir/etc/port-kernel-modules-release"
+  fi
   cat >"$initrd_dir/init" <<'EOF'
 #!/bin/sh
 set -eu
 
 PATH=/bin
-kernel_release="$(cat /etc/port-kernel-modules-release)"
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 mount -t proc proc /proc 2>/dev/null || true
 mount -t sysfs sysfs /sys 2>/dev/null || true
 
-/bin/modprobe -d / -S "$kernel_release" virtio_mmio
-/bin/modprobe -d / -S "$kernel_release" virtio_blk
-/bin/modprobe -d / -S "$kernel_release" ext4
-/bin/modprobe -d / -S "$kernel_release" vsock || true
-/bin/modprobe -d / -S "$kernel_release" vmw_vsock_virtio_transport || true
-/bin/modprobe -d / -S "$kernel_release" virtio_net || true
+if [ -x /bin/modprobe ] && [ -f /etc/port-kernel-modules-release ]; then
+  kernel_release="$(cat /etc/port-kernel-modules-release)"
+  /bin/modprobe -d / -S "$kernel_release" virtio_mmio || true
+  /bin/modprobe -d / -S "$kernel_release" virtio_blk || true
+  /bin/modprobe -d / -S "$kernel_release" ext4 || true
+  /bin/modprobe -d / -S "$kernel_release" overlay || true
+  /bin/modprobe -d / -S "$kernel_release" vsock || true
+  /bin/modprobe -d / -S "$kernel_release" vmw_vsock_virtio_transport || true
+  /bin/modprobe -d / -S "$kernel_release" virtio_net || true
+fi
+
+overlay_enabled=0
+overlay_device="/dev/vdb"
+for token in $(cat /proc/cmdline); do
+  case "$token" in
+    port.rootfs_overlay=1)
+      overlay_enabled=1
+      ;;
+    port.rootfs_overlay_device=*)
+      overlay_device="${token#port.rootfs_overlay_device=}"
+      ;;
+  esac
+done
+
+mkdir -p /lower /overlay /newroot
 
 for _ in 1 2 3 4 5; do
-  if mount -t ext4 -o rw /dev/vda /newroot 2>/dev/null; then
+  if [ "$overlay_enabled" -eq 1 ]; then
+    if mount -t ext4 -o ro /dev/vda /lower 2>/dev/null; then
+      if mount -t ext4 -o rw "$overlay_device" /overlay 2>/dev/null; then
+        mkdir -p /overlay/upper /overlay/work
+        if mount -t overlay overlay -o lowerdir=/lower,upperdir=/overlay/upper,workdir=/overlay/work /newroot 2>/dev/null; then
+          exec switch_root /newroot /init
+        fi
+        umount /overlay 2>/dev/null || true
+      fi
+      umount /lower 2>/dev/null || true
+    fi
+  elif mount -t ext4 -o rw /dev/vda /newroot 2>/dev/null; then
     exec switch_root /newroot /init
   fi
   sleep 1
 done
 
-echo "failed to mount /dev/vda from initrd" >/dev/console
+echo "failed to mount rootfs from initrd" >/dev/console
 exec sh
 EOF
   chmod 0755 "$initrd_dir/init"

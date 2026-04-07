@@ -89,7 +89,7 @@ if [[ -z "$(debugfs -R 'cat /etc/port-k3s-version' "$guest_image_path" 2>/dev/nu
   echo "guest image K3s version marker is empty" >&2
   exit 1
 fi
-if [[ "$guest_image_path" == */x86_64/firecracker/standard/* ]]; then
+if [[ "$guest_image_path" == */x86_64/firecracker/* ]]; then
   initrd_path="$(dirname "$guest_image_path")/initrd.cpio.gz"
   if [[ ! -f "$initrd_path" ]]; then
     echo "guest image initrd is missing: $initrd_path" >&2
@@ -99,6 +99,9 @@ if [[ "$guest_image_path" == */x86_64/firecracker/standard/* ]]; then
     echo "guest image initrd is empty: $initrd_path" >&2
     exit 1
   fi
+fi
+
+if [[ "$guest_image_path" == */x86_64/firecracker/standard/* ]]; then
   require_debugfs_path /etc/port-kernel-modules-release
   kernel_release="$(debugfs -R 'cat /etc/port-kernel-modules-release' "$guest_image_path" 2>/dev/null | tr -d '\r\n')"
   if [[ -z "$kernel_release" ]]; then
@@ -106,6 +109,9 @@ if [[ "$guest_image_path" == */x86_64/firecracker/standard/* ]]; then
     exit 1
   fi
   require_debugfs_path "/lib/modules/${kernel_release}/modules.dep"
+fi
+
+if [[ "$guest_image_path" == */x86_64/firecracker/* ]]; then
   require_debugfs_path /etc/port-preloaded-images.txt
   preloaded_images="$(debugfs -R 'cat /etc/port-preloaded-images.txt' "$guest_image_path" 2>/dev/null || true)"
   if [[ -z "$(printf '%s\n' "$preloaded_images" | tr -d '\r\n[:space:]')" ]]; then

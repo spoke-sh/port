@@ -145,6 +145,10 @@ guest_image = "demo-guest"
 substrate = "firecracker"
 protection_mode = "pvm"
 architecture = "x86_64"
+rootfs_read_only = true
+
+[machines.cloud-aws.rootfs_overlay]
+size_mib = 16384
 ```
 
 Read that shape with these rules:
@@ -156,6 +160,9 @@ Read that shape with these rules:
   imports the prepared host state.
 - kernel and guest-image selection must resolve dedicated
   `x86_64/firecracker/pvm` variants.
+- the recommended guest storage contract for hosted AWS PVM is a read-only base
+  guest image plus a writable `rootfs_overlay`; this avoids retrying a full
+  rootfs copy on every launch attempt and keeps the runtime state explicit.
 - failure must remain explicit. Missing host kit, missing imported readiness,
   or missing PVM artifacts must not silently fall back to the standard lane.
 

@@ -996,6 +996,7 @@ impl PortConfig {
                 guest_image,
             )
             .map_err(|message| ValidationError::new(message))?;
+            validate_machine_rootfs_overlay(machine_name, machine, resolved_architecture)?;
             validate_machine_volumes(machine_name, machine)?;
             validate_machine_volume_lane(machine_name, &machine.host, host, machine)?;
 
@@ -1122,6 +1123,7 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
         memory_mib: 2048,
         kernel_args: String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
         rootfs_read_only: false,
+        rootfs_overlay: None,
         volumes: Vec::new(),
         guest: GuestControl {
             vsock_cid,
@@ -1904,11 +1906,18 @@ pub struct MachineSpec {
     pub memory_mib: u32,
     pub kernel_args: String,
     pub rootfs_read_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rootfs_overlay: Option<MachineRootfsOverlaySpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub volumes: Vec<MachineVolumeSpec>,
     pub guest: GuestControl,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<MachineNetworkSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineRootfsOverlaySpec {
+    pub size_mib: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2861,6 +2870,52 @@ fn validate_machine_volumes(
             )));
         }
         seen_names.push(volume.name.clone());
+    }
+
+    Ok(())
+}
+
+fn validate_machine_rootfs_overlay(
+    machine_name: &str,
+    machine: &MachineSpec,
+    resolved_architecture: MachineArchitecture,
+) -> Result<(), ValidationError> {
+    let Some(overlay) = &machine.rootfs_overlay else {
+        return Ok(());
+    };
+
+    if overlay.size_mib == 0 {
+        return Err(ValidationError::new(format!(
+            "machine '{}' rootfs overlay size must be greater than zero MiB",
+            machine_name
+        )));
+    }
+    if !machine.rootfs_read_only {
+        return Err(ValidationError::new(format!(
+            "machine '{}' rootfs overlay requires rootfs_read_only = true so Port can boot a read-only base image with a writable overlay",
+            machine_name
+        )));
+    }
+    if machine.substrate != ExecutionSubstrate::Firecracker {
+        return Err(ValidationError::new(format!(
+            "machine '{}' rootfs overlay is only supported on the Firecracker lane in this slice",
+            machine_name
+        )));
+    }
+    if !matches!(
+        machine.protection_mode,
+        ProtectionMode::Standard | ProtectionMode::Pvm
+    ) {
+        return Err(ValidationError::new(format!(
+            "machine '{}' rootfs overlay requires Firecracker protection mode 'standard' or 'pvm'",
+            machine_name
+        )));
+    }
+    if resolved_architecture != MachineArchitecture::X86_64 {
+        return Err(ValidationError::new(format!(
+            "machine '{}' rootfs overlay currently requires x86_64 Firecracker guests because the overlay initrd contract is only shipped for that architecture",
+            machine_name
+        )));
     }
 
     Ok(())
@@ -5740,6 +5795,56 @@ mod tests {
                 .to_string()
                 .contains("Apple Virtualization Framework does not currently define a PVM lane")
         );
+    }
+
+    #[test]
+    fn validate_accepts_firecracker_overlay_on_x86_64_read_only_rootfs() {
+        let mut config = PortConfig::sample();
+        let machine = config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+
+        config
+            .validate()
+            .expect("x86_64 Firecracker overlay contract should validate");
+    }
+
+    #[test]
+    fn validate_rejects_rootfs_overlay_without_read_only_base() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+
+        let error = config
+            .validate()
+            .expect_err("overlay without read-only rootfs should fail validation");
+
+        assert!(error.to_string().contains("rootfs_read_only = true"));
+    }
+
+    #[test]
+    fn validate_rejects_rootfs_overlay_on_non_x86_64_firecracker_guest() {
+        let mut config = PortConfig::sample();
+        let machine = config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist");
+        machine.architecture = MachineArchitecture::Aarch64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+
+        let error = config
+            .validate()
+            .expect_err("non-x86_64 overlay contract should fail validation");
+
+        assert!(error.to_string().contains("currently requires x86_64"));
     }
 
     #[test]

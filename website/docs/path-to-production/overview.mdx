@@ -34,6 +34,8 @@ on a prepared node:
 - `port control-plane prepare-pvm-node` is the readiness bridge between a
   planned node and a real prepared AWS host
 - `port machine launch`, `status`, and `stop` stay canonical for `cloud-aws`
+- the guest storage contract is a read-only base image plus writable overlay,
+  so launch retries stay fast and explicit
 - the surrounding host-kit, artifact-kit, and no-fallback contract is what
   makes this path more production-shaped than the simpler hosted standard lane
 

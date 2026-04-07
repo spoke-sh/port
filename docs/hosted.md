@@ -155,6 +155,9 @@ That means the AWS PVM host and the K3s node are different layers:
 
 - AWS PVM host: the execution host that runs the node agent and hypervisor
 - control-plane or worker microVM: the guest VM that actually runs K3s
+- recommended guest storage contract on the AWS PVM lane: a read-only base
+  rootfs plus a writable overlay disk, so repeated launches do not restart a
+  full guest-image copy
 
 Real HA is stricter than "multiple control-plane guests":
 

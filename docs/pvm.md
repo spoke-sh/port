@@ -93,6 +93,8 @@ Required contract:
 
 - kernel variant selected as `x86_64/firecracker/pvm`
 - guest-image variant selected as `x86_64/firecracker/pvm`
+- sibling initrd for the `x86_64/firecracker/pvm` guest image so Port can boot
+  a read-only base rootfs with a writable overlay drive
 - no reuse of the current `standard` Firecracker kernel or guest image
 - variant-specific validation instead of reusing the standard lane's checks
 
@@ -172,6 +174,8 @@ Start from a copy of `examples/port.toml` and make these temporary changes:
 
 - point `[control_planes.demo].endpoint` at `http://127.0.0.1:7040`
 - switch `machines.cloud-aws.protection_mode` to `pvm`
+- switch `machines.cloud-aws.rootfs_read_only` to `true` and add
+  `[machines.cloud-aws.rootfs_overlay] size_mib = 16384`
 - point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
   prepared artifact paths available on the AWS node host
 - export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm` binary
@@ -245,12 +249,7 @@ This is a hard product boundary, not a soft maybe.
 
 The implementation order after this contract is:
 
-1. Build and package the x86_64 PVM host kit.
-2. Extend `port doctor` with explicit PVM host-kit checks.
-3. Add x86_64/firecracker/pvm kernel and guest-image pipelines plus validation.
-4. Expand prepared-node automation so operators do not need a manual config
-   overlay for the hosted demo workflow.
-5. Extend hosted launch beyond the prepared PVM lane to broader scheduler and
+1. Extend hosted launch beyond the prepared PVM lane to broader scheduler and
    provider-backed runtime rollout.
 
 ## Research Basis

@@ -224,7 +224,10 @@ For `demo-kernel` on `x86_64/firecracker/standard`, that becomes:
 - PVM note:
   the `x86_64/firecracker/pvm` guest-image variant carries explicit
   `/etc/port-protection-mode` and `/etc/port-guest-architecture` markers so
-  validation can distinguish it from the standard Firecracker lane
+  validation can distinguish it from the standard Firecracker lane, and
+  `x86_64/firecracker/*` guest images now ship a sibling `initrd.cpio.gz` so
+  Port can boot a read-only base image plus writable overlay on the hosted AWS
+  PVM lane
 
 ## PVM Artifact Kit
 

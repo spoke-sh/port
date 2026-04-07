@@ -508,6 +508,9 @@ console_log = "runtime/cloud-generic/console.log"
 #   change protection_mode to "pvm" to model a hosted machine whose node
 #   inventory only becomes state = "ready" for x86_64 Firecracker/PVM after
 #   `port control-plane prepare-pvm-node` imports the prepared AWS host state.
+#   for the hosted AWS PVM lane, also switch rootfs_read_only = true and add:
+#     [machines.cloud-aws.rootfs_overlay]
+#     size_mib = 16384
 # Hosted Cloud Hypervisor proof:
 #   copy this file to a temp config, point [control_planes.demo].endpoint at
 #   http://127.0.0.1:7040, switch substrate to "cloud-hypervisor", switch

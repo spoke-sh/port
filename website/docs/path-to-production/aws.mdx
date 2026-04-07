@@ -50,6 +50,8 @@ The stronger AWS path depends on a stricter runtime contract:
 - host boot args including `pti=off`
 - patched `firecracker-pvm`
 - dedicated `x86_64/firecracker/pvm` kernel and guest-image variants
+- a read-only guest base image plus writable overlay so launch retries do not
+  restart a full rootfs copy
 - imported readiness that marks `aws-linux-node` as ready for the PVM lane
 
 Port now exports that host contract directly for downstream image builders:
@@ -102,6 +104,9 @@ is willing to treat as ready for the hosted PVM lane.
 
 Once the host kit, imported readiness, and PVM artifacts are in place, the
 canonical lifecycle stays simple:
+
+- set `machines.cloud-aws.rootfs_read_only = true`
+- add `[machines.cloud-aws.rootfs_overlay] size_mib = 16384`
 
 ```bash
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine launch --machine cloud-aws

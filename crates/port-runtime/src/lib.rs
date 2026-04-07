@@ -31,9 +31,9 @@ use port_model::{
     HostProvider, HostedApiIdentityContract, HostedArtifactIdentityContract,
     HostedImportedNodeRecord, HostedPvmCapability, HostedPvmHostKitPackageAttachment,
     HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineControlContract,
-    MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec, OciRegistryAuth,
-    OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState, PvmHostKit,
-    PvmHostKitPackage, ServiceHealthState, ServiceSecretSourceStatus,
+    MachineRootfsOverlaySpec, MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec,
+    OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
+    PvmHostKit, PvmHostKitPackage, ServiceHealthState, ServiceSecretSourceStatus,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -610,13 +610,54 @@ impl RuntimePaths {
     }
 }
 
-fn materialize_runtime_guest_image(
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeGuestStorage {
+    rootfs_path: PathBuf,
+    rootfs_overlay_path: Option<PathBuf>,
+}
+
+fn materialize_runtime_guest_storage(
     paths: &RuntimePaths,
     source: &Path,
     rootfs_read_only: bool,
-) -> Result<PathBuf> {
+) -> Result<RuntimeGuestStorage> {
+    materialize_runtime_guest_storage_with_overlay(paths, source, rootfs_read_only, None)
+}
+
+fn materialize_runtime_guest_storage_with_overlay(
+    paths: &RuntimePaths,
+    source: &Path,
+    rootfs_read_only: bool,
+    rootfs_overlay: Option<&MachineRootfsOverlaySpec>,
+) -> Result<RuntimeGuestStorage> {
+    if rootfs_overlay.is_some() {
+        let initrd_source = firecracker_initrd_path_for_rootfs(source).with_context(|| {
+            format!(
+                "guest image '{}' requires a sibling initrd.cpio.gz when booting with a rootfs overlay",
+                source.display()
+            )
+        })?;
+        if !initrd_source.is_file() {
+            bail!(
+                "guest image '{}' requires a sibling initrd.cpio.gz when booting with a rootfs overlay",
+                source.display()
+            );
+        }
+
+        return Ok(RuntimeGuestStorage {
+            rootfs_path: source.to_path_buf(),
+            rootfs_overlay_path: Some(materialize_runtime_rootfs_overlay(
+                paths,
+                rootfs_overlay.expect("overlay should exist"),
+            )?),
+        });
+    }
+
     if rootfs_read_only {
-        return Ok(source.to_path_buf());
+        return Ok(RuntimeGuestStorage {
+            rootfs_path: source.to_path_buf(),
+            rootfs_overlay_path: None,
+        });
     }
 
     let file_name = source.file_name().with_context(|| {
@@ -627,17 +668,20 @@ fn materialize_runtime_guest_image(
     })?;
     let destination = paths.runtime_dir.join(file_name);
     if source != destination {
-        copy_file(source, &destination)?;
+        ensure_runtime_materialized_copy(source, &destination)?;
     }
 
     if let Some(initrd_source) = firecracker_initrd_path_for_rootfs(source) {
         let initrd_destination = destination.with_file_name("initrd.cpio.gz");
         if initrd_source != initrd_destination {
-            copy_file(&initrd_source, &initrd_destination)?;
+            ensure_runtime_materialized_copy(&initrd_source, &initrd_destination)?;
         }
     }
 
-    Ok(destination)
+    Ok(RuntimeGuestStorage {
+        rootfs_path: destination,
+        rootfs_overlay_path: None,
+    })
 }
 
 fn configure_detached_session(command: &mut Command) {
@@ -3192,8 +3236,12 @@ fn firecracker_local_launch_machine(
     })?;
     prepare_runtime_state(&paths, request.machine_name)?;
 
-    let runtime_guest_image_path =
-        materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
+    let runtime_guest_storage = materialize_runtime_guest_storage_with_overlay(
+        &paths,
+        &guest_variant.path,
+        machine.rootfs_read_only,
+        machine.rootfs_overlay.as_ref(),
+    )?;
 
     let effective_network = machine.network.clone().unwrap_or_default();
     if effective_network.enabled {
@@ -3203,7 +3251,8 @@ fn firecracker_local_launch_machine(
 
     let config_payload = build_firecracker_config(
         kernel_variant.path.clone(),
-        runtime_guest_image_path,
+        runtime_guest_storage.rootfs_path,
+        runtime_guest_storage.rootfs_overlay_path,
         &machine.volumes,
         machine.vcpu_count,
         machine.memory_mib,
@@ -3438,14 +3487,14 @@ fn cloud_hypervisor_local_launch_machine(
         machine.guest.vsock_cid,
         paths.vsock_path.display()
     );
-    let runtime_guest_image_path =
-        materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
+    let runtime_guest_storage =
+        materialize_runtime_guest_storage(&paths, &guest_variant.path, machine.rootfs_read_only)?;
 
     let config_payload = CloudHypervisorLaunchConfig {
         machine_name: request.machine_name.to_string(),
         runtime_dir: paths.runtime_dir.clone(),
         kernel_path: kernel_variant.path.clone(),
-        guest_image_path: runtime_guest_image_path.clone(),
+        guest_image_path: runtime_guest_storage.rootfs_path.clone(),
         vcpu_count: machine.vcpu_count,
         memory_mib: machine.memory_mib,
         kernel_args: boot_args.clone(),
@@ -3467,7 +3516,7 @@ fn cloud_hypervisor_local_launch_machine(
 
     let disk_arg = format!(
         "path={},readonly={}",
-        runtime_guest_image_path.display(),
+        runtime_guest_storage.rootfs_path.display(),
         if machine.rootfs_read_only {
             "on"
         } else {
@@ -3662,15 +3711,15 @@ fn avf_local_launch_machine_with_host_os(
     })?;
     prepare_avf_runtime_state(&paths, request.machine_name)?;
 
-    let runtime_guest_image_path =
-        materialize_runtime_guest_image(&paths, &guest_variant.path, machine.rootfs_read_only)?;
+    let runtime_guest_storage =
+        materialize_runtime_guest_storage(&paths, &guest_variant.path, machine.rootfs_read_only)?;
 
     let contract = AvfExecutionContract::linux_guest();
     let config_payload = AvfLaunchConfig {
         machine_name: request.machine_name.to_string(),
         runtime_dir: paths.runtime_dir.clone(),
         kernel_path: kernel_variant.path.clone(),
-        guest_image_path: runtime_guest_image_path,
+        guest_image_path: runtime_guest_storage.rootfs_path,
         vcpu_count: machine.vcpu_count,
         memory_mib: machine.memory_mib,
         kernel_args: machine.kernel_args.clone(),
@@ -9109,6 +9158,24 @@ fn launch_preflight_checks(
     {
         checks.push(binary_check("firecracker-binary", "firecracker", true));
     }
+    if machine.rootfs_overlay.is_some() {
+        checks.push(binary_check("mkfs-ext4", "mkfs.ext4", true));
+        let initrd_path = firecracker_initrd_path_for_rootfs(guest_image_path)
+            .unwrap_or_else(|| guest_image_path.with_file_name("initrd.cpio.gz"));
+        checks.push(path_check(
+            "rootfs-overlay-initrd",
+            &initrd_path,
+            true,
+            &format!(
+                "Found sibling initrd '{}' required for rootfs overlay boot.",
+                initrd_path.display()
+            ),
+            &format!(
+                "Missing sibling initrd '{}' required for rootfs overlay boot.",
+                initrd_path.display()
+            ),
+        ));
+    }
 
     checks
 }
@@ -9631,13 +9698,42 @@ fn copy_file(source: &Path, destination: &Path) -> Result<u64> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create '{}'", parent.display()))?;
     }
-    fs::copy(source, destination).with_context(|| {
+    if source == destination {
+        return Ok(fs::metadata(source)
+            .with_context(|| format!("failed to read '{}'", source.display()))?
+            .len());
+    }
+
+    let temp_path = atomic_write_temp_path(destination);
+    let _ = fs::remove_file(&temp_path);
+    let mut source_file =
+        File::open(source).with_context(|| format!("failed to open '{}'", source.display()))?;
+    let mut temp_file = File::options()
+        .create_new(true)
+        .write(true)
+        .open(&temp_path)
+        .with_context(|| format!("failed to create '{}'", temp_path.display()))?;
+    let copied = std::io::copy(&mut source_file, &mut temp_file).with_context(|| {
         format!(
             "failed to copy artifact from '{}' to '{}'",
             source.display(),
-            destination.display()
+            temp_path.display()
         )
-    })
+    })?;
+    temp_file
+        .sync_all()
+        .with_context(|| format!("failed to sync '{}'", temp_path.display()))?;
+    drop(temp_file);
+
+    fs::rename(&temp_path, destination).with_context(|| {
+        format!(
+            "failed to atomically replace '{}' with '{}'",
+            destination.display(),
+            temp_path.display()
+        )
+    })?;
+
+    Ok(copied)
 }
 
 fn copy_reader_to_path<R: Read>(mut reader: R, destination: &Path) -> Result<u64> {
@@ -9649,6 +9745,123 @@ fn copy_reader_to_path<R: Read>(mut reader: R, destination: &Path) -> Result<u64
         .with_context(|| format!("failed to create '{}'", destination.display()))?;
     std::io::copy(&mut reader, &mut file)
         .with_context(|| format!("failed to write '{}'", destination.display()))
+}
+
+fn ensure_runtime_materialized_copy(source: &Path, destination: &Path) -> Result<u64> {
+    if runtime_materialized_copy_is_current(source, destination)? {
+        return Ok(fs::metadata(destination)
+            .with_context(|| format!("failed to read '{}'", destination.display()))?
+            .len());
+    }
+
+    copy_file(source, destination)
+}
+
+fn runtime_materialized_copy_is_current(source: &Path, destination: &Path) -> Result<bool> {
+    let source_meta =
+        fs::metadata(source).with_context(|| format!("failed to read '{}'", source.display()))?;
+    if !source_meta.is_file() {
+        bail!("artifact source '{}' does not exist", source.display());
+    }
+
+    let destination_meta = match fs::metadata(destination) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read '{}'", destination.display()));
+        }
+    };
+    if !destination_meta.is_file() || destination_meta.len() != source_meta.len() {
+        return Ok(false);
+    }
+
+    match (source_meta.modified(), destination_meta.modified()) {
+        (Ok(source_modified), Ok(destination_modified)) => {
+            Ok(destination_modified >= source_modified)
+        }
+        _ => Ok(true),
+    }
+}
+
+fn materialize_runtime_rootfs_overlay(
+    paths: &RuntimePaths,
+    overlay: &MachineRootfsOverlaySpec,
+) -> Result<PathBuf> {
+    let destination = paths.runtime_dir.join("rootfs-overlay.ext4");
+    let expected_size = u64::from(overlay.size_mib) * 1024 * 1024;
+
+    match fs::metadata(&destination) {
+        Ok(meta) if meta.is_file() && meta.len() == expected_size => return Ok(destination),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read '{}'", destination.display()));
+        }
+    }
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create '{}'", parent.display()))?;
+    }
+
+    let temp_path = atomic_write_temp_path(&destination);
+    let _ = fs::remove_file(&temp_path);
+    let temp_file = File::options()
+        .create_new(true)
+        .write(true)
+        .open(&temp_path)
+        .with_context(|| format!("failed to create '{}'", temp_path.display()))?;
+    temp_file
+        .set_len(expected_size)
+        .with_context(|| format!("failed to size '{}'", temp_path.display()))?;
+    temp_file
+        .sync_all()
+        .with_context(|| format!("failed to sync '{}'", temp_path.display()))?;
+    drop(temp_file);
+
+    let output = Command::new("mkfs.ext4")
+        .args(["-q", "-F", "-L", "port-rootfs-overlay"])
+        .arg(&temp_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .with_context(|| format!("failed to run mkfs.ext4 for '{}'", temp_path.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "mkfs.ext4 failed for '{}': {}",
+            temp_path.display(),
+            stderr.trim()
+        );
+    }
+
+    fs::rename(&temp_path, &destination).with_context(|| {
+        format!(
+            "failed to atomically install rootfs overlay '{}' from '{}'",
+            destination.display(),
+            temp_path.display()
+        )
+    })?;
+
+    Ok(destination)
+}
+
+fn atomic_write_temp_path(destination: &Path) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    destination.with_file_name(format!(
+        ".{}.{}.tmp",
+        destination
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("port-tmp"),
+        stamp
+    ))
 }
 
 fn artifact_oci_layer_media_type(kind: ArtifactKind) -> &'static str {
@@ -11733,6 +11946,7 @@ fn connect_vsock_tunnel(
 fn build_firecracker_config(
     kernel_image_path: PathBuf,
     rootfs_path: PathBuf,
+    rootfs_overlay_path: Option<PathBuf>,
     attached_volumes: &[MachineVolumeSpec],
     vcpu_count: u8,
     mem_size_mib: u32,
@@ -11746,6 +11960,10 @@ fn build_firecracker_config(
 ) -> FirecrackerConfig {
     let mut boot_args =
         format!("{boot_args} init=/init port.guest_control_port={guest_control_port}");
+    if rootfs_overlay_path.is_some() {
+        boot_args =
+            format!("{boot_args} port.rootfs_overlay=1 port.rootfs_overlay_device=/dev/vdb");
+    }
     let (network_interfaces, _) = match network {
         Some(net) if net.enabled => {
             boot_args = format!(
@@ -11773,6 +11991,14 @@ fn build_firecracker_config(
         is_root_device: true,
         is_read_only: rootfs_read_only,
     }];
+    if let Some(path_on_host) = rootfs_overlay_path {
+        drives.push(DriveConfig {
+            drive_id: String::from("rootfs-overlay"),
+            path_on_host,
+            is_root_device: false,
+            is_read_only: false,
+        });
+    }
     drives.extend(attached_volumes.iter().map(|volume| DriveConfig {
         drive_id: volume.name.clone(),
         path_on_host: volume.path.clone(),
@@ -12157,7 +12383,7 @@ mod tests {
     use std::fs;
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
     use std::net::{Shutdown, TcpListener as StdTcpListener, TcpStream};
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
@@ -14303,10 +14529,122 @@ exec sleep 30
     }
 
     #[test]
+    fn runtime_guest_materialization_reuses_current_copy_without_recopy() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let source = tempdir.path().join("rootfs.ext4");
+        fs::write(&source, b"rootfs-v1").expect("source rootfs should write");
+        fs::write(tempdir.path().join("initrd.cpio.gz"), b"initrd").expect("initrd should write");
+
+        let first = super::materialize_runtime_guest_storage(&paths, &source, false)
+            .expect("first materialization should succeed");
+        let first_inode = fs::metadata(&first.rootfs_path)
+            .expect("materialized rootfs should exist")
+            .ino();
+
+        let second = super::materialize_runtime_guest_storage(&paths, &source, false)
+            .expect("second materialization should succeed");
+        let second_inode = fs::metadata(&second.rootfs_path)
+            .expect("materialized rootfs should exist")
+            .ino();
+
+        assert_eq!(first.rootfs_path, second.rootfs_path);
+        assert_eq!(first_inode, second_inode);
+        assert!(
+            second
+                .rootfs_path
+                .with_file_name("initrd.cpio.gz")
+                .is_file(),
+            "copied initrd should remain present next to the materialized rootfs"
+        );
+    }
+
+    #[test]
+    fn runtime_guest_materialization_refreshes_stale_copy() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let source = tempdir.path().join("rootfs.ext4");
+        fs::write(&source, b"rootfs-v1").expect("source rootfs should write");
+
+        let first = super::materialize_runtime_guest_storage(&paths, &source, false)
+            .expect("first materialization should succeed");
+        let first_inode = fs::metadata(&first.rootfs_path)
+            .expect("materialized rootfs should exist")
+            .ino();
+
+        fs::write(&source, b"rootfs-v2-with-new-bytes").expect("source rootfs should update");
+
+        let refreshed = super::materialize_runtime_guest_storage(&paths, &source, false)
+            .expect("refresh should succeed");
+        let refreshed_inode = fs::metadata(&refreshed.rootfs_path)
+            .expect("refreshed rootfs should exist")
+            .ino();
+
+        assert_ne!(first_inode, refreshed_inode);
+        assert_eq!(
+            fs::read(&refreshed.rootfs_path).expect("refreshed rootfs should read"),
+            b"rootfs-v2-with-new-bytes"
+        );
+    }
+
+    #[test]
+    fn runtime_guest_overlay_materialization_is_idempotent() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let source = tempdir.path().join("rootfs.ext4");
+        fs::write(&source, b"rootfs-v1").expect("source rootfs should write");
+        fs::write(tempdir.path().join("initrd.cpio.gz"), b"initrd").expect("initrd should write");
+
+        let overlay = port_model::MachineRootfsOverlaySpec { size_mib: 64 };
+        let first = super::materialize_runtime_guest_storage_with_overlay(
+            &paths,
+            &source,
+            true,
+            Some(&overlay),
+        )
+        .expect("overlay materialization should succeed");
+        let overlay_path = first
+            .rootfs_overlay_path
+            .clone()
+            .expect("overlay path should exist");
+        let first_inode = fs::metadata(&overlay_path)
+            .expect("overlay file should exist")
+            .ino();
+
+        let second = super::materialize_runtime_guest_storage_with_overlay(
+            &paths,
+            &source,
+            true,
+            Some(&overlay),
+        )
+        .expect("overlay materialization should remain idempotent");
+        let second_overlay_path = second
+            .rootfs_overlay_path
+            .expect("overlay path should exist");
+        let second_inode = fs::metadata(&second_overlay_path)
+            .expect("overlay file should exist")
+            .ino();
+
+        assert_eq!(first.rootfs_path, source);
+        assert_eq!(overlay_path, second_overlay_path);
+        assert_eq!(first_inode, second_inode);
+        assert_eq!(
+            fs::metadata(&overlay_path)
+                .expect("overlay file should exist")
+                .len(),
+            64 * 1024 * 1024
+        );
+    }
+
+    #[test]
     fn firecracker_config_contains_kernel_rootfs_and_vsock() {
         let config = build_firecracker_config(
             "/tmp/vmlinux".into(),
             "/tmp/rootfs.ext4".into(),
+            None,
             &[],
             2,
             512,
@@ -14343,6 +14681,7 @@ exec sleep 30
         let config = build_firecracker_config(
             kernel,
             rootfs,
+            None,
             &[],
             2,
             512,
@@ -14361,6 +14700,31 @@ exec sleep 30
     }
 
     #[test]
+    fn firecracker_config_attaches_rootfs_overlay_drive_and_boot_args() {
+        let config = build_firecracker_config(
+            "/tmp/vmlinux".into(),
+            "/tmp/rootfs.ext4".into(),
+            Some("/tmp/rootfs-overlay.ext4".into()),
+            &[],
+            2,
+            512,
+            String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
+            true,
+            7000,
+            52,
+            "/tmp/guest.vsock".into(),
+            "demo",
+            None,
+        );
+        let json = serde_json::to_string_pretty(&config).expect("config should encode");
+
+        assert!(json.contains("\"rootfs-overlay\""));
+        assert!(json.contains("/tmp/rootfs-overlay.ext4"));
+        assert!(json.contains("port.rootfs_overlay=1"));
+        assert!(json.contains("port.rootfs_overlay_device=/dev/vdb"));
+    }
+
+    #[test]
     fn firecracker_config_includes_network_interface_with_default_network_spec() {
         let net = port_model::MachineNetworkSpec::default();
         assert!(
@@ -14374,6 +14738,7 @@ exec sleep 30
         let config = build_firecracker_config(
             "/tmp/vmlinux".into(),
             "/tmp/rootfs.ext4".into(),
+            None,
             &[],
             2,
             512,
@@ -14422,6 +14787,7 @@ exec sleep 30
         let config = build_firecracker_config(
             "/tmp/vmlinux".into(),
             "/tmp/rootfs.ext4".into(),
+            None,
             &[],
             2,
             512,
@@ -18906,6 +19272,36 @@ exec sleep 30
         );
 
         assert!(!checks.iter().any(|check| check.name == "kvm-device"));
+    }
+
+    #[test]
+    fn launch_preflight_requires_overlay_dependencies_for_rootfs_overlay() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let kernel = tempdir.path().join("vmlinux");
+        let rootfs = tempdir.path().join("rootfs.ext4");
+        let initrd = tempdir.path().join("initrd.cpio.gz");
+        fs::write(&kernel, "kernel").expect("kernel should write");
+        fs::write(&rootfs, "rootfs").expect("rootfs should write");
+        fs::write(&initrd, "initrd").expect("initrd should write");
+
+        let mut config = PortConfig::sample();
+        let machine = config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist");
+        machine.architecture = port_model::MachineArchitecture::X86_64;
+        machine.protection_mode = port_model::ProtectionMode::Pvm;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(port_model::MachineRootfsOverlaySpec { size_mib: 4096 });
+
+        let checks = crate::launch_preflight_checks(machine, &kernel, &rootfs);
+
+        assert!(checks.iter().any(|check| check.name == "mkfs-ext4"));
+        assert!(
+            checks
+                .iter()
+                .any(|check| check.name == "rootfs-overlay-initrd" && check.ok)
+        );
     }
 
     #[test]

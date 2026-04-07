@@ -19,7 +19,8 @@ It keeps one operator vocabulary across lanes:
   `guest`, and `service` verbs, plus the first live hosted proofs
 - Strongest current production-oriented cloud path: `cloud-aws` on a prepared
   `aws-linux-node` using `x86_64` Firecracker/PVM through the hosted control
-  plane and node agent
+  plane and node agent, with a read-only guest base image plus a writable
+  overlay disk instead of a full rootfs copy on every launch retry
 - SSH-managed remote lane: one bounded Linux lifecycle slice for `machine
   launch`, `status`, and `stop` through `mode = "ssh"` with explicit route and
   ownership output
@@ -46,6 +47,8 @@ If you need one cloud story to evaluate first, use the AWS hosted PVM path:
 - canonical lane: `x86_64` + `firecracker` + `pvm`
 - canonical readiness step: `port control-plane prepare-pvm-node`
 - canonical lifecycle: `port machine launch`, `status`, and `stop`
+- canonical guest storage mode: read-only `x86_64/firecracker/pvm` guest image
+  plus a writable runtime overlay
 
 What stays explicit:
 

@@ -131,6 +131,8 @@ The AWS PVM lane also needs dedicated guest artifacts:
 
 - kernel selector: `x86_64/firecracker/pvm`
 - guest-image selector: `x86_64/firecracker/pvm`
+- sibling `initrd.cpio.gz` for that guest image so Port can boot a read-only
+  base rootfs with a writable overlay drive
 - no reuse of the `standard` Firecracker artifact variants
 
 This is the operational reason the AWS PVM lane is stronger than the generic
@@ -192,9 +194,13 @@ Start from a copy of `examples/port.toml` and harden only the AWS path:
 2. Switch `[machines.cloud-aws].protection_mode` to `pvm`.
 3. Switch `[machines.cloud-aws].architecture` to `x86_64` when the deployment
    config should be explicit instead of `native`.
-4. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
+4. Switch `[machines.cloud-aws].rootfs_read_only` to `true` and add
+   `[machines.cloud-aws.rootfs_overlay] size_mib = 16384` so the guest boots a
+   read-only base image with a writable overlay instead of materializing a full
+   writable copy on each launch.
+5. Point the `x86_64/firecracker/pvm` kernel and guest-image variants at the
    prepared artifact paths available to `aws-linux-node`.
-5. Export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm`
+6. Export `PORT_PVM_FIRECRACKER_BINARY` to the patched `firecracker-pvm`
    binary on the AWS execution host.
 
 Canonical operator flow:
@@ -219,6 +225,8 @@ explicit:
 
 - use prepared AWS PVM hosts as the execution fleet
 - launch the K3s control-plane and worker nodes as guest microVMs on that fleet
+- keep those guest microVMs on a read-only base image plus writable overlay so
+  launch retries stay idempotent and do not recopy the full guest rootfs
 - front the control-plane microVMs with an external load balancer or VIP and
   publish that stable HTTPS address as `api_endpoint` in `[k3s_clusters.*]`
 - set `control_plane_scheduler = "spread"` so new control-plane microVM
