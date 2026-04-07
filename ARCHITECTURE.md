@@ -88,6 +88,33 @@ AWS guide explains how those boundaries come together operationally.
 | Cloud Hypervisor `standard` | Proof-backed local and hosted lane |
 | AVF `standard` | Proof-backed local macOS lane |
 
+## Cluster Contracts
+
+Port now has two different K3s cluster contracts under the same `port cluster`
+verbs:
+
+- local K3s: one local Firecracker `standard` microVM is the cluster node
+- hosted K3s: one or more hosted Firecracker guest microVMs are the cluster
+  nodes, launched through the hosted control plane and node agents
+
+The execution host and the K3s node are not the same layer in the hosted
+contract:
+
+- the AWS PVM host is an execution host that runs Port node-agent ownership
+- the K3s control-plane and worker nodes are guest microVMs launched on top of
+  those execution hosts
+
+Real HA is therefore stricter than "multiple nodes":
+
+- at least three control-plane microVMs
+- a stable HTTPS API endpoint fronting them
+- control-plane microVMs placed across distinct execution hosts so one host
+  loss does not remove quorum
+
+Port models the K3s topology and endpoint contract, but it does not ship the
+external load balancer, VIP, DNS, or ingress layer that fronts a real HA
+control plane.
+
 ## Artifact System
 
 Artifacts are modeled as logical references plus concrete variants.

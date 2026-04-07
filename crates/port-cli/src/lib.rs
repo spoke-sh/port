@@ -77,7 +77,7 @@ pub enum Command {
     Artifacts(ArtifactCommand),
     #[command(
         subcommand,
-        about = "Operate named cluster contracts and the first local cluster lifecycle slice"
+        about = "Operate named local and hosted K3s cluster contracts"
     )]
     Cluster(ClusterCommand),
     #[command(subcommand, about = "Launch and inspect Port-managed machines")]
@@ -227,12 +227,12 @@ pub enum ArtifactCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ClusterCommand {
-    #[command(about = "List named cluster contracts from the model")]
+    #[command(about = "List named local and hosted K3s cluster contracts from the model")]
     List {
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    #[command(about = "Inspect one named cluster contract from the model")]
+    #[command(about = "Inspect one named local or hosted K3s cluster contract from the model")]
     Show {
         #[arg(long)]
         cluster: String,
@@ -248,7 +248,7 @@ pub enum ClusterCommand {
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    #[command(about = "Launch and bootstrap one named local cluster")]
+    #[command(about = "Launch and bootstrap one named cluster")]
     Up {
         #[arg(long)]
         cluster: String,
@@ -259,7 +259,7 @@ pub enum ClusterCommand {
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    #[command(about = "Report Port-owned readiness for one named local cluster")]
+    #[command(about = "Report Port-owned readiness for one named cluster")]
     Status {
         #[arg(long)]
         cluster: String,
@@ -268,7 +268,7 @@ pub enum ClusterCommand {
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    #[command(about = "Return a usable kubeconfig for one named local cluster")]
+    #[command(about = "Return a usable kubeconfig for one named cluster")]
     Kubeconfig {
         #[arg(long)]
         cluster: String,
@@ -277,7 +277,7 @@ pub enum ClusterCommand {
         #[arg(long, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    #[command(about = "Stop one named local cluster and clean up its API forward")]
+    #[command(about = "Stop one named cluster and clean up local forwards when applicable")]
     Down {
         #[arg(long)]
         cluster: String,
@@ -722,6 +722,22 @@ struct RenderedClusterRecord {
 }
 
 #[derive(Debug, Serialize)]
+struct RenderedHostedK3sClusterRecord {
+    name: String,
+    flavor: String,
+    provider: String,
+    control_plane: String,
+    host_group: String,
+    control_plane_machines: Vec<String>,
+    worker_machines: Vec<String>,
+    api_endpoint: String,
+    version: String,
+    server_args: Vec<String>,
+    worker_args: Vec<String>,
+    boundary: String,
+}
+
+#[derive(Debug, Serialize)]
 struct RenderedClusterKubeconfig {
     cluster_name: String,
     machine_name: String,
@@ -739,6 +755,29 @@ struct RenderedClusterKubeconfig {
 struct EnsuredDetachedForward {
     manifest: DetachedForwardManifest,
     action: &'static str,
+}
+
+enum ResolvedClusterKind<'a> {
+    Local(&'a port_model::ClusterSpec),
+    Hosted(&'a port_model::K3sClusterSpec),
+}
+
+fn resolve_cluster_kind<'a>(
+    config: &'a PortConfig,
+    cluster_name: &str,
+) -> Result<ResolvedClusterKind<'a>> {
+    match (
+        config.clusters.get(cluster_name),
+        config.k3s_clusters.get(cluster_name),
+    ) {
+        (Some(local), None) => Ok(ResolvedClusterKind::Local(local)),
+        (None, Some(hosted)) => Ok(ResolvedClusterKind::Hosted(hosted)),
+        (Some(_), Some(_)) => bail!(
+            "cluster '{}' is ambiguous: it exists in both local `[clusters]` and hosted `[k3s_clusters]` contracts",
+            cluster_name
+        ),
+        (None, None) => bail!("cluster '{}' not found in config", cluster_name),
+    }
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -857,17 +896,22 @@ fn run_cluster(
 ) -> Result<()> {
     match command {
         ClusterCommand::List { format } => {
-            let clusters = config
+            let local_clusters = config
                 .clusters
                 .iter()
                 .map(|(name, cluster)| render_cluster_record(name, cluster))
                 .collect::<Vec<_>>();
+            let hosted_clusters = config
+                .k3s_clusters
+                .iter()
+                .map(|(name, cluster)| render_hosted_k3s_cluster_record(name, cluster))
+                .collect::<Vec<_>>();
             match format {
                 OutputFormat::Text => {
-                    if clusters.is_empty() {
+                    if local_clusters.is_empty() && hosted_clusters.is_empty() {
                         println!("no clusters defined");
                     } else {
-                        for cluster in clusters {
+                        for cluster in local_clusters {
                             println!(
                                 "{}\tflavor={}\tprovider={}\tcount={}\tmachine={}\tversion={}",
                                 cluster.name,
@@ -878,10 +922,61 @@ fn run_cluster(
                                 cluster.version
                             );
                         }
+                        for cluster in hosted_clusters {
+                            println!(
+                                "{}\tflavor={}\tprovider={}\tcontrol-planes={}\tworkers={}\tapi-endpoint={}\tversion={}",
+                                cluster.name,
+                                cluster.flavor,
+                                cluster.provider,
+                                cluster.control_plane_machines.len(),
+                                cluster.worker_machines.len(),
+                                cluster.api_endpoint,
+                                cluster.version
+                            );
+                        }
                     }
                     Ok(())
                 }
                 OutputFormat::Json => {
+                    let mut clusters = Vec::new();
+                    for cluster in local_clusters {
+                        clusters.push(serde_json::json!({
+                            "kind": "local",
+                            "name": cluster.name,
+                            "flavor": cluster.flavor,
+                            "provider": cluster.provider,
+                            "count": cluster.count,
+                            "machine": cluster.machine,
+                            "version": cluster.version,
+                            "args": cluster.args,
+                            "stage_root": cluster.stage_root,
+                            "install_script": cluster.install_script,
+                            "binary": cluster.binary,
+                            "guest_profile": cluster.guest_profile,
+                            "required_commands": cluster.required_commands,
+                            "health_command": cluster.health_command,
+                            "kubeconfig_path": cluster.kubeconfig_path,
+                            "api_forward_target": cluster.api_forward_target,
+                            "boundary": cluster.boundary,
+                        }));
+                    }
+                    for cluster in hosted_clusters {
+                        clusters.push(serde_json::json!({
+                            "kind": "hosted-k3s",
+                            "name": cluster.name,
+                            "flavor": cluster.flavor,
+                            "provider": cluster.provider,
+                            "control_plane": cluster.control_plane,
+                            "host_group": cluster.host_group,
+                            "control_plane_machines": cluster.control_plane_machines,
+                            "worker_machines": cluster.worker_machines,
+                            "api_endpoint": cluster.api_endpoint,
+                            "version": cluster.version,
+                            "server_args": cluster.server_args,
+                            "worker_args": cluster.worker_args,
+                            "boundary": cluster.boundary,
+                        }));
+                    }
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&clusters)
@@ -891,339 +986,577 @@ fn run_cluster(
                 }
             }
         }
-        ClusterCommand::Show { cluster, format } => {
-            let rendered = render_cluster_record(
-                &cluster,
-                config
-                    .clusters
-                    .get(&cluster)
-                    .with_context(|| format!("cluster '{}' not found in config", cluster))?,
-            );
-            match format {
-                OutputFormat::Text => {
-                    println!("cluster: {}", rendered.name);
-                    println!("flavor: {}", rendered.flavor);
-                    println!("provider: {}", rendered.provider);
-                    println!("count: {}", rendered.count);
-                    println!("machine: {}", rendered.machine);
-                    println!("version: {}", rendered.version);
-                    println!(
-                        "args: {}",
-                        if rendered.args.is_empty() {
-                            String::from("none")
-                        } else {
-                            rendered.args.join(" ")
-                        }
-                    );
-                    println!("stage root: {}", rendered.stage_root);
-                    println!("install script: {}", rendered.install_script);
-                    println!("binary: {}", rendered.binary);
-                    println!("guest profile: {}", rendered.guest_profile);
-                    println!(
-                        "required commands: {}",
-                        rendered.required_commands.join(" ")
-                    );
-                    println!(
-                        "health command: {}",
-                        render_shell_command(&rendered.health_command)
-                    );
-                    println!("kubeconfig path: {}", rendered.kubeconfig_path);
-                    println!("api forward target: {}", rendered.api_forward_target);
-                    println!("boundary: {}", rendered.boundary);
-                    Ok(())
-                }
-                OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&rendered)
-                            .context("failed to encode cluster record")?
-                    );
-                    Ok(())
+        ClusterCommand::Show { cluster, format } => match resolve_cluster_kind(config, &cluster)? {
+            ResolvedClusterKind::Local(cluster_record) => {
+                let rendered = render_cluster_record(&cluster, cluster_record);
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", rendered.name);
+                        println!("flavor: {}", rendered.flavor);
+                        println!("provider: {}", rendered.provider);
+                        println!("count: {}", rendered.count);
+                        println!("machine: {}", rendered.machine);
+                        println!("version: {}", rendered.version);
+                        println!(
+                            "args: {}",
+                            if rendered.args.is_empty() {
+                                String::from("none")
+                            } else {
+                                rendered.args.join(" ")
+                            }
+                        );
+                        println!("stage root: {}", rendered.stage_root);
+                        println!("install script: {}", rendered.install_script);
+                        println!("binary: {}", rendered.binary);
+                        println!("guest profile: {}", rendered.guest_profile);
+                        println!(
+                            "required commands: {}",
+                            rendered.required_commands.join(" ")
+                        );
+                        println!(
+                            "health command: {}",
+                            render_shell_command(&rendered.health_command)
+                        );
+                        println!("kubeconfig path: {}", rendered.kubeconfig_path);
+                        println!("api forward target: {}", rendered.api_forward_target);
+                        println!("boundary: {}", rendered.boundary);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&rendered)
+                                .context("failed to encode cluster record")?
+                        );
+                        Ok(())
+                    }
                 }
             }
-        }
+            ResolvedClusterKind::Hosted(cluster_record) => {
+                let rendered = render_hosted_k3s_cluster_record(&cluster, cluster_record);
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", rendered.name);
+                        println!("flavor: {}", rendered.flavor);
+                        println!("provider: {}", rendered.provider);
+                        println!("control plane: {}", rendered.control_plane);
+                        println!("host group: {}", rendered.host_group);
+                        println!(
+                            "control-plane machines: {}",
+                            rendered.control_plane_machines.join(" ")
+                        );
+                        println!(
+                            "worker machines: {}",
+                            if rendered.worker_machines.is_empty() {
+                                String::from("none")
+                            } else {
+                                rendered.worker_machines.join(" ")
+                            }
+                        );
+                        println!("api endpoint: {}", rendered.api_endpoint);
+                        println!("version: {}", rendered.version);
+                        println!(
+                            "server args: {}",
+                            if rendered.server_args.is_empty() {
+                                String::from("none")
+                            } else {
+                                rendered.server_args.join(" ")
+                            }
+                        );
+                        println!(
+                            "worker args: {}",
+                            if rendered.worker_args.is_empty() {
+                                String::from("none")
+                            } else {
+                                rendered.worker_args.join(" ")
+                            }
+                        );
+                        println!("boundary: {}", rendered.boundary);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&rendered)
+                                .context("failed to encode hosted cluster record")?
+                        );
+                        Ok(())
+                    }
+                }
+            }
+        },
         ClusterCommand::Stage {
             cluster,
             runtime_root,
             format,
-        } => {
-            let result = port_runtime::stage_local_cluster_bootstrap(
-                config,
-                ClusterStageRequest {
-                    cluster_name: &cluster,
-                    runtime_root: &runtime_root,
-                },
-            )?;
-            match format {
-                OutputFormat::Text => {
-                    println!("cluster: {}", result.cluster_name);
-                    println!("machine: {}", result.machine_name);
-                    println!("stage root: {}", result.stage_root.display());
-                    println!("guest profile: {}", result.guest_profile);
-                    println!("required commands: {}", result.required_commands.join(" "));
-                    for staged in &result.staged_files {
+        } => match resolve_cluster_kind(config, &cluster)? {
+            ResolvedClusterKind::Hosted(_) => bail!(
+                "cluster '{}' is a hosted K3s microVM contract; `port cluster stage` only applies to the local offline bootstrap slice",
+                cluster
+            ),
+            ResolvedClusterKind::Local(_) => {
+                let result = port_runtime::stage_local_cluster_bootstrap(
+                    config,
+                    ClusterStageRequest {
+                        cluster_name: &cluster,
+                        runtime_root: &runtime_root,
+                    },
+                )?;
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", result.cluster_name);
+                        println!("machine: {}", result.machine_name);
+                        println!("stage root: {}", result.stage_root.display());
+                        println!("guest profile: {}", result.guest_profile);
+                        println!("required commands: {}", result.required_commands.join(" "));
+                        for staged in &result.staged_files {
+                            println!(
+                                "staged file: {} -> {} ({} bytes)",
+                                staged.source.display(),
+                                staged.destination.display(),
+                                staged.bytes_copied
+                            );
+                        }
                         println!(
-                            "staged file: {} -> {} ({} bytes)",
-                            staged.source.display(),
-                            staged.destination.display(),
-                            staged.bytes_copied
+                            "preflight command: {}",
+                            render_shell_command(&result.preflight_command)
                         );
+                        println!("preflight output:");
+                        print!("{}", result.preflight_stdout);
+                        if !result.preflight_stdout.ends_with('\n') {
+                            println!();
+                        }
+                        println!(
+                            "install command: {}",
+                            render_shell_command(&result.install_command)
+                        );
+                        println!("install output:");
+                        print!("{}", result.install_stdout);
+                        if !result.install_stdout.ends_with('\n') {
+                            println!();
+                        }
+                        println!("installed binary: {}", result.installed_binary.display());
+                        println!("installed kubectl: {}", result.installed_kubectl.display());
+                        println!("boundary: {}", result.boundary);
+                        Ok(())
                     }
-                    println!(
-                        "preflight command: {}",
-                        render_shell_command(&result.preflight_command)
-                    );
-                    println!("preflight output:");
-                    print!("{}", result.preflight_stdout);
-                    if !result.preflight_stdout.ends_with('\n') {
-                        println!();
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result)
+                                .context("failed to encode cluster stage result")?
+                        );
+                        Ok(())
                     }
-                    println!(
-                        "install command: {}",
-                        render_shell_command(&result.install_command)
-                    );
-                    println!("install output:");
-                    print!("{}", result.install_stdout);
-                    if !result.install_stdout.ends_with('\n') {
-                        println!();
-                    }
-                    println!("installed binary: {}", result.installed_binary.display());
-                    println!("installed kubectl: {}", result.installed_kubectl.display());
-                    println!("boundary: {}", result.boundary);
-                    Ok(())
-                }
-                OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&result)
-                            .context("failed to encode cluster stage result")?
-                    );
-                    Ok(())
                 }
             }
-        }
+        },
         ClusterCommand::Up {
             cluster,
             runtime_root,
             boot_wait_secs,
             format,
-        } => {
-            let result = port_runtime::up_local_cluster(
-                config,
-                ClusterUpRequest {
-                    cluster_name: &cluster,
-                    runtime_root: &runtime_root,
-                    boot_wait: Duration::from_secs(boot_wait_secs),
-                },
-            )?;
+        } => match resolve_cluster_kind(config, &cluster)? {
+            ResolvedClusterKind::Local(_) => {
+                let result = port_runtime::up_local_cluster(
+                    config,
+                    ClusterUpRequest {
+                        cluster_name: &cluster,
+                        runtime_root: &runtime_root,
+                        boot_wait: Duration::from_secs(boot_wait_secs),
+                    },
+                )?;
 
-            if let Some(cluster_record) = config.clusters.get(&cluster) {
-                for fwd in &cluster_record.lifecycle.forwards {
-                    let fwd_name = service_forward_name(&cluster, &fwd.name);
-                    let _ = ensure_detached_forward(
-                        config_path,
-                        config,
-                        &result.machine_name,
-                        &runtime_root,
-                        &fwd.target,
-                        &fwd_name,
-                    );
-                }
-            }
-
-            port_runtime::chown_runtime_to_sudo_caller(
-                &runtime_root.join(&result.machine_name),
-            )
-            .context("failed to transfer runtime ownership to invoking user")?;
-
-            match format {
-                OutputFormat::Text => {
-                    println!("cluster: {}", result.cluster_name);
-                    println!("machine: {}", result.machine_name);
-                    println!("launch action: {}", result.launch_action);
-                    if let Some(launch) = &result.launch {
-                        println!("machine pid: {}", launch.pid);
-                        println!("runtime dir: {}", launch.runtime_dir.display());
+                if let Some(cluster_record) = config.clusters.get(&cluster) {
+                    for fwd in &cluster_record.lifecycle.forwards {
+                        let fwd_name = service_forward_name(&cluster, &fwd.name);
+                        let _ = ensure_detached_forward(
+                            config_path,
+                            config,
+                            &result.machine_name,
+                            &runtime_root,
+                            &fwd.target,
+                            &fwd_name,
+                        );
                     }
-                    println!("stage root: {}", result.stage.stage_root.display());
-                    println!("guest profile: {}", result.stage.guest_profile);
-                    print_cluster_status_report(&result.status);
-                    println!("boundary: {}", result.boundary);
-                    Ok(())
                 }
-                OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&result)
-                            .context("failed to encode cluster up result")?
-                    );
-                    Ok(())
+
+                port_runtime::chown_runtime_to_sudo_caller(
+                    &runtime_root.join(&result.machine_name),
+                )
+                .context("failed to transfer runtime ownership to invoking user")?;
+
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", result.cluster_name);
+                        println!("machine: {}", result.machine_name);
+                        println!("launch action: {}", result.launch_action);
+                        if let Some(launch) = &result.launch {
+                            println!("machine pid: {}", launch.pid);
+                            println!("runtime dir: {}", launch.runtime_dir.display());
+                        }
+                        println!("stage root: {}", result.stage.stage_root.display());
+                        println!("guest profile: {}", result.stage.guest_profile);
+                        print_cluster_status_report(&result.status);
+                        println!("boundary: {}", result.boundary);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result)
+                                .context("failed to encode cluster up result")?
+                        );
+                        Ok(())
+                    }
                 }
             }
-        }
+            ResolvedClusterKind::Hosted(_) => {
+                let result =
+                    port_runtime::bootstrap_hosted_k3s_cluster(config, &runtime_root, &cluster)?;
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", result.cluster_name);
+                        println!("control plane: {}", result.control_plane);
+                        println!("host group: {}", result.host_group);
+                        println!("api endpoint: {}", result.api_endpoint);
+                        println!(
+                            "control-plane machines: {}",
+                            result.server_machines.join(" ")
+                        );
+                        println!(
+                            "worker machines: {}",
+                            if result.worker_machines.is_empty() {
+                                String::from("none")
+                            } else {
+                                result.worker_machines.join(" ")
+                            }
+                        );
+                        for launch in &result.server_launches {
+                            println!(
+                                "control-plane launch: {} pid={} runtime-dir={}",
+                                launch.machine_name,
+                                launch.pid,
+                                launch.runtime_dir.display()
+                            );
+                        }
+                        for launch in &result.worker_launches {
+                            println!(
+                                "worker launch: {} pid={} runtime-dir={}",
+                                launch.machine_name,
+                                launch.pid,
+                                launch.runtime_dir.display()
+                            );
+                        }
+                        print_boundary_notes(&result.boundary_notes);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result)
+                                .context("failed to encode hosted cluster up result")?
+                        );
+                        Ok(())
+                    }
+                }
+            }
+        },
         ClusterCommand::Status {
             cluster,
             runtime_root,
             format,
-        } => {
-            let result = port_runtime::local_cluster_status(
-                config,
-                ClusterStatusRequest {
-                    cluster_name: &cluster,
-                    runtime_root: &runtime_root,
-                },
-            )?;
-            match format {
-                OutputFormat::Text => {
-                    print_cluster_status_report(&result);
-                    Ok(())
-                }
-                OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&result)
-                            .context("failed to encode cluster status result")?
-                    );
-                    Ok(())
+        } => match resolve_cluster_kind(config, &cluster)? {
+            ResolvedClusterKind::Local(_) => {
+                let result = port_runtime::local_cluster_status(
+                    config,
+                    ClusterStatusRequest {
+                        cluster_name: &cluster,
+                        runtime_root: &runtime_root,
+                    },
+                )?;
+                match format {
+                    OutputFormat::Text => {
+                        print_cluster_status_report(&result);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result)
+                                .context("failed to encode cluster status result")?
+                        );
+                        Ok(())
+                    }
                 }
             }
-        }
+            ResolvedClusterKind::Hosted(_) => {
+                let result =
+                    port_runtime::hosted_k3s_cluster_access(config, &runtime_root, &cluster)?;
+                match format {
+                    OutputFormat::Text => {
+                        print_hosted_k3s_cluster_access_report(&result);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result)
+                                .context("failed to encode hosted cluster status result")?
+                        );
+                        Ok(())
+                    }
+                }
+            }
+        },
         ClusterCommand::Kubeconfig {
             cluster,
             runtime_root,
             format,
-        } => {
-            let result = port_runtime::local_cluster_kubeconfig(
-                config,
-                ClusterStatusRequest {
-                    cluster_name: &cluster,
-                    runtime_root: &runtime_root,
-                },
-            )?;
-            let forward_name = cluster_forward_name(&cluster);
-            let forward = ensure_detached_forward(
-                config_path,
-                config,
-                &result.machine_name,
-                &runtime_root,
-                &result.api_forward_target,
-                &forward_name,
-            )?;
-            let rewritten =
-                rewrite_kubeconfig_server(&result.kubeconfig, &forward.manifest.listen)?;
-            let rendered = RenderedClusterKubeconfig {
-                cluster_name: result.cluster_name,
-                machine_name: result.machine_name,
-                kubeconfig_path: result.kubeconfig_path.display().to_string(),
-                kubeconfig_surface: result.kubeconfig_surface,
-                forward_name: forward.manifest.name,
-                forward_action: forward.action.to_string(),
-                forward_listen: forward.manifest.listen,
-                forward_target: forward.manifest.target,
-                boundary: result.boundary,
-                kubeconfig: rewritten,
-            };
-            match format {
-                OutputFormat::Text => {
-                    println!("cluster: {}", rendered.cluster_name);
-                    println!("machine: {}", rendered.machine_name);
-                    println!("kubeconfig path: {}", rendered.kubeconfig_path);
-                    println!("kubeconfig surface: {}", rendered.kubeconfig_surface);
-                    println!("forward name: {}", rendered.forward_name);
-                    println!("forward action: {}", rendered.forward_action);
-                    println!("forward listen: {}", rendered.forward_listen);
-                    println!("forward target: {}", rendered.forward_target);
-                    println!("boundary: {}", rendered.boundary);
-                    println!("kubeconfig:");
-                    print!("{}", rendered.kubeconfig);
-                    if !rendered.kubeconfig.ends_with('\n') {
-                        println!();
+        } => match resolve_cluster_kind(config, &cluster)? {
+            ResolvedClusterKind::Local(_) => {
+                let result = port_runtime::local_cluster_kubeconfig(
+                    config,
+                    ClusterStatusRequest {
+                        cluster_name: &cluster,
+                        runtime_root: &runtime_root,
+                    },
+                )?;
+                let forward_name = cluster_forward_name(&cluster);
+                let forward = ensure_detached_forward(
+                    config_path,
+                    config,
+                    &result.machine_name,
+                    &runtime_root,
+                    &result.api_forward_target,
+                    &forward_name,
+                )?;
+                let rewritten =
+                    rewrite_kubeconfig_server(&result.kubeconfig, &forward.manifest.listen)?;
+                let rendered = RenderedClusterKubeconfig {
+                    cluster_name: result.cluster_name,
+                    machine_name: result.machine_name,
+                    kubeconfig_path: result.kubeconfig_path.display().to_string(),
+                    kubeconfig_surface: result.kubeconfig_surface,
+                    forward_name: forward.manifest.name,
+                    forward_action: forward.action.to_string(),
+                    forward_listen: forward.manifest.listen,
+                    forward_target: forward.manifest.target,
+                    boundary: result.boundary,
+                    kubeconfig: rewritten,
+                };
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", rendered.cluster_name);
+                        println!("machine: {}", rendered.machine_name);
+                        println!("kubeconfig path: {}", rendered.kubeconfig_path);
+                        println!("kubeconfig surface: {}", rendered.kubeconfig_surface);
+                        println!("forward name: {}", rendered.forward_name);
+                        println!("forward action: {}", rendered.forward_action);
+                        println!("forward listen: {}", rendered.forward_listen);
+                        println!("forward target: {}", rendered.forward_target);
+                        println!("boundary: {}", rendered.boundary);
+                        println!("kubeconfig:");
+                        print!("{}", rendered.kubeconfig);
+                        if !rendered.kubeconfig.ends_with('\n') {
+                            println!();
+                        }
+                        Ok(())
                     }
-                    Ok(())
-                }
-                OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&rendered)
-                            .context("failed to encode cluster kubeconfig result")?
-                    );
-                    Ok(())
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&rendered)
+                                .context("failed to encode cluster kubeconfig result")?
+                        );
+                        Ok(())
+                    }
                 }
             }
-        }
+            ResolvedClusterKind::Hosted(_) => {
+                let result =
+                    port_runtime::hosted_k3s_cluster_access(config, &runtime_root, &cluster)?;
+                let rewritten =
+                    rewrite_kubeconfig_server(&result.kubeconfig, &result.api_endpoint)?;
+                let rendered = serde_json::json!({
+                    "cluster_name": result.cluster_name,
+                    "control_plane": result.control_plane,
+                    "host_group": result.host_group,
+                    "server_machines": result.server_machines,
+                    "worker_machines": result.worker_machines,
+                    "api_endpoint": result.api_endpoint,
+                    "kubeconfig_surface": result.kubeconfig_surface,
+                    "visibility_surface": result.visibility_surface,
+                    "boundary_notes": result.boundary_notes,
+                    "kubeconfig": rewritten,
+                });
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", result.cluster_name);
+                        println!("control plane: {}", result.control_plane);
+                        println!("host group: {}", result.host_group);
+                        println!("api endpoint: {}", result.api_endpoint);
+                        println!(
+                            "control-plane machines: {}",
+                            result.server_machines.join(" ")
+                        );
+                        println!(
+                            "worker machines: {}",
+                            if result.worker_machines.is_empty() {
+                                String::from("none")
+                            } else {
+                                result.worker_machines.join(" ")
+                            }
+                        );
+                        println!("kubeconfig surface: {}", result.kubeconfig_surface);
+                        print_boundary_notes(&result.boundary_notes);
+                        println!("kubeconfig:");
+                        print!("{}", rewritten);
+                        if !rewritten.ends_with('\n') {
+                            println!();
+                        }
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&rendered)
+                                .context("failed to encode hosted cluster kubeconfig result")?
+                        );
+                        Ok(())
+                    }
+                }
+            }
+        },
         ClusterCommand::Down {
             cluster,
             runtime_root,
             stop_wait_secs,
             format,
-        } => {
-            let cluster_record = config
-                .clusters
-                .get(&cluster)
-                .with_context(|| format!("cluster '{}' not found in config", cluster))?;
-            for fwd in &cluster_record.lifecycle.forwards {
-                let fwd_name = service_forward_name(&cluster, &fwd.name);
-                let _ = stop_detached_forward_if_present(
+        } => match resolve_cluster_kind(config, &cluster)? {
+            ResolvedClusterKind::Local(cluster_record) => {
+                for fwd in &cluster_record.lifecycle.forwards {
+                    let fwd_name = service_forward_name(&cluster, &fwd.name);
+                    let _ = stop_detached_forward_if_present(
+                        config,
+                        &cluster_record.machine,
+                        &runtime_root,
+                        &fwd_name,
+                    );
+                }
+                let forward_name = cluster_forward_name(&cluster);
+                let forward_cleanup = stop_detached_forward_if_present(
                     config,
                     &cluster_record.machine,
                     &runtime_root,
-                    &fwd_name,
+                    &forward_name,
+                )?;
+                let result = port_runtime::down_local_cluster(
+                    config,
+                    ClusterDownRequest {
+                        cluster_name: &cluster,
+                        runtime_root: &runtime_root,
+                        stop_wait: Duration::from_secs(stop_wait_secs),
+                    },
+                )?;
+                let forward_cleanup = forward_cleanup.map_or_else(
+                    || format!("{forward_name} not-present"),
+                    |manifest| format!("{} stopped", manifest.name),
                 );
-            }
-            let forward_name = cluster_forward_name(&cluster);
-            let forward_cleanup = stop_detached_forward_if_present(
-                config,
-                &cluster_record.machine,
-                &runtime_root,
-                &forward_name,
-            )?;
-            let result = port_runtime::down_local_cluster(
-                config,
-                ClusterDownRequest {
-                    cluster_name: &cluster,
-                    runtime_root: &runtime_root,
-                    stop_wait: Duration::from_secs(stop_wait_secs),
-                },
-            )?;
-            let forward_cleanup = forward_cleanup.map_or_else(
-                || format!("{forward_name} not-present"),
-                |manifest| format!("{} stopped", manifest.name),
-            );
-            match format {
-                OutputFormat::Text => {
-                    println!("cluster: {}", result.cluster_name);
-                    println!("machine: {}", result.machine_name);
-                    println!("forward cleanup: {}", forward_cleanup);
-                    println!("previous state: {}", result.stop.previous_state);
-                    println!("current state: {}", result.stop.current_state);
-                    println!(
-                        "machine pid: {}",
-                        result
-                            .stop
-                            .pid
-                            .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
-                    );
-                    println!("runtime dir: {}", result.stop.runtime_dir.display());
-                    println!("detail: {}", result.stop.detail);
-                    println!("boundary: {}", result.boundary);
-                    Ok(())
-                }
-                OutputFormat::Json => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "cluster_name": result.cluster_name,
-                            "machine_name": result.machine_name,
-                            "forward_cleanup": forward_cleanup,
-                            "stop": result.stop,
-                            "boundary": result.boundary,
-                        }))
-                        .context("failed to encode cluster down result")?
-                    );
-                    Ok(())
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", result.cluster_name);
+                        println!("machine: {}", result.machine_name);
+                        println!("forward cleanup: {}", forward_cleanup);
+                        println!("previous state: {}", result.stop.previous_state);
+                        println!("current state: {}", result.stop.current_state);
+                        println!(
+                            "machine pid: {}",
+                            result
+                                .stop
+                                .pid
+                                .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+                        );
+                        println!("runtime dir: {}", result.stop.runtime_dir.display());
+                        println!("detail: {}", result.stop.detail);
+                        println!("boundary: {}", result.boundary);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "cluster_name": result.cluster_name,
+                                "machine_name": result.machine_name,
+                                "forward_cleanup": forward_cleanup,
+                                "stop": result.stop,
+                                "boundary": result.boundary,
+                            }))
+                            .context("failed to encode cluster down result")?
+                        );
+                        Ok(())
+                    }
                 }
             }
-        }
+            ResolvedClusterKind::Hosted(_) => {
+                let result = port_runtime::down_hosted_k3s_cluster(
+                    config,
+                    &runtime_root,
+                    &cluster,
+                    Duration::from_secs(stop_wait_secs),
+                )?;
+                match format {
+                    OutputFormat::Text => {
+                        println!("cluster: {}", result.cluster_name);
+                        println!("control plane: {}", result.control_plane);
+                        println!("host group: {}", result.host_group);
+                        println!("api endpoint: {}", result.api_endpoint);
+                        println!(
+                            "control-plane machines: {}",
+                            result.server_machines.join(" ")
+                        );
+                        println!(
+                            "worker machines: {}",
+                            if result.worker_machines.is_empty() {
+                                String::from("none")
+                            } else {
+                                result.worker_machines.join(" ")
+                            }
+                        );
+                        for stop in &result.worker_stops {
+                            println!(
+                                "worker stop: {} previous={} current={} pid={}",
+                                stop.machine_name,
+                                stop.previous_state,
+                                stop.current_state,
+                                stop.pid
+                                    .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+                            );
+                        }
+                        for stop in &result.server_stops {
+                            println!(
+                                "control-plane stop: {} previous={} current={} pid={}",
+                                stop.machine_name,
+                                stop.previous_state,
+                                stop.current_state,
+                                stop.pid
+                                    .map_or_else(|| String::from("(none)"), |pid| pid.to_string())
+                            );
+                        }
+                        print_boundary_notes(&result.boundary_notes);
+                        Ok(())
+                    }
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&result)
+                                .context("failed to encode hosted cluster down result")?
+                        );
+                        Ok(())
+                    }
+                }
+            }
+        },
     }
 }
 
@@ -1245,7 +1578,29 @@ fn render_cluster_record(name: &str, cluster: &port_model::ClusterSpec) -> Rende
         kubeconfig_path: cluster.lifecycle.kubeconfig_path.display().to_string(),
         api_forward_target: cluster.lifecycle.api_forward_target.clone(),
         boundary: String::from(
-            "single-node local K3s only in this slice; multi-node, hosted, and aws lanes remain follow-on work",
+            "single-node local K3s only in this slice; hosted microVM-backed K3s is a separate contract and local multi-node expansion remains follow-on work",
+        ),
+    }
+}
+
+fn render_hosted_k3s_cluster_record(
+    name: &str,
+    cluster: &port_model::K3sClusterSpec,
+) -> RenderedHostedK3sClusterRecord {
+    RenderedHostedK3sClusterRecord {
+        name: name.to_string(),
+        flavor: String::from("k3s"),
+        provider: String::from("hosted"),
+        control_plane: cluster.control_plane.clone(),
+        host_group: cluster.host_group.clone(),
+        control_plane_machines: cluster.server_machines.clone(),
+        worker_machines: cluster.worker_machines.clone(),
+        api_endpoint: cluster.api_endpoint.clone(),
+        version: cluster.version.clone(),
+        server_args: cluster.server_args.clone(),
+        worker_args: cluster.worker_args.clone(),
+        boundary: String::from(
+            "hosted Firecracker microVM K3s; real HA depends on at least three control-plane microVMs, a stable HTTPS api endpoint, and distinct execution hosts behind that endpoint",
         ),
     }
 }
@@ -1281,6 +1636,52 @@ fn print_cluster_status_report(report: &port_runtime::ClusterStatusReport) {
     println!("kubeconfig surface: {}", report.kubeconfig_surface);
     println!("boundary: {}", report.boundary);
     println!("detail: {}", report.detail);
+}
+
+fn print_boundary_notes(notes: &[String]) {
+    for note in notes {
+        println!("boundary: {}", note);
+    }
+}
+
+fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sClusterAccessReport) {
+    println!("cluster: {}", report.cluster_name);
+    println!("control plane: {}", report.control_plane);
+    println!("host group: {}", report.host_group);
+    println!(
+        "control-plane machines: {}",
+        report.server_machines.join(" ")
+    );
+    println!(
+        "worker machines: {}",
+        if report.worker_machines.is_empty() {
+            String::from("none")
+        } else {
+            report.worker_machines.join(" ")
+        }
+    );
+    println!("api endpoint: {}", report.api_endpoint);
+    println!("kubeconfig surface: {}", report.kubeconfig_surface);
+    println!("visibility surface: {}", report.visibility_surface);
+    if report.visibility_output.is_empty() {
+        println!("visibility output: (none)");
+    } else {
+        println!("visibility output:");
+        print!("{}", report.visibility_output);
+        if !report.visibility_output.ends_with('\n') {
+            println!();
+        }
+    }
+    for machine in &report.machine_access {
+        let machine_name = machine.route.machine_name.as_deref().unwrap_or("(unknown)");
+        let node_name = machine.route.node_name.as_deref().unwrap_or("(unresolved)");
+        println!(
+            "route: role={} machine={} node={}",
+            machine.role, machine_name, node_name
+        );
+        println!("route detail: {}", machine.detail);
+    }
+    print_boundary_notes(&report.boundary_notes);
 }
 
 fn render_shell_command(command: &[String]) -> String {

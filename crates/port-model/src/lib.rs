@@ -2070,8 +2070,9 @@ const fn default_cluster_count() -> u16 {
 pub struct K3sClusterSpec {
     pub control_plane: String,
     pub host_group: String,
-    pub server_machine: String,
+    pub server_machines: Vec<String>,
     pub worker_machines: Vec<String>,
+    pub api_endpoint: String,
     pub version: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub server_args: Vec<String>,
@@ -3467,15 +3468,15 @@ fn validate_k3s_cluster(
             cluster_name, cluster.control_plane, cluster.host_group, group_control_plane
         )));
     }
-    if cluster.server_machine.trim().is_empty() {
+    if cluster.server_machines.is_empty() {
         return Err(ValidationError::new(format!(
-            "k3s cluster '{}' must declare a non-empty server machine",
+            "k3s cluster '{}' must declare at least one control-plane machine",
             cluster_name
         )));
     }
-    if cluster.worker_machines.is_empty() {
+    if cluster.api_endpoint.trim().is_empty() {
         return Err(ValidationError::new(format!(
-            "k3s cluster '{}' must declare at least one worker machine",
+            "k3s cluster '{}' must declare a non-empty api endpoint",
             cluster_name
         )));
     }
@@ -3483,6 +3484,12 @@ fn validate_k3s_cluster(
         return Err(ValidationError::new(format!(
             "k3s cluster '{}' must declare a non-empty version",
             cluster_name
+        )));
+    }
+    if !cluster.api_endpoint.starts_with("https://") {
+        return Err(ValidationError::new(format!(
+            "k3s cluster '{}' api endpoint '{}' must start with 'https://'",
+            cluster_name, cluster.api_endpoint
         )));
     }
     if cluster.server_args.iter().any(|arg| arg.trim().is_empty()) {
@@ -3499,15 +3506,28 @@ fn validate_k3s_cluster(
     }
 
     let mut seen = BTreeSet::new();
-    validate_k3s_cluster_machine(
-        config,
-        cluster_name,
-        &cluster.control_plane,
-        &cluster.host_group,
-        &cluster.server_machine,
-        "server",
-    )?;
-    seen.insert(cluster.server_machine.clone());
+    for server_machine in &cluster.server_machines {
+        if server_machine.trim().is_empty() {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' control-plane machines must not contain empty names",
+                cluster_name
+            )));
+        }
+        if !seen.insert(server_machine.clone()) {
+            return Err(ValidationError::new(format!(
+                "k3s cluster '{}' reuses machine '{}' across K3s node roles",
+                cluster_name, server_machine
+            )));
+        }
+        validate_k3s_cluster_machine(
+            config,
+            cluster_name,
+            &cluster.control_plane,
+            &cluster.host_group,
+            server_machine,
+            "control-plane",
+        )?;
+    }
 
     for worker_machine in &cluster.worker_machines {
         if worker_machine.trim().is_empty() {
@@ -4223,8 +4243,9 @@ mod tests {
             K3sClusterSpec {
                 control_plane: String::from("demo"),
                 host_group: String::from("remote-linux"),
-                server_machine: String::from("cloud-generic"),
+                server_machines: vec![String::from("cloud-generic")],
                 worker_machines: vec![String::from("cloud-aws")],
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 version: String::from("v1.32.0+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
@@ -4244,8 +4265,9 @@ mod tests {
             &K3sClusterSpec {
                 control_plane: String::from("demo"),
                 host_group: String::from("remote-linux"),
-                server_machine: String::from("cloud-generic"),
+                server_machines: vec![String::from("cloud-generic")],
                 worker_machines: vec![String::from("cloud-aws")],
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 version: String::from("v1.32.0+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
@@ -4255,8 +4277,9 @@ mod tests {
         let encoded = sample.to_toml_string().expect("sample should encode");
         assert!(encoded.contains("[k3s_clusters.demo]"));
         assert!(encoded.contains("host_group = \"remote-linux\""));
-        assert!(encoded.contains("server_machine = \"cloud-generic\""));
+        assert!(encoded.contains("server_machines = [\"cloud-generic\"]"));
         assert!(encoded.contains("worker_machines = [\"cloud-aws\"]"));
+        assert!(encoded.contains("api_endpoint = \"https://demo-k3s.internal:6443\""));
         assert!(encoded.contains("version = \"v1.32.0+k3s1\""));
 
         let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");

@@ -165,13 +165,16 @@ contract.
 
 ### Hosted K3s Clusters
 
-The first K3s slice adds one explicit hosted cluster catalog instead of a new
-`port k3s` command family:
+Hosted K3s stays under the canonical `port cluster ...` command family instead
+of introducing a separate `port k3s ...` surface.
+
+The hosted cluster catalog is explicit:
 
 - one control plane
 - one host group
-- one server machine
-- one or more worker machines
+- one or more control-plane machines
+- zero or more worker machines
+- one stable HTTPS API endpoint that fronts the control plane
 - one K3s version plus optional server and worker install arguments
 
 Example:
@@ -179,22 +182,29 @@ Example:
 ```toml
 [k3s_clusters.demo]
 control_plane = "demo"
-host_group = "remote-linux"
-server_machine = "cloud-generic"
-worker_machines = ["cloud-aws"]
+host_group = "aws-builders"
+server_machines = ["cloud-aws-a", "cloud-aws-b", "cloud-aws-c"]
+worker_machines = ["cloud-aws-worker-a", "cloud-aws-worker-b"]
+api_endpoint = "https://demo-k3s.internal:6443"
 version = "v1.32.0+k3s1"
 server_args = ["--disable=traefik"]
 worker_args = ["--node-label=role=worker"]
 ```
 
-The first hosted K3s slice stays explicit about its boundary:
+Hosted K3s is a microVM-backed cluster contract:
 
 - hosted control-plane ownership only
-- Firecracker with `standard` protection only
+- Firecracker guest microVMs are the K3s nodes
+- the host lane, including AWS PVM, is the execution host for those microVMs, not the K3s node itself
 - stateless machines only
-- no HA, ingress, load balancers, CSI, or attached volumes
-- cluster bring-up, kubeconfig handoff, and node visibility stay on
-  `port machine ...` plus `port guest exec ...`
+- `port cluster up|status|kubeconfig|down` is the canonical lifecycle surface
+
+Real-HA boundary:
+
+- real HA needs at least three control-plane microVMs
+- those control-plane microVMs must be spread across distinct execution hosts
+- `api_endpoint` must already front those control-plane microVMs through an external load balancer or VIP
+- Port models that endpoint and bootstraps the guest microVM nodes, but it does not ship the load balancer, VIP, DNS, ingress, CSI, or attached-volume layer in this slice
 
 ### Attached Volumes
 

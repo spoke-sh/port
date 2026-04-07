@@ -27,6 +27,10 @@ It keeps one operator vocabulary across lanes:
   `standard` lane with `port cluster up|status|kubeconfig|down`, Port-owned
   offline bootstrap inputs, and an explicit downstream handoff of health plus
   kubeconfig
+- Hosted K3s cluster slice: named hosted K3s clusters under the same
+  `port cluster` verbs, with Firecracker guest microVMs as the K3s nodes,
+  explicit control-plane and worker machine sets, and an operator-supplied
+  HTTPS API endpoint
 - Attached volume first slice: one persistent `host-file` attached volume on
   the local Firecracker `standard` lane with explicit host path and ownership
   output
@@ -143,8 +147,9 @@ repo-level review surface:
   one named local K3s cluster
 - it keeps the downstream seam thin: infra asks Port for cluster readiness plus
   kubeconfig, then owns later GitOps/bootstrap convergence
-- it keeps hosted, multi-node, AWS, richer networking, ingress, and storage
-  guarantees as explicit follow-on work
+- it keeps hosted microVM-backed K3s as a separate contract, and it keeps real
+  HA, richer networking, ingress, and storage guarantees as explicit follow-on
+  work around that contract
 - it stays named `mission` until upstream `keel screen` exists and Port can
   hard-cut to `keel screen`
 - it uses the current renderer-backed cast/GIF path today; future `atxt`

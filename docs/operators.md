@@ -207,6 +207,52 @@ Human-reviewable artifact:
 ./scripts/render-local-cluster-proof.sh .keel/stories/VFDk8ggoV/EVIDENCE
 ```
 
+## Hosted K3s MicroVM Contract
+
+Hosted K3s now uses the same `port cluster ...` verbs, but the nodes are
+hosted guest microVMs instead of one local guest.
+
+Config shape:
+
+```toml
+[k3s_clusters.demo]
+control_plane = "demo"
+host_group = "aws-builders"
+server_machines = ["cloud-aws-a", "cloud-aws-b", "cloud-aws-c"]
+worker_machines = ["cloud-aws-worker-a", "cloud-aws-worker-b"]
+api_endpoint = "https://demo-k3s.internal:6443"
+version = "v1.32.0+k3s1"
+server_args = ["--disable=traefik"]
+worker_args = ["--node-label=role=worker"]
+```
+
+Canonical workflow:
+
+```bash
+port --config /tmp/port-hosted-k3s.toml cluster show --cluster demo
+port --config /tmp/port-hosted-k3s.toml cluster up --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-hosted-k3s.toml cluster status --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-hosted-k3s.toml cluster kubeconfig --cluster demo --runtime-root /var/lib/port/runtime
+port --config /tmp/port-hosted-k3s.toml cluster down --cluster demo --runtime-root /var/lib/port/runtime
+```
+
+Interpret that contract this way:
+
+- the execution hosts, including AWS PVM hosts, run Port node-agent ownership
+- the K3s control-plane and worker nodes are the guest microVMs named in
+  `server_machines` and `worker_machines`
+- `api_endpoint` must already front the control-plane microVMs through an
+  external load balancer or VIP
+
+Real-HA boundary:
+
+- at least three control-plane microVMs
+- those control-plane microVMs spread across distinct execution hosts
+- one stable HTTPS API endpoint fronting them
+
+Port bootstraps and reports that topology, but it does not ship the external
+load balancer, VIP, DNS, ingress, or storage layer around it.
+
 ## Hosted External Project Deployment First Slice
 
 Port now has one bounded answer to "can it host an external project?" without

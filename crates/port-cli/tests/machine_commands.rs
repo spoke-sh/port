@@ -1,13 +1,19 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
+use port_agent_protocol::{
+    ExecResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame,
+    write_frame,
+};
 use port_model::{
     ClusterProvider, ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture,
     MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode,
@@ -302,6 +308,38 @@ fn hosted_config(runtime_root: &Path) -> PortConfig {
     config
 }
 
+fn hosted_k3s_config(runtime_root: &Path) -> PortConfig {
+    let mut config = hosted_config(runtime_root);
+    let server_b = {
+        let mut machine = config
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist")
+            .clone();
+        machine.guest.vsock_cid = 63;
+        machine.guest.control_port = 7002;
+        machine.guest.console_log = PathBuf::from("runtime/cloud-aws-b/console.log");
+        machine
+    };
+    config
+        .machines
+        .insert(String::from("cloud-aws-b"), server_b);
+    config.k3s_clusters.insert(
+        String::from("demo"),
+        port_model::K3sClusterSpec {
+            control_plane: String::from("demo"),
+            host_group: String::from("aws-builders"),
+            server_machines: vec![String::from("cloud-aws"), String::from("cloud-aws-b")],
+            worker_machines: Vec::new(),
+            api_endpoint: String::from("https://demo-k3s.internal:6443"),
+            version: String::from("v1.32.0+k3s1"),
+            server_args: vec![String::from("--disable=traefik")],
+            worker_args: Vec::new(),
+        },
+    );
+    config
+}
+
 fn hosted_multi_node_config(runtime_root: &Path, alternate_runtime_root: &Path) -> PortConfig {
     let mut config = hosted_config(runtime_root);
     let mut alternate = config
@@ -484,6 +522,63 @@ fn write_registered_node_state(
     .expect("registered node state should write");
 }
 
+fn spawn_hosted_exec_sequence_server(
+    paths: port_runtime::RuntimePaths,
+    expected: Vec<(Vec<String>, String)>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for _ in 0..1000 {
+            if paths.manifest_path.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            paths.manifest_path.exists(),
+            "machine manifest should exist before binding guest transport at {}",
+            paths.manifest_path.display()
+        );
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
+
+        for (expected_command, stdout) in expected {
+            let (mut stream, _) = listener
+                .accept()
+                .expect("should accept hosted guest transport");
+            let reader_stream = stream.try_clone().expect("stream should clone");
+            let mut reader = BufReader::new(reader_stream);
+            let mut handshake = String::new();
+            reader
+                .read_line(&mut handshake)
+                .expect("handshake should decode");
+            assert!(
+                handshake.starts_with("CONNECT "),
+                "unexpected guest transport handshake: {handshake:?}"
+            );
+            stream.write_all(b"OK\n").expect("handshake should ack");
+            stream.flush().expect("handshake should flush");
+            let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
+            match request.operation {
+                GuestOperation::Exec(request) => assert_eq!(request.command, expected_command),
+                other => panic!("unexpected hosted guest operation: {other:?}"),
+            }
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: request.id,
+                    exit_code: 0,
+                    result: OperationResult::Exec(ExecResult {
+                        stdout,
+                        stderr: String::new(),
+                    }),
+                },
+            )
+            .expect("response should encode");
+        }
+    })
+}
+
 fn write_forward_manifest(
     runtime_root: &Path,
     machine: &str,
@@ -523,6 +618,28 @@ fn write_fake_firecracker_binary(root: &Path, name: &str) -> PathBuf {
     permissions.set_mode(0o755);
     fs::set_permissions(&path, permissions).expect("fake firecracker permissions should update");
     path
+}
+
+fn write_fake_network_binaries(root: &Path) {
+    for (name, version_output) in [
+        ("ip", "ip utility, iproute2-6.12.0"),
+        ("iptables", "iptables v1.8.11"),
+    ] {
+        let path = root.join(name);
+        fs::write(
+            &path,
+            format!(
+                "#!/usr/bin/env bash\nif [[ \"${{1:-}}\" == \"-V\" || \"${{1:-}}\" == \"--version\" ]]; then\n  echo '{version_output}'\n  exit 0\nfi\nexit 0\n"
+            ),
+        )
+        .expect("fake network tool should write");
+        let mut permissions = fs::metadata(&path)
+            .expect("fake network tool metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions)
+            .expect("fake network tool permissions should update");
+    }
 }
 
 fn write_fake_port_wrapper(root: &Path) -> PathBuf {
@@ -804,6 +921,236 @@ fn cli_cluster_list_and_show_surface_local_contract() {
     assert!(show_stdout.contains("kubeconfig path: /etc/rancher/k3s/k3s.yaml"));
     assert!(show_stdout.contains("api forward target: 127.0.0.1:6443"));
     assert!(show_stdout.contains("boundary: single-node local K3s only in this slice"));
+}
+
+#[test]
+fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_k3s_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_fake_standard_firecracker_artifacts(&mut server_config, temp.path());
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = bogus_runtime_root;
+    write_config(&client_config_path, &client_config);
+
+    let show = Command::new(port_bin())
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("show")
+        .arg("--cluster")
+        .arg("demo")
+        .output()
+        .expect("hosted cluster show command should run");
+    assert!(show.status.success(), "{show:?}");
+    let show_stdout = String::from_utf8_lossy(&show.stdout);
+    assert!(show_stdout.contains("provider: hosted"));
+    assert!(show_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(show_stdout.contains("worker machines: none"));
+    assert!(show_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+    assert!(show_stdout.contains("real HA depends on at least three control-plane microVMs"));
+
+    let list = Command::new(port_bin())
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("list")
+        .output()
+        .expect("hosted cluster list command should run");
+    assert!(list.status.success(), "{list:?}");
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(list_stdout.contains("provider=hosted"));
+    assert!(list_stdout.contains("control-planes=2"));
+    assert!(list_stdout.contains("api-endpoint=https://demo-k3s.internal:6443"));
+
+    let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
+    write_fake_network_binaries(temp.path());
+    let joined_path = prepend_path_env(temp.path());
+    let _servers = spawn_hosted_server_harness(
+        &server_config_path,
+        &node_addr,
+        &control_plane_addr,
+        &[("PATH", joined_path.as_path())],
+    );
+
+    let server_a = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+    let server_b = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws-b");
+    let server_a_guest = spawn_hosted_exec_sequence_server(
+        server_a,
+        vec![
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from(
+                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh -",
+                    ),
+                ],
+                String::from("server bootstrapped\n"),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("cat /var/lib/rancher/k3s/server/node-token"),
+                ],
+                String::from("demo-join-token\n"),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("cat /etc/rancher/k3s/k3s.yaml"),
+                ],
+                String::from(
+                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                ),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("k3s kubectl get nodes -o wide"),
+                ],
+                String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                ),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("cat /etc/rancher/k3s/k3s.yaml"),
+                ],
+                String::from(
+                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                ),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("k3s kubectl get nodes -o wide"),
+                ],
+                String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                ),
+            ),
+        ],
+    );
+    let server_b_guest = spawn_hosted_exec_sequence_server(
+        server_b,
+        vec![(
+            vec![
+                String::from("/bin/sh"),
+                String::from("-lc"),
+                String::from(
+                    "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='server --disable=traefik' sh -",
+                ),
+            ],
+            String::from("server joined\n"),
+        )],
+    );
+
+    let up = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("up")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .output()
+        .expect("hosted cluster up command should run");
+    assert!(up.status.success(), "{up:?}");
+    let up_stdout = String::from_utf8_lossy(&up.stdout);
+    assert!(up_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(up_stdout.contains("worker machines: none"));
+    assert!(up_stdout.contains("control-plane launch: cloud-aws"));
+    assert!(up_stdout.contains("control-plane launch: cloud-aws-b"));
+    assert!(up_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+
+    let status = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("status")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .output()
+        .expect("hosted cluster status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(status_stdout.contains("visibility output:"));
+    assert!(status_stdout.contains("route: role=control-plane machine=cloud-aws"));
+
+    let kubeconfig = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("kubeconfig")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .output()
+        .expect("hosted cluster kubeconfig command should run");
+    assert!(kubeconfig.status.success(), "{kubeconfig:?}");
+    let kubeconfig_stdout = String::from_utf8_lossy(&kubeconfig.stdout);
+    assert!(kubeconfig_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+    assert!(kubeconfig_stdout.contains("server: https://demo-k3s.internal:6443"));
+
+    let down = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("down")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .output()
+        .expect("hosted cluster down command should run");
+    assert!(down.status.success(), "{down:?}");
+    let down_stdout = String::from_utf8_lossy(&down.stdout);
+    assert!(down_stdout.contains("control-plane stop: cloud-aws"));
+    assert!(down_stdout.contains("control-plane stop: cloud-aws-b"));
+
+    server_a_guest
+        .join()
+        .expect("primary control-plane guest thread should complete");
+    server_b_guest
+        .join()
+        .expect("secondary control-plane guest thread should complete");
+
+    drop(_servers);
+    cleanup_hosted_registration_state();
+    assert!(fake_binary.exists());
 }
 
 #[test]

@@ -23,6 +23,9 @@ What is shipped today:
 - provider-backed AWS `x86_64` Firecracker/PVM launch through
   `port machine launch` for `cloud-aws` when `aws-linux-node` is prepared,
   imported as ready, and backed by real PVM host-kit and artifact-kit inputs
+- hosted K3s lifecycle through `port cluster show|up|status|kubeconfig|down`
+  for `[k3s_clusters.*]`, where the K3s nodes are hosted Firecracker guest
+  microVMs rather than the execution host itself
 - `port control-plane serve` as the first live hosted HTTP server for canonical
   machine and guest routes, accepting registered node agents for the demo lane
 - `port node-agent serve` as the first live hosted node-runtime server for one
@@ -33,6 +36,8 @@ What is planned:
 - a long-lived node agent that owns hypervisor processes on each execution host
 - broader hosted rollout beyond the single-node demo lane, including durable
   inventory, placement, and policy
+- automatic control-plane spread, external API endpoint management, and the
+  surrounding load-balancer or VIP contract needed for real HA K3s
 - a client/API path so the same `port` verbs can target local or hosted
   environments without changing their core meaning
 
@@ -136,6 +141,33 @@ Human-reviewable artifact:
 ```bash
 ./scripts/render-hosted-pvm-proof.sh .keel/stories/VFgcoUoUd/EVIDENCE
 ```
+
+## Hosted K3s MicroVM Contract
+
+Hosted K3s uses the hosted split directly:
+
+- the control plane owns the named K3s cluster contract from `[k3s_clusters.*]`
+- node agents launch and own the guest microVM runtime on each execution host
+- the K3s nodes are the guest microVMs named in `server_machines` and
+  `worker_machines`
+
+That means the AWS PVM host and the K3s node are different layers:
+
+- AWS PVM host: the execution host that runs the node agent and hypervisor
+- control-plane or worker microVM: the guest VM that actually runs K3s
+
+Real HA is stricter than "multiple control-plane guests":
+
+- at least three control-plane microVMs
+- a stable HTTPS `api_endpoint` that fronts those control-plane microVMs
+- control-plane microVMs placed across distinct execution hosts so one host
+  loss does not remove quorum
+
+Port now models the K3s topology and the stable API endpoint in the shared
+config and lifecycle reports. Port does not yet ship the external load
+balancer, VIP, DNS, or ingress layer that fronts that endpoint, and it does
+not yet claim an automatic host-spread scheduler for those control-plane
+microVMs.
 
 ## Hosted API Identity Contract
 

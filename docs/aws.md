@@ -56,6 +56,20 @@ The AWS node must satisfy the PVM host kit before the lane is honest:
 
 Port should treat those as blocking requirements, not hints.
 
+### AWS PVM Host Versus K3s Node
+
+The AWS PVM host is the execution host in Port's hosted model. It is not the
+same thing as a K3s node in the hosted K3s contract.
+
+- AWS PVM host: prepared `x86_64` execution host running the Port node agent
+  and hypervisor ownership
+- K3s node: Firecracker guest microVM launched by Port on top of that prepared
+  host
+
+That distinction matters for HA. "Three K3s nodes" only becomes real HA when
+those control-plane microVMs are spread across distinct prepared AWS hosts and
+fronted by one stable HTTPS API endpoint.
+
 ### 3. Port-Owned Nix Host Kit Export
 
 Port now exports the AWS `x86_64` PVM host contract directly from the Port
@@ -197,6 +211,15 @@ PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine launch -
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine status --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine stop --machine cloud-aws
 ```
+
+If you are building hosted K3s on top of the AWS PVM lane, keep the layer split
+explicit:
+
+- use prepared AWS PVM hosts as the execution fleet
+- launch the K3s control-plane and worker nodes as guest microVMs on that fleet
+- front the control-plane microVMs with an external load balancer or VIP and
+  publish that stable HTTPS address as `api_endpoint` in `[k3s_clusters.*]`
+- do not count "multiple microVMs on one prepared host" as real HA
 
 Interpret those commands this way:
 
