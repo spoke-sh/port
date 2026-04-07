@@ -4264,6 +4264,7 @@ async fn node_machine_status(
             runtime_machine_status(config, runtime_root, machine_name)
         },
     )
+    .await
 }
 
 async fn node_machine_monitor(
@@ -4279,6 +4280,7 @@ async fn node_machine_monitor(
             runtime_machine_monitor(config, runtime_root, machine_name)
         },
     )
+    .await
 }
 
 async fn node_machine_top(
@@ -4294,6 +4296,7 @@ async fn node_machine_top(
             runtime_machine_top(config, runtime_root, machine_name)
         },
     )
+    .await
 }
 
 async fn node_machine_command(
@@ -4316,7 +4319,8 @@ async fn node_machine_command(
                     },
                 )
             },
-        );
+        )
+        .await;
     }
     if let Some(machine_name) = machine.strip_suffix(":stop") {
         return node_machine_response(
@@ -4326,7 +4330,8 @@ async fn node_machine_command(
             |config, runtime_root, machine_name| {
                 runtime_stop_machine(config, runtime_root, machine_name, Duration::from_secs(3))
             },
-        );
+        )
+        .await;
     }
 
     node_agent_error(
@@ -4980,15 +4985,25 @@ fn localize_machine_for_node(
     Ok((localized, route))
 }
 
-fn node_machine_response<T, F>(
+async fn run_node_blocking_operation<T, F>(operation: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| anyhow!("node-agent blocking operation failed: {error}"))?
+}
+
+async fn node_machine_response<T, F>(
     state: &NodeAgentState,
     headers: &HeaderMap,
     machine_name: &str,
     operation: F,
 ) -> Response
 where
-    T: Serialize + HostedMachineProjection,
-    F: FnOnce(&PortConfig, &std::path::Path, &str) -> Result<T>,
+    T: Serialize + HostedMachineProjection + Send + 'static,
+    F: FnOnce(&PortConfig, &std::path::Path, &str) -> Result<T> + Send + 'static,
 {
     if let Some(response) = node_authorize(state, headers) {
         return response;
@@ -4998,20 +5013,29 @@ where
         Ok(value) => value,
         Err(response) => return response,
     };
+    let machine_name = machine_name.to_string();
+    let machine_name_for_result = machine_name.clone();
+    let runtime_root = state.inner.runtime_root.clone();
+    let node_name = state.inner.node_name.clone();
+    let route_for_result = route.clone();
 
-    match operation(&localized, &state.inner.runtime_root, machine_name) {
+    match run_node_blocking_operation(move || {
+        operation(&localized, &runtime_root, &machine_name_for_result)
+    })
+    .await
+    {
         Ok(result) => json_response(
             StatusCode::OK,
             &HostedSuccess {
-                route: route.clone(),
-                result: result.apply_hosted_route(&route),
+                route: route_for_result.clone(),
+                result: result.apply_hosted_route(&route_for_result),
             },
         ),
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to serve machine '{}': {error}",
-                state.inner.node_name, machine_name
+                node_name, machine_name
             ),
             Some(route),
         ),
@@ -6151,6 +6175,53 @@ mod tests {
         unsafe {
             std::env::remove_var(&token_var);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn node_machine_response_runs_on_blocking_pool() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let state = build_node_agent_state(
+            config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: reserve_test_addr(),
+                token: String::from("node-secret"),
+            },
+        )
+        .expect("node-agent state should build");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-port-node-agent-token",
+            "node-secret".parse().expect("header should parse"),
+        );
+
+        let heartbeats = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let heartbeats_for_task = Arc::clone(&heartbeats);
+        let heartbeat = tokio::spawn(async move {
+            for _ in 0..6 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                heartbeats_for_task.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+
+        let response = node_machine_response(
+            &state,
+            &headers,
+            "cloud-aws",
+            |config, runtime_root, machine_name| {
+                std::thread::sleep(Duration::from_millis(450));
+                runtime_machine_status(config, runtime_root, machine_name)
+            },
+        )
+        .await;
+
+        heartbeat.await.expect("heartbeat task should complete");
+        assert!(
+            heartbeats.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+            "expected background runtime work to keep progressing during a blocking machine operation",
+        );
+        assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
