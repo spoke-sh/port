@@ -3,7 +3,6 @@ id: VF4z5T69U
 title: Review ATXT Mission Proof Adoption
 type: feat
 status: backlog
-scope: VEzGIe4i4
 created_at: 2026-03-27T14:49:19
 updated_at: 2026-03-27T14:49:19
 index: 1
@@ -25,7 +24,7 @@ Materialized from routine `VEz56fPp4` for eligible window ending `2026-03-27T16:
 ## Routine Provenance
 
 - Routine: `VEz56fPp4`
-- Target scope: `VEzGIe4i4`
+- Target scope: `VG4c6oj75`
 - Eligible window ends: `2026-03-27T16:00:00Z`
 
 ## Blueprint

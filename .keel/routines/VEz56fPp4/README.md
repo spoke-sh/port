@@ -8,7 +8,9 @@ title: Review ATXT Mission Proof Adoption
 cadence:
   cron: 0 9 * * *
   timezone: America/Los_Angeles
-target-scope: VEzGIe4i4
+target-scope: VG4c6oj75
+lineage:
+  - VEzGIe4i4
 ---
 
 # Blueprint

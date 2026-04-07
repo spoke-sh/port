@@ -112,8 +112,6 @@
 |--------|--------|
 | [Hosted External Project Deployment Proof](epics/VEyjUL2Zr/voyages/VEyjdNXnp/) | done |
 
-### [Mission Proof Recorder Readiness](epics/VEzGIe4i4/) (draft)
-
 ### [Ship Cluster-First Bootstrap UX](epics/VFDhlRjOf/) (done)
 
 | Voyage | Status |
