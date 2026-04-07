@@ -12080,70 +12080,82 @@ fn setup_host_networking(
     machine_name: &str,
     network: &port_model::MachineNetworkSpec,
 ) -> Result<()> {
+    // Retrying a failed launch must start from a clean host-networking slate.
+    // Prior attempts may have already created the TAP device before failing.
+    teardown_host_networking(machine_name, network);
+
     let tap_name = tap_device_name(machine_name);
     let host_cidr = format!("{}/{}", network.host_ip, network.prefix_len);
     let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
     let outbound_iface = default_outbound_interface()?;
 
-    run_network_command("ip", &["tuntap", "add", "dev", &tap_name, "mode", "tap"])
-        .with_context(|| format!("failed to create TAP device '{tap_name}'"))?;
-    run_network_command("ip", &["addr", "add", &host_cidr, "dev", &tap_name])
-        .with_context(|| format!("failed to assign address {host_cidr} to '{tap_name}'"))?;
-    run_network_command("ip", &["link", "set", &tap_name, "up"])
-        .with_context(|| format!("failed to bring up '{tap_name}'"))?;
+    let result: Result<()> = (|| {
+        run_network_command("ip", &["tuntap", "add", "dev", &tap_name, "mode", "tap"])
+            .with_context(|| format!("failed to create TAP device '{tap_name}'"))?;
+        run_network_command("ip", &["addr", "add", &host_cidr, "dev", &tap_name])
+            .with_context(|| format!("failed to assign address {host_cidr} to '{tap_name}'"))?;
+        run_network_command("ip", &["link", "set", &tap_name, "up"])
+            .with_context(|| format!("failed to bring up '{tap_name}'"))?;
 
-    fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
+        fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
 
-    run_network_command(
-        "iptables",
-        &[
-            "-t",
-            "nat",
-            "-A",
-            "POSTROUTING",
-            "-s",
-            &subnet,
-            "-o",
-            &outbound_iface,
-            "-j",
-            "MASQUERADE",
-        ],
-    )
-    .context("failed to add iptables MASQUERADE rule")?;
-    run_network_command(
-        "iptables",
-        &[
-            "-A",
-            "FORWARD",
-            "-i",
-            &tap_name,
-            "-o",
-            &outbound_iface,
-            "-j",
-            "ACCEPT",
-        ],
-    )
-    .context("failed to add iptables FORWARD accept rule")?;
-    run_network_command(
-        "iptables",
-        &[
-            "-A",
-            "FORWARD",
-            "-i",
-            &outbound_iface,
-            "-o",
-            &tap_name,
-            "-m",
-            "state",
-            "--state",
-            "RELATED,ESTABLISHED",
-            "-j",
-            "ACCEPT",
-        ],
-    )
-    .context("failed to add iptables FORWARD established rule")?;
+        run_network_command(
+            "iptables",
+            &[
+                "-t",
+                "nat",
+                "-A",
+                "POSTROUTING",
+                "-s",
+                &subnet,
+                "-o",
+                &outbound_iface,
+                "-j",
+                "MASQUERADE",
+            ],
+        )
+        .context("failed to add iptables MASQUERADE rule")?;
+        run_network_command(
+            "iptables",
+            &[
+                "-A",
+                "FORWARD",
+                "-i",
+                &tap_name,
+                "-o",
+                &outbound_iface,
+                "-j",
+                "ACCEPT",
+            ],
+        )
+        .context("failed to add iptables FORWARD accept rule")?;
+        run_network_command(
+            "iptables",
+            &[
+                "-A",
+                "FORWARD",
+                "-i",
+                &outbound_iface,
+                "-o",
+                &tap_name,
+                "-m",
+                "state",
+                "--state",
+                "RELATED,ESTABLISHED",
+                "-j",
+                "ACCEPT",
+            ],
+        )
+        .context("failed to add iptables FORWARD established rule")?;
 
-    Ok(())
+        Ok(())
+    })();
+
+    if result.is_err() {
+        teardown_host_networking(machine_name, network);
+    }
+
+    result
 }
 
 fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNetworkSpec) {
