@@ -175,11 +175,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1775526354,
-        "narHash": "sha256-bHpAPbJLKy/KcJslv7i3vtkh7Uf0PoHN2v4wjGTu4eg=",
+        "lastModified": 1775568675,
+        "narHash": "sha256-vhj6XXyMp8y61FpFwQsCZcvysUs7Ft5hAq0MNy/eCKE=",
         "ref": "main",
-        "rev": "4970fd51a349edb7662b8f0ff31e7ffa96d2a8b4",
-        "revCount": 344,
+        "rev": "25c069984ced841cf58adea2687d97091cc433ca",
+        "revCount": 352,
         "type": "git",
         "url": "ssh://git@github.com/spoke-sh/paddles.git"
       },
