@@ -9067,13 +9067,6 @@ fn launch_preflight_checks(
     guest_image_path: &Path,
 ) -> Vec<DoctorCheck> {
     let mut checks = vec![
-        path_check(
-            "kvm-device",
-            Path::new("/dev/kvm"),
-            true,
-            "Found /dev/kvm for KVM acceleration.",
-            "Missing /dev/kvm.",
-        ),
         versioned_binary_check("iproute2", "ip", &["-V"], "iproute2", true),
         versioned_binary_check("iptables", "iptables", &["--version"], "iptables", true),
         path_check(
@@ -9098,6 +9091,19 @@ fn launch_preflight_checks(
         ),
     ];
 
+    if launch_requires_kvm_device(machine) {
+        checks.insert(
+            0,
+            path_check(
+                "kvm-device",
+                Path::new("/dev/kvm"),
+                true,
+                "Found /dev/kvm for KVM acceleration.",
+                "Missing /dev/kvm.",
+            ),
+        );
+    }
+
     if machine.substrate == ExecutionSubstrate::Firecracker
         && machine.protection_mode == ProtectionMode::Standard
     {
@@ -9105,6 +9111,14 @@ fn launch_preflight_checks(
     }
 
     checks
+}
+
+fn launch_requires_kvm_device(machine: &port_model::MachineSpec) -> bool {
+    match machine.substrate {
+        ExecutionSubstrate::Firecracker => machine.protection_mode == ProtectionMode::Standard,
+        ExecutionSubstrate::CloudHypervisor => true,
+        ExecutionSubstrate::Avf => false,
+    }
 }
 
 fn binary_check(name: &str, binary: &str, required: bool) -> DoctorCheck {
@@ -18858,6 +18872,40 @@ exec sleep 30
         let message = error.to_string();
         assert!(message.contains("firecracker-pvm"));
         assert!(message.contains("not a compatible fallback"));
+    }
+
+    #[test]
+    fn launch_preflight_requires_kvm_for_standard_firecracker_lane() {
+        let config = PortConfig::sample();
+        let machine = config.machines.get("demo").expect("demo should exist");
+        let checks = crate::launch_preflight_checks(
+            machine,
+            Path::new("/tmp/kernel"),
+            Path::new("/tmp/guest"),
+        );
+
+        assert!(checks.iter().any(|check| check.name == "kvm-device"));
+    }
+
+    #[test]
+    fn launch_preflight_skips_kvm_for_firecracker_pvm_lane() {
+        let mut config = PortConfig::sample();
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .protection_mode = port_model::ProtectionMode::Pvm;
+        let machine = config
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist");
+        let checks = crate::launch_preflight_checks(
+            machine,
+            Path::new("/tmp/kernel"),
+            Path::new("/tmp/guest"),
+        );
+
+        assert!(!checks.iter().any(|check| check.name == "kvm-device"));
     }
 
     #[test]

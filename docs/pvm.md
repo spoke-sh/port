@@ -45,6 +45,8 @@ Required contract:
 - custom host kernel booted specifically for the PVM-capable KVM lane
 - host boot line includes `pti=off`
 - patched Firecracker binary for the PVM lane
+- the hosted Firecracker/PVM launch path must not fail on a missing `/dev/kvm`;
+  the PVM host kit is the launch gate instead
 - explicit operator separation between the standard Firecracker host kit and
   the PVM host kit
 

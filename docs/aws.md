@@ -53,6 +53,8 @@ The AWS node must satisfy the PVM host kit before the lane is honest:
 - host boot line includes `pti=off`
 - patched `firecracker-pvm` binary
 - imported readiness advertising the node as `ready` for the AWS PVM lane
+- no `/dev/kvm` launch requirement in the hosted Firecracker/PVM path; the PVM
+  host-kit contract is the gate instead
 
 Port should treat those as blocking requirements, not hints.
 
