@@ -82,7 +82,10 @@ fn install_revision(revision: Revision<'_>) -> Result<()> {
     println!("installer: {}", install_script.display());
 
     let mut command = ProcessCommand::new("sh");
-    command.arg(&install_script).arg(&repo_cache).arg(&binary_path);
+    command
+        .arg(&install_script)
+        .arg(&repo_cache)
+        .arg(&binary_path);
     run_command_forwarding_output(command, "run the local Port installer")
 }
 
@@ -219,7 +222,15 @@ fn build_port_binary(
         .current_dir(repo_dir)
         .env("CARGO_TARGET_DIR", target_dir)
         .args([
-            "build", "--locked", "--release", "--target", target, "-p", "port", "--bin", "port",
+            "build",
+            "--locked",
+            "--release",
+            "--target",
+            target,
+            "-p",
+            "port",
+            "--bin",
+            "port",
         ]);
     run_command_capture(command, "build Port from source")?;
 
@@ -285,12 +296,16 @@ fn cache_root() -> Result<PathBuf> {
         return Ok(PathBuf::from(configured));
     }
 
-    let home = env::var_os("HOME").context("set HOME or PORT_CACHE_ROOT so Port can resolve ~/.cache/port")?;
+    let home = env::var_os("HOME")
+        .context("set HOME or PORT_CACHE_ROOT so Port can resolve ~/.cache/port")?;
     Ok(PathBuf::from(home).join(".cache/port"))
 }
 
 fn ensure_supported_target(target: &str) -> Result<()> {
-    if SUPPORTED_TARGETS.iter().any(|supported| supported == &target) {
+    if SUPPORTED_TARGETS
+        .iter()
+        .any(|supported| supported == &target)
+    {
         return Ok(());
     }
 
@@ -351,14 +366,20 @@ fn select_toolchain(repo_dir: &Path) -> Result<ToolchainSelection> {
 
         for toolchain in candidates {
             let selection = ToolchainSelection::Rustup(toolchain);
-            if selection.rustc_version().is_ok_and(|version| version >= required) {
+            if selection
+                .rustc_version()
+                .is_ok_and(|version| version >= required)
+            {
                 return Ok(selection);
             }
         }
     }
 
     let plain = ToolchainSelection::Plain;
-    if plain.rustc_version().is_ok_and(|version| version >= required) {
+    if plain
+        .rustc_version()
+        .is_ok_and(|version| version >= required)
+    {
         return Ok(plain);
     }
 
@@ -369,9 +390,8 @@ fn select_toolchain(repo_dir: &Path) -> Result<ToolchainSelection> {
 }
 
 fn command_exists(binary: &str) -> bool {
-    env::var_os("PATH").is_some_and(|paths| {
-        env::split_paths(&paths).any(|path| path.join(binary).is_file())
-    })
+    env::var_os("PATH")
+        .is_some_and(|paths| env::split_paths(&paths).any(|path| path.join(binary).is_file()))
 }
 
 fn rustup_toolchains() -> Result<Vec<String>> {

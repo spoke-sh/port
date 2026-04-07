@@ -3583,7 +3583,10 @@ fn validate_k3s_cluster(
                 if distinct_candidates.is_empty() {
                     String::from("(none)")
                 } else {
-                    distinct_candidates.into_iter().collect::<Vec<_>>().join(", ")
+                    distinct_candidates
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 }
             )));
         }

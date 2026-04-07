@@ -3352,12 +3352,8 @@ fn scheduled_candidate_nodes(
     state: &ControlPlaneState,
     summary: &HostedMachineSummaryContract,
 ) -> Result<Vec<String>, String> {
-    let Some((cluster_name, cluster)) = state
-        .inner
-        .config
-        .k3s_clusters
-        .iter()
-        .find(|(_, cluster)| {
+    let Some((cluster_name, cluster)) =
+        state.inner.config.k3s_clusters.iter().find(|(_, cluster)| {
             cluster
                 .server_machines
                 .iter()
@@ -3376,7 +3372,11 @@ fn scheduled_candidate_nodes(
         .server_machines
         .iter()
         .filter(|machine| *machine != &summary.machine_name)
-        .filter_map(|machine| placements.get(machine).map(|placement| placement.node_name.clone()))
+        .filter_map(|machine| {
+            placements
+                .get(machine)
+                .map(|placement| placement.node_name.clone())
+        })
         .collect::<BTreeSet<_>>();
     if occupied_nodes.is_empty() {
         return Ok(summary.candidate_nodes.clone());
@@ -6659,7 +6659,9 @@ mod tests {
         let client = Client::new();
 
         let first = client
-            .post(format!("http://{control_addr}/v1/machines/cloud-aws:launch"))
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws:launch"
+            ))
             .header("authorization", "Bearer demo-token")
             .send()
             .await
@@ -6667,18 +6669,28 @@ mod tests {
         assert_eq!(first.status(), StatusCode::OK);
         let first_body: HostedSuccess<LaunchMetadata> =
             first.json().await.expect("first launch body should decode");
-        assert_eq!(first_body.route.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            first_body.route.node_name.as_deref(),
+            Some("aws-linux-node")
+        );
 
         let second = client
-            .post(format!("http://{control_addr}/v1/machines/cloud-aws-b:launch"))
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws-b:launch"
+            ))
             .header("authorization", "Bearer demo-token")
             .send()
             .await
             .expect("second launch should complete");
         assert_eq!(second.status(), StatusCode::OK);
-        let second_body: HostedSuccess<LaunchMetadata> =
-            second.json().await.expect("second launch body should decode");
-        assert_eq!(second_body.route.node_name.as_deref(), Some("aws-linux-node-b"));
+        let second_body: HostedSuccess<LaunchMetadata> = second
+            .json()
+            .await
+            .expect("second launch body should decode");
+        assert_eq!(
+            second_body.route.node_name.as_deref(),
+            Some("aws-linux-node-b")
+        );
 
         let placements: MachinePlacementStateFile = serde_json::from_slice(
             &std::fs::read(machine_placement_state_path(&control_plane))
@@ -6785,7 +6797,9 @@ mod tests {
         let client = Client::new();
 
         let first = client
-            .post(format!("http://{control_addr}/v1/machines/cloud-aws:launch"))
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws:launch"
+            ))
             .header("authorization", "Bearer demo-token")
             .send()
             .await
@@ -6793,7 +6807,9 @@ mod tests {
         assert_eq!(first.status(), StatusCode::OK);
 
         let second = client
-            .post(format!("http://{control_addr}/v1/machines/cloud-aws-b:launch"))
+            .post(format!(
+                "http://{control_addr}/v1/machines/cloud-aws-b:launch"
+            ))
             .header("authorization", "Bearer demo-token")
             .send()
             .await
