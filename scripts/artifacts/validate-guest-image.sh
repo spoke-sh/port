@@ -65,6 +65,8 @@ require_debugfs_path /usr/bin/iptables
 require_debugfs_path /usr/bin/iptables-save
 require_debugfs_path /usr/bin/ip6tables
 require_debugfs_path /usr/bin/nft
+require_debugfs_path /etc/ssl/certs/ca-certificates.crt
+require_debugfs_path /etc/pki/tls/certs/ca-bundle.crt
 require_debugfs_path /etc/port-k3s-version
 require_debugfs_path /etc/hosts
 if [[ "$(debugfs -R 'cat /etc/port-guest-architecture' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" != "$expected_architecture" ]]; then
@@ -97,6 +99,10 @@ if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q '127.0.0.1
 fi
 if ! debugfs -R 'cat /usr/bin/k3s' "$guest_image_path" 2>/dev/null | grep -q '/bin/k3s'; then
   echo "guest image k3s wrapper does not point at the packaged K3s runtime" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /usr/bin/k3s' "$guest_image_path" 2>/dev/null | grep -q 'SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt'; then
+  echo "guest image k3s wrapper does not export SSL_CERT_FILE for outbound registry pulls" >&2
   exit 1
 fi
 if [[ -z "$(debugfs -R 'cat /etc/port-k3s-version' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" ]]; then

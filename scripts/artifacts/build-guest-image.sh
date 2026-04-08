@@ -191,7 +191,9 @@ mkdir -p \
   "$staging_dir/bin" \
   "$staging_dir/dev" \
   "$staging_dir/etc" \
+  "$staging_dir/etc/pki/tls/certs" \
   "$staging_dir/etc/rancher/k3s" \
+  "$staging_dir/etc/ssl/certs" \
   "$staging_dir/nix/store" \
   "$staging_dir/opt/cni/bin" \
   "$staging_dir/proc" \
@@ -230,6 +232,8 @@ iptables_attr="nixpkgs#legacyPackages.${guest_nix_system}.iptables.out"
 iptables_store="$(copy_store_closure "$iptables_attr")"
 nftables_attr="nixpkgs#legacyPackages.${guest_nix_system}.nftables.out"
 nftables_store="$(copy_store_closure "$nftables_attr")"
+cacert_attr="nixpkgs#legacyPackages.${guest_nix_system}.cacert.out"
+cacert_store="$(copy_store_closure "$cacert_attr")"
 for tool in \
   iptables \
   iptables-save \
@@ -243,6 +247,8 @@ done
 ln -sf "${iptables_store}/bin/xtables-nft-multi" "$staging_dir/usr/bin/xtables-nft-multi"
 ln -sf "${iptables_store}/bin/xtables-legacy-multi" "$staging_dir/usr/bin/xtables-legacy-multi"
 ln -sf "${nftables_store}/bin/nft" "$staging_dir/usr/bin/nft"
+ln -sf "${cacert_store}/etc/ssl/certs/ca-bundle.crt" "$staging_dir/etc/ssl/certs/ca-certificates.crt"
+ln -sf /etc/ssl/certs/ca-certificates.crt "$staging_dir/etc/pki/tls/certs/ca-bundle.crt"
 
 if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
   kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.modules)"
@@ -365,6 +371,9 @@ done
 cat >"$staging_dir/usr/bin/k3s" <<EOF
 #!/bin/sh
 set -eu
+
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+export SSL_CERT_DIR=/etc/ssl/certs
 
 exec '${k3s_store}/bin/k3s' "\$@"
 EOF
