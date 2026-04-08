@@ -2816,6 +2816,8 @@ pub fn bootstrap_hosted_k3s_cluster(
 
     let cluster = load_hosted_k3s_cluster(config, cluster_name)?;
     let primary_server = hosted_k3s_primary_server_machine(cluster_name, &cluster)?.to_string();
+    let primary_server_args =
+        hosted_k3s_effective_args(config, &primary_server, &cluster.server_args)?;
 
     let primary_server_launch = launch_local_machine(
         config,
@@ -2839,7 +2841,7 @@ pub fn bootstrap_hosted_k3s_cluster(
         k3s_bootstrap_command(
             &cluster.version,
             "server",
-            &cluster.server_args,
+            &primary_server_args,
             Some("--cluster-init"),
             None,
             None,
@@ -2848,27 +2850,12 @@ pub fn bootstrap_hosted_k3s_cluster(
         cluster_name,
     )?;
 
-    let join_token = execute_hosted_k3s_exec(
-        config,
-        runtime_root,
-        &primary_server,
-        hosted_k3s_join_token_command(),
-        "read the K3s join token",
-        cluster_name,
-    )?
-    .stdout
-    .trim()
-    .to_string();
-    if join_token.is_empty() {
-        bail!(
-            "hosted k3s cluster '{}' returned an empty join token from server '{}'",
-            cluster_name,
-            primary_server
-        );
-    }
+    let join_token =
+        wait_for_hosted_k3s_join_token(config, runtime_root, cluster_name, &primary_server)?;
 
     let mut server_launches = vec![primary_server_launch];
     for server_machine in cluster.server_machines.iter().skip(1) {
+        let server_args = hosted_k3s_effective_args(config, server_machine, &cluster.server_args)?;
         let launch = launch_local_machine(
             config,
             &LaunchRequest {
@@ -2890,7 +2877,7 @@ pub fn bootstrap_hosted_k3s_cluster(
             k3s_bootstrap_command(
                 &cluster.version,
                 "server",
-                &cluster.server_args,
+                &server_args,
                 None,
                 Some(&cluster.api_endpoint),
                 Some(&join_token),
@@ -2903,6 +2890,7 @@ pub fn bootstrap_hosted_k3s_cluster(
 
     let mut worker_launches = Vec::with_capacity(cluster.worker_machines.len());
     for worker_machine in &cluster.worker_machines {
+        let worker_args = hosted_k3s_effective_args(config, worker_machine, &cluster.worker_args)?;
         let launch = launch_local_machine(
             config,
             &LaunchRequest {
@@ -2924,7 +2912,7 @@ pub fn bootstrap_hosted_k3s_cluster(
             k3s_bootstrap_command(
                 &cluster.version,
                 "agent",
-                &cluster.worker_args,
+                &worker_args,
                 None,
                 Some(&cluster.api_endpoint),
                 Some(&join_token),
@@ -3052,10 +3040,80 @@ fn hosted_k3s_join_token_command() -> Vec<String> {
     vec![
         String::from("/bin/sh"),
         String::from("-lc"),
-        String::from(
-            "attempt=0; while [ \"$attempt\" -lt 120 ]; do if [ -s /var/lib/rancher/k3s/server/node-token ]; then cat /var/lib/rancher/k3s/server/node-token; exit 0; fi; attempt=$((attempt + 1)); sleep 1; done; echo 'timed out waiting for /var/lib/rancher/k3s/server/node-token' >&2; exit 1",
-        ),
+        String::from("cat /var/lib/rancher/k3s/server/node-token"),
     ]
+}
+
+fn wait_for_hosted_k3s_join_token(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    machine_name: &str,
+) -> Result<String> {
+    const JOIN_TOKEN_TIMEOUT: Duration = Duration::from_secs(120);
+    const JOIN_TOKEN_INTERVAL: Duration = Duration::from_secs(1);
+
+    let started = Instant::now();
+    let mut last_detail = String::from("join token did not appear yet");
+    while started.elapsed() < JOIN_TOKEN_TIMEOUT {
+        match execute_hosted_k3s_exec(
+            config,
+            runtime_root,
+            machine_name,
+            hosted_k3s_join_token_command(),
+            "read the K3s join token",
+            cluster_name,
+        ) {
+            Ok(result) => {
+                let join_token = result.stdout.trim().to_string();
+                if !join_token.is_empty() {
+                    return Ok(join_token);
+                }
+                last_detail = format!(
+                    "hosted k3s cluster '{}' returned an empty join token from server '{}'",
+                    cluster_name, machine_name
+                );
+            }
+            Err(error) => {
+                last_detail = error.to_string();
+            }
+        }
+        thread::sleep(JOIN_TOKEN_INTERVAL);
+    }
+
+    bail!(
+        "hosted k3s cluster '{}' did not expose a join token on server '{}' within {}s: {}",
+        cluster_name,
+        machine_name,
+        JOIN_TOKEN_TIMEOUT.as_secs(),
+        last_detail
+    )
+}
+
+fn hosted_k3s_effective_args(
+    config: &PortConfig,
+    machine_name: &str,
+    args: &[String],
+) -> Result<Vec<String>> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{}'", machine_name))?;
+    let mut effective = args.to_vec();
+    let snapshotter_configured = effective
+        .iter()
+        .any(|arg| arg == "--snapshotter" || arg.starts_with("--snapshotter="));
+    if machine.rootfs_overlay.is_some() && !snapshotter_configured {
+        effective.push(String::from("--snapshotter=native"));
+    }
+    let node_name_configured = effective
+        .iter()
+        .any(|arg| arg == "--node-name" || arg.starts_with("--node-name="));
+    if !node_name_configured {
+        effective.push(String::from("--node-name"));
+        effective.push(machine_name.to_string());
+    }
+    Ok(effective)
 }
 
 fn k3s_bootstrap_command(
@@ -5837,9 +5895,15 @@ pub(crate) fn start_detached_forward(
     let stdout_log = state_dir.join(format!("{name}.stdout.log"));
     let stderr_log = state_dir.join(format!("{name}.stderr.log"));
 
+    let mut daemon_config = config.clone();
+    daemon_config.k3s_clusters.clear();
+    daemon_config.control_planes.clear();
+    daemon_config.nodes.clear();
+    daemon_config.host_groups.clear();
+
     fs::write(
         &config_path,
-        config
+        daemon_config
             .to_toml_string()
             .context("failed to encode detached forward config")?,
     )
@@ -16935,7 +16999,11 @@ exec sleep 30
                     k3s_bootstrap_command(
                         "v1.32.0+k3s1",
                         "server",
-                        &[String::from("--disable=traefik")],
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
                         Some("--cluster-init"),
                         None,
                         None,
@@ -16954,7 +17022,11 @@ exec sleep 30
                 k3s_bootstrap_command(
                     "v1.32.0+k3s1",
                     "agent",
-                    &[String::from("--node-label=role=worker")],
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
                     None,
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
@@ -16998,6 +17070,116 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_k3s_bootstrap_uses_native_snapshotter_for_overlay_rootfs_guests() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        for machine_name in ["cloud-aws", "cloud-aws-worker"] {
+            let machine = config
+                .machines
+                .get_mut(machine_name)
+                .expect("hosted machine should exist");
+            machine.rootfs_read_only = true;
+            machine.rootfs_overlay = Some(port_model::MachineRootfsOverlaySpec { size_mib: 64 });
+        }
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let guest_path = config
+            .artifacts
+            .guest_images
+            .get("demo-guest")
+            .expect("demo-guest should exist")
+            .variants
+            .iter()
+            .find(|variant| {
+                variant.selector.architecture == MachineArchitecture::X86_64
+                    && variant.selector.substrate == ExecutionSubstrate::Firecracker
+                    && variant.selector.protection_mode == ProtectionMode::Standard
+            })
+            .expect("standard guest variant should exist")
+            .path
+            .clone();
+        fs::write(guest_path.with_file_name("initrd.cpio.gz"), b"initrd")
+            .expect("overlay guest initrd should write");
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let worker_paths =
+            RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
+        let worker_join_paths = RuntimePaths::for_machine(
+            &config.nodes["aws-linux-node"].runtime_root,
+            "cloud-aws-worker",
+        );
+        let server_guest = spawn_hosted_exec_sequence_server(
+            worker_paths,
+            vec![
+                (
+                    k3s_bootstrap_command(
+                        "v1.32.0+k3s1",
+                        "server",
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--snapshotter=native"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
+                    String::from("server bootstrapped\n"),
+                ),
+                (
+                    hosted_k3s_join_token_command(),
+                    String::from("demo-join-token\n"),
+                ),
+            ],
+        );
+        let worker_guest = spawn_hosted_exec_sequence_server(
+            worker_join_paths,
+            vec![(
+                k3s_bootstrap_command(
+                    "v1.32.0+k3s1",
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--snapshotter=native"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                String::from("worker joined\n"),
+            )],
+        );
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+
+        let result = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+        assert_eq!(result.join_token, "demo-join-token");
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(result.server_launches[0].pid.to_string())
+            .status();
+        for metadata in result.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+    }
+
+    #[test]
     fn hosted_k3s_cluster_access_contract() {
         let _guard = hosted_server_lock()
             .lock()
@@ -17022,7 +17204,11 @@ exec sleep 30
                     k3s_bootstrap_command(
                         "v1.32.0+k3s1",
                         "server",
-                        &[String::from("--disable=traefik")],
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
                         Some("--cluster-init"),
                         None,
                         None,
@@ -17053,7 +17239,11 @@ exec sleep 30
                 k3s_bootstrap_command(
                     "v1.32.0+k3s1",
                     "agent",
-                    &[String::from("--node-label=role=worker")],
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
                     None,
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
@@ -17265,7 +17455,11 @@ exec sleep 30
                     k3s_bootstrap_command(
                         "v1.32.0+k3s1",
                         "server",
-                        &[String::from("--disable=traefik")],
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
                         Some("--cluster-init"),
                         None,
                         None,
@@ -17296,7 +17490,11 @@ exec sleep 30
                 k3s_bootstrap_command(
                     "v1.32.0+k3s1",
                     "agent",
-                    &[String::from("--node-label=role=worker")],
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
                     None,
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
@@ -17858,6 +18056,12 @@ exec sleep 30
         assert_eq!(
             response.result.manifest_path,
             paths.runtime_dir.join("forwards/demo-web.json")
+        );
+        let forward_config = fs::read_to_string(paths.runtime_dir.join("forwards/demo-web.config.toml"))
+            .expect("detached forward config should exist");
+        assert!(
+            !forward_config.contains("[k3s_clusters.demo]"),
+            "{forward_config}"
         );
 
         let status = Command::new("kill")

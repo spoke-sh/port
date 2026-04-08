@@ -226,6 +226,23 @@ kmod_attr="nixpkgs#legacyPackages.${guest_nix_system}.kmod.out"
 kmod_store="$(copy_store_closure "$kmod_attr")"
 ln -sf "${kmod_store}/bin/modprobe" "$staging_dir/usr/bin/modprobe"
 ln -sf "${kmod_store}/bin/lsmod" "$staging_dir/usr/bin/lsmod"
+iptables_attr="nixpkgs#legacyPackages.${guest_nix_system}.iptables.out"
+iptables_store="$(copy_store_closure "$iptables_attr")"
+nftables_attr="nixpkgs#legacyPackages.${guest_nix_system}.nftables.out"
+nftables_store="$(copy_store_closure "$nftables_attr")"
+for tool in \
+  iptables \
+  iptables-save \
+  iptables-restore \
+  ip6tables \
+  ip6tables-save \
+  ip6tables-restore
+do
+  ln -sf "${iptables_store}/bin/xtables-nft-multi" "$staging_dir/usr/bin/$tool"
+done
+ln -sf "${iptables_store}/bin/xtables-nft-multi" "$staging_dir/usr/bin/xtables-nft-multi"
+ln -sf "${iptables_store}/bin/xtables-legacy-multi" "$staging_dir/usr/bin/xtables-legacy-multi"
+ln -sf "${nftables_store}/bin/nft" "$staging_dir/usr/bin/nft"
 
 if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
   kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.modules)"
@@ -341,7 +358,7 @@ copy_binary_with_libs \
   "${CARGO_TARGET_DIR:-$repo_root/target}/release/port-guest-agent" \
   "usr/bin/port-guest-agent"
 
-for applet in cat chmod cp dirname echo env grep head install ip kill ln ls mkdir mount mknod mv ps pwd readlink rm sed setsid sh sleep stat sync tail touch uname; do
+for applet in cat chmod cp dirname echo env grep head install ip kill ln ls mkdir mount mknod mv ps pwd readlink rm sed setsid sh sleep stat sync tail touch tr uname; do
   ln -sf busybox "$staging_dir/bin/$applet"
 done
 
@@ -356,9 +373,15 @@ ln -sf k3s "$staging_dir/usr/bin/kubectl"
 ln -sf k3s "$staging_dir/usr/bin/crictl"
 ln -sf k3s "$staging_dir/usr/bin/ctr"
 
+cat >"$staging_dir/etc/hosts" <<'EOF'
+127.0.0.1 localhost
+::1 localhost
+EOF
+
 cat >"$staging_dir/init" <<'EOF'
 #!/bin/sh
 set -eu
+PATH=/bin:/usr/bin
 
 mount_if_needed() {
   mount -t "$1" "$2" "$3" 2>/dev/null || true
@@ -372,6 +395,9 @@ mount_if_needed sysfs sysfs /sys
 mkdir -p /run/port /tmp /var/log /sys/fs/cgroup
 mount_if_needed cgroup2 cgroup2 /sys/fs/cgroup
 mkdir -p /etc/rancher/k3s /opt/cni/bin /var/lib/cni /var/lib/kubelet /var/lib/rancher/k3s /var/lib/rancher/k3s/agent/images
+/bin/ip link set lo up 2>/dev/null || true
+/bin/ip addr add 127.0.0.1/8 dev lo 2>/dev/null || true
+/bin/ip -6 addr add ::1/128 dev lo 2>/dev/null || true
 
 guest_control_port=7000
 protection_mode="$(cat /etc/port-protection-mode 2>/dev/null || echo unknown)"
@@ -411,16 +437,16 @@ fi
 
 if [ -n "$net_ip" ] && [ -n "$net_gateway" ]; then
   for _ in 1 2 3 4 5; do
-    if ip link show eth0 >/dev/null 2>&1; then
+    if /bin/ip link show eth0 >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
 
-  if ip link show eth0 >/dev/null 2>&1; then
-    ip addr add "${net_ip}/${net_prefix_len}" dev eth0
-    ip link set eth0 up
-    ip route add default via "$net_gateway" dev eth0
+  if /bin/ip link show eth0 >/dev/null 2>&1; then
+    /bin/ip addr add "${net_ip}/${net_prefix_len}" dev eth0
+    /bin/ip link set eth0 up
+    /bin/ip route add default via "$net_gateway" dev eth0
     echo "port guest network: ${net_ip}/${net_prefix_len} via ${net_gateway}" >/dev/console
     echo "port guest network: ${net_ip}/${net_prefix_len} via ${net_gateway}" >>/var/log/port-agent.log
   else
@@ -436,8 +462,9 @@ if [ -n "$net_ip" ] && [ -n "$net_gateway" ]; then
       printf 'nameserver %s\n' "$server" >>/etc/resolv.conf
     done
     IFS="$old_IFS"
-    echo "port guest dns: configured $(cat /etc/resolv.conf | tr '\n' ' ')" >/dev/console
-    echo "port guest dns: configured $(cat /etc/resolv.conf | tr '\n' ' ')" >>/var/log/port-agent.log
+    dns_summary="$(/bin/tr '\n' ' ' </etc/resolv.conf 2>/dev/null || cat /etc/resolv.conf)"
+    echo "port guest dns: configured ${dns_summary}" >/dev/console
+    echo "port guest dns: configured ${dns_summary}" >>/var/log/port-agent.log
   fi
 fi
 

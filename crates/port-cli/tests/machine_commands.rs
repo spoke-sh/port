@@ -1055,9 +1055,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
-                    String::from(
-                        "attempt=0; while [ \"$attempt\" -lt 120 ]; do if [ -s /var/lib/rancher/k3s/server/node-token ]; then cat /var/lib/rancher/k3s/server/node-token; exit 0; fi; attempt=$((attempt + 1)); sleep 1; done; echo 'timed out waiting for /var/lib/rancher/k3s/server/node-token' >&2; exit 1",
-                    ),
+                    String::from("cat /var/lib/rancher/k3s/server/node-token"),
                 ],
                 String::from("demo-join-token\n"),
             ),

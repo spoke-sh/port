@@ -57,10 +57,16 @@ require_debugfs_path /init
 require_debugfs_path /bin/busybox
 require_debugfs_path /bin/dirname
 require_debugfs_path /bin/install
+require_debugfs_path /bin/tr
 require_debugfs_path /usr/bin/port-guest-agent
 require_debugfs_path /usr/bin/k3s
 require_debugfs_path /usr/bin/kubectl
+require_debugfs_path /usr/bin/iptables
+require_debugfs_path /usr/bin/iptables-save
+require_debugfs_path /usr/bin/ip6tables
+require_debugfs_path /usr/bin/nft
 require_debugfs_path /etc/port-k3s-version
+require_debugfs_path /etc/hosts
 if [[ "$(debugfs -R 'cat /etc/port-guest-architecture' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" != "$expected_architecture" ]]; then
   echo "guest image architecture marker does not match $expected_architecture" >&2
   exit 1
@@ -81,12 +87,24 @@ if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q 'cgroup2';
   echo "guest image init does not mount cgroup2 for K3s" >&2
   exit 1
 fi
+if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q 'ip link set lo up'; then
+  echo "guest image init does not bring loopback up before guest services" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q '127.0.0.1/8'; then
+  echo "guest image init does not assign 127.0.0.1/8 to loopback" >&2
+  exit 1
+fi
 if ! debugfs -R 'cat /usr/bin/k3s' "$guest_image_path" 2>/dev/null | grep -q '/bin/k3s'; then
   echo "guest image k3s wrapper does not point at the packaged K3s runtime" >&2
   exit 1
 fi
 if [[ -z "$(debugfs -R 'cat /etc/port-k3s-version' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" ]]; then
   echo "guest image K3s version marker is empty" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /etc/hosts' "$guest_image_path" 2>/dev/null | grep -q '127.0.0.1 localhost'; then
+  echo "guest image /etc/hosts does not include the localhost entry" >&2
   exit 1
 fi
 if [[ "$guest_image_path" == */x86_64/firecracker/* ]]; then
