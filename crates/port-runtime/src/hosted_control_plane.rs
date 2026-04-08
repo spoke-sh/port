@@ -5034,7 +5034,7 @@ where
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
-                "node '{}' failed to serve machine '{}': {error}",
+                "node '{}' failed to serve machine '{}': {error:#}",
                 node_name, machine_name
             ),
             Some(route),
@@ -6222,6 +6222,67 @@ mod tests {
             "expected background runtime work to keep progressing during a blocking machine operation",
         );
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn node_machine_response_surfaces_full_error_chain() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("machine-error-chain");
+        let token_var = unique_test_env("PORT_TEST_MACHINE_ERROR_CHAIN_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+        let state = build_node_agent_state(
+            config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: reserve_test_addr(),
+                token: String::from("node-secret"),
+            },
+        )
+        .expect("node-agent state should build");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-port-node-agent-token",
+            "node-secret".parse().expect("header should parse"),
+        );
+
+        let response = node_machine_response(
+            &state,
+            &headers,
+            "cloud-aws",
+            |_config, _runtime_root, _machine_name| {
+                Err::<MachineStatus, _>(anyhow!("tap create returned EBUSY"))
+                    .context("failed to set up host-side networking for guest VM")
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let error: HostedError = serde_json::from_slice(&body).expect("error should decode");
+        assert!(
+            error
+                .message
+                .contains("failed to set up host-side networking for guest VM"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("tap create returned EBUSY"),
+            "{}",
+            error.message
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[tokio::test]
