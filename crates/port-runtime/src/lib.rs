@@ -54,6 +54,8 @@ pub use hosted_control_plane::{
     serve_node_agent,
 };
 
+const PORT_IPTABLES_BINARY_ENV: &str = "PORT_IPTABLES_BINARY";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedPvmNodePrepareRequest {
     pub control_plane: String,
@@ -957,9 +959,10 @@ fn collect_doctor_report_with_facts(
         "iproute2",
         local_firecracker_supported,
     ));
+    let iptables_binary = iptables_binary();
     checks.push(versioned_binary_check(
         "iptables",
-        "iptables",
+        &iptables_binary,
         &["--version"],
         "iptables",
         local_firecracker_supported,
@@ -9115,9 +9118,16 @@ fn launch_preflight_checks(
     kernel_path: &Path,
     guest_image_path: &Path,
 ) -> Vec<DoctorCheck> {
+    let iptables_binary = iptables_binary();
     let mut checks = vec![
         versioned_binary_check("iproute2", "ip", &["-V"], "iproute2", true),
-        versioned_binary_check("iptables", "iptables", &["--version"], "iptables", true),
+        versioned_binary_check(
+            "iptables",
+            &iptables_binary,
+            &["--version"],
+            "iptables",
+            true,
+        ),
         path_check(
             format!("artifact:{}", machine.kernel),
             kernel_path,
@@ -9331,6 +9341,11 @@ fn oci_registry_auth_check(
 }
 
 fn find_binary(binary: &str) -> Option<PathBuf> {
+    let candidate = Path::new(binary);
+    if candidate.components().count() > 1 {
+        return candidate.is_file().then(|| candidate.to_path_buf());
+    }
+
     let path = env::var_os("PATH")?;
 
     env::split_paths(&path)
@@ -12062,6 +12077,13 @@ fn run_network_command(program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn iptables_binary() -> String {
+    env::var(PORT_IPTABLES_BINARY_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| String::from("iptables"))
+}
+
 fn default_outbound_interface() -> Result<String> {
     let output = Command::new("ip")
         .args(["route", "show", "default"])
@@ -12084,6 +12106,7 @@ fn setup_host_networking(
     // Prior attempts may have already created the TAP device before failing.
     teardown_host_networking(machine_name, network);
 
+    let iptables_binary = iptables_binary();
     let tap_name = tap_device_name(machine_name);
     let host_cidr = format!("{}/{}", network.host_ip, network.prefix_len);
     let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
@@ -12100,7 +12123,7 @@ fn setup_host_networking(
         fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
 
         run_network_command(
-            "iptables",
+            &iptables_binary,
             &[
                 "-t",
                 "nat",
@@ -12116,7 +12139,7 @@ fn setup_host_networking(
         )
         .context("failed to add iptables MASQUERADE rule")?;
         run_network_command(
-            "iptables",
+            &iptables_binary,
             &[
                 "-A",
                 "FORWARD",
@@ -12130,7 +12153,7 @@ fn setup_host_networking(
         )
         .context("failed to add iptables FORWARD accept rule")?;
         run_network_command(
-            "iptables",
+            &iptables_binary,
             &[
                 "-A",
                 "FORWARD",
@@ -12159,12 +12182,13 @@ fn setup_host_networking(
 }
 
 fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNetworkSpec) {
+    let iptables_binary = iptables_binary();
     let tap_name = tap_device_name(machine_name);
     let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
 
     if let Ok(outbound_iface) = default_outbound_interface() {
         let _ = run_network_command(
-            "iptables",
+            &iptables_binary,
             &[
                 "-t",
                 "nat",
@@ -12179,7 +12203,7 @@ fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNet
             ],
         );
         let _ = run_network_command(
-            "iptables",
+            &iptables_binary,
             &[
                 "-D",
                 "FORWARD",
@@ -12192,7 +12216,7 @@ fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNet
             ],
         );
         let _ = run_network_command(
-            "iptables",
+            &iptables_binary,
             &[
                 "-D",
                 "FORWARD",
@@ -19313,6 +19337,62 @@ exec sleep 30
             checks
                 .iter()
                 .any(|check| check.name == "rootfs-overlay-initrd" && check.ok)
+        );
+    }
+
+    #[test]
+    fn launch_preflight_honors_explicit_iptables_binary_override() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let ip_path = tempdir.path().join("ip");
+        fs::write(
+            &ip_path,
+            "#!/bin/sh\nif [ \"${1:-}\" = \"-V\" ]; then\n  echo 'ip utility, iproute2-6.19.0, libbpf 1.6.3'\n  exit 0\nfi\nexit 0\n",
+        )
+        .expect("fake ip should write");
+        let mut permissions = fs::metadata(&ip_path)
+            .expect("fake ip metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&ip_path, permissions).expect("fake ip permissions should update");
+
+        let iptables_path = tempdir.path().join("iptables-legacy");
+        fs::write(
+            &iptables_path,
+            "#!/bin/sh\nif [ \"${1:-}\" = \"--version\" ]; then\n  echo 'iptables v1.8.12 (legacy)'\n  exit 0\nfi\nexit 0\n",
+        )
+        .expect("fake iptables should write");
+        let mut permissions = fs::metadata(&iptables_path)
+            .expect("fake iptables metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&iptables_path, permissions)
+            .expect("fake iptables permissions should update");
+
+        let _path_guard = ScopedPathEnv::replace(tempdir.path());
+        let _iptables_guard = ScopedEnvVar::set(crate::PORT_IPTABLES_BINARY_ENV, &iptables_path);
+
+        let config = PortConfig::sample();
+        let machine = config
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist");
+        let checks = crate::launch_preflight_checks(
+            machine,
+            Path::new("/tmp/kernel"),
+            Path::new("/tmp/guest"),
+        );
+
+        let iptables_check = checks
+            .iter()
+            .find(|check| check.name == "iptables")
+            .expect("iptables check should exist");
+        assert!(iptables_check.ok, "{}", iptables_check.detail);
+        assert!(
+            iptables_check
+                .detail
+                .contains(&iptables_path.display().to_string()),
+            "{}",
+            iptables_check.detail
         );
     }
 
