@@ -100,6 +100,8 @@ Required contract:
 - sibling initrd for the `x86_64/firecracker/pvm` guest image so Port can boot
   a read-only base rootfs with a writable overlay drive
 - no reuse of the current `standard` Firecracker kernel or guest image
+- the PVM kernel variant must resolve from a dedicated guest-kernel build
+  source such as `pvm-builds`, not from the stock Firecracker CI kernel
 - variant-specific validation instead of reusing the standard lane's checks
 
 That keeps the artifact story honest: PVM is a separate compatibility lane with

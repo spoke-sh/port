@@ -190,19 +190,19 @@ For `demo-kernel` on `x86_64/firecracker/standard`, that becomes:
 - Logical reference:
   `demo-fs/port/demo-kernel:v1`
 - Source:
-  pinned Firecracker CI kernel assets from the official `spec.ccfc.min` bucket
-  for `v1.14`
+  pinned upstream kernel sources for each compatibility lane:
+  Firecracker CI demo kernels for the standard Firecracker lanes, and the
+  sibling `pvm-builds` flake for the `x86_64/firecracker/pvm` lane
 - Current pinned keys:
   `firecracker-ci/v1.14/x86_64/vmlinux-6.1.155`
   `firecracker-ci/v1.14/aarch64/vmlinux-6.1.155`
 - Validation:
-  sha256 check against the pinned architecture-specific digest and a non-zero
-  file size check
+  compare the built artifact against the lane-specific upstream source plus a
+  non-zero file size check
 - PVM note:
-  the current `x86_64/firecracker/pvm` kernel variant is materialized as its
-  own selector/path and validation lane, but it is still seeded from the same
-  pinned Firecracker CI demo kernel while the real PVM host-kit/runtime path is
-  under construction
+  `x86_64/firecracker/pvm` now resolves a dedicated PVM guest kernel from
+  `pvm-builds` via `PORT_PVM_BUILD_FLAKE_REF` or a sibling `../pvm-builds`
+  checkout. It no longer reuses the standard Firecracker CI demo kernel.
 
 ## Guest Image Artifact
 

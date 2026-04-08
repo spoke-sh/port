@@ -138,6 +138,9 @@ The AWS PVM lane also needs dedicated guest artifacts:
 - sibling `initrd.cpio.gz` for that guest image so Port can boot a read-only
   base rootfs with a writable overlay drive
 - no reuse of the `standard` Firecracker artifact variants
+- the PVM kernel selector must resolve from a dedicated guest kernel build
+  source, wired through `PORT_PVM_BUILD_FLAKE_REF` or a sibling `../pvm-builds`
+  checkout during artifact build and validation
 
 This is the operational reason the AWS PVM lane is stronger than the generic
 hosted standard lane: the runtime, the host kit, and the artifacts are all

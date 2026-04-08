@@ -10,6 +10,22 @@ output_path="$1"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+resolve_pvm_build_flake_ref() {
+  if [[ -n "${PORT_PVM_BUILD_FLAKE_REF:-}" ]]; then
+    printf '%s\n' "$PORT_PVM_BUILD_FLAKE_REF"
+    return 0
+  fi
+
+  local sibling_repo="${repo_root}/../pvm-builds"
+  if [[ -f "${sibling_repo}/flake.nix" ]]; then
+    printf 'git+file://%s\n' "$sibling_repo"
+    return 0
+  fi
+
+  echo "missing PVM guest kernel build source: set PORT_PVM_BUILD_FLAKE_REF or provide a sibling ../pvm-builds checkout" >&2
+  exit 1
+}
+
 case "$output_path" in
   */x86_64/firecracker/standard/*)
     arch="x86_64"
@@ -19,8 +35,11 @@ case "$output_path" in
     ;;
   */x86_64/firecracker/pvm/*)
     arch="x86_64"
-    kernel_key="firecracker-ci/v1.14/x86_64/vmlinux-6.1.155"
-    kernel_sha256="e41c7048bd2475e7e788153823fcb9166a7e0b78c4c443bd6446d015fa735f53"
+    pvm_build_flake_ref="$(resolve_pvm_build_flake_ref)"
+    pvm_guest_kernel_attr="${PORT_PVM_GUEST_KERNEL_ATTR:-packages.x86_64-linux.linux-port-pvm-guest}"
+    kernel_source="$(nix build --option eval-cache false --no-link --print-out-paths "${pvm_build_flake_ref}#${pvm_guest_kernel_attr}")"
+    kernel_path="${kernel_source}/vmlinux"
+    kernel_origin="${pvm_build_flake_ref}#${pvm_guest_kernel_attr}"
     ;;
   */aarch64/firecracker/standard/*)
     arch="aarch64"
