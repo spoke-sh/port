@@ -204,6 +204,8 @@ Hosted K3s is a microVM-backed cluster contract:
 - hosted control-plane ownership only
 - Firecracker guest microVMs are the K3s nodes
 - the host lane, including AWS PVM, is the execution host for those microVMs, not the K3s node itself
+- hosted K3s prefers a preinstalled guest `k3s` binary and only falls back to
+  fetching `get.k3s.io` when the guest image does not already ship `k3s`
 - stateless machines only
 - `control_plane_scheduler = "spread"` tells Port to fail placement instead of reusing an already occupied execution host for a new control-plane microVM
 - `port cluster up|status|kubeconfig|down` is the canonical lifecycle surface

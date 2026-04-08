@@ -158,6 +158,9 @@ That means the AWS PVM host and the K3s node are different layers:
 - recommended guest storage contract on the AWS PVM lane: a read-only base
   rootfs plus a writable overlay disk, so repeated launches do not restart a
   full guest-image copy
+- recommended guest bootstrap contract: ship `k3s` in the guest image and let
+  hosted K3s launch that binary directly, with `get.k3s.io` only as a bounded
+  fallback when the image does not already include `k3s`
 
 Real HA is stricter than "multiple control-plane guests":
 

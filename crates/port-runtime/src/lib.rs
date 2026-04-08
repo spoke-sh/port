@@ -2836,7 +2836,7 @@ pub fn bootstrap_hosted_k3s_cluster(
         config,
         runtime_root,
         &primary_server,
-        k3s_install_command(
+        k3s_bootstrap_command(
             &cluster.version,
             "server",
             &cluster.server_args,
@@ -2852,11 +2852,7 @@ pub fn bootstrap_hosted_k3s_cluster(
         config,
         runtime_root,
         &primary_server,
-        vec![
-            String::from("/bin/sh"),
-            String::from("-lc"),
-            String::from("cat /var/lib/rancher/k3s/server/node-token"),
-        ],
+        hosted_k3s_join_token_command(),
         "read the K3s join token",
         cluster_name,
     )?
@@ -2891,7 +2887,7 @@ pub fn bootstrap_hosted_k3s_cluster(
             config,
             runtime_root,
             server_machine,
-            k3s_install_command(
+            k3s_bootstrap_command(
                 &cluster.version,
                 "server",
                 &cluster.server_args,
@@ -2925,7 +2921,7 @@ pub fn bootstrap_hosted_k3s_cluster(
             config,
             runtime_root,
             worker_machine,
-            k3s_install_command(
+            k3s_bootstrap_command(
                 &cluster.version,
                 "agent",
                 &cluster.worker_args,
@@ -3052,7 +3048,17 @@ fn execute_hosted_k3s_exec(
     })
 }
 
-fn k3s_install_command(
+fn hosted_k3s_join_token_command() -> Vec<String> {
+    vec![
+        String::from("/bin/sh"),
+        String::from("-lc"),
+        String::from(
+            "attempt=0; while [ \"$attempt\" -lt 120 ]; do if [ -s /var/lib/rancher/k3s/server/node-token ]; then cat /var/lib/rancher/k3s/server/node-token; exit 0; fi; attempt=$((attempt + 1)); sleep 1; done; echo 'timed out waiting for /var/lib/rancher/k3s/server/node-token' >&2; exit 1",
+        ),
+    ]
+}
+
+fn k3s_bootstrap_command(
     version: &str,
     role: &str,
     args: &[String],
@@ -3060,31 +3066,45 @@ fn k3s_install_command(
     server_url: Option<&str>,
     join_token: Option<&str>,
 ) -> Vec<String> {
-    let mut script = String::from("curl -sfL https://get.k3s.io | ");
-    script.push_str(&format!(
-        "INSTALL_K3S_VERSION={} ",
-        shell_single_quote(version)
-    ));
+    let mut direct_exec = role.to_string();
+    if let Some(bootstrap_flag) = bootstrap_flag {
+        direct_exec.push(' ');
+        direct_exec.push_str(bootstrap_flag);
+    }
     if let Some(server_url) = server_url {
-        script.push_str(&format!("K3S_URL={} ", shell_single_quote(server_url)));
+        direct_exec.push_str(" --server ");
+        direct_exec.push_str(&shell_single_quote(server_url));
     }
     if let Some(join_token) = join_token {
-        script.push_str(&format!("K3S_TOKEN={} ", shell_single_quote(join_token)));
-    }
-
-    let mut install_exec = role.to_string();
-    if let Some(bootstrap_flag) = bootstrap_flag {
-        install_exec.push(' ');
-        install_exec.push_str(bootstrap_flag);
+        direct_exec.push_str(" --token ");
+        direct_exec.push_str(&shell_single_quote(join_token));
     }
     if !args.is_empty() {
-        install_exec.push(' ');
-        install_exec.push_str(&args.join(" "));
+        direct_exec.push(' ');
+        direct_exec.push_str(&args.join(" "));
     }
-    script.push_str(&format!(
-        "INSTALL_K3S_EXEC={} sh -",
-        shell_single_quote(&install_exec)
+
+    let mut install_env = format!("INSTALL_K3S_VERSION={} ", shell_single_quote(version));
+    if let Some(server_url) = server_url {
+        install_env.push_str(&format!("K3S_URL={} ", shell_single_quote(server_url)));
+    }
+    if let Some(join_token) = join_token {
+        install_env.push_str(&format!("K3S_TOKEN={} ", shell_single_quote(join_token)));
+    }
+    install_env.push_str(&format!(
+        "INSTALL_K3S_EXEC={}",
+        shell_single_quote(&direct_exec)
     ));
+
+    let pid_path = format!("/run/port/k3s-{role}.pid");
+    let log_path = format!("/var/log/k3s-{role}.log");
+    let script = format!(
+        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path={pid_path}; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" {direct_exec} ) >{log_path} 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; {install_env} sh \"$installer\"",
+        pid_path = shell_single_quote(&pid_path),
+        direct_exec = direct_exec,
+        log_path = shell_single_quote(&log_path),
+        install_env = install_env
+    );
 
     vec![String::from("/bin/sh"), String::from("-lc"), script]
 }
@@ -12499,13 +12519,14 @@ mod tests {
         cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
         collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
         down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        hosted_k3s_cluster_access, hosted_k3s_kubeconfig_command, hosted_k3s_visibility_command,
-        hosted_placeholder_runtime_root, launch_local_machine, list_artifacts,
-        list_machine_secrets, list_machine_services, list_machines, local_cluster_kubeconfig,
-        local_cluster_status, machine_monitor, machine_service_status, machine_status, machine_top,
-        path_check, prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
-        put_machine_secret, read_json_file, read_pid_file, render_hosted_route_context, repo_root,
-        resolve_artifact_metadata, resolve_artifact_script_path, resolve_artifact_store_contract,
+        hosted_k3s_cluster_access, hosted_k3s_join_token_command, hosted_k3s_kubeconfig_command,
+        hosted_k3s_visibility_command, hosted_placeholder_runtime_root, k3s_bootstrap_command,
+        launch_local_machine, list_artifacts, list_machine_secrets, list_machine_services,
+        list_machines, local_cluster_kubeconfig, local_cluster_status, machine_monitor,
+        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
+        read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
+        resolve_artifact_script_path, resolve_artifact_store_contract,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
         stage_local_cluster_bootstrap, stop_machine, stop_machine_service, sudo_caller_ids,
@@ -16911,21 +16932,18 @@ exec sleep 30
             worker_paths,
             vec![
                 (
-                    vec![
-                        String::from("/bin/sh"),
-                        String::from("-lc"),
-                        String::from(
-                            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh -",
-                        ),
-                    ],
+                    k3s_bootstrap_command(
+                        "v1.32.0+k3s1",
+                        "server",
+                        &[String::from("--disable=traefik")],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
                     String::from("server bootstrapped\n"),
                 ),
                 (
-                    vec![
-                        String::from("/bin/sh"),
-                        String::from("-lc"),
-                        String::from("cat /var/lib/rancher/k3s/server/node-token"),
-                    ],
+                    hosted_k3s_join_token_command(),
                     String::from("demo-join-token\n"),
                 ),
             ],
@@ -16933,13 +16951,14 @@ exec sleep 30
         let worker_guest = spawn_hosted_exec_sequence_server(
             worker_join_paths,
             vec![(
-                vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from(
-                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -",
-                    ),
-                ],
+                k3s_bootstrap_command(
+                    "v1.32.0+k3s1",
+                    "agent",
+                    &[String::from("--node-label=role=worker")],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
                 String::from("worker joined\n"),
             )],
         );
@@ -17000,21 +17019,18 @@ exec sleep 30
             worker_paths,
             vec![
                 (
-                    vec![
-                        String::from("/bin/sh"),
-                        String::from("-lc"),
-                        String::from(
-                            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh -",
-                        ),
-                    ],
+                    k3s_bootstrap_command(
+                        "v1.32.0+k3s1",
+                        "server",
+                        &[String::from("--disable=traefik")],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
                     String::from("server bootstrapped\n"),
                 ),
                 (
-                    vec![
-                        String::from("/bin/sh"),
-                        String::from("-lc"),
-                        String::from("cat /var/lib/rancher/k3s/server/node-token"),
-                    ],
+                    hosted_k3s_join_token_command(),
                     String::from("demo-join-token\n"),
                 ),
                 (
@@ -17034,13 +17050,14 @@ exec sleep 30
         let worker_guest = spawn_hosted_exec_sequence_server(
             worker_join_paths,
             vec![(
-                vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from(
-                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -",
-                    ),
-                ],
+                k3s_bootstrap_command(
+                    "v1.32.0+k3s1",
+                    "agent",
+                    &[String::from("--node-label=role=worker")],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
                 String::from("worker joined\n"),
             )],
         );
@@ -17245,21 +17262,18 @@ exec sleep 30
             worker_paths,
             vec![
                 (
-                    vec![
-                        String::from("/bin/sh"),
-                        String::from("-lc"),
-                        String::from(
-                            "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh -",
-                        ),
-                    ],
+                    k3s_bootstrap_command(
+                        "v1.32.0+k3s1",
+                        "server",
+                        &[String::from("--disable=traefik")],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
                     String::from("server bootstrapped\n"),
                 ),
                 (
-                    vec![
-                        String::from("/bin/sh"),
-                        String::from("-lc"),
-                        String::from("cat /var/lib/rancher/k3s/server/node-token"),
-                    ],
+                    hosted_k3s_join_token_command(),
                     String::from("demo-join-token\n"),
                 ),
                 (
@@ -17279,13 +17293,14 @@ exec sleep 30
         let worker_guest = spawn_hosted_exec_sequence_server(
             worker_join_paths,
             vec![(
-                vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from(
-                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh -",
-                    ),
-                ],
+                k3s_bootstrap_command(
+                    "v1.32.0+k3s1",
+                    "agent",
+                    &[String::from("--node-label=role=worker")],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
                 String::from("worker joined\n"),
             )],
         );

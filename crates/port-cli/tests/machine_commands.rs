@@ -1046,7 +1046,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from(
-                        "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh -",
+                        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-server.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" server --cluster-init --disable=traefik ) >'/var/log/k3s-server.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh \"$installer\"",
                     ),
                 ],
                 String::from("server bootstrapped\n"),
@@ -1055,7 +1055,9 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
-                    String::from("cat /var/lib/rancher/k3s/server/node-token"),
+                    String::from(
+                        "attempt=0; while [ \"$attempt\" -lt 120 ]; do if [ -s /var/lib/rancher/k3s/server/node-token ]; then cat /var/lib/rancher/k3s/server/node-token; exit 0; fi; attempt=$((attempt + 1)); sleep 1; done; echo 'timed out waiting for /var/lib/rancher/k3s/server/node-token' >&2; exit 1",
+                    ),
                 ],
                 String::from("demo-join-token\n"),
             ),
@@ -1108,7 +1110,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 String::from("/bin/sh"),
                 String::from("-lc"),
                 String::from(
-                    "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='server --disable=traefik' sh -",
+                    "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-server.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" server --server 'https://demo-k3s.internal:6443' --token 'demo-join-token' --disable=traefik ) >'/var/log/k3s-server.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='server --server '\\''https://demo-k3s.internal:6443'\\'' --token '\\''demo-join-token'\\'' --disable=traefik' sh \"$installer\"",
                 ),
             ],
             String::from("server joined\n"),

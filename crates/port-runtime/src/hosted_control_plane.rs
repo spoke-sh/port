@@ -932,7 +932,11 @@ fn current_unix_timestamp_seconds() -> Result<u64> {
 }
 
 pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    // Hosted control-plane routes proxy live node traffic while also serving
+    // artifact and placement I/O. Keep a second worker available so launch-time
+    // transfers cannot starve node registration refreshes.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
         .context("failed to build control-plane runtime")?;
@@ -1115,39 +1119,49 @@ async fn artifact_push(
         Err(response) => return response,
     };
 
-    let parent = match request.store_path.parent() {
-        Some(parent) => parent,
-        None => {
+    let store_path = request.store_path.clone();
+    let store_detail = artifact_store_detail(&state, &request);
+    let bytes_copied = body.len() as u64;
+    let write_result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        maybe_delay_control_plane_artifact_io(&store_path);
+        let parent = store_path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("'{}' has no parent directory", store_path.display()),
+            )
+        })?;
+        std::fs::create_dir_all(parent)?;
+        std::fs::write(&store_path, &body)?;
+        Ok(())
+    })
+    .await;
+    match write_result {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::InvalidInput => {
             return error_response(
                 StatusCode::BAD_REQUEST,
+                format!("{store_detail} has no parent directory"),
+                Some(route),
+            );
+        }
+        Ok(Err(error)) => {
+            let message = if error.kind() == std::io::ErrorKind::NotFound {
+                format!("failed to create backing directory for {store_detail}: {error}")
+            } else {
+                format!("failed to write {store_detail}: {error}")
+            };
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, message, Some(route));
+        }
+        Err(error) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
                 format!(
-                    "{} has no parent directory",
-                    artifact_store_detail(&state, &request)
+                    "control plane '{}' artifact write task failed: {error}",
+                    state.inner.control_plane
                 ),
                 Some(route),
             );
         }
-    };
-    if let Err(error) = std::fs::create_dir_all(parent) {
-        return error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to create parent directory '{}' for {}: {error}",
-                parent.display(),
-                artifact_store_detail(&state, &request)
-            ),
-            Some(route),
-        );
-    }
-    if let Err(error) = std::fs::write(&request.store_path, &body) {
-        return error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
-                "failed to write {}: {error}",
-                artifact_store_detail(&state, &request)
-            ),
-            Some(route),
-        );
     }
 
     json_response(
@@ -1159,7 +1173,7 @@ async fn artifact_push(
                 reference: request.reference,
                 selector: request.selector,
                 store_path: request.store_path,
-                bytes_copied: body.len() as u64,
+                bytes_copied,
             },
         },
     )
@@ -1193,21 +1207,53 @@ async fn artifact_pull(
         Err(response) => return response,
     };
 
-    match std::fs::read(&request.store_path) {
-        Ok(bytes) => raw_response(StatusCode::OK, bytes, "application/octet-stream"),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => error_response(
+    let store_path = request.store_path.clone();
+    let store_detail = artifact_store_detail(&state, &request);
+    match tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+        maybe_delay_control_plane_artifact_io(&store_path);
+        std::fs::read(&store_path)
+    })
+    .await
+    {
+        Ok(Ok(bytes)) => raw_response(StatusCode::OK, bytes, "application/octet-stream"),
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => error_response(
             StatusCode::NOT_FOUND,
-            format!("{} was not found", artifact_store_detail(&state, &request)),
+            format!("{store_detail} was not found"),
+            Some(route),
+        ),
+        Ok(Err(error)) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read {store_detail}: {error}"),
             Some(route),
         ),
         Err(error) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!(
-                "failed to read {}: {error}",
-                artifact_store_detail(&state, &request)
+                "control plane '{}' artifact read task failed: {error}",
+                state.inner.control_plane
             ),
             Some(route),
         ),
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_delay_control_plane_artifact_io(_path: &std::path::Path) {}
+
+#[cfg(test)]
+fn maybe_delay_control_plane_artifact_io(path: &std::path::Path) {
+    let Some(filename) = path.file_name().and_then(|value| value.to_str()) else {
+        return;
+    };
+    let Some(start) = filename.find(".delay-") else {
+        return;
+    };
+    let digits: String = filename[start + ".delay-".len()..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    if let Ok(milliseconds) = digits.parse::<u64>() {
+        thread::sleep(Duration::from_millis(milliseconds));
     }
 }
 
@@ -3992,16 +4038,27 @@ pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> R
             })?;
         let refresh_state = state.clone();
         let refresh_target = registration_target.clone();
-        tokio::spawn(async move {
+        thread::spawn(move || {
+            let refresh_runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    eprintln!(
+                        "node agent '{}' could not build registration refresh runtime for control plane '{}': {}",
+                        refresh_state.inner.node_name, refresh_target.control_plane, error
+                    );
+                    return;
+                }
+            };
             loop {
-                tokio::time::sleep(NODE_AGENT_REGISTRATION_REFRESH_INTERVAL).await;
-                if let Err(error) = register_node_agent_once(
+                thread::sleep(NODE_AGENT_REGISTRATION_REFRESH_INTERVAL);
+                if let Err(error) = refresh_runtime.block_on(register_node_agent_once(
                     &refresh_state,
                     &refresh_target,
                     Some(registered_at),
-                )
-                .await
-                {
+                )) {
                     eprintln!(
                         "node agent '{}' registration refresh against control plane '{}' failed: {}",
                         refresh_state.inner.node_name, refresh_target.control_plane, error
@@ -5481,6 +5538,159 @@ mod tests {
         );
 
         cleanup_registered_state(&control_plane);
+    }
+
+    #[tokio::test]
+    async fn node_agent_refresh_stays_live_while_control_plane_artifact_pull_is_in_flight() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("artifact-refresh");
+        let token_var = unique_test_env("PORT_TEST_ARTIFACT_REFRESH_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        let control_bind = reserve_test_addr();
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .endpoint = format!("http://{control_bind}");
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let identity = config
+            .hosted_api_identity_contract("cloud-aws")
+            .expect("hosted identity should resolve")
+            .expect("cloud-aws should use hosted control plane");
+        let headers = HostedClientHeaders::from_identity(&identity, "demo-token").to_header_map();
+
+        let mut request = sample_artifact_transfer_request(&config, &control_plane);
+        request.filename = String::from("demo-kernel.delay-6500.img");
+        request.store_path = hosted_artifact_store_path(
+            &control_plane,
+            &request.reference,
+            request.selector,
+            &request.filename,
+        );
+        std::fs::create_dir_all(
+            request
+                .store_path
+                .parent()
+                .expect("delayed artifact should have a parent directory"),
+        )
+        .expect("artifact parent should exist");
+        std::fs::write(&request.store_path, b"delayed-artifact").expect("artifact should persist");
+
+        let control_config = config.clone();
+        let control_plane_name = control_plane.clone();
+        let control_bind_for_thread = control_bind.clone();
+        std::thread::spawn(move || {
+            let _ = serve_control_plane(
+                control_config,
+                ControlPlaneServeRequest {
+                    control_plane: control_plane_name,
+                    bind: control_bind_for_thread,
+                    node_bindings: Vec::new(),
+                },
+            );
+        });
+
+        wait_for_http_ready(
+            control_bind.parse().expect("control bind should parse"),
+            "/v1/machines",
+            &[("authorization", "Bearer demo-token")],
+            true,
+        )
+        .await;
+
+        let node_bind = reserve_test_addr();
+        let node_config = config.clone();
+        let node_bind_for_thread = node_bind.clone();
+        std::thread::spawn(move || {
+            let _ = serve_node_agent(
+                node_config,
+                NodeAgentServeRequest {
+                    node_name: String::from("aws-linux-node"),
+                    bind: node_bind_for_thread,
+                    token: String::from("node-secret"),
+                },
+            );
+        });
+
+        let state_path = registered_node_state_path(&control_plane);
+        wait_for(Duration::from_secs(5), Duration::from_millis(100), || {
+            std::fs::read(&state_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RegisteredNodeStateFile>(&bytes).ok())
+                .and_then(|state| state.nodes.get("aws-linux-node").cloned())
+                .is_some()
+        });
+        let first: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&state_path).expect("registered state should read"),
+        )
+        .expect("registered state should decode");
+        let first_seen = first.nodes["aws-linux-node"].refreshed_at;
+
+        let client = Client::new();
+        let mut pull = tokio::spawn(async move {
+            let mut request_builder =
+                client.post(format!("http://{control_bind}/v1/artifacts:pull"));
+            for (name, value) in &headers {
+                request_builder = request_builder.header(name, value);
+            }
+            let response = request_builder
+                .header(CONTENT_TYPE, "application/json")
+                .body(serde_json::to_vec(&request).expect("artifact request should encode"))
+                .send()
+                .await
+                .expect("artifact pull should complete");
+            let status = response.status();
+            let body = response
+                .bytes()
+                .await
+                .expect("artifact body should decode")
+                .to_vec();
+            (status, body)
+        });
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(4), &mut pull)
+                .await
+                .is_err(),
+            "artifact pull should still be in flight before the first delayed read completes",
+        );
+
+        wait_for(Duration::from_secs(8), Duration::from_millis(100), || {
+            std::fs::read(&state_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<RegisteredNodeStateFile>(&bytes).ok())
+                .and_then(|state| {
+                    state
+                        .nodes
+                        .get("aws-linux-node")
+                        .map(|registration| registration.refreshed_at > first_seen)
+                })
+                .unwrap_or(false)
+        });
+
+        let refreshed: RegisteredNodeStateFile = serde_json::from_slice(
+            &std::fs::read(&state_path).expect("registered state should read"),
+        )
+        .expect("registered state should decode");
+        assert!(
+            refreshed.nodes["aws-linux-node"].refreshed_at > first_seen,
+            "expected a later refresh than {first_seen}, got {}",
+            refreshed.nodes["aws-linux-node"].refreshed_at
+        );
+
+        let (status, body) = pull.await.expect("artifact pull task should join");
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"delayed-artifact");
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[tokio::test]

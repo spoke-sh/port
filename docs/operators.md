@@ -242,6 +242,9 @@ Interpret that contract this way:
 - the execution hosts, including AWS PVM hosts, run Port node-agent ownership
 - the K3s control-plane and worker nodes are the guest microVMs named in
   `server_machines` and `worker_machines`
+- the hosted guest image should normally already contain `k3s`; Port launches
+  that binary directly and only falls back to `get.k3s.io` when the image does
+  not ship `k3s`
 - `control_plane_scheduler = "spread"` tells Port not to reuse an already
   occupied execution host for a new control-plane microVM
 - `api_endpoint` must already front the control-plane microVMs through an
