@@ -1,7 +1,6 @@
 {
   lib,
   firecracker,
-  makeWrapper,
   stdenvNoCC,
 }:
 let
@@ -13,12 +12,11 @@ stdenvNoCC.mkDerivation {
   version = hostKit.package.version;
 
   dontUnpack = true;
-  nativeBuildInputs = [ makeWrapper ];
 
   installPhase = ''
     mkdir -p $out/bin $out/share/port/nixos
 
-    makeWrapper ${firecracker}/bin/firecracker $out/bin/${hostKit.firecracker_binary_name}
+    ln -s ${firecracker}/bin/firecracker $out/bin/${hostKit.firecracker_binary_name}
     ln -s ${firecracker}/bin/jailer $out/bin/jailer
 
     install -Dm644 ${hostKitManifest} \
@@ -31,6 +29,7 @@ stdenvNoCC.mkDerivation {
 
   passthru = {
     inherit hostKit;
+    firecrackerPackage = firecracker;
     modulePath = "/share/port/nixos/aws-pvm-host.nix";
     manifestPath = "/share/port/aws-pvm-host-kit.json";
   };

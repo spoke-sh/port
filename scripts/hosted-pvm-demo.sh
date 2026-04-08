@@ -204,9 +204,9 @@ prepare_cmd=(
   --architecture x86-64
   --provenance repo-proof
   --package-name firecracker-pvm-host-kit
-  --package-version 2026.03
+  --package-version 2026.04
   --host-kernel-release 6.12.0-port-pvm
-  --firecracker-build v1.12.0-port-pvm
+  --firecracker-build v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c
 )
 echo
 echo "prepare-pvm-node:"
@@ -214,7 +214,7 @@ print_command "${prepare_cmd[@]}"
 prepare_output="$("${prepare_cmd[@]}")"
 printf '%s\n' "$prepare_output"
 require_contains "$prepare_output" "prepared hosted pvm node: aws-linux-node"
-require_contains "$prepare_output" "firecracker-pvm-host-kit@2026.03"
+require_contains "$prepare_output" "firecracker-pvm-host-kit@2026.04"
 
 echo
 echo "imported inventory:"

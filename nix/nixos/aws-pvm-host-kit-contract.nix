@@ -2,9 +2,9 @@
   architecture = "x86_64";
   package = {
     name = "firecracker-pvm-host-kit";
-    version = "2026.03";
+    version = "2026.04";
     host_kernel_release = "6.12.0-port-pvm";
-    firecracker_build = "v1.12.0-port-pvm";
+    firecracker_build = "v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c";
   };
   host_platform = "linux";
   host_architecture = "x86_64";

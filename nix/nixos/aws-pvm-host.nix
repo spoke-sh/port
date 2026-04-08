@@ -8,6 +8,7 @@ let
   hostKit = import ./aws-pvm-host-kit-contract.nix;
   cfg = config.port.awsPvmHost;
   fallbackKernelPackages = pkgs.linuxPackages_6_12;
+  defaultFirecrackerPackage = pkgs.callPackage ../loopholelabs-firecracker-pvm.nix { };
   hostKitPackage = pkgs.callPackage ../firecracker-pvm-host-kit.nix {
     firecracker = cfg.firecrackerPackage;
   };
@@ -35,11 +36,11 @@ in
 
     firecrackerPackage = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.firecracker;
+      default = defaultFirecrackerPackage;
       description = ''
-        Base Firecracker derivation wrapped as the canonical
-        `firecracker-pvm` binary surface. Override this with the actual patched
-        PVM build used by your image pipeline.
+        Pinned loopholelabs Firecracker/PVM derivation wrapped as the canonical
+        `firecracker-pvm` binary surface. Override this only when the image
+        pipeline intentionally ships a different provenanced PVM build.
       '';
     };
 

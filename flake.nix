@@ -85,6 +85,7 @@
           pkgs.gzip
           pkgs.curl
         ] ++ pkgs.lib.optionals isLinux [
+          awsPvmHostKitPkg
           pkgs.firecracker
           pkgs.iproute2
           pkgs.iptables
@@ -143,8 +144,9 @@
         '';
         paddlesPkg = paddles.packages.${system}.paddles;
         keelPkg = keel.packages.${system}.keel;
+        awsPvmFirecrackerPkg = pkgs.callPackage ./nix/loopholelabs-firecracker-pvm.nix { };
         awsPvmHostKitPkg = pkgs.callPackage ./nix/firecracker-pvm-host-kit.nix {
-          firecracker = pkgs.firecracker;
+          firecracker = awsPvmFirecrackerPkg;
         };
         awsPvmHostModuleEval = nixpkgs.lib.nixosSystem {
           inherit system;
@@ -209,6 +211,7 @@
         ];
         linuxRuntimeInputs = pkgs.lib.optionals isLinux [
           pkgs.firecracker
+          awsPvmHostKitPkg
           pkgs.iproute2
           pkgs.iptables
           pkgs.cpio
@@ -224,6 +227,7 @@
           keel = keelPkg;
           default = portPkg;
         } // pkgs.lib.optionalAttrs isLinux {
+          firecracker-pvm = awsPvmFirecrackerPkg;
           firecracker-pvm-host-kit = awsPvmHostKitPkg;
         };
 

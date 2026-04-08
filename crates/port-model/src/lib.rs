@@ -1065,9 +1065,9 @@ fn x86_64_firecracker_pvm_host_kit() -> PvmHostKit {
     PvmHostKit {
         package: PvmHostKitPackage {
             name: String::from("firecracker-pvm-host-kit"),
-            version: String::from("2026.03"),
+            version: String::from("2026.04"),
             host_kernel_release: String::from("6.12.0-port-pvm"),
-            firecracker_build: String::from("v1.12.0-port-pvm"),
+            firecracker_build: String::from("v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c"),
         },
         host_platform: HostPlatform::Linux,
         host_architecture: MachineArchitecture::X86_64,
@@ -5642,9 +5642,12 @@ mod tests {
             .expect("planned hosted PVM lane should declare a host-kit contract");
 
         assert_eq!(aws_host_kit.package.name, "firecracker-pvm-host-kit");
-        assert_eq!(aws_host_kit.package.version, "2026.03");
+        assert_eq!(aws_host_kit.package.version, "2026.04");
         assert_eq!(aws_host_kit.package.host_kernel_release, "6.12.0-port-pvm");
-        assert_eq!(aws_host_kit.package.firecracker_build, "v1.12.0-port-pvm");
+        assert_eq!(
+            aws_host_kit.package.firecracker_build,
+            "v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c"
+        );
     }
 
     #[test]

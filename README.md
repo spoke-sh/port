@@ -58,7 +58,8 @@ What stays explicit:
   real prepared-host and no-fallback contract
 - the Port flake now exports `nixosModules.aws-pvm-host` and
   `packages.x86_64-linux.firecracker-pvm-host-kit` as the supported downstream
-  AWS PVM host-kit handoff
+  AWS PVM host-kit handoff, backed by Port's pinned loopholelabs no-KVM PVM
+  Firecracker build
 - Port still does not claim EC2 provisioning, IAM, VPC wiring, DNS, or arm64
   Firecracker/PVM support
 

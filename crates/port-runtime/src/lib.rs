@@ -3280,6 +3280,8 @@ fn firecracker_local_launch_machine(
         .with_context(|| format!("failed to create '{}'", paths.stdout_log.display()))?;
     let stderr = File::create(&paths.stderr_log)
         .with_context(|| format!("failed to create '{}'", paths.stderr_log.display()))?;
+    File::create(&paths.firecracker_log)
+        .with_context(|| format!("failed to create '{}'", paths.firecracker_log.display()))?;
 
     let mut command = Command::new(&firecracker_binary);
     command
@@ -9215,6 +9217,47 @@ fn binary_check(name: &str, binary: &str, required: bool) -> DoctorCheck {
     }
 }
 
+fn binary_candidates(binary: &str) -> Vec<PathBuf> {
+    let candidate = Path::new(binary);
+    if candidate.components().count() > 1 {
+        return candidate
+            .is_file()
+            .then(|| candidate.to_path_buf())
+            .into_iter()
+            .collect();
+    }
+
+    let Some(path) = env::var_os("PATH") else {
+        return Vec::new();
+    };
+
+    env::split_paths(&path)
+        .map(|entry| entry.join(binary))
+        .filter(|candidate| candidate.is_file())
+        .collect()
+}
+
+fn binary_output_contains(path: &Path, args: &[&str], needle: &str) -> bool {
+    Command::new(path)
+        .args(args)
+        .output()
+        .map(|output| {
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            combined.contains(needle)
+        })
+        .unwrap_or(false)
+}
+
+fn find_versioned_binary(binary: &str, args: &[&str], needle: &str) -> Option<PathBuf> {
+    binary_candidates(binary)
+        .into_iter()
+        .find(|candidate| binary_output_contains(candidate, args, needle))
+}
+
 fn versioned_binary_check(
     name: &str,
     binary: &str,
@@ -9222,7 +9265,7 @@ fn versioned_binary_check(
     needle: &str,
     required: bool,
 ) -> DoctorCheck {
-    match find_binary(binary) {
+    match find_versioned_binary(binary, args, needle).or_else(|| find_binary(binary)) {
         Some(path) => match Command::new(&path).args(args).output() {
             Ok(output) => {
                 let combined = format!(
@@ -9341,16 +9384,7 @@ fn oci_registry_auth_check(
 }
 
 fn find_binary(binary: &str) -> Option<PathBuf> {
-    let candidate = Path::new(binary);
-    if candidate.components().count() > 1 {
-        return candidate.is_file().then(|| candidate.to_path_buf());
-    }
-
-    let path = env::var_os("PATH")?;
-
-    env::split_paths(&path)
-        .map(|entry| entry.join(binary))
-        .find(|candidate| candidate.is_file())
+    binary_candidates(binary).into_iter().next()
 }
 
 fn select_firecracker_binary(
@@ -12084,8 +12118,15 @@ fn iptables_binary() -> String {
         .unwrap_or_else(|| String::from("iptables"))
 }
 
+fn iproute_binary() -> String {
+    find_versioned_binary("ip", &["-V"], "iproute2")
+        .unwrap_or_else(|| PathBuf::from("ip"))
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn default_outbound_interface() -> Result<String> {
-    let output = Command::new("ip")
+    let output = Command::new(iproute_binary())
         .args(["route", "show", "default"])
         .output()
         .context("failed to run 'ip route show default'")?;
@@ -12107,17 +12148,24 @@ fn setup_host_networking(
     teardown_host_networking(machine_name, network);
 
     let iptables_binary = iptables_binary();
+    let iproute_binary = iproute_binary();
     let tap_name = tap_device_name(machine_name);
     let host_cidr = format!("{}/{}", network.host_ip, network.prefix_len);
     let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
     let outbound_iface = default_outbound_interface()?;
 
     let result: Result<()> = (|| {
-        run_network_command("ip", &["tuntap", "add", "dev", &tap_name, "mode", "tap"])
-            .with_context(|| format!("failed to create TAP device '{tap_name}'"))?;
-        run_network_command("ip", &["addr", "add", &host_cidr, "dev", &tap_name])
-            .with_context(|| format!("failed to assign address {host_cidr} to '{tap_name}'"))?;
-        run_network_command("ip", &["link", "set", &tap_name, "up"])
+        run_network_command(
+            &iproute_binary,
+            &["tuntap", "add", "dev", &tap_name, "mode", "tap"],
+        )
+        .with_context(|| format!("failed to create TAP device '{tap_name}'"))?;
+        run_network_command(
+            &iproute_binary,
+            &["addr", "add", &host_cidr, "dev", &tap_name],
+        )
+        .with_context(|| format!("failed to assign address {host_cidr} to '{tap_name}'"))?;
+        run_network_command(&iproute_binary, &["link", "set", &tap_name, "up"])
             .with_context(|| format!("failed to bring up '{tap_name}'"))?;
 
         fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
@@ -12183,6 +12231,7 @@ fn setup_host_networking(
 
 fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNetworkSpec) {
     let iptables_binary = iptables_binary();
+    let iproute_binary = iproute_binary();
     let tap_name = tap_device_name(machine_name);
     let subnet = format!("{}/{}", network.guest_ip, network.prefix_len);
 
@@ -12234,7 +12283,7 @@ fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNet
         );
     }
 
-    let _ = run_network_command("ip", &["link", "del", &tap_name]);
+    let _ = run_network_command(&iproute_binary, &["link", "del", &tap_name]);
 }
 
 fn teardown_host_networking_from_state(paths: &RuntimePaths, machine_name: &str) {
@@ -13711,6 +13760,39 @@ exit 23
         path
     }
 
+    fn write_log_asserting_firecracker_binary(root: &Path, name: &str) -> PathBuf {
+        let path = root.join(name);
+        fs::write(
+            &path,
+            r#"#!/usr/bin/env bash
+set -euo pipefail
+log_path=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --log-path)
+      log_path="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+test -n "$log_path"
+test -f "$log_path"
+sleep 30
+"#,
+        )
+        .expect("log-asserting firecracker should write");
+        let mut permissions = fs::metadata(&path)
+            .expect("log-asserting firecracker metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions)
+            .expect("log-asserting firecracker permissions should update");
+        path
+    }
+
     fn write_fake_network_binaries(root: &Path) {
         for (name, version_output) in [
             ("ip", "ip utility, iproute2-6.12.0"),
@@ -13731,6 +13813,17 @@ exit 23
             fs::set_permissions(&path, permissions)
                 .expect("fake network tool permissions should update");
         }
+    }
+
+    fn write_fake_ip_binary(root: &Path, script_name: &str, script: &str) -> PathBuf {
+        let path = root.join(script_name);
+        fs::write(&path, script).expect("fake ip binary should write");
+        let mut permissions = fs::metadata(&path)
+            .expect("fake ip binary metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions).expect("fake ip binary permissions should update");
+        path
     }
 
     fn serve_vsock_guest_agent_proxy(vsock_path: &Path, backend_socket: &Path) {
@@ -13867,6 +13960,16 @@ exit 23
                 entries.extend(std::env::split_paths(existing));
             }
             let joined = std::env::join_paths(entries).expect("PATH should join");
+            unsafe {
+                std::env::set_var("PATH", joined);
+            }
+            Self { original }
+        }
+
+        fn from_paths<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Self {
+            let original = std::env::var_os("PATH");
+            let joined = std::env::join_paths(paths.into_iter().map(Path::to_path_buf))
+                .expect("PATH should join");
             unsafe {
                 std::env::set_var("PATH", joined);
             }
@@ -15856,7 +15959,7 @@ exec sleep 30
             .expect("generic hosted host-kit contract check should exist");
 
         assert!(!aws.ok);
-        assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.03"));
+        assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.04"));
         assert!(aws.detail.contains("cloud-aws"));
         assert!(aws.detail.contains("prepare-pvm-node"));
         assert!(aws.detail.contains("planned"));
@@ -15912,9 +16015,12 @@ exec sleep 30
 
         assert!(aws.ok);
         assert!(aws.detail.contains("inventory/aws-linux-node.json"));
-        assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.03"));
+        assert!(aws.detail.contains("firecracker-pvm-host-kit@2026.04"));
         assert!(aws.detail.contains("6.12.0-port-pvm"));
-        assert!(aws.detail.contains("v1.12.0-port-pvm"));
+        assert!(
+            aws.detail
+                .contains("v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c")
+        );
 
         let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
     }
@@ -17955,6 +18061,8 @@ exec sleep 30
             .host_kit = Some(host_kit.clone());
         let package = host_kit.package.clone();
         let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker-pvm");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
         unsafe {
             std::env::set_var("PORT_TEST_HOSTED_PVM_FIRECRACKER", &fake_binary);
         }
@@ -18063,6 +18171,8 @@ exec sleep 30
             .host_kit = Some(host_kit.clone());
         let package = host_kit.package.clone();
         let fake_binary = write_fake_firecracker_binary(tempdir.path(), "firecracker-pvm");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
         unsafe {
             std::env::set_var("PORT_TEST_HOSTED_PVM_FIRECRACKER", &fake_binary);
         }
@@ -18197,6 +18307,43 @@ exec sleep 30
 
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
+    }
+
+    #[test]
+    fn hosted_standard_launch_precreates_firecracker_log_file() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_config_with_hosted_runtime_roots(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let fake_binary = write_log_asserting_firecracker_binary(tempdir.path(), "firecracker");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+
+        let metadata = launch_local_machine(
+            &config,
+            &LaunchRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                boot_wait: Duration::from_secs(0),
+            },
+        )
+        .expect("hosted standard launch should create the firecracker log path first");
+
+        assert_eq!(metadata.firecracker_binary, fake_binary);
+        assert!(
+            metadata.log_path.exists(),
+            "{}",
+            metadata.log_path.display()
+        );
+
+        let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
     }
 
     #[test]
@@ -19393,6 +19540,78 @@ exec sleep 30
                 .contains(&iptables_path.display().to_string()),
             "{}",
             iptables_check.detail
+        );
+    }
+
+    #[test]
+    fn launch_preflight_prefers_iproute2_binary_over_busybox_ip_on_path() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let busybox_dir = tempdir.path().join("busybox");
+        let iproute_dir = tempdir.path().join("iproute2");
+        fs::create_dir_all(&busybox_dir).expect("busybox dir should exist");
+        fs::create_dir_all(&iproute_dir).expect("iproute dir should exist");
+
+        write_fake_ip_binary(
+            &busybox_dir,
+            "ip",
+            "#!/bin/sh\nif [ \"${1:-}\" = \"-V\" ]; then\n  echo 'BusyBox v1.37.0'\n  exit 0\nfi\nexit 0\n",
+        );
+        write_fake_ip_binary(
+            &iproute_dir,
+            "ip",
+            "#!/bin/sh\nif [ \"${1:-}\" = \"-V\" ]; then\n  echo 'ip utility, iproute2-6.19.0, libbpf 1.6.3'\n  exit 0\nfi\nif [ \"${1:-}\" = \"route\" ]; then\n  echo 'default via 192.0.2.1 dev eth0'\n  exit 0\nfi\nexit 0\n",
+        );
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::from_paths([
+            busybox_dir.as_path(),
+            iproute_dir.as_path(),
+            tempdir.path(),
+        ]);
+
+        let mut config = PortConfig::sample();
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let machine = config
+            .machines
+            .get("demo")
+            .expect("demo machine should exist");
+        let kernel = config.artifacts.kernels["demo-kernel"].variants[0]
+            .path
+            .clone();
+        let rootfs = config.artifacts.guest_images["demo-guest"].variants[0]
+            .path
+            .clone();
+
+        let checks = crate::launch_preflight_checks(machine, &kernel, &rootfs);
+        let ip_check = checks
+            .iter()
+            .find(|check| check.name == "iproute2")
+            .expect("iproute2 check should exist");
+        assert!(ip_check.ok, "{}", ip_check.detail);
+    }
+
+    #[test]
+    fn default_outbound_interface_prefers_iproute2_binary_over_busybox_ip_on_path() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let busybox_dir = tempdir.path().join("busybox");
+        let iproute_dir = tempdir.path().join("iproute2");
+        fs::create_dir_all(&busybox_dir).expect("busybox dir should exist");
+        fs::create_dir_all(&iproute_dir).expect("iproute dir should exist");
+
+        write_fake_ip_binary(
+            &busybox_dir,
+            "ip",
+            "#!/bin/sh\nif [ \"${1:-}\" = \"-V\" ]; then\n  echo 'BusyBox v1.37.0'\n  exit 0\nfi\necho 'busybox-ip-was-used' >&2\nexit 1\n",
+        );
+        write_fake_ip_binary(
+            &iproute_dir,
+            "ip",
+            "#!/bin/sh\nif [ \"${1:-}\" = \"-V\" ]; then\n  echo 'ip utility, iproute2-6.19.0, libbpf 1.6.3'\n  exit 0\nfi\nif [ \"${1:-}\" = \"route\" ] && [ \"${2:-}\" = \"show\" ] && [ \"${3:-}\" = \"default\" ]; then\n  echo 'default via 192.0.2.1 dev eth0'\n  exit 0\nfi\nexit 1\n",
+        );
+        let _path_guard = ScopedPathEnv::from_paths([busybox_dir.as_path(), iproute_dir.as_path()]);
+
+        assert_eq!(
+            crate::default_outbound_interface().expect("default route should resolve"),
+            "eth0"
         );
     }
 

@@ -87,6 +87,9 @@ The companion package publishes:
 - `share/port/aws-pvm-host-kit.json`
 - `share/port/nixos/aws-pvm-host.nix`
 
+By default, `bin/firecracker-pvm` is backed by Port's pinned
+`loopholelabs/firecracker` no-KVM PVM release for `x86_64-linux`.
+
 Minimal downstream import:
 
 ```nix
@@ -102,7 +105,8 @@ Minimal downstream import:
           system.stateVersion = "24.11";
 
           # Replace these with the concrete PVM-capable builds used for the
-          # production image when they live outside the Port repo.
+          # production image when they intentionally differ from Port's pinned
+          # loopholelabs Firecracker/PVM package.
           # port.awsPvmHost.kernelPackages = pkgs.linuxPackagesFor myPortPvmKernel;
           # port.awsPvmHost.firecrackerPackage = myFirecrackerPvm;
         }
@@ -122,8 +126,8 @@ downstream repo.
 The default `kernelPackages` value is intentionally a buildable Linux 6.12
 fallback so downstream AMI builds evaluate and realize cleanly. Treat that as
 the wiring seam, not as the final production PVM kernel. Production images
-should still override the kernel and Firecracker package inputs with the actual
-PVM-capable builds they intend to ship.
+should still override the kernel input, and only override the Firecracker
+package when they intentionally ship a different provenanced PVM build.
 
 ### 4. AWS Artifact Kit Contract
 
@@ -213,7 +217,7 @@ port --config /tmp/port-aws-pvm.toml artifacts validate --artifact demo-guest --
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
 PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml node-agent serve --node aws-linux-node --bind 127.0.0.1:9234 --token node-secret
 
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml control-plane prepare-pvm-node --control-plane demo --node aws-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.04 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c
 
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine launch --machine cloud-aws
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-aws-pvm.toml machine status --machine cloud-aws

@@ -3061,7 +3061,7 @@ fn cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch() {
     assert!(prepare.status.success(), "{prepare:?}");
     let prepare_stdout = String::from_utf8_lossy(&prepare.stdout);
     assert!(prepare_stdout.contains("prepared hosted pvm node: aws-linux-node"));
-    assert!(prepare_stdout.contains("firecracker-pvm-host-kit@2026.03"));
+    assert!(prepare_stdout.contains("firecracker-pvm-host-kit@2026.04"));
 
     let imported_inventory: serde_json::Value = serde_json::from_slice(
         &fs::read(".port/hosted/demo/imported-inventory.json")

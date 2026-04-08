@@ -129,7 +129,7 @@ architecture = "x86_64"
 state = "planned"
 
 [nodes.aws-linux-node.capabilities.pvm_lanes.host_kit]
-package = { name = "firecracker-pvm-host-kit", version = "2026.03", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.12.0-port-pvm" }
+package = { name = "firecracker-pvm-host-kit", version = "2026.04", host_kernel_release = "6.12.0-port-pvm", firecracker_build = "v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c" }
 host_platform = "linux"
 host_architecture = "x86_64"
 requires_custom_host_kernel = true
@@ -427,7 +427,7 @@ Then run:
 ```bash
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane serve --control-plane demo --bind 127.0.0.1:7040
 PORT_PVM_FIRECRACKER_BINARY=/path/to/firecracker-pvm PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml node-agent serve --node generic-linux-node --bind 127.0.0.1:9234 --token node-secret
-PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.03 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.12.0-port-pvm
+PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml control-plane prepare-pvm-node --control-plane demo --node generic-linux-node --architecture x86-64 --provenance repo-proof --package-name firecracker-pvm-host-kit --package-version 2026.04 --host-kernel-release 6.12.0-port-pvm --firecracker-build v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine launch --machine cloud-generic
 PORT_DEMO_TOKEN=demo-token port --config /tmp/port-pvm.toml machine stop --machine cloud-generic
 ```

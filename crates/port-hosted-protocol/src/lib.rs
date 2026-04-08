@@ -1083,9 +1083,9 @@ mod tests {
             provenance: String::from("inventory-sync"),
             package: PvmHostKitPackage {
                 name: String::from("firecracker-pvm-host-kit"),
-                version: String::from("2026.03"),
+                version: String::from("2026.04"),
                 host_kernel_release: String::from("6.12.0-port-pvm"),
-                firecracker_build: String::from("v1.12.0-port-pvm"),
+                firecracker_build: String::from("v1.13.0-dev+loopholelabs.pvm.7f6c070fa09c"),
             },
         };
         let body = to_value(&request).expect("prepare request should serialize");
@@ -1113,7 +1113,7 @@ mod tests {
         .expect("prepared record should serialize");
         assert_eq!(
             success["result"]["pvm_host_kit_packages"][0]["package"]["version"],
-            "2026.03"
+            "2026.04"
         );
     }
 
