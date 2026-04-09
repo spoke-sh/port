@@ -46,6 +46,16 @@ for tool in cargo e2fsck ldd mkfs.ext4 nix nix-store; do
   fi
 done
 
+cp_bin="${PORT_CP_BIN:-}"
+if [[ -z "$cp_bin" ]]; then
+  cp_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#coreutils)"
+  cp_bin="${cp_store}/bin/cp"
+fi
+if [[ ! -x "$cp_bin" ]]; then
+  echo "missing required tool for guest image build: GNU cp (set PORT_CP_BIN or install coreutils)" >&2
+  exit 1
+fi
+
 build_firecracker_initrd=0
 copy_kernel_modules_into_guest=0
 stage_preloaded_k3s_images=0
@@ -138,7 +148,7 @@ copy_store_closure() {
         continue
       fi
       mkdir -p "$staging_dir/$(dirname "$closure_path")"
-      cp -a "$closure_path" "$staging_dir/$(dirname "$closure_path")/"
+      "$cp_bin" -a --no-preserve=ownership "$closure_path" "$staging_dir/$(dirname "$closure_path")/"
       chmod -R u+w "$staging_dir/$closure_path"
     done < <(nix-store -qR "$output_path")
   done < <(nix build --option eval-cache false --no-link --print-out-paths "$attr")
@@ -195,6 +205,7 @@ mkdir -p \
   "$staging_dir/etc/rancher/k3s" \
   "$staging_dir/etc/ssl/certs" \
   "$staging_dir/nix/store" \
+  "$staging_dir/opt/credential-provider/bin" \
   "$staging_dir/opt/cni/bin" \
   "$staging_dir/proc" \
   "$staging_dir/run/port" \
@@ -232,6 +243,8 @@ iptables_attr="nixpkgs#legacyPackages.${guest_nix_system}.iptables.out"
 iptables_store="$(copy_store_closure "$iptables_attr")"
 nftables_attr="nixpkgs#legacyPackages.${guest_nix_system}.nftables.out"
 nftables_store="$(copy_store_closure "$nftables_attr")"
+awscli_attr="nixpkgs#legacyPackages.${guest_nix_system}.awscli2"
+awscli_store="$(copy_store_closure "$awscli_attr")"
 cacert_attr="nixpkgs#legacyPackages.${guest_nix_system}.cacert.out"
 cacert_store="$(copy_store_closure "$cacert_attr")"
 for tool in \
@@ -247,8 +260,65 @@ done
 ln -sf "${iptables_store}/bin/xtables-nft-multi" "$staging_dir/usr/bin/xtables-nft-multi"
 ln -sf "${iptables_store}/bin/xtables-legacy-multi" "$staging_dir/usr/bin/xtables-legacy-multi"
 ln -sf "${nftables_store}/bin/nft" "$staging_dir/usr/bin/nft"
+ln -sf "${awscli_store}/bin/aws" "$staging_dir/usr/bin/aws"
 ln -sf "${cacert_store}/etc/ssl/certs/ca-bundle.crt" "$staging_dir/etc/ssl/certs/ca-certificates.crt"
 ln -sf /etc/ssl/certs/ca-certificates.crt "$staging_dir/etc/pki/tls/certs/ca-bundle.crt"
+
+cat >"$staging_dir/etc/rancher/k3s/ecr-credential-provider.yaml" <<'EOF'
+apiVersion: kubelet.config.k8s.io/v1
+kind: CredentialProviderConfig
+providers:
+  - name: ecr-credential-provider
+    apiVersion: credentialprovider.kubelet.k8s.io/v1
+    matchImages:
+      - "*.dkr.ecr.*.amazonaws.com"
+      - "*.dkr.ecr.*.amazonaws.com.cn"
+    defaultCacheDuration: 11h
+EOF
+
+cat >"$staging_dir/opt/credential-provider/bin/ecr-credential-provider" <<'EOF'
+#!/bin/sh
+set -eu
+
+request_file="$(/bin/mktemp)"
+trap '/bin/rm -f "$request_file"' EXIT
+/bin/cat >"$request_file"
+
+api_version="$(/bin/sed -n 's/.*"apiVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$request_file" | /bin/head -n 1)"
+if [ -z "$api_version" ]; then
+  api_version="credentialprovider.kubelet.k8s.io/v1"
+fi
+image="$(/bin/sed -n 's/.*"image"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$request_file" | /bin/head -n 1)"
+registry_host="${image%%/*}"
+
+if [ -z "$image" ] || [ -z "$registry_host" ]; then
+  echo "ecr-credential-provider: missing image in kubelet request" >&2
+  exit 1
+fi
+
+case "$registry_host" in
+  *.dkr.ecr.*.amazonaws.com|*.dkr.ecr.*.amazonaws.com.cn)
+    ;;
+  *)
+    /bin/printf '{"apiVersion":"%s","kind":"CredentialProviderResponse","cacheKeyType":"Registry","auth":null}\n' "$api_version"
+    exit 0
+    ;;
+esac
+
+region="$(/bin/printf '%s' "$registry_host" | /bin/tr '.' '\n' | /bin/sed -n '4p')"
+if [ -z "$region" ]; then
+  echo "ecr-credential-provider: could not derive region from registry host '$registry_host'" >&2
+  exit 1
+fi
+
+password="$(/usr/bin/aws ecr get-login-password --region "$region")"
+
+/bin/printf '{"apiVersion":"%s","kind":"CredentialProviderResponse","cacheKeyType":"Registry","cacheDuration":"11h","auth":{"%s":{"username":"AWS","password":"%s"}}}\n' \
+  "$api_version" \
+  "$registry_host" \
+  "$password"
+EOF
+chmod 0755 "$staging_dir/opt/credential-provider/bin/ecr-credential-provider"
 
 if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
   kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.modules)"
@@ -257,7 +327,7 @@ if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
     exit 1
   fi
   mkdir -p "$staging_dir/lib"
-  cp -a "${kernel_modules_store}/lib/modules" "$staging_dir/lib/"
+  "$cp_bin" -a --no-preserve=ownership "${kernel_modules_store}/lib/modules" "$staging_dir/lib/"
   chmod -R u+w "$staging_dir/lib/modules"
   kernel_release="$(find "${kernel_modules_store}/lib/modules" -mindepth 1 -maxdepth 1 -type d | head -n 1 | xargs basename)"
   if [[ -z "$kernel_release" ]]; then
@@ -287,7 +357,7 @@ if [[ "$build_firecracker_initrd" -eq 1 ]]; then
       "$initrd_dir" \
       "${kmod_store}/bin/modprobe" \
       "bin/modprobe"
-    cp -a "${kernel_modules_store}/lib/modules" "$initrd_dir/lib/"
+    "$cp_bin" -a --no-preserve=ownership "${kernel_modules_store}/lib/modules" "$initrd_dir/lib/"
     chmod -R u+w "$initrd_dir/lib/modules"
     printf '%s\n' "$kernel_release" >"$initrd_dir/etc/port-kernel-modules-release"
   fi
@@ -364,7 +434,7 @@ copy_binary_with_libs \
   "${CARGO_TARGET_DIR:-$repo_root/target}/release/port-guest-agent" \
   "usr/bin/port-guest-agent"
 
-for applet in cat chmod cp dirname echo env grep head install ip kill ln ls mkdir mount mknod mv ps pwd readlink rm sed setsid sh sleep stat sync tail touch tr uname; do
+for applet in cat chmod cp dirname echo env grep head install ip kill ln ls mkdir mktemp mount mknod mv ps printf pwd readlink rm sed setsid sh sleep stat sync tail touch tr uname; do
   ln -sf busybox "$staging_dir/bin/$applet"
 done
 

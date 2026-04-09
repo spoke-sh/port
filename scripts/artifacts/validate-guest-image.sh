@@ -57,6 +57,8 @@ require_debugfs_path /init
 require_debugfs_path /bin/busybox
 require_debugfs_path /bin/dirname
 require_debugfs_path /bin/install
+require_debugfs_path /bin/mktemp
+require_debugfs_path /bin/printf
 require_debugfs_path /bin/tr
 require_debugfs_path /usr/bin/port-guest-agent
 require_debugfs_path /usr/bin/k3s
@@ -65,9 +67,13 @@ require_debugfs_path /usr/bin/iptables
 require_debugfs_path /usr/bin/iptables-save
 require_debugfs_path /usr/bin/ip6tables
 require_debugfs_path /usr/bin/nft
+require_debugfs_path /usr/bin/aws
+require_debugfs_path /opt/credential-provider/bin/ecr-credential-provider
+require_debugfs_path /etc/rancher/k3s/ecr-credential-provider.yaml
 require_debugfs_path /etc/ssl/certs/ca-certificates.crt
 require_debugfs_path /etc/pki/tls/certs/ca-bundle.crt
 require_debugfs_path /etc/port-k3s-version
+require_debugfs_path /etc/port-k3s-store-path
 require_debugfs_path /etc/hosts
 if [[ "$(debugfs -R 'cat /etc/port-guest-architecture' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" != "$expected_architecture" ]]; then
   echo "guest image architecture marker does not match $expected_architecture" >&2
@@ -105,10 +111,32 @@ if ! debugfs -R 'cat /usr/bin/k3s' "$guest_image_path" 2>/dev/null | grep -q 'SS
   echo "guest image k3s wrapper does not export SSL_CERT_FILE for outbound registry pulls" >&2
   exit 1
 fi
+if ! debugfs -R 'cat /opt/credential-provider/bin/ecr-credential-provider' "$guest_image_path" 2>/dev/null | grep -q 'aws ecr get-login-password'; then
+  echo "guest image ECR credential provider does not mint ECR login tokens" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /opt/credential-provider/bin/ecr-credential-provider' "$guest_image_path" 2>/dev/null | grep -q '/bin/mktemp'; then
+  echo "guest image ECR credential provider does not use absolute helper paths for mktemp" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /opt/credential-provider/bin/ecr-credential-provider' "$guest_image_path" 2>/dev/null | grep -q '/bin/printf'; then
+  echo "guest image ECR credential provider does not use absolute helper paths for printf" >&2
+  exit 1
+fi
+if ! debugfs -R 'cat /etc/rancher/k3s/ecr-credential-provider.yaml' "$guest_image_path" 2>/dev/null | grep -q 'ecr-credential-provider'; then
+  echo "guest image kubelet credential provider config is missing the ECR provider entry" >&2
+  exit 1
+fi
 if [[ -z "$(debugfs -R 'cat /etc/port-k3s-version' "$guest_image_path" 2>/dev/null | tr -d '\r\n')" ]]; then
   echo "guest image K3s version marker is empty" >&2
   exit 1
 fi
+k3s_store_path="$(debugfs -R 'cat /etc/port-k3s-store-path' "$guest_image_path" 2>/dev/null | tr -d '\r\n')"
+if [[ -z "$k3s_store_path" ]]; then
+  echo "guest image K3s store marker is empty" >&2
+  exit 1
+fi
+require_debugfs_path "$k3s_store_path/bin/k3s"
 if ! debugfs -R 'cat /etc/hosts' "$guest_image_path" 2>/dev/null | grep -q '127.0.0.1 localhost'; then
   echo "guest image /etc/hosts does not include the localhost entry" >&2
   exit 1
