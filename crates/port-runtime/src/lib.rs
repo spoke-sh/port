@@ -11237,39 +11237,67 @@ impl GuestForwardSession {
     }
 
     pub fn serve(self) -> Result<()> {
-        match self.listener {
-            ForwardListener::Tcp(listener) => {
-                for inbound in listener.incoming() {
-                    let inbound = inbound.context("failed to accept forwarded host connection")?;
+        // Track consecutive proxy failures. When the guest transport is
+        // persistently dead (vsock gone, VM crashed), exit so the
+        // orchestration layer can detect the broken forward and restart it
+        // instead of silently black-holing TCP connections.
+        const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+        let (result_tx, result_rx) = std::sync::mpsc::channel::<bool>();
+
+        macro_rules! forward_accept_loop {
+            ($listener:expr, $label:expr) => {{
+                let mut consecutive_failures: u32 = 0;
+                for inbound in $listener.incoming() {
+                    let inbound = inbound.with_context(|| {
+                        format!("failed to accept forwarded {} connection", $label)
+                    })?;
+
+                    // Drain results from completed proxy threads.
+                    while let Ok(success) = result_rx.try_recv() {
+                        if success {
+                            consecutive_failures = 0;
+                        } else {
+                            consecutive_failures += 1;
+                        }
+                    }
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        bail!(
+                            "forward daemon exiting: {} consecutive proxy failures; \
+                             the guest transport is likely dead",
+                            consecutive_failures
+                        );
+                    }
+
                     let endpoint = self.endpoint.clone();
                     let target = self.target.clone();
+                    let tx = result_tx.clone();
                     thread::spawn(move || {
-                        if let Err(error) =
-                            proxy_guest_forward_connection(endpoint, target, inbound)
-                        {
-                            eprintln!("port guest forward connection failed: {error}");
-                        }
+                        let ok = match proxy_guest_forward_connection(
+                            endpoint, target, inbound,
+                        ) {
+                            Ok(()) => true,
+                            Err(error) => {
+                                eprintln!(
+                                    "port guest forward connection failed: {error}"
+                                );
+                                false
+                            }
+                        };
+                        let _ = tx.send(ok);
                     });
                 }
+            }};
+        }
+
+        match self.listener {
+            ForwardListener::Tcp(ref listener) => {
+                forward_accept_loop!(listener, "host");
             }
             ForwardListener::Unix {
-                listener,
-                socket_path,
+                ref listener,
+                ref socket_path,
             } => {
-                for inbound in listener.incoming() {
-                    let inbound =
-                        inbound.context("failed to accept forwarded Unix-socket connection")?;
-                    let endpoint = self.endpoint.clone();
-                    let target = self.target.clone();
-                    thread::spawn(move || {
-                        if let Err(error) =
-                            proxy_guest_forward_connection(endpoint, target, inbound)
-                        {
-                            eprintln!("port guest forward connection failed: {error}");
-                        }
-                    });
-                }
-
+                forward_accept_loop!(listener, "Unix-socket");
                 let _ = fs::remove_file(socket_path);
             }
         }
