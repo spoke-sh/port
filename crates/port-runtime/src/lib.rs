@@ -12254,6 +12254,21 @@ fn setup_host_networking(
         run_network_command(&iproute_binary, &["link", "set", &tap_name, "up"])
             .with_context(|| format!("failed to bring up '{tap_name}'"))?;
 
+        // Enable proxy ARP so this TAP answers ARP requests for other guests
+        // on the same subnet, allowing inter-VM traffic to be routed through
+        // the host.
+        let proxy_arp_path = format!("/proc/sys/net/ipv4/conf/{tap_name}/proxy_arp");
+        fs::write(&proxy_arp_path, "1")
+            .with_context(|| format!("failed to enable proxy_arp on '{tap_name}'"))?;
+
+        // Add a host route for this guest's IP so the kernel routes traffic
+        // to the correct TAP even when multiple TAPs share a subnet.
+        let guest_host_route = format!("{}/32", network.guest_ip);
+        let _ = run_network_command(
+            &iproute_binary,
+            &["route", "add", &guest_host_route, "dev", &tap_name],
+        );
+
         fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
 
         run_network_command(
@@ -12304,6 +12319,24 @@ fn setup_host_networking(
             ],
         )
         .context("failed to add iptables FORWARD established rule")?;
+
+        // Allow forwarding between guest TAP devices on the same subnet so
+        // multi-VM clusters (e.g. K3s server + workers) can communicate.
+        let guest_subnet = format!("{}/{}", network.host_ip, network.prefix_len);
+        run_network_command(
+            &iptables_binary,
+            &[
+                "-A",
+                "FORWARD",
+                "-s",
+                &guest_subnet,
+                "-d",
+                &guest_subnet,
+                "-j",
+                "ACCEPT",
+            ],
+        )
+        .context("failed to add iptables FORWARD inter-vm rule")?;
 
         Ok(())
     })();
@@ -12368,6 +12401,12 @@ fn teardown_host_networking(machine_name: &str, network: &port_model::MachineNet
             ],
         );
     }
+
+    let guest_host_route = format!("{}/32", network.guest_ip);
+    let _ = run_network_command(
+        &iproute_binary,
+        &["route", "del", &guest_host_route, "dev", &tap_name],
+    );
 
     let _ = run_network_command(&iproute_binary, &["link", "del", &tap_name]);
 }
