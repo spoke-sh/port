@@ -484,10 +484,14 @@ net_ip=""
 net_gateway=""
 net_prefix_len="24"
 net_dns=""
+guest_hostname=""
 for token in $(cat /proc/cmdline); do
   case "$token" in
     port.guest_control_port=*)
       guest_control_port="${token#port.guest_control_port=}"
+      ;;
+    port.hostname=*)
+      guest_hostname="${token#port.hostname=}"
       ;;
     port.net_ip=*)
       net_ip="${token#port.net_ip=}"
@@ -512,6 +516,16 @@ if [ -f /etc/port-k3s-version ]; then
   k3s_version="$(cat /etc/port-k3s-version)"
   echo "port k3s version: ${k3s_version}" >/dev/console
   echo "port k3s version: ${k3s_version}" >>/var/log/port-agent.log
+fi
+
+if [ -n "$guest_hostname" ]; then
+  printf '%s\n' "$guest_hostname" >/proc/sys/kernel/hostname 2>/dev/null || true
+  printf '%s\n' "$guest_hostname" >/etc/hostname
+  if ! /bin/busybox grep -q "127.0.1.1 ${guest_hostname}" /etc/hosts 2>/dev/null; then
+    printf '127.0.1.1 %s\n' "$guest_hostname" >>/etc/hosts
+  fi
+  echo "port guest hostname: ${guest_hostname}" >/dev/console
+  echo "port guest hostname: ${guest_hostname}" >>/var/log/port-agent.log
 fi
 
 if [ -n "$net_ip" ] && [ -n "$net_gateway" ]; then

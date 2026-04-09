@@ -3040,7 +3040,9 @@ fn hosted_k3s_join_token_command() -> Vec<String> {
     vec![
         String::from("/bin/sh"),
         String::from("-lc"),
-        String::from("cat /var/lib/rancher/k3s/server/node-token"),
+        String::from(
+            "cat /var/lib/rancher/k3s/server/token 2>/dev/null || cat /var/lib/rancher/k3s/server/node-token",
+        ),
     ]
 }
 

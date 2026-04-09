@@ -91,6 +91,10 @@ if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q '/etc/port
   echo "guest image init does not load the protection-mode marker" >&2
   exit 1
 fi
+if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q 'port.hostname='; then
+  echo "guest image init does not parse the guest hostname kernel arg" >&2
+  exit 1
+fi
 if ! debugfs -R 'cat /init' "$guest_image_path" 2>/dev/null | grep -q 'cgroup2'; then
   echo "guest image init does not mount cgroup2 for K3s" >&2
   exit 1
