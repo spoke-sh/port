@@ -6708,63 +6708,41 @@ pub(crate) fn hosted_stored_service_placements(
     machine_name: &str,
     service_name: Option<&str>,
 ) -> Result<Vec<HostedStoredServicePlacement>> {
-    let machine = config
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let machine = effective_config
         .machines
         .get(machine_name)
         .with_context(|| format!("unknown machine '{}'", machine_name))?;
-    let inventory = config.hosted_inventory_contract()?;
+    let inventory = effective_config.hosted_inventory_contract()?;
     let mut placements = Vec::new();
+    let mut candidate_roots = Vec::<(Option<String>, PathBuf)>::new();
+    let mut seen = BTreeSet::<(Option<String>, PathBuf)>::new();
 
-    for (node_name, node) in inventory
-        .nodes
-        .iter()
-        .filter(|(_, node)| node.host == machine.host)
-    {
-        let definitions = service_definition_dir(
-            &RuntimePaths::for_machine(&node.runtime_root, machine_name).runtime_dir,
-        );
-        if !definitions.exists() {
-            continue;
-        }
+    if let Some(placement) = hosted_stored_machine_placement(config, machine_name)? {
+        candidate_roots.push((Some(placement.node_name), placement.runtime_root));
+    }
 
-        if let Some(service_name) = service_name {
-            let path = definitions.join(format!("{service_name}.json"));
-            if !path.exists() {
-                continue;
-            }
-            let record: ServiceDefinitionRecord = read_json_file(&path)?;
-            let mut status = service_status_from_record(record, path);
-            if status.node_name.is_none() {
-                status.node_name = Some(node_name.clone());
-            }
-            placements.push(HostedStoredServicePlacement { status });
-            continue;
-        }
-
-        for entry in fs::read_dir(&definitions)
-            .with_context(|| format!("failed to read '{}'", definitions.display()))?
+    if candidate_roots.is_empty() {
+        for (node_name, node) in inventory
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.host == machine.host)
         {
-            let entry = entry.with_context(|| {
-                format!(
-                    "failed to inspect hosted service definitions in '{}'",
-                    definitions.display()
-                )
-            })?;
-            if !entry
-                .file_type()
-                .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
-                .is_file()
-            {
-                continue;
-            }
-            let path = entry.path();
-            let record: ServiceDefinitionRecord = read_json_file(&path)?;
-            let mut status = service_status_from_record(record, path);
-            if status.node_name.is_none() {
-                status.node_name = Some(node_name.clone());
-            }
-            placements.push(HostedStoredServicePlacement { status });
+            candidate_roots.push((Some(node_name.clone()), node.runtime_root.clone()));
         }
+    }
+
+    for (node_name, runtime_root) in candidate_roots {
+        let dedupe_key = (node_name.clone(), runtime_root.clone());
+        if !seen.insert(dedupe_key) {
+            continue;
+        }
+        placements.extend(read_hosted_service_placements_from_runtime(
+            machine_name,
+            node_name.as_deref(),
+            &runtime_root,
+            service_name,
+        )?);
     }
 
     placements.sort_by(|left, right| {
@@ -6773,6 +6751,61 @@ pub(crate) fn hosted_stored_service_placements(
             .cmp(&right.status.name)
             .then(left.status.node_name.cmp(&right.status.node_name))
     });
+    Ok(placements)
+}
+
+fn read_hosted_service_placements_from_runtime(
+    machine_name: &str,
+    node_name: Option<&str>,
+    runtime_root: &Path,
+    service_name: Option<&str>,
+) -> Result<Vec<HostedStoredServicePlacement>> {
+    let definitions =
+        service_definition_dir(&RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir);
+    if !definitions.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut placements = Vec::new();
+    if let Some(service_name) = service_name {
+        let path = definitions.join(format!("{service_name}.json"));
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let record: ServiceDefinitionRecord = read_json_file(&path)?;
+        let mut status = service_status_from_record(record, path);
+        if status.node_name.is_none() {
+            status.node_name = node_name.map(ToOwned::to_owned);
+        }
+        placements.push(HostedStoredServicePlacement { status });
+        return Ok(placements);
+    }
+
+    for entry in fs::read_dir(&definitions)
+        .with_context(|| format!("failed to read '{}'", definitions.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to inspect hosted service definitions in '{}'",
+                definitions.display()
+            )
+        })?;
+        if !entry
+            .file_type()
+            .with_context(|| format!("failed to inspect '{}'", entry.path().display()))?
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        let record: ServiceDefinitionRecord = read_json_file(&path)?;
+        let mut status = service_status_from_record(record, path);
+        if status.node_name.is_none() {
+            status.node_name = node_name.map(ToOwned::to_owned);
+        }
+        placements.push(HostedStoredServicePlacement { status });
+    }
+
     Ok(placements)
 }
 
@@ -21582,6 +21615,62 @@ exec sleep 30
             service_definition_dir(&secondary_paths.runtime_dir)
                 .join("svc-secondary.json")
                 .exists()
+        );
+    }
+
+    #[test]
+    fn hosted_stored_service_placements_follow_machine_placement_even_if_machine_host_drifts() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_service_config(tempdir.path());
+        config.machines.retain(|name, _| name == "cloud-aws");
+
+        let secondary_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let secondary_paths = RuntimePaths::for_machine(&secondary_runtime_root, "cloud-aws");
+        write_manifest(&secondary_paths, "cloud-aws", 2);
+        write_machine_placement_state(
+            "demo",
+            "cloud-aws",
+            "aws-linux-node-b",
+            &secondary_runtime_root,
+            "stored on secondary node",
+        );
+
+        crate::apply_machine_service_local(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "cloud-aws",
+                runtime_root: tempdir.path(),
+                name: "svc-secondary",
+                kind: ServiceKind::Service,
+                host_group: None,
+                command: vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                ],
+                secret_bindings: Vec::new(),
+                policy: ServicePolicy::default(),
+            },
+        )
+        .expect("service definition should store under the machine's placed runtime root");
+
+        config
+            .machines
+            .get_mut("cloud-aws")
+            .expect("cloud-aws should exist")
+            .host = String::from("gcp-linux");
+
+        let placements =
+            crate::hosted_stored_service_placements(&config, "cloud-aws", Some("svc-secondary"))
+                .expect("stored placement lookup should follow persisted machine placement");
+        assert_eq!(placements.len(), 1);
+        assert_eq!(
+            placements[0].status.node_name.as_deref(),
+            Some("aws-linux-node-b")
+        );
+        assert_eq!(
+            placements[0].status.manifest_path,
+            service_definition_dir(&secondary_paths.runtime_dir).join("svc-secondary.json")
         );
     }
 

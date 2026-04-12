@@ -1481,21 +1481,32 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
                 )
                 .await
                 {
-                    Ok(status) => match annotate_machine_status_with_fleet_state(
-                        &state,
-                        &summary,
-                        &status.route,
-                        status.result,
-                    ) {
-                        Ok(status) => machines.push(status),
-                        Err(message) => {
+                    Ok(status) => {
+                        if let Err(message) =
+                            persist_observed_machine_placement(&state, machine_name, &route)
+                        {
                             return error_response(
                                 StatusCode::BAD_GATEWAY,
                                 message,
                                 Some(HostedRouteContext::from_machine_summary(&summary)),
                             );
                         }
-                    },
+                        match annotate_machine_status_with_fleet_state(
+                            &state,
+                            &summary,
+                            &status.route,
+                            status.result,
+                        ) {
+                            Ok(status) => machines.push(status),
+                            Err(message) => {
+                                return error_response(
+                                    StatusCode::BAD_GATEWAY,
+                                    message,
+                                    Some(HostedRouteContext::from_machine_summary(&summary)),
+                                );
+                            }
+                        }
+                    }
                     Err(message) => {
                         let status = malformed_machine_status(&summary, route.clone(), message);
                         match annotate_machine_status_with_fleet_state(
@@ -1645,21 +1656,30 @@ async fn machine_status(
             )
             .await
             {
-                Ok(status) => match annotate_machine_status_with_fleet_state(
-                    &state,
-                    &summary,
-                    &status.route,
-                    status.result,
-                ) {
-                    Ok(result) => json_response(
-                        StatusCode::OK,
-                        &HostedSuccess {
-                            route: status.route,
-                            result,
-                        },
-                    ),
-                    Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route)),
-                },
+                Ok(status) => {
+                    if let Err(message) =
+                        persist_observed_machine_placement(&state, &machine, &route)
+                    {
+                        return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
+                    }
+                    match annotate_machine_status_with_fleet_state(
+                        &state,
+                        &summary,
+                        &status.route,
+                        status.result,
+                    ) {
+                        Ok(result) => json_response(
+                            StatusCode::OK,
+                            &HostedSuccess {
+                                route: status.route,
+                                result,
+                            },
+                        ),
+                        Err(message) => {
+                            error_response(StatusCode::BAD_GATEWAY, message, Some(route))
+                        }
+                    }
+                }
                 Err(message) => {
                     let status = malformed_machine_status(&summary, route.clone(), message);
                     match annotate_machine_status_with_fleet_state(&state, &summary, &route, status)
@@ -2155,7 +2175,42 @@ async fn service_list(
         Ok(summary) => summary,
         Err(response) => return response,
     };
-    let route = HostedRouteContext::from_machine_summary(&summary);
+    let mut route = HostedRouteContext::from_machine_summary(&summary);
+    let live_proxy_error = match resolve_stored_machine_binding(&state, &summary) {
+        Ok((Some(binding), live_route, _)) => {
+            match proxy_json::<HostedSuccess<Vec<crate::ServiceDefinitionStatus>>>(
+                &state,
+                &binding,
+                HostedNodeRoute::Service(HostedServiceRoute::List {
+                    machine_name: machine.clone(),
+                }),
+                Method::GET,
+                None,
+                live_route.clone(),
+            )
+            .await
+            {
+                Ok(success) => return json_response(StatusCode::OK, &success),
+                Err(message) => {
+                    route = live_route;
+                    Some(machine_placement_detail(
+                        &route,
+                        format!(
+                            "control plane '{}' could not refresh services for machine '{}': {message}",
+                            state.inner.control_plane, machine
+                        ),
+                    ))
+                }
+            }
+        }
+        Ok((None, live_route, issue)) => {
+            route = live_route;
+            issue
+        }
+        Err(message) => {
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
+        }
+    };
     let placements = match hosted_stored_service_placements(&state.inner.config, &machine, None) {
         Ok(placements) => placements,
         Err(error) => {
@@ -2173,6 +2228,11 @@ async fn service_list(
     let mut services = Vec::new();
     for placement in placements {
         services.push(refresh_or_stored_service_status(&state, &machine, placement).await);
+    }
+    if services.is_empty() {
+        if let Some(message) = live_proxy_error {
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
+        }
     }
     services.sort_by(|left, right| left.name.cmp(&right.name));
     json_response(
@@ -2196,8 +2256,42 @@ async fn service_status(
         Ok(summary) => summary,
         Err(response) => return response,
     };
-    let route =
+    let mut route =
         HostedRouteContext::from_machine_summary(&summary).with_service_name(service.clone());
+    let live_proxy_error = match resolve_stored_machine_binding(&state, &summary) {
+        Ok((Some(binding), live_route, _)) => {
+            route = live_route.with_service_name(service.clone());
+            match proxy_json::<HostedSuccess<crate::ServiceDefinitionStatus>>(
+                &state,
+                &binding,
+                HostedNodeRoute::Service(HostedServiceRoute::Status {
+                    machine_name: machine.clone(),
+                    service_name: service.clone(),
+                }),
+                Method::GET,
+                None,
+                route.clone(),
+            )
+            .await
+            {
+                Ok(success) => return json_response(StatusCode::OK, &success),
+                Err(message) => Some(machine_placement_detail(
+                    &route,
+                    format!(
+                        "control plane '{}' could not refresh service '{}' on machine '{}': {message}",
+                        state.inner.control_plane, service, machine
+                    ),
+                )),
+            }
+        }
+        Ok((None, live_route, issue)) => {
+            route = live_route.with_service_name(service.clone());
+            issue
+        }
+        Err(message) => {
+            return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
+        }
+    };
     let placements = match hosted_stored_service_placements(
         &state.inner.config,
         &machine,
@@ -2216,14 +2310,20 @@ async fn service_status(
         }
     };
     match placements.len() {
-        0 => error_response(
-            StatusCode::NOT_FOUND,
-            format!(
-                "control plane '{}' could not find stored placement for service '{}' on machine '{}'. {}",
-                state.inner.control_plane, service, machine, summary.placement_detail
-            ),
-            Some(route),
-        ),
+        0 => {
+            if let Some(message) = live_proxy_error {
+                error_response(StatusCode::BAD_GATEWAY, message, Some(route))
+            } else {
+                error_response(
+                    StatusCode::NOT_FOUND,
+                    format!(
+                        "control plane '{}' could not find stored placement for service '{}' on machine '{}'. {}",
+                        state.inner.control_plane, service, machine, summary.placement_detail
+                    ),
+                    Some(route),
+                )
+            }
+        }
         1 => {
             let placement = placements
                 .into_iter()
@@ -2262,8 +2362,42 @@ async fn service_command(
             Ok(summary) => summary,
             Err(response) => return response,
         };
-        let route = HostedRouteContext::from_machine_summary(&summary)
+        let mut route = HostedRouteContext::from_machine_summary(&summary)
             .with_service_name(service_name.to_string());
+        let live_proxy_error = match resolve_stored_machine_binding(&state, &summary) {
+            Ok((Some(binding), live_route, _)) => {
+                route = live_route.with_service_name(service_name.to_string());
+                match proxy_json::<HostedSuccess<crate::ServiceDefinitionStatus>>(
+                    &state,
+                    &binding,
+                    HostedNodeRoute::Service(HostedServiceRoute::Stop {
+                        machine_name: machine.clone(),
+                        service_name: service_name.to_string(),
+                    }),
+                    Method::POST,
+                    None,
+                    route.clone(),
+                )
+                .await
+                {
+                    Ok(success) => return json_response(StatusCode::OK, &success),
+                    Err(message) => Some(machine_placement_detail(
+                        &route,
+                        format!(
+                            "control plane '{}' could not stop service '{}' on machine '{}': {message}",
+                            state.inner.control_plane, service_name, machine
+                        ),
+                    )),
+                }
+            }
+            Ok((None, live_route, issue)) => {
+                route = live_route.with_service_name(service_name.to_string());
+                issue
+            }
+            Err(message) => {
+                return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
+            }
+        };
         let placements = match hosted_stored_service_placements(
             &state.inner.config,
             &machine,
@@ -2282,14 +2416,18 @@ async fn service_command(
             }
         };
         if placements.is_empty() {
-            return error_response(
-                StatusCode::NOT_FOUND,
-                format!(
-                    "control plane '{}' could not find stored placement for service '{}' on machine '{}'. {}",
-                    state.inner.control_plane, service_name, machine, summary.placement_detail
-                ),
-                Some(route),
-            );
+            return if let Some(message) = live_proxy_error {
+                error_response(StatusCode::BAD_GATEWAY, message, Some(route))
+            } else {
+                error_response(
+                    StatusCode::NOT_FOUND,
+                    format!(
+                        "control plane '{}' could not find stored placement for service '{}' on machine '{}'. {}",
+                        state.inner.control_plane, service_name, machine, summary.placement_detail
+                    ),
+                    Some(route),
+                )
+            };
         }
         if placements.len() > 1 {
             return error_response(
@@ -2747,6 +2885,49 @@ fn store_machine_placement(
     Ok(placement)
 }
 
+fn persist_observed_machine_placement(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    route_context: &HostedRouteContext,
+) -> Result<(), String> {
+    let Some(node_name) = route_context.node_name.as_ref() else {
+        return Ok(());
+    };
+    let Some(runtime_root) = route_context.runtime_root.as_ref() else {
+        return Ok(());
+    };
+
+    let current_state = state
+        .inner
+        .machine_placement_state
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect machine placement state",
+                state.inner.control_plane
+            )
+        })?
+        .clone();
+    if current_state
+        .machines
+        .get(machine_name)
+        .is_some_and(|placement| {
+            placement.node_name == *node_name && placement.runtime_root == *runtime_root
+        })
+    {
+        return Ok(());
+    }
+
+    let observed_at_unix_s = current_unix_timestamp_seconds().map_err(|error| {
+        format!(
+            "control plane '{}' could not timestamp recovered placement for machine '{}': {error}",
+            state.inner.control_plane, machine_name
+        )
+    })?;
+    store_machine_placement(state, machine_name, route_context, observed_at_unix_s)?;
+    Ok(())
+}
+
 fn resolve_known_node_binding(
     state: &ControlPlaneState,
     node_name: &str,
@@ -2843,6 +3024,56 @@ fn resolve_machine_binding(
     match resolve_node_binding(state, summary) {
         Ok((binding, route)) => Ok((Some(binding), route, None)),
         Err((route, message)) => Ok((None, route, Some(message))),
+    }
+}
+
+fn resolve_stored_machine_binding(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+) -> Result<
+    (
+        Option<HostedNodeBinding>,
+        HostedRouteContext,
+        Option<String>,
+    ),
+    String,
+> {
+    let Some(placement) = refresh_machine_placements(state)?
+        .get(&summary.machine_name)
+        .cloned()
+    else {
+        return Ok((
+            None,
+            HostedRouteContext::from_machine_summary(summary),
+            None,
+        ));
+    };
+
+    let route_context = stored_machine_route_context(summary, &placement);
+    match resolve_known_node_binding(state, &placement.node_name) {
+        Ok(Some((binding, _))) => Ok((Some(binding), route_context, None)),
+        Ok(None) => Ok((
+            None,
+            route_context.clone(),
+            Some(machine_placement_detail(
+                &route_context,
+                format!(
+                    "stored placement points at node '{}' but the control plane has no live registered node-agent endpoint for it.",
+                    placement.node_name
+                ),
+            )),
+        )),
+        Err(message) => Ok((
+            None,
+            route_context.clone(),
+            Some(machine_placement_detail(
+                &route_context,
+                format!(
+                    "stored placement on node '{}' is not currently usable: {message}",
+                    placement.node_name
+                ),
+            )),
+        )),
     }
 }
 
@@ -7064,6 +7295,82 @@ mod tests {
                 .as_deref()
                 .unwrap_or_default()
                 .contains("aaa-linux-node")
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn control_plane_machine_status_recovers_and_persists_placement_without_prior_launch() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("status-placement");
+        let token_var = unique_test_env("PORT_TEST_STATUS_PLACEMENT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mock_state = MockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: config.nodes["aws-linux-node"].runtime_root.clone(),
+            pid: 3333,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let node_addr = serve_mock_node_agent_named(mock_state).await;
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        persist_registered_node_state(
+            &registered_node_state_path(&control_plane),
+            &RegisteredNodeStateFile {
+                control_plane: control_plane.clone(),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    HostedNodeRegistration {
+                        endpoint: format!("http://{node_addr}"),
+                        token: String::from("node-secret"),
+                        registered_at: now,
+                        refreshed_at: now,
+                        ttl_seconds: 30,
+                    },
+                )]),
+            },
+        )
+        .expect("registered state should persist");
+
+        let placement_path = machine_placement_state_path(&control_plane);
+        assert!(!placement_path.exists());
+
+        let control_addr =
+            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
+        let status = Client::new()
+            .get(format!("http://{control_addr}/v1/machines/cloud-aws"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("status request should complete");
+        assert_eq!(status.status(), StatusCode::OK);
+        let body: HostedSuccess<MachineStatus> =
+            status.json().await.expect("status body should decode");
+        assert_eq!(body.route.node_name.as_deref(), Some("aws-linux-node"));
+        assert!(placement_path.exists());
+
+        let placements: MachinePlacementStateFile = serde_json::from_slice(
+            &std::fs::read(&placement_path).expect("machine placement state should read"),
+        )
+        .expect("machine placement state should decode");
+        let placement = placements
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws placement should persist");
+        assert_eq!(placement.node_name, "aws-linux-node");
+        assert_eq!(
+            placement.runtime_root,
+            config.nodes["aws-linux-node"].runtime_root
         );
 
         cleanup_registered_state(&control_plane);
