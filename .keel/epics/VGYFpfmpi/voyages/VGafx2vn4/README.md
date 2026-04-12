@@ -32,5 +32,5 @@ started_at: 2026-04-12T09:11:27
 | Title | Type | Status |
 |-------|------|--------|
 | [Model Stable HA Endpoint Handoff In Cluster Output](../../../../stories/VGafyUpFb/README.md) | feat | done |
-| [Capture Hosted AWS PVM Failover Proof For The Stable Endpoint](../../../../stories/VGafyVDGA/README.md) | feat | backlog |
+| [Capture Hosted AWS PVM Failover Proof For The Stable Endpoint](../../../../stories/VGafyVDGA/README.md) | feat | needs-human-verification |
 <!-- END GENERATED -->

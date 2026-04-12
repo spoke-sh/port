@@ -1,0 +1,13 @@
+cluster: demo
+flavor: k3s
+provider: hosted
+control plane: demo
+host group: aws-builders
+control-plane scheduler: spread
+control-plane machines: cloud-aws
+worker machines: none
+api endpoint: https://demo-k3s.internal:6443
+version: v1.32.0+k3s1
+server args: --disable=traefik
+worker args: none
+boundary: hosted Firecracker microVM K3s; real HA depends on at least three control-plane microVMs, a stable HTTPS api endpoint, and distinct execution hosts behind that endpoint
