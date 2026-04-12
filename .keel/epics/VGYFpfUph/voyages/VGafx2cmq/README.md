@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGafx2cmq
-status: planned
+status: in-progress
 epic: VGYFpfUph
 created_at: 2026-04-12T08:22:54
 # authored
 title: Define Real-HA Control Plane Placement Truth
 index: 1
 updated_at: 2026-04-12T08:28:03
+started_at: 2026-04-12T08:50:46
 ---
 
 # Define Real-HA Control Plane Placement Truth
@@ -26,10 +27,10 @@ updated_at: 2026-04-12T08:28:03
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Require Honest Real-HA Topology Admission For Hosted AWS PVM](../../../../stories/VGafyU6FW/README.md) | feat | backlog |
+| [Require Honest Real-HA Topology Admission For Hosted AWS PVM](../../../../stories/VGafyU6FW/README.md) | feat | done |
 | [Surface Control-Plane Host Spread In Cluster Status](../../../../stories/VGafyUVFV/README.md) | feat | backlog |
 <!-- END GENERATED -->

@@ -1558,6 +1558,15 @@ pub enum HostedSchedulerPolicy {
     Spread,
 }
 
+impl std::fmt::Display for HostedSchedulerPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DeterministicFirstFit => f.write_str("deterministic-first-fit"),
+            Self::Spread => f.write_str("spread"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedInventoryContract {
     pub nodes: BTreeMap<String, HostedNodeContract>,
@@ -2185,6 +2194,24 @@ fn control_plane_scheduler_is_default(policy: &HostedSchedulerPolicy) -> bool {
     *policy == HostedSchedulerPolicy::DeterministicFirstFit
 }
 
+pub const HOSTED_K3S_REAL_HA_MIN_CONTROL_PLANES: usize = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedK3sHaTopologyPosture {
+    NonHaTopology,
+    HaEligibleTopology,
+}
+
+impl std::fmt::Display for HostedK3sHaTopologyPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonHaTopology => f.write_str("non-ha-topology"),
+            Self::HaEligibleTopology => f.write_str("ha-eligible-topology"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct K3sClusterSpec {
     pub control_plane: String,
@@ -2202,6 +2229,18 @@ pub struct K3sClusterSpec {
     pub server_args: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub worker_args: Vec<String>,
+}
+
+impl K3sClusterSpec {
+    pub fn ha_topology_posture(&self) -> HostedK3sHaTopologyPosture {
+        if self.server_machines.len() >= HOSTED_K3S_REAL_HA_MIN_CONTROL_PLANES
+            && self.control_plane_scheduler == HostedSchedulerPolicy::Spread
+        {
+            HostedK3sHaTopologyPosture::HaEligibleTopology
+        } else {
+            HostedK3sHaTopologyPosture::NonHaTopology
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -4934,6 +4973,91 @@ mod tests {
         assert!(message.contains("control-plane scheduler 'spread'"));
         assert!(message.contains("distinct hosted candidate nodes"));
         assert!(message.contains("aws-builders"));
+    }
+
+    #[test]
+    fn hosted_k3s_two_control_planes_with_spread_stay_non_ha_topology() {
+        let mut sample = PortConfig::sample();
+        let mut server_b = sample
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws should exist")
+            .clone();
+        server_b.guest.vsock_cid = 62;
+        server_b.guest.control_port = 7002;
+        server_b.guest.console_log = PathBuf::from("runtime/cloud-aws-b/console.log");
+        sample
+            .machines
+            .insert(String::from("cloud-aws-b"), server_b);
+        sample.k3s_clusters.insert(
+            String::from("demo"),
+            K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws"), String::from("cloud-aws-b")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: HostedSchedulerPolicy::Spread,
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        let cluster = sample
+            .k3s_clusters
+            .get("demo")
+            .expect("demo cluster should exist");
+        assert_eq!(
+            cluster.ha_topology_posture(),
+            super::HostedK3sHaTopologyPosture::NonHaTopology
+        );
+    }
+
+    #[test]
+    fn hosted_k3s_three_control_planes_with_spread_become_ha_eligible_topology() {
+        let mut sample = PortConfig::sample();
+        for (name, cid, port, log) in [
+            ("cloud-aws-b", 62, 7002, "runtime/cloud-aws-b/console.log"),
+            ("cloud-aws-c", 63, 7003, "runtime/cloud-aws-c/console.log"),
+        ] {
+            let mut machine = sample
+                .machines
+                .get("cloud-aws")
+                .expect("cloud-aws should exist")
+                .clone();
+            machine.guest.vsock_cid = cid;
+            machine.guest.control_port = port;
+            machine.guest.console_log = PathBuf::from(log);
+            sample.machines.insert(String::from(name), machine);
+        }
+        sample.k3s_clusters.insert(
+            String::from("demo"),
+            K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![
+                    String::from("cloud-aws"),
+                    String::from("cloud-aws-b"),
+                    String::from("cloud-aws-c"),
+                ],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: HostedSchedulerPolicy::Spread,
+                version: String::from("v1.32.0+k3s1"),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
+
+        let cluster = sample
+            .k3s_clusters
+            .get("demo")
+            .expect("demo cluster should exist");
+        assert_eq!(
+            cluster.ha_topology_posture(),
+            super::HostedK3sHaTopologyPosture::HaEligibleTopology
+        );
     }
 
     #[test]

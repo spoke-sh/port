@@ -2469,21 +2469,22 @@ fn hosted_k3s_boundary_notes() -> Vec<String> {
 }
 
 fn hosted_k3s_topology_note(cluster: &K3sClusterSpec) -> String {
-    if cluster.server_machines.len() < 3 {
-        format!(
-            "This config declares {} control-plane microVM{}; that is not real HA yet.",
+    match cluster.ha_topology_posture() {
+        port_model::HostedK3sHaTopologyPosture::NonHaTopology => format!(
+            "This config declares {} control-plane microVM{} with scheduler '{}'; Port classifies that topology as non-HA until at least {} control-plane microVMs and spread scheduling are both present.",
             cluster.server_machines.len(),
             if cluster.server_machines.len() == 1 {
                 ""
             } else {
                 "s"
-            }
-        )
-    } else {
-        format!(
-            "This config declares {} control-plane microVMs; real HA still depends on keeping quorum across distinct execution hosts behind the configured HTTPS api endpoint.",
+            },
+            cluster.control_plane_scheduler,
+            port_model::HOSTED_K3S_REAL_HA_MIN_CONTROL_PLANES
+        ),
+        port_model::HostedK3sHaTopologyPosture::HaEligibleTopology => format!(
+            "This config declares {} control-plane microVMs with spread scheduling; Port treats it as HA-eligible topology, but runtime truth still depends on keeping quorum across distinct execution hosts behind the configured HTTPS api endpoint.",
             cluster.server_machines.len()
-        )
+        ),
     }
 }
 

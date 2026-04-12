@@ -195,7 +195,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Define Real-HA Control Plane Placement Truth](epics/VGYFpfUph/voyages/VGafx2cmq/) | planned |
+| [Define Real-HA Control Plane Placement Truth](epics/VGYFpfUph/voyages/VGafx2cmq/) | in-progress |
 
 ### [Ship Stable HA API Endpoint And Failover Proofs For Hosted AWS PVM](epics/VGYFpfmpi/) (active)
 
