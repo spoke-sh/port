@@ -179,6 +179,14 @@
 |--------|--------|
 | [Export And Prove AWS PVM Host Kit Module](epics/VFhLhfrqk/voyages/VFhLjViAG/) | done |
 
+### [Ship Workspace Scratch Builder Runtime Class](epics/VGYFpewpf/) (draft)
+
+### [Ship Blessed Closure Promotion Runner Runtime Class](epics/VGYFpf9pg/) (draft)
+
+### [Ship Multi-Host Control Plane Placement For Hosted AWS PVM Clusters](epics/VGYFpfUph/) (draft)
+
+### [Ship Stable HA API Endpoint And Failover Proofs For Hosted AWS PVM](epics/VGYFpfmpi/) (draft)
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
