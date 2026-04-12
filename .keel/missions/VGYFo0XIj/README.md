@@ -1,12 +1,13 @@
 ---
 # system-managed
 id: VGYFo0XIj
-status: defining
+status: active
 created_at: 2026-04-11T22:26:30
-updated_at: 2026-04-11T22:26:30
+updated_at: 2026-04-11T23:12:11
 # authored
 title: Implement Workspace Builder And Promotion Runtime Classes
 watch: ~
+activated_at: 2026-04-11T23:12:11
 ---
 
 # Implement Workspace Builder And Promotion Runtime Classes

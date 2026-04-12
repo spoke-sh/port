@@ -179,9 +179,17 @@
 |--------|--------|
 | [Export And Prove AWS PVM Host Kit Module](epics/VFhLhfrqk/voyages/VFhLjViAG/) | done |
 
-### [Ship Workspace Scratch Builder Runtime Class](epics/VGYFpewpf/) (draft)
+### [Ship Workspace Scratch Builder Runtime Class](epics/VGYFpewpf/) (active)
 
-### [Ship Blessed Closure Promotion Runner Runtime Class](epics/VGYFpf9pg/) (draft)
+| Voyage | Status |
+|--------|--------|
+| [Define Builder And Promotion Runtime Class Contracts](epics/VGYFpewpf/voyages/VGYQ4zrrX/) | in-progress |
+
+### [Ship Blessed Closure Promotion Runner Runtime Class](epics/VGYFpf9pg/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Prove Runtime Class Identity And Guard Rails](epics/VGYFpf9pg/voyages/VGYQ50GrI/) | planned |
 
 ### [Ship Multi-Host Control Plane Placement For Hosted AWS PVM Clusters](epics/VGYFpfUph/) (draft)
 
