@@ -203,6 +203,18 @@
 |--------|--------|
 | [Define Stable Endpoint Handoff And Failover Proof](epics/VGYFpfmpi/voyages/VGafx2vn4/) | done |
 
+### [Export Canonical Hosted Cluster Status Contract](epics/VGcgU7q58/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Expose Hosted Cluster Status Schema](epics/VGcgU7q58/voyages/VGcghuutu/) | planned |
+
+### [Seal Managed Hosted Service Ownership](epics/VGcgU9T57/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | planned |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
