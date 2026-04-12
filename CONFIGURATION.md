@@ -170,6 +170,53 @@ Use [`docs/aws.md`](docs/aws.md) for the full operator narrative and
 [`docs/pvm.md`](docs/pvm.md) for the low-level host-kit and artifact-kit
 contract.
 
+### Runtime Classes
+
+Port can now carry an explicit runtime-class contract on a machine when the
+lane matters downstream and should not be inferred from the machine name alone.
+
+The first runtime-class slice defines `workspace-scratch-builder` as an
+explicitly untrusted workspace lane:
+
+```toml
+[machines.workspace-scratch-demo]
+host = "local"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "x86_64"
+vcpu_count = 2
+memory_mib = 4096
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = true
+
+[machines.workspace-scratch-demo.rootfs_overlay]
+size_mib = 4096
+
+[machines.workspace-scratch-demo.runtime_class]
+kind = "workspace-scratch-builder"
+trust = "workspace-untrusted"
+writable_roots = ["nix-store", "source-root", "temp-root"]
+
+[machines.workspace-scratch-demo.runtime_class.workspace]
+workspace = "demo"
+lane = "scratch"
+```
+
+Read that shape with these rules:
+
+- runtime class is a Port-owned execution contract, not a policy or admission
+  surface
+- `workspace-scratch-builder` must stay `workspace-untrusted`; it must not
+  imply publish trust, signing rights, or admin credentials
+- builder scratch state remains explicit: a read-only base guest plus a
+  writable overlay and declared writable-root categories
+- the same runtime-class vocabulary should mean the same thing on local and AWS
+  lanes even when the backing storage substrate differs
+- trusted promotion remains a separate follow-on runtime class rather than an
+  upgrade flag on the scratch lane
+
 ### Hosted K3s Clusters
 
 Hosted K3s stays under the canonical `port cluster ...` command family instead

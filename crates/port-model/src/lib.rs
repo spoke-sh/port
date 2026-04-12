@@ -997,6 +997,7 @@ impl PortConfig {
             )
             .map_err(|message| ValidationError::new(message))?;
             validate_machine_rootfs_overlay(machine_name, machine, resolved_architecture)?;
+            validate_machine_runtime_class(machine_name, machine)?;
             validate_machine_volumes(machine_name, machine)?;
             validate_machine_volume_lane(machine_name, &machine.host, host, machine)?;
 
@@ -1124,6 +1125,7 @@ fn sample_machine(host: &str, name: &str, vsock_cid: u32) -> MachineSpec {
         kernel_args: String::from("console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"),
         rootfs_read_only: false,
         rootfs_overlay: None,
+        runtime_class: None,
         volumes: Vec::new(),
         guest: GuestControl {
             vsock_cid,
@@ -1908,11 +1910,59 @@ pub struct MachineSpec {
     pub rootfs_read_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rootfs_overlay: Option<MachineRootfsOverlaySpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<MachineRuntimeClassSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub volumes: Vec<MachineVolumeSpec>,
     pub guest: GuestControl,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network: Option<MachineNetworkSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineRuntimeClassSpec {
+    pub kind: MachineRuntimeClassKind,
+    pub trust: MachineRuntimeTrustPosture,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writable_roots: Vec<MachineRuntimeWritableRoot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<MachineRuntimeWorkspaceBinding>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineRuntimeClassKind {
+    WorkspaceScratchBuilder,
+}
+
+impl std::fmt::Display for MachineRuntimeClassKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkspaceScratchBuilder => f.write_str("workspace-scratch-builder"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineRuntimeTrustPosture {
+    WorkspaceUntrusted,
+    PromotionTrusted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineRuntimeWritableRoot {
+    NixStore,
+    SourceRoot,
+    TempRoot,
+    EvidenceRoot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineRuntimeWorkspaceBinding {
+    pub workspace: String,
+    pub lane: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2916,6 +2966,88 @@ fn validate_machine_rootfs_overlay(
             "machine '{}' rootfs overlay currently requires x86_64 Firecracker guests because the overlay initrd contract is only shipped for that architecture",
             machine_name
         )));
+    }
+
+    Ok(())
+}
+
+fn runtime_writable_root_label(root: MachineRuntimeWritableRoot) -> &'static str {
+    match root {
+        MachineRuntimeWritableRoot::NixStore => "nix-store",
+        MachineRuntimeWritableRoot::SourceRoot => "source-root",
+        MachineRuntimeWritableRoot::TempRoot => "temp-root",
+        MachineRuntimeWritableRoot::EvidenceRoot => "evidence-root",
+    }
+}
+
+fn validate_machine_runtime_class(
+    machine_name: &str,
+    machine: &MachineSpec,
+) -> Result<(), ValidationError> {
+    let Some(runtime_class) = &machine.runtime_class else {
+        return Ok(());
+    };
+
+    let mut seen_writable_roots = Vec::new();
+    for root in &runtime_class.writable_roots {
+        if seen_writable_roots.contains(root) {
+            return Err(ValidationError::new(format!(
+                "machine '{}' runtime class '{}' declares duplicate writable root '{}'",
+                machine_name,
+                runtime_class.kind,
+                runtime_writable_root_label(*root)
+            )));
+        }
+        seen_writable_roots.push(*root);
+    }
+
+    match runtime_class.kind {
+        MachineRuntimeClassKind::WorkspaceScratchBuilder => {
+            let workspace = runtime_class.workspace.as_ref().ok_or_else(|| {
+                ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must declare a workspace binding",
+                    machine_name, runtime_class.kind
+                ))
+            })?;
+            if workspace.workspace.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must declare a non-empty workspace name",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if workspace.lane.trim().is_empty() {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must declare a non-empty workspace lane",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if runtime_class.trust != MachineRuntimeTrustPosture::WorkspaceUntrusted {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must stay 'workspace-untrusted' and cannot imply publish trust",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if !machine.rootfs_read_only || machine.rootfs_overlay.is_none() {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' requires a read-only base guest plus a writable rootfs overlay so scratch state stays explicit",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            for required_root in [
+                MachineRuntimeWritableRoot::NixStore,
+                MachineRuntimeWritableRoot::SourceRoot,
+                MachineRuntimeWritableRoot::TempRoot,
+            ] {
+                if !runtime_class.writable_roots.contains(&required_root) {
+                    return Err(ValidationError::new(format!(
+                        "machine '{}' runtime class '{}' must declare writable root '{}'",
+                        machine_name,
+                        runtime_class.kind,
+                        runtime_writable_root_label(required_root)
+                    )));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -4085,6 +4217,120 @@ mod tests {
 
         let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
         assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn workspace_scratch_runtime_class_round_trips() {
+        let mut sample = PortConfig::sample();
+        sample.clusters.clear();
+        let machine = sample
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+        machine.runtime_class = Some(super::MachineRuntimeClassSpec {
+            kind: super::MachineRuntimeClassKind::WorkspaceScratchBuilder,
+            trust: super::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+            writable_roots: vec![
+                super::MachineRuntimeWritableRoot::NixStore,
+                super::MachineRuntimeWritableRoot::SourceRoot,
+                super::MachineRuntimeWritableRoot::TempRoot,
+            ],
+            workspace: Some(super::MachineRuntimeWorkspaceBinding {
+                workspace: String::from("demo"),
+                lane: String::from("scratch"),
+            }),
+        });
+
+        sample
+            .validate()
+            .expect("workspace scratch runtime class should validate");
+
+        let encoded = sample.to_toml_string().expect("sample should encode");
+        assert!(encoded.contains("[machines.demo.runtime_class]"));
+        assert!(encoded.contains("kind = \"workspace-scratch-builder\""));
+        assert!(encoded.contains("trust = \"workspace-untrusted\""));
+        assert!(encoded.contains("writable_roots = ["));
+        assert!(encoded.contains("\"nix-store\""));
+        assert!(encoded.contains("\"source-root\""));
+        assert!(encoded.contains("\"temp-root\""));
+        assert!(encoded.contains("[machines.demo.runtime_class.workspace]"));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
+        assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn workspace_scratch_runtime_class_rejects_publish_trust() {
+        let mut sample = PortConfig::sample();
+        sample.clusters.clear();
+        let machine = sample
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+        machine.runtime_class = Some(super::MachineRuntimeClassSpec {
+            kind: super::MachineRuntimeClassKind::WorkspaceScratchBuilder,
+            trust: super::MachineRuntimeTrustPosture::PromotionTrusted,
+            writable_roots: vec![
+                super::MachineRuntimeWritableRoot::NixStore,
+                super::MachineRuntimeWritableRoot::SourceRoot,
+                super::MachineRuntimeWritableRoot::TempRoot,
+            ],
+            workspace: Some(super::MachineRuntimeWorkspaceBinding {
+                workspace: String::from("demo"),
+                lane: String::from("scratch"),
+            }),
+        });
+
+        let error = sample
+            .validate()
+            .expect_err("scratch builder should reject publish trust");
+        assert!(
+            error
+                .to_string()
+                .contains("must stay 'workspace-untrusted' and cannot imply publish trust"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn workspace_scratch_runtime_class_requires_declared_writable_roots() {
+        let mut sample = PortConfig::sample();
+        sample.clusters.clear();
+        let machine = sample
+            .machines
+            .get_mut("demo")
+            .expect("sample machine should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+        machine.runtime_class = Some(super::MachineRuntimeClassSpec {
+            kind: super::MachineRuntimeClassKind::WorkspaceScratchBuilder,
+            trust: super::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+            writable_roots: vec![
+                super::MachineRuntimeWritableRoot::NixStore,
+                super::MachineRuntimeWritableRoot::SourceRoot,
+            ],
+            workspace: Some(super::MachineRuntimeWorkspaceBinding {
+                workspace: String::from("demo"),
+                lane: String::from("scratch"),
+            }),
+        });
+
+        let error = sample
+            .validate()
+            .expect_err("scratch builder should require the temp root");
+        assert!(
+            error
+                .to_string()
+                .contains("must declare writable root 'temp-root'"),
+            "{error}"
+        );
     }
 
     #[test]

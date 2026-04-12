@@ -27,10 +27,10 @@ started_at: 2026-04-11T23:12:19
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Model Machine Runtime Class Contracts For Builder Lanes](../../../../stories/VGYQnafG0/README.md) | feat | in-progress |
+| [Model Machine Runtime Class Contracts For Builder Lanes](../../../../stories/VGYQnafG0/README.md) | feat | done |
 | [Surface Builder Runtime Class Identity In Machine Output](../../../../stories/VGYQnawG1/README.md) | feat | backlog |
 <!-- END GENERATED -->
