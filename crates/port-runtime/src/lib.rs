@@ -3232,17 +3232,26 @@ fn hosted_k3s_service_command(
     command
 }
 
+fn hosted_k3s_service_healthcheck_command(role: &str) -> Vec<String> {
+    let k3s = "/usr/bin/k3s";
+    let shell = match role {
+        "server" => format!(
+            "{k3s} crictl info >/dev/null 2>&1 && {k3s} kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml --request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
+        ),
+        "agent" => format!(
+            "{k3s} crictl info >/dev/null 2>&1 && {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
+        ),
+        _ => String::from("/usr/bin/k3s crictl info >/dev/null 2>&1"),
+    };
+    vec![String::from("/bin/sh"), String::from("-lc"), shell]
+}
+
 fn hosted_k3s_service_policy(role: &str) -> ServicePolicy {
-    let _ = role;
     ServicePolicy {
         restart: ServiceRestartPolicy::Always,
         healthcheck: ServiceHealthcheck {
             policy: ServiceHealthPolicy::Command,
-            command: vec![
-                String::from("/usr/bin/k3s"),
-                String::from("crictl"),
-                String::from("info"),
-            ],
+            command: hosted_k3s_service_healthcheck_command(role),
         },
     }
 }
@@ -17381,6 +17390,34 @@ exec sleep 30
         for metadata in result.worker_launches {
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
+    }
+
+    #[test]
+    fn hosted_k3s_server_healthcheck_requires_runtime_and_readyz() {
+        let policy = hosted_k3s_service_policy("server");
+        assert_eq!(policy.restart, ServiceRestartPolicy::Always);
+        assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
+        assert_eq!(policy.healthcheck.command[0], "/bin/sh");
+        assert_eq!(policy.healthcheck.command[1], "-lc");
+        let shell = &policy.healthcheck.command[2];
+        assert!(shell.contains("/usr/bin/k3s crictl info"));
+        assert!(shell.contains(
+            "/usr/bin/k3s kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml --request-timeout=10s get --raw=/readyz"
+        ));
+    }
+
+    #[test]
+    fn hosted_k3s_agent_healthcheck_requires_runtime_and_kubelet_api() {
+        let policy = hosted_k3s_service_policy("agent");
+        assert_eq!(policy.restart, ServiceRestartPolicy::Always);
+        assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
+        assert_eq!(policy.healthcheck.command[0], "/bin/sh");
+        assert_eq!(policy.healthcheck.command[1], "-lc");
+        let shell = &policy.healthcheck.command[2];
+        assert!(shell.contains("/usr/bin/k3s crictl info"));
+        assert!(shell.contains(
+            "/usr/bin/k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz"
+        ));
     }
 
     #[test]
