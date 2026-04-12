@@ -22,8 +22,8 @@ mission: VGYFo0mIs
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/2 stories done
+**Progress:** 1/1 voyages complete, 2/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Define Stable Endpoint Handoff And Failover Proof](voyages/VGafx2vn4/) | in-progress | 1/2 |
+| [Define Stable Endpoint Handoff And Failover Proof](voyages/VGafx2vn4/) | done | 2/2 |
 <!-- END GENERATED -->

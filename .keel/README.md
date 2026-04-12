@@ -197,11 +197,11 @@
 |--------|--------|
 | [Define Real-HA Control Plane Placement Truth](epics/VGYFpfUph/voyages/VGafx2cmq/) | done |
 
-### [Ship Stable HA API Endpoint And Failover Proofs For Hosted AWS PVM](epics/VGYFpfmpi/) (active)
+### [Ship Stable HA API Endpoint And Failover Proofs For Hosted AWS PVM](epics/VGYFpfmpi/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Define Stable Endpoint Handoff And Failover Proof](epics/VGYFpfmpi/voyages/VGafx2vn4/) | in-progress |
+| [Define Stable Endpoint Handoff And Failover Proof](epics/VGYFpfmpi/voyages/VGafx2vn4/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

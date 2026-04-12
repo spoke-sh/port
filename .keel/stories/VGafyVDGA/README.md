@@ -1,9 +1,9 @@
 ---
 # system-managed
 id: VGafyVDGA
-status: needs-human-verification
+status: done
 created_at: 2026-04-12T08:23:00
-updated_at: 2026-04-12T09:40:37
+updated_at: 2026-04-12T09:41:04
 # authored
 title: Capture Hosted AWS PVM Failover Proof For The Stable Endpoint
 type: feat
@@ -12,6 +12,7 @@ scope: VGYFpfmpi/VGafx2vn4
 index: 2
 started_at: 2026-04-12T09:22:00
 submitted_at: 2026-04-12T09:40:37
+completed_at: 2026-04-12T09:41:04
 ---
 
 # Capture Hosted AWS PVM Failover Proof For The Stable Endpoint

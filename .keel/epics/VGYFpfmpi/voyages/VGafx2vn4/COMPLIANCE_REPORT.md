@@ -1,0 +1,9 @@
+# COMPLIANCE REPORT: Define Stable Endpoint Handoff And Failover Proof
+
+## Requirement Traceability Matrix
+
+| Req ID | Status | Implemented By | Proof Artifacts |
+|--------|--------|----------------|-----------------|
+| SRS-01 | ✓ VERIFIED | [VGafyUpFb](../../../../stories/VGafyUpFb/README.md) | [ac-1.bootstrap.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-1.bootstrap.log)<br>[ac-2.access.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-2.access.log)<br>[ac-3.ha-eligible.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-3.ha-eligible.log)<br>[ac-4.cli-lifecycle.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-4.cli-lifecycle.log)<br>[ac-5.cli-status.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-5.cli-status.log)<br>[ac-6.fmt.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-6.fmt.log) |
+| SRS-02 | ✓ VERIFIED | [VGafyUpFb](../../../../stories/VGafyUpFb/README.md) | [ac-1.bootstrap.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-1.bootstrap.log)<br>[ac-2.access.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-2.access.log)<br>[ac-3.ha-eligible.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-3.ha-eligible.log)<br>[ac-4.cli-lifecycle.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-4.cli-lifecycle.log)<br>[ac-5.cli-status.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-5.cli-status.log)<br>[ac-6.fmt.log](../../../../stories/VGafyUpFb/EVIDENCE/ac-6.fmt.log) |
+| SRS-03 | ✓ VERIFIED | [VGafyVDGA](../../../../stories/VGafyVDGA/README.md) | [ac-1.gif](../../../../stories/VGafyVDGA/EVIDENCE/ac-1.gif)<br>[ac-1.log](../../../../stories/VGafyVDGA/EVIDENCE/ac-1.log)<br>[ac-2.log](../../../../stories/VGafyVDGA/EVIDENCE/ac-2.log)<br>[ac-3.log](../../../../stories/VGafyVDGA/EVIDENCE/ac-3.log)<br>[ac-4.log](../../../../stories/VGafyVDGA/EVIDENCE/ac-4.log)<br>[hosted-k3s-ha-failover-workflow.cast](../../../../stories/VGafyVDGA/EVIDENCE/hosted-k3s-ha-failover-workflow.cast) |
