@@ -1669,6 +1669,15 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
         }
     );
     println!("api endpoint: {}", report.api_endpoint);
+    println!("real-ha status: {}", report.ha_status);
+    println!("real-ha detail: {}", report.ha_status_detail);
+    for placement in &report.control_plane_placements {
+        println!(
+            "control-plane placement: {} -> {}",
+            placement.machine_name,
+            placement.node_name.as_deref().unwrap_or("(unresolved)")
+        );
+    }
     println!("kubeconfig surface: {}", report.kubeconfig_surface);
     println!("visibility surface: {}", report.visibility_surface);
     if report.visibility_output.is_empty() {

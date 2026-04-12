@@ -459,6 +459,13 @@ fn write_machine_placement_state(
     runtime_root: &Path,
     placement_detail: &str,
 ) {
+    write_machine_placement_entries(
+        control_plane,
+        &[(machine_name, node_name, runtime_root, placement_detail)],
+    );
+}
+
+fn write_machine_placement_entries(control_plane: &str, placements: &[(&str, &str, &Path, &str)]) {
     let state_path = Path::new(".port/hosted")
         .join(control_plane)
         .join("machine-placements.json");
@@ -468,20 +475,29 @@ fn write_machine_placement_state(
             .expect("machine placement state path should have parent"),
     )
     .expect("machine placement state dir should exist");
+    let machines = placements
+        .iter()
+        .map(
+            |(machine_name, node_name, runtime_root, placement_detail)| {
+                (
+                    (*machine_name).to_string(),
+                    json!({
+                        "node_name": node_name,
+                        "runtime_root": runtime_root,
+                        "placed_at_unix_s": 1,
+                        "placement_detail": placement_detail,
+                    }),
+                )
+            },
+        )
+        .collect::<BTreeMap<_, _>>();
     fs::write(
         &state_path,
         format!(
             "{}\n",
             serde_json::to_string_pretty(&json!({
                 "control_plane": control_plane,
-                "machines": {
-                    machine_name: {
-                        "node_name": node_name,
-                        "runtime_root": runtime_root,
-                        "placed_at_unix_s": 1,
-                        "placement_detail": placement_detail,
-                    }
-                }
+                "machines": machines,
             }))
             .expect("machine placement state should encode")
         ),
@@ -1197,6 +1213,132 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     drop(_servers);
     cleanup_hosted_registration_state();
     assert!(fake_binary.exists());
+}
+
+#[test]
+fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let alternate_runtime_root = temp.path().join("hosted/aws-linux-node-b");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_k3s_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node");
+    client_config
+        .nodes
+        .get_mut("aws-linux-node-b")
+        .expect("aws-linux-node-b should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node-b");
+    write_config(&client_config_path, &client_config);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+    write_registered_node_state(
+        "demo",
+        BTreeMap::from([(
+            String::from("aws-linux-node"),
+            port_model::HostedNodeRegistration {
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+                registered_at: 1,
+                refreshed_at: 1,
+                ttl_seconds: 30,
+            },
+        )]),
+    );
+
+    let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
+    let _ = write_machine_manifest(&alternate_runtime_root, "cloud-aws-b", 434343);
+    write_machine_placement_entries(
+        "demo",
+        &[
+            (
+                "cloud-aws",
+                "aws-linux-node",
+                &hosted_runtime_root,
+                "Stored on the primary hosted AWS node.",
+            ),
+            (
+                "cloud-aws-b",
+                "aws-linux-node-b",
+                &alternate_runtime_root,
+                "Stored on the secondary hosted AWS node.",
+            ),
+        ],
+    );
+
+    let server_a = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+    let server_a_guest = spawn_hosted_exec_sequence_server(
+        server_a,
+        vec![
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("cat /etc/rancher/k3s/k3s.yaml"),
+                ],
+                String::from(
+                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                ),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("k3s kubectl get nodes -o wide"),
+                ],
+                String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                ),
+            ),
+        ],
+    );
+
+    let status = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("status")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .output()
+        .expect("hosted cluster status command should run");
+    assert!(status.status.success(), "{status:?}");
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(status_stdout.contains("real-ha status: non-ha-topology"));
+    assert!(
+        status_stdout
+            .contains("real-ha detail: Hosted AWS x86_64 PVM real-HA status is non-ha-topology"),
+        "{status_stdout}"
+    );
+    assert!(status_stdout.contains("control-plane placement: cloud-aws -> aws-linux-node"));
+    assert!(status_stdout.contains("control-plane placement: cloud-aws-b -> aws-linux-node-b"));
+
+    server_a_guest
+        .join()
+        .expect("primary control-plane guest thread should complete");
+
+    drop(_servers);
+    cleanup_hosted_registration_state();
 }
 
 #[test]

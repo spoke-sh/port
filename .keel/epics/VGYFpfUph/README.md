@@ -22,8 +22,8 @@ mission: VGYFo0mIs
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/2 stories done
+**Progress:** 0/1 voyages complete, 2/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Define Real-HA Control Plane Placement Truth](voyages/VGafx2cmq/) | in-progress | 1/2 |
+| [Define Real-HA Control Plane Placement Truth](voyages/VGafx2cmq/) | in-progress | 2/2 |
 <!-- END GENERATED -->

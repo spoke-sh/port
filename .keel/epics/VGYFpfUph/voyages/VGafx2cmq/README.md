@@ -27,10 +27,10 @@ started_at: 2026-04-12T08:50:46
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 stories complete
+**Progress:** 2/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Require Honest Real-HA Topology Admission For Hosted AWS PVM](../../../../stories/VGafyU6FW/README.md) | feat | done |
-| [Surface Control-Plane Host Spread In Cluster Status](../../../../stories/VGafyUVFV/README.md) | feat | backlog |
+| [Surface Control-Plane Host Spread In Cluster Status](../../../../stories/VGafyUVFV/README.md) | feat | done |
 <!-- END GENERATED -->

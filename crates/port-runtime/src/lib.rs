@@ -257,6 +257,36 @@ pub struct HostedK3sMachineAccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sControlPlanePlacement {
+    pub machine_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_root: Option<PathBuf>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedK3sHaStatus {
+    NonHaTopology,
+    PendingPlacement,
+    SpreadUnsatisfied,
+    SpreadSatisfied,
+}
+
+impl std::fmt::Display for HostedK3sHaStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonHaTopology => f.write_str("non-ha-topology"),
+            Self::PendingPlacement => f.write_str("pending-placement"),
+            Self::SpreadUnsatisfied => f.write_str("spread-unsatisfied"),
+            Self::SpreadSatisfied => f.write_str("spread-satisfied"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sClusterAccessReport {
     pub cluster_name: String,
     pub control_plane: String,
@@ -264,6 +294,9 @@ pub struct HostedK3sClusterAccessReport {
     pub server_machines: Vec<String>,
     pub worker_machines: Vec<String>,
     pub api_endpoint: String,
+    pub ha_status: HostedK3sHaStatus,
+    pub ha_status_detail: String,
+    pub control_plane_placements: Vec<HostedK3sControlPlanePlacement>,
     pub kubeconfig_surface: String,
     pub kubeconfig: String,
     pub visibility_surface: String,
@@ -2503,46 +2536,12 @@ fn hosted_k3s_runtime_ha_note(
     cluster: &K3sClusterSpec,
     machine_access: &[HostedK3sMachineAccess],
 ) -> Option<String> {
-    let distinct_server_nodes: BTreeSet<_> = machine_access
-        .iter()
-        .filter(|machine| machine.role == "control-plane")
-        .filter_map(|machine| machine.route.node_name.clone())
-        .collect();
-    if distinct_server_nodes.is_empty() {
-        return None;
+    let placements = hosted_k3s_control_plane_placements(machine_access);
+    if placements.is_empty() {
+        None
+    } else {
+        Some(hosted_k3s_ha_status_detail(cluster, &placements))
     }
-
-    if cluster.server_machines.len() < 3 {
-        return Some(format!(
-            "Current placement resolves {} control-plane microVM{} onto {} execution host{}; treat this as bring-up or multi-node proof, not quorum-backed HA.",
-            cluster.server_machines.len(),
-            if cluster.server_machines.len() == 1 {
-                ""
-            } else {
-                "s"
-            },
-            distinct_server_nodes.len(),
-            if distinct_server_nodes.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ));
-    }
-
-    if distinct_server_nodes.len() < cluster.server_machines.len() {
-        return Some(format!(
-            "Current placement resolves {} control-plane microVMs onto {} distinct execution hosts; losing one host can still break quorum.",
-            cluster.server_machines.len(),
-            distinct_server_nodes.len()
-        ));
-    }
-
-    Some(format!(
-        "Current placement resolves the {} control-plane microVMs onto {} distinct execution hosts.",
-        cluster.server_machines.len(),
-        distinct_server_nodes.len()
-    ))
 }
 
 fn hosted_k3s_report_boundary_notes(
@@ -2563,6 +2562,96 @@ fn hosted_k3s_cluster_boundary_notes(cluster: &K3sClusterSpec) -> Vec<String> {
     notes.push(hosted_k3s_topology_note(cluster));
     notes.push(hosted_k3s_scheduler_note(cluster));
     notes
+}
+
+fn hosted_k3s_control_plane_placements(
+    machine_access: &[HostedK3sMachineAccess],
+) -> Vec<HostedK3sControlPlanePlacement> {
+    machine_access
+        .iter()
+        .filter(|machine| machine.role == "control-plane")
+        .map(|machine| HostedK3sControlPlanePlacement {
+            machine_name: machine
+                .route
+                .machine_name
+                .clone()
+                .unwrap_or_else(|| String::from("(unknown)")),
+            node_name: machine.route.node_name.clone(),
+            runtime_root: machine.route.runtime_root.clone(),
+            detail: machine.detail.clone(),
+        })
+        .collect()
+}
+
+fn hosted_k3s_ha_status(
+    cluster: &K3sClusterSpec,
+    placements: &[HostedK3sControlPlanePlacement],
+) -> HostedK3sHaStatus {
+    if cluster.ha_topology_posture() == port_model::HostedK3sHaTopologyPosture::NonHaTopology {
+        return HostedK3sHaStatus::NonHaTopology;
+    }
+    if placements
+        .iter()
+        .any(|placement| placement.node_name.is_none())
+    {
+        return HostedK3sHaStatus::PendingPlacement;
+    }
+
+    let distinct_nodes = placements
+        .iter()
+        .filter_map(|placement| placement.node_name.clone())
+        .collect::<BTreeSet<_>>();
+    if distinct_nodes.len() < cluster.server_machines.len() {
+        HostedK3sHaStatus::SpreadUnsatisfied
+    } else {
+        HostedK3sHaStatus::SpreadSatisfied
+    }
+}
+
+fn hosted_k3s_ha_status_detail(
+    cluster: &K3sClusterSpec,
+    placements: &[HostedK3sControlPlanePlacement],
+) -> String {
+    let resolved_nodes = placements
+        .iter()
+        .filter_map(|placement| placement.node_name.clone())
+        .collect::<BTreeSet<_>>();
+    match hosted_k3s_ha_status(cluster, placements) {
+        HostedK3sHaStatus::NonHaTopology => format!(
+            "Hosted AWS x86_64 PVM real-HA status is non-ha-topology: this cluster declares {} control-plane microVM{} with scheduler '{}'; Port requires at least {} control-plane microVMs plus spread scheduling before the topology can claim real HA.",
+            cluster.server_machines.len(),
+            if cluster.server_machines.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            cluster.control_plane_scheduler,
+            port_model::HOSTED_K3S_REAL_HA_MIN_CONTROL_PLANES
+        ),
+        HostedK3sHaStatus::PendingPlacement => {
+            let unresolved = placements
+                .iter()
+                .filter(|placement| placement.node_name.is_none())
+                .map(|placement| placement.machine_name.clone())
+                .collect::<Vec<_>>();
+            format!(
+                "Hosted AWS x86_64 PVM real-HA status is pending-placement: HA-eligible topology exists, but control-plane placement is still unresolved for {}.",
+                unresolved.join(", ")
+            )
+        }
+        HostedK3sHaStatus::SpreadUnsatisfied => format!(
+            "Hosted AWS x86_64 PVM real-HA status is spread-unsatisfied: {} control-plane microVMs currently resolve onto {} distinct execution hosts: {}.",
+            cluster.server_machines.len(),
+            resolved_nodes.len(),
+            resolved_nodes.into_iter().collect::<Vec<_>>().join(", ")
+        ),
+        HostedK3sHaStatus::SpreadSatisfied => format!(
+            "Hosted AWS x86_64 PVM real-HA status is spread-satisfied: {} control-plane microVMs currently resolve onto {} distinct execution hosts: {}.",
+            cluster.server_machines.len(),
+            resolved_nodes.len(),
+            resolved_nodes.into_iter().collect::<Vec<_>>().join(", ")
+        ),
+    }
 }
 
 fn hosted_k3s_boundary_summary() -> String {
@@ -2801,6 +2890,9 @@ pub fn hosted_k3s_cluster_access(
         );
     }
     let boundary_notes = hosted_k3s_report_boundary_notes(&cluster, &machine_access);
+    let control_plane_placements = hosted_k3s_control_plane_placements(&machine_access);
+    let ha_status = hosted_k3s_ha_status(&cluster, &control_plane_placements);
+    let ha_status_detail = hosted_k3s_ha_status_detail(&cluster, &control_plane_placements);
 
     Ok(HostedK3sClusterAccessReport {
         cluster_name: cluster_name.to_string(),
@@ -2809,6 +2901,9 @@ pub fn hosted_k3s_cluster_access(
         server_machines: cluster.server_machines.clone(),
         worker_machines: cluster.worker_machines,
         api_endpoint: cluster.api_endpoint,
+        ha_status,
+        ha_status_detail,
+        control_plane_placements,
         kubeconfig_surface: hosted_k3s_kubeconfig_surface(&primary_server),
         kubeconfig,
         visibility_surface: hosted_k3s_visibility_surface(&primary_server),
@@ -17640,6 +17735,23 @@ exec sleep 30
         assert!(report.visibility_output.contains("cloud-aws"));
         assert!(report.visibility_output.contains("cloud-aws-worker"));
         assert_eq!(report.machine_access.len(), 2);
+        assert_eq!(report.ha_status, super::HostedK3sHaStatus::NonHaTopology);
+        assert_eq!(report.control_plane_placements.len(), 1);
+        assert_eq!(
+            report.control_plane_placements[0].machine_name,
+            String::from("cloud-aws")
+        );
+        assert_eq!(
+            report.control_plane_placements[0].node_name.as_deref(),
+            Some("aws-linux-node")
+        );
+        assert!(
+            report
+                .ha_status_detail
+                .contains("Hosted AWS x86_64 PVM real-HA status is non-ha-topology"),
+            "{}",
+            report.ha_status_detail
+        );
         assert!(
             report
                 .boundary_notes
@@ -17687,6 +17799,54 @@ exec sleep 30
         for metadata in bootstrap.worker_launches {
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
+    }
+
+    #[test]
+    fn hosted_k3s_ha_status_reports_spread_satisfied_across_three_hosts() {
+        let cluster = port_model::K3sClusterSpec {
+            control_plane: String::from("demo"),
+            host_group: String::from("aws-builders"),
+            server_machines: vec![
+                String::from("cloud-aws"),
+                String::from("cloud-aws-b"),
+                String::from("cloud-aws-c"),
+            ],
+            worker_machines: Vec::new(),
+            api_endpoint: String::from("https://demo-k3s.internal:6443"),
+            control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
+            version: String::from("v1.32.0+k3s1"),
+            server_args: vec![String::from("--disable=traefik")],
+            worker_args: Vec::new(),
+        };
+        let placements = vec![
+            super::HostedK3sControlPlanePlacement {
+                machine_name: String::from("cloud-aws"),
+                node_name: Some(String::from("aws-linux-node")),
+                runtime_root: Some(PathBuf::from("/tmp/aws-linux-node")),
+                detail: String::from("primary"),
+            },
+            super::HostedK3sControlPlanePlacement {
+                machine_name: String::from("cloud-aws-b"),
+                node_name: Some(String::from("aws-linux-node-b")),
+                runtime_root: Some(PathBuf::from("/tmp/aws-linux-node-b")),
+                detail: String::from("secondary"),
+            },
+            super::HostedK3sControlPlanePlacement {
+                machine_name: String::from("cloud-aws-c"),
+                node_name: Some(String::from("aws-linux-node-c")),
+                runtime_root: Some(PathBuf::from("/tmp/aws-linux-node-c")),
+                detail: String::from("tertiary"),
+            },
+        ];
+
+        assert_eq!(
+            super::hosted_k3s_ha_status(&cluster, &placements),
+            super::HostedK3sHaStatus::SpreadSatisfied
+        );
+        let detail = super::hosted_k3s_ha_status_detail(&cluster, &placements);
+        assert!(detail.contains("Hosted AWS x86_64 PVM"));
+        assert!(detail.contains("spread-satisfied"));
+        assert!(detail.contains("3 distinct execution hosts"));
     }
 
     #[test]
