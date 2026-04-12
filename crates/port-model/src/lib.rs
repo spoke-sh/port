@@ -1950,6 +1950,15 @@ pub enum MachineRuntimeTrustPosture {
     PromotionTrusted,
 }
 
+impl std::fmt::Display for MachineRuntimeTrustPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkspaceUntrusted => f.write_str("workspace-untrusted"),
+            Self::PromotionTrusted => f.write_str("promotion-trusted"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MachineRuntimeWritableRoot {
@@ -1957,6 +1966,12 @@ pub enum MachineRuntimeWritableRoot {
     SourceRoot,
     TempRoot,
     EvidenceRoot,
+}
+
+impl std::fmt::Display for MachineRuntimeWritableRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(runtime_writable_root_label(*self))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -22,8 +22,8 @@ mission: VGYFo0XIj
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 1/2 stories done
+**Progress:** 1/1 voyages complete, 2/2 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Define Builder And Promotion Runtime Class Contracts](voyages/VGYQ4zrrX/) | in-progress | 1/2 |
+| [Define Builder And Promotion Runtime Class Contracts](voyages/VGYQ4zrrX/) | done | 2/2 |
 <!-- END GENERATED -->

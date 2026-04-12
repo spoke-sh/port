@@ -31,9 +31,10 @@ use port_model::{
     HostProvider, HostedApiIdentityContract, HostedArtifactIdentityContract,
     HostedImportedNodeRecord, HostedPvmCapability, HostedPvmHostKitPackageAttachment,
     HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineControlContract,
-    MachineRootfsOverlaySpec, MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec,
-    OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
-    PvmHostKit, PvmHostKitPackage, ServiceHealthState, ServiceSecretSourceStatus,
+    MachineRootfsOverlaySpec, MachineRuntimeClassSpec, MachineVolumeBackend,
+    MachineVolumePersistence, MachineVolumeSpec, OciRegistryAuth, OciRegistryTransport, PortConfig,
+    ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage, ServiceHealthState,
+    ServiceSecretSourceStatus,
 };
 use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
@@ -228,6 +229,8 @@ pub struct LaunchMetadata {
     pub stdout_path: PathBuf,
     pub stderr_path: PathBuf,
     pub manifest_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<MachineRuntimeClassSpec>,
     pub attached_volumes: Vec<MachineVolumeSpec>,
 }
 
@@ -316,6 +319,8 @@ pub struct MachineStatus {
     pub firecracker_log: PathBuf,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<MachineRuntimeClassSpec>,
     pub attached_volumes: Vec<MachineVolumeSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosted_fleet_nodes: Vec<HostedFleetNodeStatus>,
@@ -390,6 +395,8 @@ pub struct StopResult {
     pub pid: Option<u32>,
     pub control: MachineControlContract,
     pub runtime_dir: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<MachineRuntimeClassSpec>,
     pub attached_volumes: Vec<MachineVolumeSpec>,
     pub detail: String,
 }
@@ -423,6 +430,8 @@ pub struct MachineMonitorReport {
     pub firecracker_log: PathBuf,
     pub stdout_log: PathBuf,
     pub stderr_log: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<MachineRuntimeClassSpec>,
     pub detached_forwards: Vec<DetachedForwardStatus>,
     pub detail: String,
 }
@@ -1785,6 +1794,7 @@ pub fn down_local_cluster(
             pid: None,
             control: MachineControlContract::local_runtime_root(),
             runtime_dir: paths.runtime_dir,
+            runtime_class: None,
             attached_volumes: Vec::new(),
             detail: String::from("cluster machine was already stopped; no runtime state existed"),
         }
@@ -3490,6 +3500,7 @@ fn firecracker_local_launch_machine(
         stdout_path: paths.stdout_log.clone(),
         stderr_path: paths.stderr_log.clone(),
         manifest_path: paths.manifest_path.clone(),
+        runtime_class: machine.runtime_class.clone(),
         attached_volumes: machine.volumes.clone(),
     };
 
@@ -3746,6 +3757,7 @@ fn cloud_hypervisor_local_launch_machine(
         stdout_path: paths.stdout_log.clone(),
         stderr_path: paths.stderr_log.clone(),
         manifest_path: paths.manifest_path.clone(),
+        runtime_class: machine.runtime_class.clone(),
         attached_volumes: Vec::new(),
     };
     write_json_file(&paths.manifest_path, &metadata)?;
@@ -3947,6 +3959,7 @@ fn avf_local_launch_machine_with_host_os(
         stdout_path: paths.stdout_log.clone(),
         stderr_path: paths.stderr_log.clone(),
         manifest_path: paths.manifest_path.clone(),
+        runtime_class: machine.runtime_class.clone(),
         attached_volumes: Vec::new(),
     };
     write_json_file(&paths.manifest_path, &metadata)?;
@@ -4196,6 +4209,7 @@ fn avf_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<M
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        runtime_class: manifest.runtime_class,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
@@ -4313,6 +4327,7 @@ fn cloud_hypervisor_local_machine_status(
         firecracker_log: metadata.console_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        runtime_class: manifest.runtime_class,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
@@ -5134,6 +5149,7 @@ fn firecracker_local_stop_machine(
                 pid: Some(pid),
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: status.attached_volumes.clone(),
                 detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
             })
@@ -5147,6 +5163,7 @@ fn firecracker_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: status.attached_volumes.clone(),
                 detail: String::from("machine was already stopped"),
             })
@@ -5160,6 +5177,7 @@ fn firecracker_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: status.attached_volumes.clone(),
                 detail: String::from("cleaned stale runtime sockets for already-stopped machine"),
             })
@@ -5227,6 +5245,7 @@ fn avf_local_stop_machine(
                 pid: Some(pid),
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from(
                     "sent SIGTERM to AVF launcher pid and cleaned transient runtime paths",
@@ -5243,6 +5262,7 @@ fn avf_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from("AVF machine was already stopped"),
             })
@@ -5257,6 +5277,7 @@ fn avf_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from("removed stale AVF runtime pid and transient paths"),
             })
@@ -5308,6 +5329,7 @@ fn cloud_hypervisor_local_stop_machine(
                 pid: Some(pid),
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from(
                     "sent SIGTERM to Cloud Hypervisor pid and cleaned transient runtime paths",
@@ -5324,6 +5346,7 @@ fn cloud_hypervisor_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from("Cloud Hypervisor machine was already stopped"),
             })
@@ -5338,6 +5361,7 @@ fn cloud_hypervisor_local_stop_machine(
                 pid: status.pid,
                 control: MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir,
+                runtime_class: status.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from(
                     "cleaned stale Cloud Hypervisor runtime state for already-stopped machine",
@@ -5530,6 +5554,7 @@ fn inspect_machine(
         firecracker_log: paths.firecracker_log,
         stdout_log: paths.stdout_log,
         stderr_log: paths.stderr_log,
+        runtime_class: manifest.runtime_class,
         attached_volumes: manifest.attached_volumes,
         hosted_fleet_nodes: Vec::new(),
         detail,
@@ -5722,6 +5747,7 @@ fn cloud_hypervisor_malformed_machine_status(
         firecracker_log: cloud_hypervisor_log_path(paths),
         stdout_log: paths.stdout_log.clone(),
         stderr_log: paths.stderr_log.clone(),
+        runtime_class: None,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
@@ -5747,6 +5773,7 @@ fn synthetic_machine_status(
         firecracker_log: paths.firecracker_log.clone(),
         stdout_log: paths.stdout_log.clone(),
         stderr_log: paths.stderr_log.clone(),
+        runtime_class: None,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
         detail,
@@ -5796,6 +5823,7 @@ fn machine_monitor_report(
         firecracker_log: status.firecracker_log,
         stdout_log: status.stdout_log,
         stderr_log: status.stderr_log,
+        runtime_class: status.runtime_class,
         detached_forwards,
         detail: status.detail,
     })
@@ -14781,6 +14809,7 @@ exec sleep 30
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            runtime_class: None,
             attached_volumes: Vec::new(),
         };
         fs::write(
@@ -16396,6 +16425,7 @@ exec sleep 30
             stdout_path: running_paths.stdout_log.clone(),
             stderr_path: running_paths.stderr_log.clone(),
             manifest_path: running_paths.manifest_path.clone(),
+            runtime_class: None,
             attached_volumes: Vec::new(),
         };
         fs::write(
@@ -16417,6 +16447,7 @@ exec sleep 30
             stdout_path: stale_paths.stdout_log.clone(),
             stderr_path: stale_paths.stderr_log.clone(),
             manifest_path: stale_paths.manifest_path.clone(),
+            runtime_class: None,
             attached_volumes: Vec::new(),
         };
         fs::write(
@@ -16477,6 +16508,19 @@ exec sleep 30
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            runtime_class: Some(port_model::MachineRuntimeClassSpec {
+                kind: port_model::MachineRuntimeClassKind::WorkspaceScratchBuilder,
+                trust: port_model::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+                writable_roots: vec![
+                    port_model::MachineRuntimeWritableRoot::NixStore,
+                    port_model::MachineRuntimeWritableRoot::SourceRoot,
+                    port_model::MachineRuntimeWritableRoot::TempRoot,
+                ],
+                workspace: Some(port_model::MachineRuntimeWorkspaceBinding {
+                    workspace: String::from("demo"),
+                    lane: String::from("scratch"),
+                }),
+            }),
             attached_volumes: Vec::new(),
         };
         fs::write(
@@ -16500,6 +16544,7 @@ exec sleep 30
         assert_eq!(status.firecracker_log, paths.firecracker_log);
         assert_eq!(status.stdout_log, paths.stdout_log);
         assert_eq!(status.stderr_log, paths.stderr_log);
+        assert_eq!(status.runtime_class, manifest.runtime_class);
     }
 
     #[test]
@@ -16532,6 +16577,19 @@ exec sleep 30
             stdout_path: paths.stdout_log.clone(),
             stderr_path: paths.stderr_log.clone(),
             manifest_path: paths.manifest_path.clone(),
+            runtime_class: Some(port_model::MachineRuntimeClassSpec {
+                kind: port_model::MachineRuntimeClassKind::WorkspaceScratchBuilder,
+                trust: port_model::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+                writable_roots: vec![
+                    port_model::MachineRuntimeWritableRoot::NixStore,
+                    port_model::MachineRuntimeWritableRoot::SourceRoot,
+                    port_model::MachineRuntimeWritableRoot::TempRoot,
+                ],
+                workspace: Some(port_model::MachineRuntimeWorkspaceBinding {
+                    workspace: String::from("demo"),
+                    lane: String::from("scratch"),
+                }),
+            }),
             attached_volumes: Vec::new(),
         };
         fs::write(
@@ -16557,6 +16615,7 @@ exec sleep 30
                 pid: Some(child.id()),
                 control: port_model::MachineControlContract::local_runtime_root(),
                 runtime_dir: paths.runtime_dir.clone(),
+                runtime_class: manifest.runtime_class.clone(),
                 attached_volumes: Vec::new(),
                 detail: String::from("sent SIGTERM to pid and cleaned stale runtime sockets"),
             }

@@ -14,8 +14,8 @@ use port_agent_protocol::{
 };
 use port_model::{
     ExecutionSubstrate, HostConnection, HostedSchedulerPolicy, MachineArchitecture,
-    MachineControlContract, MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec,
-    PortConfig, ProtectionMode, PvmHostKitPackage,
+    MachineControlContract, MachineRuntimeClassSpec, MachineVolumeBackend,
+    MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode, PvmHostKitPackage,
 };
 use port_runtime::{
     ArtifactRequest, ClusterDownRequest, ClusterStageRequest, ClusterStatusRequest,
@@ -2011,6 +2011,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("console stdout: {}", metadata.stdout_path.display());
             println!("console stderr: {}", metadata.stderr_path.display());
             println!("manifest: {}", metadata.manifest_path.display());
+            output_runtime_class(&metadata.runtime_class);
             if !metadata.attached_volumes.is_empty() {
                 println!("inventory owner: {}", control.inventory_owner);
                 println!("lifecycle owner: {}", control.lifecycle_owner);
@@ -2042,6 +2043,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                     println!("lifecycle owner: {}", machine.control.lifecycle_owner);
                     println!("status source: {}", machine.control.status_source);
                     println!("status route: {}", machine.control.status_route);
+                    output_runtime_class(&machine.runtime_class);
                     println!("runtime dir: {}", machine.runtime_dir.display());
                     print_hosted_fleet_nodes(&machine.hosted_fleet_nodes);
                     println!("detail: {}", machine.detail);
@@ -2106,6 +2108,7 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
             println!("status source: {}", result.control.status_source);
             println!("stop route: {}", result.control.stop_route);
             println!("runtime dir: {}", result.runtime_dir.display());
+            output_runtime_class(&result.runtime_class);
             if !result.attached_volumes.is_empty() {
                 print!("{}", format_attached_volumes(&result.attached_volumes));
             }
@@ -2133,6 +2136,14 @@ fn machine_control_contract(
 
 fn print_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) {
     let rendered = format_hosted_fleet_nodes(nodes);
+    if rendered.is_empty() {
+        return;
+    }
+    print!("{rendered}");
+}
+
+fn output_runtime_class(runtime_class: &Option<MachineRuntimeClassSpec>) {
+    let rendered = format_runtime_class(runtime_class);
     if rendered.is_empty() {
         return;
     }
@@ -2189,6 +2200,7 @@ fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
         .expect("write should succeed");
     writeln!(&mut output, "stop route: {}", status.control.stop_route)
         .expect("write should succeed");
+    output.push_str(&format_runtime_class(&status.runtime_class));
     output.push_str(&format_attached_volumes(&status.attached_volumes));
     writeln!(&mut output, "guest route: {}", status.control.guest_route)
         .expect("write should succeed");
@@ -2219,6 +2231,24 @@ fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
     .expect("write should succeed");
     output.push_str(&format_hosted_fleet_nodes(&status.hosted_fleet_nodes));
     writeln!(&mut output, "detail: {}", status.detail).expect("write should succeed");
+    output
+}
+
+fn format_runtime_class(runtime_class: &Option<MachineRuntimeClassSpec>) -> String {
+    let Some(runtime_class) = runtime_class else {
+        return String::new();
+    };
+
+    let mut output = String::new();
+    writeln!(&mut output, "runtime class: {}", runtime_class.kind).expect("write should succeed");
+    writeln!(&mut output, "trust posture: {}", runtime_class.trust).expect("write should succeed");
+    if let Some(workspace) = &runtime_class.workspace {
+        writeln!(&mut output, "workspace: {}", workspace.workspace).expect("write should succeed");
+        writeln!(&mut output, "workspace lane: {}", workspace.lane).expect("write should succeed");
+    }
+    for root in &runtime_class.writable_roots {
+        writeln!(&mut output, "writable root: {}", root).expect("write should succeed");
+    }
     output
 }
 
@@ -3558,6 +3588,19 @@ mod tests {
             firecracker_log: PathBuf::from("/tmp/runtime/cloud-aws/firecracker.log"),
             stdout_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stdout.log"),
             stderr_log: PathBuf::from("/tmp/runtime/cloud-aws/console.stderr.log"),
+            runtime_class: Some(port_model::MachineRuntimeClassSpec {
+                kind: port_model::MachineRuntimeClassKind::WorkspaceScratchBuilder,
+                trust: port_model::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+                writable_roots: vec![
+                    port_model::MachineRuntimeWritableRoot::NixStore,
+                    port_model::MachineRuntimeWritableRoot::SourceRoot,
+                    port_model::MachineRuntimeWritableRoot::TempRoot,
+                ],
+                workspace: Some(port_model::MachineRuntimeWorkspaceBinding {
+                    workspace: String::from("acme"),
+                    lane: String::from("scratch"),
+                }),
+            }),
             attached_volumes: Vec::new(),
             hosted_fleet_nodes,
             detail: detail.to_string(),
@@ -3780,6 +3823,29 @@ mod tests {
             "freshness: missing-registration",
             "routing eligibility: missing-registration",
             "detail: control plane 'demo' could not inspect hosted fleet state for machine 'cloud-aws'",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing '{expected}' in:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn machine_status_render_includes_runtime_class_contract() {
+        let rendered = format_machine_status(&sample_hosted_status(
+            Vec::new(),
+            "runtime class contract should render",
+        ));
+
+        for expected in [
+            "runtime class: workspace-scratch-builder",
+            "trust posture: workspace-untrusted",
+            "workspace: acme",
+            "workspace lane: scratch",
+            "writable root: nix-store",
+            "writable root: source-root",
+            "writable root: temp-root",
         ] {
             assert!(
                 rendered.contains(expected),

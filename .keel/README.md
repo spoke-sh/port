@@ -179,11 +179,11 @@
 |--------|--------|
 | [Export And Prove AWS PVM Host Kit Module](epics/VFhLhfrqk/voyages/VFhLjViAG/) | done |
 
-### [Ship Workspace Scratch Builder Runtime Class](epics/VGYFpewpf/) (active)
+### [Ship Workspace Scratch Builder Runtime Class](epics/VGYFpewpf/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Define Builder And Promotion Runtime Class Contracts](epics/VGYFpewpf/voyages/VGYQ4zrrX/) | in-progress |
+| [Define Builder And Promotion Runtime Class Contracts](epics/VGYFpewpf/voyages/VGYQ4zrrX/) | done |
 
 ### [Ship Blessed Closure Promotion Runner Runtime Class](epics/VGYFpf9pg/) (active)
 
