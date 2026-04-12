@@ -3,13 +3,14 @@
 id: VFgcM1Zpu
 status: verified
 created_at: 2026-04-02T18:17:22
-updated_at: 2026-04-02T19:25:21
+updated_at: 2026-04-12T16:46:04
 # authored
 title: Seal Hosted AWS PVM Runtime Contract
 watch: ~
 activated_at: 2026-04-02T18:21:01
 achieved_at: 2026-04-02T19:18:03
 verified_at: 2026-04-02T19:25:21
+verification_artifact: verification.gif
 ---
 
 # Seal Hosted AWS PVM Runtime Contract

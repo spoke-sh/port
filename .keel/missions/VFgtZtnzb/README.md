@@ -3,13 +3,14 @@
 id: VFgtZtnzb
 status: verified
 created_at: 2026-04-02T19:25:47
-updated_at: 2026-04-02T20:33:42
+updated_at: 2026-04-12T16:46:11
 # authored
 title: Seal Guest Backed Session Drivers For The Creator Platform
 watch: ~
 activated_at: 2026-04-02T19:31:48
 achieved_at: 2026-04-02T20:12:17
 verified_at: 2026-04-02T20:33:42
+verification_artifact: verification.gif
 ---
 
 # Seal Guest Backed Session Drivers For The Creator Platform

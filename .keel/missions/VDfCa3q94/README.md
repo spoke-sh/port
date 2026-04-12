@@ -3,10 +3,11 @@ id: VDfCa3q94
 title: Ship Cloud Block Storage Normalization
 status: verified
 created_at: 2026-03-12T07:30:58
-updated_at: 2026-03-12T08:36:49
+updated_at: 2026-04-12T16:46:24
 activated_at: 2026-03-12T07:32:01
 achieved_at: 2026-03-12T08:36:43
 verified_at: 2026-03-12T08:36:49
+verification_artifact: verification.gif
 ---
 
 # Ship Cloud Block Storage Normalization
