@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
@@ -22,7 +22,17 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use vsock::{VMADDR_CID_ANY, VsockListener, VsockStream};
 
+#[cfg(not(test))]
 const MANAGED_PROCESS_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const MANAGED_PROCESS_RECONCILE_INTERVAL: Duration = Duration::from_millis(50);
+
+#[cfg(not(test))]
+const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_millis(250);
+
+const MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD: u32 = 3;
 
 #[derive(Debug, Default)]
 struct ManagedProcessSupervisor {
@@ -37,6 +47,8 @@ struct ManagedProcessHandle {
     cwd: PathBuf,
     policy: ServicePolicy,
     child: Child,
+    started_at: Instant,
+    consecutive_unhealthy_checks: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,6 +285,8 @@ impl AgentService {
                 cwd,
                 policy,
                 child,
+                started_at: Instant::now(),
+                consecutive_unhealthy_checks: 0,
             };
             refresh_managed_process_handle(&self.root, &mut handle)?;
             supervisor.processes.insert(name.clone(), handle);
@@ -435,14 +449,7 @@ impl AgentService {
     }
 
     fn persist_managed_process_record(&self, record: &ManagedProcessRecord) -> Result<()> {
-        let runtime_dir = self.managed_service_runtime_dir();
-        fs::create_dir_all(&runtime_dir)
-            .with_context(|| format!("failed to create '{}'", runtime_dir.display()))?;
-        let path = runtime_dir.join(format!("{}.json", record.name));
-        let bytes = serde_json::to_vec_pretty(record)
-            .with_context(|| format!("failed to encode '{}'", path.display()))?;
-        fs::write(&path, format!("{}\n", String::from_utf8_lossy(&bytes)))
-            .with_context(|| format!("failed to write '{}'", path.display()))
+        write_managed_process_record(&self.root, record)
     }
 }
 
@@ -559,7 +566,16 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
         let (health_state, health_detail) = evaluate_managed_service_health(handle)?;
         handle.record.health_state = health_state;
         handle.record.health_detail = health_detail;
-        if should_restart_unhealthy_managed_service(handle.policy.restart, health_state) {
+        match health_state {
+            ServiceHealthState::Healthy | ServiceHealthState::Unknown => {
+                handle.consecutive_unhealthy_checks = 0;
+            }
+            ServiceHealthState::Unhealthy => {
+                handle.consecutive_unhealthy_checks =
+                    handle.consecutive_unhealthy_checks.saturating_add(1);
+            }
+        }
+        if should_restart_unhealthy_managed_service(handle) {
             let health_detail = handle
                 .record
                 .health_detail
@@ -599,12 +615,11 @@ fn should_restart_managed_service(
     }
 }
 
-fn should_restart_unhealthy_managed_service(
-    policy: ServiceRestartPolicy,
-    health_state: ServiceHealthState,
-) -> bool {
-    matches!(policy, ServiceRestartPolicy::Always)
-        && matches!(health_state, ServiceHealthState::Unhealthy)
+fn should_restart_unhealthy_managed_service(handle: &ManagedProcessHandle) -> bool {
+    matches!(handle.policy.restart, ServiceRestartPolicy::Always)
+        && matches!(handle.record.health_state, ServiceHealthState::Unhealthy)
+        && handle.started_at.elapsed() >= MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD
+        && handle.consecutive_unhealthy_checks >= MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD
 }
 
 fn restart_managed_process(
@@ -650,6 +665,8 @@ fn restart_managed_process(
                 handle.record.health_detail = None;
                 handle.record.detail = running_detail;
                 handle.child = child;
+                handle.started_at = Instant::now();
+                handle.consecutive_unhealthy_checks = 0;
             }
         }
         Err(error) => {
@@ -769,10 +786,17 @@ fn write_managed_process_record(root: &Path, record: &ManagedProcessRecord) -> R
     fs::create_dir_all(&runtime_dir)
         .with_context(|| format!("failed to create '{}'", runtime_dir.display()))?;
     let path = runtime_dir.join(format!("{}.json", record.name));
+    let temp_path = runtime_dir.join(format!("{}.json.tmp", record.name));
     let bytes = serde_json::to_vec_pretty(record)
         .with_context(|| format!("failed to encode '{}'", path.display()))?;
-    fs::write(&path, format!("{}\n", String::from_utf8_lossy(&bytes)))
-        .with_context(|| format!("failed to write '{}'", path.display()))
+    fs::write(&temp_path, format!("{}\n", String::from_utf8_lossy(&bytes)))
+        .with_context(|| format!("failed to write '{}'", temp_path.display()))?;
+    fs::rename(&temp_path, &path).with_context(|| {
+        format!(
+            "failed to move managed process record '{}' into place",
+            path.display()
+        )
+    })
 }
 
 fn spawn_redacted_log_pump<R>(reader: R, writer: File, redactions: Vec<String>)
@@ -1441,7 +1465,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        AgentService, MANAGED_PROCESS_RECONCILE_INTERVAL, handle_protocol_stream, serve_with_vsock,
+        AgentService, MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD,
+        MANAGED_PROCESS_RECONCILE_INTERVAL, handle_protocol_stream, serve_with_vsock,
     };
 
     fn wait_for(condition: impl Fn() -> bool) {
@@ -1459,8 +1484,12 @@ mod tests {
     }
 
     fn wait_for_background(condition: impl Fn() -> bool) {
+        wait_for_background_for(MANAGED_PROCESS_RECONCILE_INTERVAL * 12, condition);
+    }
+
+    fn wait_for_background_for(timeout: Duration, condition: impl Fn() -> bool) {
         let deadline = std::time::Instant::now()
-            .checked_add(MANAGED_PROCESS_RECONCILE_INTERVAL * 3)
+            .checked_add(timeout)
             .expect("deadline should compute");
         while std::time::Instant::now() < deadline {
             if condition() {
@@ -1985,7 +2014,7 @@ mod tests {
     }
 
     #[test]
-    fn background_supervisor_restarts_always_service_after_health_check_failure() {
+    fn background_supervisor_allows_always_service_to_recover_during_health_grace_period() {
         let temp = tempdir().expect("tempdir should exist");
         let guest_root = temp.path().join("guest");
         fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
@@ -2030,12 +2059,22 @@ mod tests {
         ));
 
         let runtime_record = guest_root.join("run/port/services/runtime/healthbox.json");
-        wait_for_background(|| {
-            let record = read_to_string(&runtime_record);
-            record.contains("health check failure") && !record.contains("\"restart_count\": 0")
-        });
+        wait_for(|| runtime_record.exists());
+        thread::sleep(MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD / 2);
+        let record = read_to_string(&runtime_record);
+        assert!(
+            record.contains("\"restart_count\": 0"),
+            "service restarted during grace period: {record}"
+        );
 
         fs::write(guest_root.join("workspace/healthy"), "ok").expect("healthy marker should write");
+        wait_for_background_for(
+            MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD + (MANAGED_PROCESS_RECONCILE_INTERVAL * 4),
+            || {
+                let record = read_to_string(&runtime_record);
+                record.contains("\"health_state\": \"healthy\"")
+            },
+        );
 
         let status = service.handle(RequestEnvelope {
             id: 17,
@@ -2054,8 +2093,83 @@ mod tests {
             other => panic!("unexpected health status response: {other:?}"),
         };
         assert_eq!(status.state, ManagedServiceRuntimeState::Running);
-        assert!(status.restart_count >= 1);
+        assert_eq!(status.restart_count, 0);
         assert_eq!(status.health_state, ServiceHealthState::Healthy);
+    }
+
+    #[test]
+    fn background_supervisor_restarts_always_service_after_sustained_health_check_failure() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let service = AgentService::new(guest_root.clone());
+
+        let start = service.handle(RequestEnvelope {
+            id: 18,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("healthbox"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "count_file=health-restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; trap 'exit 0' TERM; while :; do sleep 1; done",
+                        ),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::Always,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![
+                                String::from("/bin/sh"),
+                                String::from("-lc"),
+                                String::from("test -f healthy"),
+                            ],
+                        },
+                    },
+                },
+            }),
+        });
+        assert!(matches!(
+            start,
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(_)),
+                ..
+            }
+        ));
+
+        let runtime_record = guest_root.join("run/port/services/runtime/healthbox.json");
+        wait_for_background_for(
+            MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD + Duration::from_secs(2),
+            || {
+                let record = read_to_string(&runtime_record);
+                record.contains("health check failure") && !record.contains("\"restart_count\": 0")
+            },
+        );
+
+        let status = service.handle(RequestEnvelope {
+            id: 19,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("healthbox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected health status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert!(status.restart_count >= 1);
+        assert_eq!(status.health_state, ServiceHealthState::Unhealthy);
     }
 
     #[test]
