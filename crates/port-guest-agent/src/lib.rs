@@ -22,6 +22,8 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use vsock::{VMADDR_CID_ANY, VsockListener, VsockStream};
 
+const MANAGED_PROCESS_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
+
 #[derive(Debug, Default)]
 struct ManagedProcessSupervisor {
     processes: BTreeMap<String, ManagedProcessHandle>,
@@ -68,10 +70,9 @@ pub struct AgentService {
 impl AgentService {
     #[must_use]
     pub fn new(root: PathBuf) -> Self {
-        Self {
-            root,
-            supervisor: Arc::new(Mutex::new(ManagedProcessSupervisor::default())),
-        }
+        let supervisor = Arc::new(Mutex::new(ManagedProcessSupervisor::default()));
+        spawn_managed_process_reconciler(root.clone(), Arc::clone(&supervisor));
+        Self { root, supervisor }
     }
 
     pub fn handle(&self, request: RequestEnvelope) -> ResponseEnvelope {
@@ -486,6 +487,35 @@ fn managed_service_status(record: &ManagedProcessRecord) -> ManagedServiceStatus
     }
 }
 
+fn spawn_managed_process_reconciler(
+    root: PathBuf,
+    supervisor: Arc<Mutex<ManagedProcessSupervisor>>,
+) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(MANAGED_PROCESS_RECONCILE_INTERVAL);
+            let mut supervisor = match supervisor.lock() {
+                Ok(supervisor) => supervisor,
+                Err(_) => {
+                    eprintln!("port-guest-agent managed process supervisor lock was poisoned");
+                    continue;
+                }
+            };
+            for handle in supervisor.processes.values_mut() {
+                if let Err(error) = refresh_managed_process_handle(&root, handle) {
+                    eprintln!(
+                        "port-guest-agent failed to reconcile managed service '{}': {error}",
+                        handle.record.name
+                    );
+                }
+            }
+            supervisor
+                .processes
+                .retain(|_, handle| handle.record.state == ManagedServiceRuntimeState::Running);
+        }
+    });
+}
+
 fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle) -> Result<()> {
     if handle.record.state != ManagedServiceRuntimeState::Running {
         write_managed_process_record(root, &handle.record)?;
@@ -514,55 +544,14 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
         handle.record.health_detail = None;
         handle.record.detail = exit_detail;
         if should_restart_managed_service(handle.policy.restart, handle.record.state) {
-            handle.record.restart_count += 1;
-            match spawn_managed_process(
+            restart_managed_process(
                 root,
-                &handle.record.name,
-                &handle.command,
-                &handle.env,
-                &handle.cwd,
-            ) {
-                Ok(mut child) => {
-                    if let Some(status) = child
-                        .try_wait()
-                        .context("failed to inspect managed service state after restart")?
-                    {
-                        handle.record.pid = None;
-                        handle.record.exit_code = status.code();
-                        handle.record.state = if status.success() {
-                            ManagedServiceRuntimeState::Exited
-                        } else {
-                            ManagedServiceRuntimeState::Failed
-                        };
-                        handle.record.last_exit_code = handle.record.exit_code;
-                        handle.record.last_exit_detail = Some(format!(
-                            "managed process exited immediately after restart with code {}",
-                            handle.record.exit_code.unwrap_or(1)
-                        ));
-                        handle.record.detail = handle
-                            .record
-                            .last_exit_detail
-                            .clone()
-                            .unwrap_or_else(|| String::from("managed process restart failed"));
-                    } else {
-                        handle.record.state = ManagedServiceRuntimeState::Running;
-                        handle.record.pid = Some(child.id());
-                        handle.record.exit_code = None;
-                        handle.record.detail = format!(
-                            "managed process restarted after exit code {}",
-                            handle.record.last_exit_code.unwrap_or(1)
-                        );
-                        handle.child = child;
-                    }
-                }
-                Err(error) => {
-                    handle.record.state = ManagedServiceRuntimeState::Failed;
-                    handle.record.detail = format!(
-                        "managed process restart attempt {} failed: {error}",
-                        handle.record.restart_count
-                    );
-                }
-            }
+                handle,
+                format!(
+                    "managed process restarted after exit code {}",
+                    handle.record.last_exit_code.unwrap_or(1)
+                ),
+            )?;
         }
     }
 
@@ -570,6 +559,26 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
         let (health_state, health_detail) = evaluate_managed_service_health(handle)?;
         handle.record.health_state = health_state;
         handle.record.health_detail = health_detail;
+        if should_restart_unhealthy_managed_service(handle.policy.restart, health_state) {
+            let health_detail = handle
+                .record
+                .health_detail
+                .clone()
+                .unwrap_or_else(|| String::from("health check reported unhealthy"));
+            terminate_child(&mut handle.child)?;
+            let exit_status = wait_for_child_exit(&mut handle.child)?;
+            handle.record.pid = None;
+            handle.record.exit_code = exit_status.code();
+            handle.record.last_exit_code = exit_status.code();
+            handle.record.last_exit_detail = Some(format!(
+                "managed process restarted after health check failure: {health_detail}"
+            ));
+            restart_managed_process(
+                root,
+                handle,
+                format!("managed process restarted after health check failure: {health_detail}"),
+            )?;
+        }
     }
     write_managed_process_record(root, &handle.record)
 }
@@ -588,6 +597,70 @@ fn should_restart_managed_service(
             )
         }
     }
+}
+
+fn should_restart_unhealthy_managed_service(
+    policy: ServiceRestartPolicy,
+    health_state: ServiceHealthState,
+) -> bool {
+    matches!(policy, ServiceRestartPolicy::Always)
+        && matches!(health_state, ServiceHealthState::Unhealthy)
+}
+
+fn restart_managed_process(
+    root: &Path,
+    handle: &mut ManagedProcessHandle,
+    running_detail: String,
+) -> Result<()> {
+    handle.record.restart_count += 1;
+    match spawn_managed_process(
+        root,
+        &handle.record.name,
+        &handle.command,
+        &handle.env,
+        &handle.cwd,
+    ) {
+        Ok(mut child) => {
+            if let Some(status) = child
+                .try_wait()
+                .context("failed to inspect managed service state after restart")?
+            {
+                handle.record.pid = None;
+                handle.record.exit_code = status.code();
+                handle.record.state = if status.success() {
+                    ManagedServiceRuntimeState::Exited
+                } else {
+                    ManagedServiceRuntimeState::Failed
+                };
+                handle.record.last_exit_code = handle.record.exit_code;
+                handle.record.last_exit_detail = Some(format!(
+                    "managed process exited immediately after restart with code {}",
+                    handle.record.exit_code.unwrap_or(1)
+                ));
+                handle.record.detail = handle
+                    .record
+                    .last_exit_detail
+                    .clone()
+                    .unwrap_or_else(|| String::from("managed process restart failed"));
+            } else {
+                handle.record.state = ManagedServiceRuntimeState::Running;
+                handle.record.pid = Some(child.id());
+                handle.record.exit_code = None;
+                handle.record.health_state = ServiceHealthState::Unknown;
+                handle.record.health_detail = None;
+                handle.record.detail = running_detail;
+                handle.child = child;
+            }
+        }
+        Err(error) => {
+            handle.record.state = ManagedServiceRuntimeState::Failed;
+            handle.record.detail = format!(
+                "managed process restart attempt {} failed: {error}",
+                handle.record.restart_count
+            );
+        }
+    }
+    Ok(())
 }
 
 fn evaluate_managed_service_health(
@@ -1361,10 +1434,15 @@ mod tests {
         ManagedServiceRuntimeState, OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope,
         StreamKind, StreamRequestFrame, StreamResponseFrame, read_frame, write_frame,
     };
-    use port_model::{ServiceHealthState, ServicePolicy};
+    use port_model::{
+        ServiceHealthPolicy, ServiceHealthState, ServiceHealthcheck, ServicePolicy,
+        ServiceRestartPolicy,
+    };
     use tempfile::tempdir;
 
-    use super::{AgentService, handle_protocol_stream, serve_with_vsock};
+    use super::{
+        AgentService, MANAGED_PROCESS_RECONCILE_INTERVAL, handle_protocol_stream, serve_with_vsock,
+    };
 
     fn wait_for(condition: impl Fn() -> bool) {
         for _ in 0..100 {
@@ -1378,6 +1456,19 @@ mod tests {
 
     fn read_to_string(path: &Path) -> String {
         fs::read_to_string(path).unwrap_or_default()
+    }
+
+    fn wait_for_background(condition: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now()
+            .checked_add(MANAGED_PROCESS_RECONCILE_INTERVAL * 3)
+            .expect("deadline should compute");
+        while std::time::Instant::now() < deadline {
+            if condition() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        panic!("background condition did not become true in time");
     }
 
     #[test]
@@ -1826,6 +1917,145 @@ mod tests {
 
         wait_for(|| read_to_string(&runtime_record).contains("\"state\": \"stopped\""));
         assert!(!read_to_string(&runtime_record).contains("s3cr3t"));
+    }
+
+    #[test]
+    fn background_supervisor_restarts_failed_service_without_status_polling() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let service = AgentService::new(guest_root.clone());
+
+        let start = service.handle(RequestEnvelope {
+            id: 14,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("restartbox"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "count_file=restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; if [ \"$count\" -eq 1 ]; then sleep 0.2; exit 23; fi; trap 'exit 0' TERM; while :; do sleep 1; done",
+                        ),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::OnFailure,
+                        healthcheck: ServiceHealthcheck::default(),
+                    },
+                },
+            }),
+        });
+        assert!(matches!(
+            start,
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(_)),
+                ..
+            }
+        ));
+
+        let runtime_record = guest_root.join("run/port/services/runtime/restartbox.json");
+        wait_for_background(|| {
+            let record = read_to_string(&runtime_record);
+            record.contains("\"state\": \"running\"") && record.contains("\"restart_count\": 1")
+        });
+
+        let status = service.handle(RequestEnvelope {
+            id: 15,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("restartbox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected restart status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(status.restart_count, 1);
+        assert_eq!(status.last_exit_code, Some(23));
+    }
+
+    #[test]
+    fn background_supervisor_restarts_always_service_after_health_check_failure() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let service = AgentService::new(guest_root.clone());
+
+        let start = service.handle(RequestEnvelope {
+            id: 16,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("healthbox"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "count_file=health-restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; trap 'exit 0' TERM; while :; do sleep 1; done",
+                        ),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::Always,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![
+                                String::from("/bin/sh"),
+                                String::from("-lc"),
+                                String::from("test -f healthy"),
+                            ],
+                        },
+                    },
+                },
+            }),
+        });
+        assert!(matches!(
+            start,
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(_)),
+                ..
+            }
+        ));
+
+        let runtime_record = guest_root.join("run/port/services/runtime/healthbox.json");
+        wait_for_background(|| {
+            let record = read_to_string(&runtime_record);
+            record.contains("health check failure") && !record.contains("\"restart_count\": 0")
+        });
+
+        fs::write(guest_root.join("workspace/healthy"), "ok").expect("healthy marker should write");
+
+        let status = service.handle(RequestEnvelope {
+            id: 17,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("healthbox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected health status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert!(status.restart_count >= 1);
+        assert_eq!(status.health_state, ServiceHealthState::Healthy);
     }
 
     #[test]

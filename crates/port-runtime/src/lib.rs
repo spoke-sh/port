@@ -2834,18 +2834,16 @@ pub fn bootstrap_hosted_k3s_cluster(
         )
     })?;
 
-    execute_hosted_k3s_exec(
+    execute_hosted_k3s_managed_service_start(
         config,
         runtime_root,
         &primary_server,
-        k3s_bootstrap_command(
-            &cluster.version,
-            "server",
-            &primary_server_args,
-            Some("--cluster-init"),
-            None,
-            None,
-        ),
+        &cluster.host_group,
+        "server",
+        &primary_server_args,
+        Some("--cluster-init"),
+        None,
+        None,
         "bootstrap the K3s server",
         cluster_name,
     )?;
@@ -2870,18 +2868,16 @@ pub fn bootstrap_hosted_k3s_cluster(
                 server_machine, cluster_name
             )
         })?;
-        execute_hosted_k3s_exec(
+        execute_hosted_k3s_managed_service_start(
             config,
             runtime_root,
             server_machine,
-            k3s_bootstrap_command(
-                &cluster.version,
-                "server",
-                &server_args,
-                None,
-                Some(&cluster.api_endpoint),
-                Some(&join_token),
-            ),
+            &cluster.host_group,
+            "server",
+            &server_args,
+            None,
+            Some(&cluster.api_endpoint),
+            Some(&join_token),
             "join the K3s control-plane node",
             cluster_name,
         )?;
@@ -2905,18 +2901,16 @@ pub fn bootstrap_hosted_k3s_cluster(
                 worker_machine, cluster_name
             )
         })?;
-        execute_hosted_k3s_exec(
+        execute_hosted_k3s_managed_service_start(
             config,
             runtime_root,
             worker_machine,
-            k3s_bootstrap_command(
-                &cluster.version,
-                "agent",
-                &worker_args,
-                None,
-                Some(&cluster.api_endpoint),
-                Some(&join_token),
-            ),
+            &cluster.host_group,
+            "agent",
+            &worker_args,
+            None,
+            Some(&cluster.api_endpoint),
+            Some(&join_token),
             "join the K3s worker",
             cluster_name,
         )?;
@@ -3036,6 +3030,85 @@ fn execute_hosted_k3s_exec(
     })
 }
 
+fn execute_hosted_k3s_managed_service_start(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    host_group: &str,
+    role: &str,
+    args: &[String],
+    bootstrap_flag: Option<&str>,
+    server_url: Option<&str>,
+    join_token: Option<&str>,
+    action: &str,
+    cluster_name: &str,
+) -> Result<ManagedServiceStatus> {
+    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(2);
+    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+
+    let request = ServiceApplyRequest {
+        machine_name,
+        runtime_root,
+        name: hosted_k3s_service_name(role),
+        kind: ServiceKind::Service,
+        host_group: Some(host_group),
+        command: hosted_k3s_service_command(role, args, bootstrap_flag, server_url, join_token),
+        secret_bindings: Vec::new(),
+        policy: hosted_k3s_service_policy(role),
+    };
+    let started = Instant::now();
+    let last_error = loop {
+        match apply_machine_service(config, request.clone()) {
+            Ok(status) => {
+                return Ok(ManagedServiceStatus {
+                    name: status.name,
+                    kind: match status.kind {
+                        ServiceKind::Service => port_agent_protocol::ManagedServiceKind::Service,
+                        ServiceKind::Sandbox => port_agent_protocol::ManagedServiceKind::Sandbox,
+                    },
+                    state: match status.runtime.state {
+                        ServiceRuntimeState::Stored => ManagedServiceRuntimeState::Stored,
+                        ServiceRuntimeState::Starting => ManagedServiceRuntimeState::Starting,
+                        ServiceRuntimeState::Running => ManagedServiceRuntimeState::Running,
+                        ServiceRuntimeState::Exited => ManagedServiceRuntimeState::Exited,
+                        ServiceRuntimeState::Stopped => ManagedServiceRuntimeState::Stopped,
+                        ServiceRuntimeState::Failed => ManagedServiceRuntimeState::Failed,
+                    },
+                    restart_count: status.runtime.restart_count,
+                    pid: status.runtime.pid,
+                    exit_code: status.runtime.exit_code,
+                    last_exit_code: status.runtime.last_exit_code,
+                    last_exit_detail: status.runtime.last_exit_detail,
+                    health_state: status.runtime.health_state,
+                    health_detail: status.runtime.health_detail,
+                    stdout_path: status
+                        .runtime
+                        .stdout_path
+                        .map(|path| path.display().to_string()),
+                    stderr_path: status
+                        .runtime
+                        .stderr_path
+                        .map(|path| path.display().to_string()),
+                    detail: status.detail,
+                });
+            }
+            Err(error) => {
+                if started.elapsed() >= GUEST_RETRY_TIMEOUT {
+                    break error;
+                }
+                thread::sleep(GUEST_RETRY_INTERVAL);
+            }
+        }
+    };
+
+    Err(last_error).with_context(|| {
+        format!(
+            "failed to {} on machine '{}' for hosted k3s cluster '{}'",
+            action, machine_name, cluster_name
+        )
+    })
+}
+
 fn hosted_k3s_join_token_command() -> Vec<String> {
     vec![
         String::from("/bin/sh"),
@@ -3118,55 +3191,61 @@ fn hosted_k3s_effective_args(
     Ok(effective)
 }
 
-fn k3s_bootstrap_command(
-    version: &str,
+fn hosted_k3s_service_name(role: &str) -> &'static str {
+    match role {
+        "server" => "k3s-server",
+        "agent" => "k3s-agent",
+        _ => "k3s",
+    }
+}
+
+fn hosted_k3s_service_command(
     role: &str,
     args: &[String],
     bootstrap_flag: Option<&str>,
     server_url: Option<&str>,
     join_token: Option<&str>,
 ) -> Vec<String> {
-    let mut direct_exec = role.to_string();
+    let mut command = vec![String::from("/usr/bin/k3s"), role.to_string()];
     if let Some(bootstrap_flag) = bootstrap_flag {
-        direct_exec.push(' ');
-        direct_exec.push_str(bootstrap_flag);
+        command.push(bootstrap_flag.to_string());
     }
     if let Some(server_url) = server_url {
-        direct_exec.push_str(" --server ");
-        direct_exec.push_str(&shell_single_quote(server_url));
+        command.push(String::from("--server"));
+        command.push(server_url.to_string());
     }
     if let Some(join_token) = join_token {
-        direct_exec.push_str(" --token ");
-        direct_exec.push_str(&shell_single_quote(join_token));
+        command.push(String::from("--token"));
+        command.push(join_token.to_string());
     }
-    if !args.is_empty() {
-        direct_exec.push(' ');
-        direct_exec.push_str(&args.join(" "));
-    }
+    command.extend(args.iter().cloned());
+    command
+}
 
-    let mut install_env = format!("INSTALL_K3S_VERSION={} ", shell_single_quote(version));
-    if let Some(server_url) = server_url {
-        install_env.push_str(&format!("K3S_URL={} ", shell_single_quote(server_url)));
+fn hosted_k3s_service_policy(role: &str) -> ServicePolicy {
+    let _ = role;
+    ServicePolicy {
+        restart: ServiceRestartPolicy::Always,
+        healthcheck: ServiceHealthcheck {
+            policy: ServiceHealthPolicy::Command,
+            command: vec![
+                String::from("/usr/bin/k3s"),
+                String::from("crictl"),
+                String::from("info"),
+            ],
+        },
     }
-    if let Some(join_token) = join_token {
-        install_env.push_str(&format!("K3S_TOKEN={} ", shell_single_quote(join_token)));
-    }
-    install_env.push_str(&format!(
-        "INSTALL_K3S_EXEC={}",
-        shell_single_quote(&direct_exec)
-    ));
+}
 
-    let pid_path = format!("/run/port/k3s-{role}.pid");
-    let log_path = format!("/var/log/k3s-{role}.log");
-    let script = format!(
-        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path={pid_path}; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" {direct_exec} ) >{log_path} 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; {install_env} sh \"$installer\"",
-        pid_path = shell_single_quote(&pid_path),
-        direct_exec = direct_exec,
-        log_path = shell_single_quote(&log_path),
-        install_env = install_env
-    );
-
-    vec![String::from("/bin/sh"), String::from("-lc"), script]
+#[cfg(test)]
+fn k3s_bootstrap_command(
+    role: &str,
+    args: &[String],
+    bootstrap_flag: Option<&str>,
+    server_url: Option<&str>,
+    join_token: Option<&str>,
+) -> Vec<String> {
+    hosted_k3s_service_command(role, args, bootstrap_flag, server_url, join_token)
 }
 
 fn shell_single_quote(value: &str) -> String {
@@ -11272,14 +11351,10 @@ impl GuestForwardSession {
                     let target = self.target.clone();
                     let tx = result_tx.clone();
                     thread::spawn(move || {
-                        let ok = match proxy_guest_forward_connection(
-                            endpoint, target, inbound,
-                        ) {
+                        let ok = match proxy_guest_forward_connection(endpoint, target, inbound) {
                             Ok(()) => true,
                             Err(error) => {
-                                eprintln!(
-                                    "port guest forward connection failed: {error}"
-                                );
+                                eprintln!("port guest forward connection failed: {error}");
                                 false
                             }
                         };
@@ -12653,13 +12728,13 @@ mod tests {
         collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
         down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
         hosted_k3s_cluster_access, hosted_k3s_join_token_command, hosted_k3s_kubeconfig_command,
-        hosted_k3s_visibility_command, hosted_placeholder_runtime_root, k3s_bootstrap_command,
-        launch_local_machine, list_artifacts, list_machine_secrets, list_machine_services,
-        list_machines, local_cluster_kubeconfig, local_cluster_status, machine_monitor,
-        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
-        read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
-        resolve_artifact_script_path, resolve_artifact_store_contract,
+        hosted_k3s_service_policy, hosted_k3s_visibility_command, hosted_placeholder_runtime_root,
+        k3s_bootstrap_command, launch_local_machine, list_artifacts, list_machine_secrets,
+        list_machine_services, list_machines, local_cluster_kubeconfig, local_cluster_status,
+        machine_monitor, machine_service_status, machine_status, machine_top, path_check,
+        prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
+        put_machine_secret, read_json_file, read_pid_file, render_hosted_route_context, repo_root,
+        resolve_artifact_metadata, resolve_artifact_script_path, resolve_artifact_store_contract,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
         stage_local_cluster_bootstrap, stop_machine, stop_machine_service, sudo_caller_ids,
@@ -12667,8 +12742,10 @@ mod tests {
     };
     use port_agent_protocol::{
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
-        LogsResult, OperationResult, PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind,
-        StreamResponseFrame, read_frame, write_frame,
+        LogsResult, ManagedServiceKind, ManagedServiceOperation, ManagedServiceRequest,
+        ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult,
+        PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind, StreamResponseFrame, read_frame,
+        write_frame,
     };
     use port_guest_agent::serve as serve_guest_agent;
     use port_hosted_protocol::{
@@ -14680,9 +14757,21 @@ exec sleep 30
         .expect("manifest should write");
     }
 
-    fn spawn_hosted_exec_sequence_server(
+    enum HostedGuestExpectedOperation {
+        Exec {
+            command: Vec<String>,
+            stdout: String,
+        },
+        ManagedServiceStart {
+            name: String,
+            command: Vec<String>,
+            policy: ServicePolicy,
+        },
+    }
+
+    fn spawn_hosted_guest_sequence_server(
         paths: RuntimePaths,
-        expected: Vec<(Vec<String>, String)>,
+        expected: Vec<HostedGuestExpectedOperation>,
     ) -> thread::JoinHandle<()> {
         thread::spawn(move || {
             for _ in 0..1000 {
@@ -14700,7 +14789,7 @@ exec sleep 30
             let listener =
                 UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
 
-            for (expected_command, stdout) in expected {
+            for expected_operation in expected {
                 let (mut stream, _) = listener
                     .accept()
                     .expect("should accept hosted guest transport");
@@ -14718,22 +14807,82 @@ exec sleep 30
                 stream.flush().expect("handshake should flush");
                 let request: RequestEnvelope =
                     read_frame(&mut reader).expect("request should decode");
-                match request.operation {
-                    GuestOperation::Exec(request) => assert_eq!(request.command, expected_command),
-                    other => panic!("unexpected hosted guest operation: {other:?}"),
-                }
-                write_frame(
-                    &mut stream,
-                    &ResponseEnvelope::Completed {
-                        id: request.id,
-                        exit_code: 0,
-                        result: OperationResult::Exec(ExecResult {
-                            stdout,
-                            stderr: String::new(),
+                let request_id = request.id;
+                match (expected_operation, request.operation) {
+                    (
+                        HostedGuestExpectedOperation::Exec { command, stdout },
+                        GuestOperation::Exec(exec_request),
+                    ) => {
+                        assert_eq!(exec_request.command, command);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::Exec(ExecResult {
+                                    stdout,
+                                    stderr: String::new(),
+                                }),
+                            },
+                        )
+                        .expect("response should encode");
+                    }
+                    (
+                        HostedGuestExpectedOperation::ManagedServiceStart {
+                            name,
+                            command,
+                            policy,
+                        },
+                        GuestOperation::ManagedService(ManagedServiceRequest {
+                            operation:
+                                ManagedServiceOperation::Start {
+                                    name: request_name,
+                                    kind,
+                                    command: request_command,
+                                    env,
+                                    cwd,
+                                    policy: request_policy,
+                                },
                         }),
-                    },
-                )
-                .expect("response should encode");
+                    ) => {
+                        assert_eq!(request_name, name);
+                        assert_eq!(kind, ManagedServiceKind::Service);
+                        assert_eq!(request_command, command);
+                        assert!(env.is_empty());
+                        assert_eq!(cwd, None);
+                        assert_eq!(request_policy, policy);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::ManagedService(
+                                    ManagedServiceResult::Status(ManagedServiceStatus {
+                                        name: request_name.clone(),
+                                        kind,
+                                        state: ManagedServiceRuntimeState::Running,
+                                        restart_count: 0,
+                                        pid: Some(4242),
+                                        exit_code: None,
+                                        last_exit_code: None,
+                                        last_exit_detail: None,
+                                        health_state: ServiceHealthState::Unknown,
+                                        health_detail: None,
+                                        stdout_path: Some(format!(
+                                            "/run/port/services/{request_name}.stdout.log"
+                                        )),
+                                        stderr_path: Some(format!(
+                                            "/run/port/services/{request_name}.stderr.log"
+                                        )),
+                                        detail: String::from("managed process is running"),
+                                    }),
+                                ),
+                            },
+                        )
+                        .expect("response should encode");
+                    }
+                    (_, other) => panic!("unexpected hosted guest operation: {other:?}"),
+                }
             }
         })
     }
@@ -17061,12 +17210,12 @@ exec sleep 30
             &config.nodes["aws-linux-node"].runtime_root,
             "cloud-aws-worker",
         );
-        let server_guest = spawn_hosted_exec_sequence_server(
+        let server_guest = spawn_hosted_guest_sequence_server(
             worker_paths,
             vec![
-                (
-                    k3s_bootstrap_command(
-                        "v1.32.0+k3s1",
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
                         "server",
                         &[
                             String::from("--disable=traefik"),
@@ -17077,19 +17226,19 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    String::from("server bootstrapped\n"),
-                ),
-                (
-                    hosted_k3s_join_token_command(),
-                    String::from("demo-join-token\n"),
-                ),
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
             ],
         );
-        let worker_guest = spawn_hosted_exec_sequence_server(
+        let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![(
-                k3s_bootstrap_command(
-                    "v1.32.0+k3s1",
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
                     "agent",
                     &[
                         String::from("--node-label=role=worker"),
@@ -17100,8 +17249,8 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                String::from("worker joined\n"),
-            )],
+                policy: hosted_k3s_service_policy("agent"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -17181,12 +17330,12 @@ exec sleep 30
             &config.nodes["aws-linux-node"].runtime_root,
             "cloud-aws-worker",
         );
-        let server_guest = spawn_hosted_exec_sequence_server(
+        let server_guest = spawn_hosted_guest_sequence_server(
             worker_paths,
             vec![
-                (
-                    k3s_bootstrap_command(
-                        "v1.32.0+k3s1",
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
                         "server",
                         &[
                             String::from("--disable=traefik"),
@@ -17198,19 +17347,19 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    String::from("server bootstrapped\n"),
-                ),
-                (
-                    hosted_k3s_join_token_command(),
-                    String::from("demo-join-token\n"),
-                ),
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
             ],
         );
-        let worker_guest = spawn_hosted_exec_sequence_server(
+        let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![(
-                k3s_bootstrap_command(
-                    "v1.32.0+k3s1",
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
                     "agent",
                     &[
                         String::from("--node-label=role=worker"),
@@ -17222,8 +17371,8 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                String::from("worker joined\n"),
-            )],
+                policy: hosted_k3s_service_policy("agent"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -17266,12 +17415,12 @@ exec sleep 30
             &config.nodes["aws-linux-node"].runtime_root,
             "cloud-aws-worker",
         );
-        let server_guest = spawn_hosted_exec_sequence_server(
+        let server_guest = spawn_hosted_guest_sequence_server(
             worker_paths,
             vec![
-                (
-                    k3s_bootstrap_command(
-                        "v1.32.0+k3s1",
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
                         "server",
                         &[
                             String::from("--disable=traefik"),
@@ -17282,31 +17431,31 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    String::from("server bootstrapped\n"),
-                ),
-                (
-                    hosted_k3s_join_token_command(),
-                    String::from("demo-join-token\n"),
-                ),
-                (
-                    hosted_k3s_kubeconfig_command(),
-                    String::from(
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_kubeconfig_command(),
+                    stdout: String::from(
                         "apiVersion: v1\nclusters:\n- cluster:\n    server: https://demo-k3s.internal:6443\n",
                     ),
-                ),
-                (
-                    hosted_k3s_visibility_command(),
-                    String::from(
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_visibility_command(),
+                    stdout: String::from(
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
-                ),
+                },
             ],
         );
-        let worker_guest = spawn_hosted_exec_sequence_server(
+        let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![(
-                k3s_bootstrap_command(
-                    "v1.32.0+k3s1",
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
                     "agent",
                     &[
                         String::from("--node-label=role=worker"),
@@ -17317,8 +17466,8 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                String::from("worker joined\n"),
-            )],
+                policy: hosted_k3s_service_policy("agent"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -17517,12 +17666,12 @@ exec sleep 30
             &config.nodes["aws-linux-node"].runtime_root,
             "cloud-aws-worker",
         );
-        let server_guest = spawn_hosted_exec_sequence_server(
+        let server_guest = spawn_hosted_guest_sequence_server(
             worker_paths,
             vec![
-                (
-                    k3s_bootstrap_command(
-                        "v1.32.0+k3s1",
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
                         "server",
                         &[
                             String::from("--disable=traefik"),
@@ -17533,31 +17682,31 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    String::from("server bootstrapped\n"),
-                ),
-                (
-                    hosted_k3s_join_token_command(),
-                    String::from("demo-join-token\n"),
-                ),
-                (
-                    hosted_k3s_kubeconfig_command(),
-                    String::from(
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_kubeconfig_command(),
+                    stdout: String::from(
                         "apiVersion: v1\nclusters:\n- cluster:\n    server: https://demo-k3s.internal:6443\n",
                     ),
-                ),
-                (
-                    hosted_k3s_visibility_command(),
-                    String::from(
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_visibility_command(),
+                    stdout: String::from(
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
-                ),
+                },
             ],
         );
-        let worker_guest = spawn_hosted_exec_sequence_server(
+        let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![(
-                k3s_bootstrap_command(
-                    "v1.32.0+k3s1",
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
                     "agent",
                     &[
                         String::from("--node-label=role=worker"),
@@ -17568,8 +17717,8 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                String::from("worker joined\n"),
-            )],
+                policy: hosted_k3s_service_policy("agent"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -18126,8 +18275,9 @@ exec sleep 30
             response.result.manifest_path,
             paths.runtime_dir.join("forwards/demo-web.json")
         );
-        let forward_config = fs::read_to_string(paths.runtime_dir.join("forwards/demo-web.config.toml"))
-            .expect("detached forward config should exist");
+        let forward_config =
+            fs::read_to_string(paths.runtime_dir.join("forwards/demo-web.config.toml"))
+                .expect("detached forward config should exist");
         assert!(
             !forward_config.contains("[k3s_clusters.demo]"),
             "{forward_config}"
