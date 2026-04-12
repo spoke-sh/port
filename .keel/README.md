@@ -191,11 +191,11 @@
 |--------|--------|
 | [Prove Runtime Class Identity And Guard Rails](epics/VGYFpf9pg/voyages/VGYQ50GrI/) | done |
 
-### [Ship Multi-Host Control Plane Placement For Hosted AWS PVM Clusters](epics/VGYFpfUph/) (active)
+### [Ship Multi-Host Control Plane Placement For Hosted AWS PVM Clusters](epics/VGYFpfUph/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Define Real-HA Control Plane Placement Truth](epics/VGYFpfUph/voyages/VGafx2cmq/) | in-progress |
+| [Define Real-HA Control Plane Placement Truth](epics/VGYFpfUph/voyages/VGafx2cmq/) | done |
 
 ### [Ship Stable HA API Endpoint And Failover Proofs For Hosted AWS PVM](epics/VGYFpfmpi/) (active)
 
