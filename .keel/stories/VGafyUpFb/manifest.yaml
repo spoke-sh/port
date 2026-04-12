@@ -1,0 +1,9 @@
+id: VGafyUpFb
+git_sha: 9f7595963b5d7a8d320aabfb2ec41e2f42c4d6c6
+evidence:
+  EVIDENCE/ac-1.bootstrap.log: 6f4b2c842658354c46415a350024e6e00de7238c59d7710495aa71e2d1933ce1
+  EVIDENCE/ac-2.access.log: 0e2fc1ace03b3bfcd81774da9ca8c2eb62bca8406602ee33957e1fa00a9f6809
+  EVIDENCE/ac-3.ha-eligible.log: b906eadef5901a212f4857dbdc886b0e678930dc59254391a20c5f29256fa259
+  EVIDENCE/ac-4.cli-lifecycle.log: 9ba1f8326ca79907e799ea936a9aea9c8a3f0e6a1b16c9cbcd6843dc15634aac
+  EVIDENCE/ac-5.cli-status.log: b15d454d8f766580cda9a4c6ae44f30e4af4eb629341d3ea129e937d74dbab22
+  EVIDENCE/ac-6.fmt.log: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855

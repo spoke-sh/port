@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGafx2vn4
-status: planned
+status: in-progress
 epic: VGYFpfmpi
 created_at: 2026-04-12T08:22:54
 # authored
 title: Define Stable Endpoint Handoff And Failover Proof
 index: 1
 updated_at: 2026-04-12T08:28:05
+started_at: 2026-04-12T09:11:27
 ---
 
 # Define Stable Endpoint Handoff And Failover Proof
@@ -26,10 +27,10 @@ updated_at: 2026-04-12T08:28:05
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Model Stable HA Endpoint Handoff In Cluster Output](../../../../stories/VGafyUpFb/README.md) | feat | backlog |
+| [Model Stable HA Endpoint Handoff In Cluster Output](../../../../stories/VGafyUpFb/README.md) | feat | done |
 | [Capture Hosted AWS PVM Failover Proof For The Stable Endpoint](../../../../stories/VGafyVDGA/README.md) | feat | backlog |
 <!-- END GENERATED -->

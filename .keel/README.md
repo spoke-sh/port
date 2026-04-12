@@ -201,7 +201,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Define Stable Endpoint Handoff And Failover Proof](epics/VGYFpfmpi/voyages/VGafx2vn4/) | planned |
+| [Define Stable Endpoint Handoff And Failover Proof](epics/VGYFpfmpi/voyages/VGafx2vn4/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

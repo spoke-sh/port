@@ -1228,6 +1228,11 @@ fn run_cluster(
                         println!("host group: {}", result.host_group);
                         println!("api endpoint: {}", result.api_endpoint);
                         println!(
+                            "stable-endpoint posture: {}",
+                            result.stable_endpoint_posture
+                        );
+                        println!("stable-endpoint detail: {}", result.stable_endpoint_detail);
+                        println!(
                             "control-plane machines: {}",
                             result.server_machines.join(" ")
                         );
@@ -1392,6 +1397,8 @@ fn run_cluster(
                     "server_machines": result.server_machines,
                     "worker_machines": result.worker_machines,
                     "api_endpoint": result.api_endpoint,
+                    "stable_endpoint_posture": result.stable_endpoint_posture,
+                    "stable_endpoint_detail": result.stable_endpoint_detail,
                     "kubeconfig_surface": result.kubeconfig_surface,
                     "visibility_surface": result.visibility_surface,
                     "boundary_notes": result.boundary_notes,
@@ -1403,6 +1410,11 @@ fn run_cluster(
                         println!("control plane: {}", result.control_plane);
                         println!("host group: {}", result.host_group);
                         println!("api endpoint: {}", result.api_endpoint);
+                        println!(
+                            "stable-endpoint posture: {}",
+                            result.stable_endpoint_posture
+                        );
+                        println!("stable-endpoint detail: {}", result.stable_endpoint_detail);
                         println!(
                             "control-plane machines: {}",
                             result.server_machines.join(" ")
@@ -1669,6 +1681,11 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
         }
     );
     println!("api endpoint: {}", report.api_endpoint);
+    println!(
+        "stable-endpoint posture: {}",
+        report.stable_endpoint_posture
+    );
+    println!("stable-endpoint detail: {}", report.stable_endpoint_detail);
     println!("real-ha status: {}", report.ha_status);
     println!("real-ha detail: {}", report.ha_status_detail);
     for placement in &report.control_plane_placements {

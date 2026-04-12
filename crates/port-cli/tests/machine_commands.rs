@@ -11,13 +11,14 @@ use std::thread;
 use std::time::Duration;
 
 use port_agent_protocol::{
-    ExecResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope, read_frame,
-    write_frame,
+    ExecResult, GuestOperation, ManagedServiceKind, ManagedServiceOperation, ManagedServiceRequest,
+    ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult,
+    RequestEnvelope, ResponseEnvelope, read_frame, write_frame,
 };
 use port_model::{
     ClusterProvider, ExecutionSubstrate, HostConnection, HostProvider, MachineArchitecture,
     MachineVolumeBackend, MachineVolumePersistence, MachineVolumeSpec, PortConfig, ProtectionMode,
-    PvmCapabilityState,
+    PvmCapabilityState, ServiceHealthState,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -361,6 +362,25 @@ fn hosted_k3s_config(runtime_root: &Path) -> PortConfig {
     config
 }
 
+fn hosted_single_server_k3s_config(runtime_root: &Path) -> PortConfig {
+    let mut config = hosted_config(runtime_root);
+    config.k3s_clusters.insert(
+        String::from("demo"),
+        port_model::K3sClusterSpec {
+            control_plane: String::from("demo"),
+            host_group: String::from("aws-builders"),
+            server_machines: vec![String::from("cloud-aws")],
+            worker_machines: Vec::new(),
+            api_endpoint: String::from("https://demo-k3s.internal:6443"),
+            control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
+            version: String::from("v1.32.0+k3s1"),
+            server_args: vec![String::from("--disable=traefik")],
+            worker_args: Vec::new(),
+        },
+    );
+    config
+}
+
 fn hosted_multi_node_config(runtime_root: &Path, alternate_runtime_root: &Path) -> PortConfig {
     let mut config = hosted_config(runtime_root);
     let mut alternate = config
@@ -559,9 +579,20 @@ fn write_registered_node_state(
     .expect("registered node state should write");
 }
 
-fn spawn_hosted_exec_sequence_server(
+enum HostedGuestExpectedOperation {
+    Exec {
+        command: Vec<String>,
+        stdout: String,
+    },
+    ManagedServiceStart {
+        name: String,
+        command: Vec<String>,
+    },
+}
+
+fn spawn_hosted_guest_sequence_server(
     paths: port_runtime::RuntimePaths,
-    expected: Vec<(Vec<String>, String)>,
+    expected: Vec<HostedGuestExpectedOperation>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         for _ in 0..1000 {
@@ -579,7 +610,7 @@ fn spawn_hosted_exec_sequence_server(
         let listener =
             UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
 
-        for (expected_command, stdout) in expected {
+        for expected_operation in expected {
             let (mut stream, _) = listener
                 .accept()
                 .expect("should accept hosted guest transport");
@@ -596,24 +627,92 @@ fn spawn_hosted_exec_sequence_server(
             stream.write_all(b"OK\n").expect("handshake should ack");
             stream.flush().expect("handshake should flush");
             let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
-            match request.operation {
-                GuestOperation::Exec(request) => assert_eq!(request.command, expected_command),
-                other => panic!("unexpected hosted guest operation: {other:?}"),
-            }
-            write_frame(
-                &mut stream,
-                &ResponseEnvelope::Completed {
-                    id: request.id,
-                    exit_code: 0,
-                    result: OperationResult::Exec(ExecResult {
-                        stdout,
-                        stderr: String::new(),
+            let request_id = request.id;
+            match (expected_operation, request.operation) {
+                (
+                    HostedGuestExpectedOperation::Exec { command, stdout },
+                    GuestOperation::Exec(request),
+                ) => {
+                    assert_eq!(request.command, command);
+                    write_frame(
+                        &mut stream,
+                        &ResponseEnvelope::Completed {
+                            id: request_id,
+                            exit_code: 0,
+                            result: OperationResult::Exec(ExecResult {
+                                stdout,
+                                stderr: String::new(),
+                            }),
+                        },
+                    )
+                    .expect("response should encode");
+                }
+                (
+                    HostedGuestExpectedOperation::ManagedServiceStart { name, command },
+                    GuestOperation::ManagedService(ManagedServiceRequest {
+                        operation:
+                            ManagedServiceOperation::Start {
+                                name: request_name,
+                                kind,
+                                command: request_command,
+                                env,
+                                cwd,
+                                policy: _,
+                            },
                     }),
-                },
-            )
-            .expect("response should encode");
+                ) => {
+                    assert_eq!(request_name, name);
+                    assert_eq!(kind, ManagedServiceKind::Service);
+                    assert_eq!(request_command, command);
+                    assert!(env.is_empty());
+                    assert_eq!(cwd, None);
+                    write_frame(
+                        &mut stream,
+                        &ResponseEnvelope::Completed {
+                            id: request_id,
+                            exit_code: 0,
+                            result: OperationResult::ManagedService(ManagedServiceResult::Status(
+                                ManagedServiceStatus {
+                                    name: request_name.clone(),
+                                    kind,
+                                    state: ManagedServiceRuntimeState::Running,
+                                    restart_count: 0,
+                                    pid: Some(4242),
+                                    exit_code: None,
+                                    last_exit_code: None,
+                                    last_exit_detail: None,
+                                    health_state: ServiceHealthState::Unknown,
+                                    health_detail: None,
+                                    stdout_path: Some(format!(
+                                        "/run/port/services/{request_name}.stdout.log"
+                                    )),
+                                    stderr_path: Some(format!(
+                                        "/run/port/services/{request_name}.stderr.log"
+                                    )),
+                                    detail: String::from("managed process is running"),
+                                },
+                            )),
+                        },
+                    )
+                    .expect("response should encode");
+                }
+                (_, other) => panic!("unexpected hosted guest operation: {other:?}"),
+            }
         }
     })
+}
+
+fn spawn_hosted_exec_sequence_server(
+    paths: port_runtime::RuntimePaths,
+    expected: Vec<(Vec<String>, String)>,
+) -> thread::JoinHandle<()> {
+    spawn_hosted_guest_sequence_server(
+        paths,
+        expected
+            .into_iter()
+            .map(|(command, stdout)| HostedGuestExpectedOperation::Exec { command, stdout })
+            .collect(),
+    )
 }
 
 fn write_forward_manifest(
@@ -970,7 +1069,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     let node_addr = reserve_addr();
     let control_plane_addr = reserve_addr();
 
-    let mut server_config = hosted_k3s_config(&hosted_runtime_root);
+    let mut server_config = hosted_single_server_k3s_config(&hosted_runtime_root);
     server_config
         .control_planes
         .get_mut("demo")
@@ -1000,7 +1099,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     let show_stdout = String::from_utf8_lossy(&show.stdout);
     assert!(show_stdout.contains("provider: hosted"));
     assert!(show_stdout.contains("control-plane scheduler: spread"));
-    assert!(show_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(show_stdout.contains("control-plane machines: cloud-aws"));
     assert!(show_stdout.contains("worker machines: none"));
     assert!(show_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
     assert!(show_stdout.contains("real HA depends on at least three control-plane microVMs"));
@@ -1016,119 +1115,98 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     let list_stdout = String::from_utf8_lossy(&list.stdout);
     assert!(list_stdout.contains("provider=hosted"));
     assert!(list_stdout.contains("scheduler=spread"));
-    assert!(list_stdout.contains("control-planes=2"));
+    assert!(list_stdout.contains("control-planes=1"));
     assert!(list_stdout.contains("api-endpoint=https://demo-k3s.internal:6443"));
 
     let fake_binary = write_fake_firecracker_binary(temp.path(), "firecracker");
     write_fake_network_binaries(temp.path());
     let joined_path = prepend_path_env(temp.path());
-    let second_node_addr = reserve_addr();
     let _servers = spawn_hosted_server_harness(
         &server_config_path,
         &node_addr,
         &control_plane_addr,
         &[("PATH", joined_path.as_path())],
     );
-    let mut second_node_command = Command::new(port_bin());
-    second_node_command
-        .env("PORT_DEMO_TOKEN", "demo-token")
-        .env("PATH", &joined_path)
-        .arg("--config")
-        .arg(&server_config_path)
-        .arg("node-agent")
-        .arg("serve")
-        .arg("--node")
-        .arg("aws-linux-node-b")
-        .arg("--bind")
-        .arg(&second_node_addr)
-        .arg("--token")
-        .arg("node-secret")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let _second_node = ChildGuard::spawn("node-agent-b", second_node_command);
-    wait_for_tcp(&second_node_addr);
+    write_registered_node_state(
+        "demo",
+        BTreeMap::from([(
+            String::from("aws-linux-node"),
+            port_model::HostedNodeRegistration {
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+                registered_at: 1,
+                refreshed_at: 1,
+                ttl_seconds: 30,
+            },
+        )]),
+    );
 
     let server_a = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
-    let server_b = port_runtime::RuntimePaths::for_machine(
-        &server_config.nodes["aws-linux-node-b"].runtime_root,
-        "cloud-aws-b",
-    );
-    let server_a_guest = spawn_hosted_exec_sequence_server(
+    let server_a_guest = spawn_hosted_guest_sequence_server(
         server_a,
         vec![
-            (
-                vec![
+            HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-server"),
+                command: vec![
+                    String::from("/usr/bin/k3s"),
+                    String::from("server"),
+                    String::from("--cluster-init"),
+                    String::from("--disable=traefik"),
+                    String::from("--node-name"),
+                    String::from("cloud-aws"),
+                ],
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from(
-                        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-server.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" server --cluster-init --disable=traefik ) >'/var/log/k3s-server.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --cluster-init --disable=traefik' sh \"$installer\"",
+                        "cat /var/lib/rancher/k3s/server/token 2>/dev/null || cat /var/lib/rancher/k3s/server/node-token",
                     ),
                 ],
-                String::from("server bootstrapped\n"),
-            ),
-            (
-                vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from("cat /var/lib/rancher/k3s/server/node-token"),
-                ],
-                String::from("demo-join-token\n"),
-            ),
-            (
-                vec![
+                stdout: String::from("demo-join-token\n"),
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("cat /etc/rancher/k3s/k3s.yaml"),
                 ],
-                String::from(
+                stdout: String::from(
                     "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
                 ),
-            ),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
-                String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                stdout: String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
-            ),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("cat /etc/rancher/k3s/k3s.yaml"),
                 ],
-                String::from(
+                stdout: String::from(
                     "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
                 ),
-            ),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
-                String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                stdout: String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
-            ),
+            },
         ],
-    );
-    let server_b_guest = spawn_hosted_exec_sequence_server(
-        server_b,
-        vec![(
-            vec![
-                String::from("/bin/sh"),
-                String::from("-lc"),
-                String::from(
-                    "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-server.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" server --server 'https://demo-k3s.internal:6443' --token 'demo-join-token' --disable=traefik ) >'/var/log/k3s-server.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://demo-k3s.internal:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='server --server '\\''https://demo-k3s.internal:6443'\\'' --token '\\''demo-join-token'\\'' --disable=traefik' sh \"$installer\"",
-                ),
-            ],
-            String::from("server joined\n"),
-        )],
     );
 
     let up = Command::new(port_bin())
@@ -1145,11 +1223,16 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
         .expect("hosted cluster up command should run");
     assert!(up.status.success(), "{up:?}");
     let up_stdout = String::from_utf8_lossy(&up.stdout);
-    assert!(up_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(up_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+    assert!(up_stdout.contains("stable-endpoint posture: manual-rewrite-required"));
+    assert!(
+        up_stdout.contains(
+            "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
+        )
+    );
+    assert!(up_stdout.contains("control-plane machines: cloud-aws"));
     assert!(up_stdout.contains("worker machines: none"));
     assert!(up_stdout.contains("control-plane launch: cloud-aws"));
-    assert!(up_stdout.contains("control-plane launch: cloud-aws-b"));
-    assert!(up_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
 
     let status = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")
@@ -1165,7 +1248,14 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
         .expect("hosted cluster status command should run");
     assert!(status.status.success(), "{status:?}");
     let status_stdout = String::from_utf8_lossy(&status.stdout);
-    assert!(status_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(status_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+    assert!(status_stdout.contains("stable-endpoint posture: manual-rewrite-required"));
+    assert!(
+        status_stdout.contains(
+            "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
+        )
+    );
+    assert!(status_stdout.contains("control-plane machines: cloud-aws"));
     assert!(status_stdout.contains("visibility output:"));
     assert!(status_stdout.contains("route: role=control-plane machine=cloud-aws"));
 
@@ -1184,6 +1274,12 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     assert!(kubeconfig.status.success(), "{kubeconfig:?}");
     let kubeconfig_stdout = String::from_utf8_lossy(&kubeconfig.stdout);
     assert!(kubeconfig_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+    assert!(kubeconfig_stdout.contains("stable-endpoint posture: manual-rewrite-required"));
+    assert!(
+        kubeconfig_stdout.contains(
+            "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
+        )
+    );
     assert!(kubeconfig_stdout.contains("server: https://demo-k3s.internal:6443"));
 
     let down = Command::new(port_bin())
@@ -1201,14 +1297,10 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
     assert!(down.status.success(), "{down:?}");
     let down_stdout = String::from_utf8_lossy(&down.stdout);
     assert!(down_stdout.contains("control-plane stop: cloud-aws"));
-    assert!(down_stdout.contains("control-plane stop: cloud-aws-b"));
 
     server_a_guest
         .join()
         .expect("primary control-plane guest thread should complete");
-    server_b_guest
-        .join()
-        .expect("secondary control-plane guest thread should complete");
 
     drop(_servers);
     cleanup_hosted_registration_state();
@@ -1306,6 +1398,26 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
             ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("cat /etc/rancher/k3s/k3s.yaml"),
+                ],
+                String::from(
+                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                ),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("k3s kubectl get nodes -o wide"),
+                ],
+                String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                ),
+            ),
         ],
     );
 
@@ -1323,7 +1435,14 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
         .expect("hosted cluster status command should run");
     assert!(status.status.success(), "{status:?}");
     let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(status_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
     assert!(status_stdout.contains("control-plane machines: cloud-aws cloud-aws-b"));
+    assert!(status_stdout.contains("stable-endpoint posture: manual-rewrite-required"));
+    assert!(
+        status_stdout.contains(
+            "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
+        )
+    );
     assert!(status_stdout.contains("real-ha status: non-ha-topology"));
     assert!(
         status_stdout
@@ -1332,6 +1451,29 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
     );
     assert!(status_stdout.contains("control-plane placement: cloud-aws -> aws-linux-node"));
     assert!(status_stdout.contains("control-plane placement: cloud-aws-b -> aws-linux-node-b"));
+
+    let kubeconfig = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("kubeconfig")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .output()
+        .expect("hosted cluster kubeconfig command should run");
+    assert!(kubeconfig.status.success(), "{kubeconfig:?}");
+    let kubeconfig_stdout = String::from_utf8_lossy(&kubeconfig.stdout);
+    assert!(kubeconfig_stdout.contains("api endpoint: https://demo-k3s.internal:6443"));
+    assert!(kubeconfig_stdout.contains("stable-endpoint posture: manual-rewrite-required"));
+    assert!(
+        kubeconfig_stdout.contains(
+            "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
+        )
+    );
+    assert!(kubeconfig_stdout.contains("server: https://demo-k3s.internal:6443"));
 
     server_a_guest
         .join()

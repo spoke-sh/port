@@ -242,6 +242,8 @@ pub struct HostedK3sBootstrapResult {
     pub server_machines: Vec<String>,
     pub worker_machines: Vec<String>,
     pub api_endpoint: String,
+    pub stable_endpoint_posture: HostedK3sStableEndpointPosture,
+    pub stable_endpoint_detail: String,
     pub version: String,
     pub join_token: String,
     pub server_launches: Vec<LaunchMetadata>,
@@ -286,6 +288,22 @@ impl std::fmt::Display for HostedK3sHaStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedK3sStableEndpointPosture {
+    ManualRewriteRequired,
+    HaEligible,
+}
+
+impl std::fmt::Display for HostedK3sStableEndpointPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ManualRewriteRequired => f.write_str("manual-rewrite-required"),
+            Self::HaEligible => f.write_str("ha-eligible"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sClusterAccessReport {
     pub cluster_name: String,
@@ -294,6 +312,8 @@ pub struct HostedK3sClusterAccessReport {
     pub server_machines: Vec<String>,
     pub worker_machines: Vec<String>,
     pub api_endpoint: String,
+    pub stable_endpoint_posture: HostedK3sStableEndpointPosture,
+    pub stable_endpoint_detail: String,
     pub ha_status: HostedK3sHaStatus,
     pub ha_status_detail: String,
     pub control_plane_placements: Vec<HostedK3sControlPlanePlacement>,
@@ -2654,6 +2674,71 @@ fn hosted_k3s_ha_status_detail(
     }
 }
 
+fn hosted_k3s_bootstrap_stable_endpoint_posture(
+    cluster: &K3sClusterSpec,
+) -> HostedK3sStableEndpointPosture {
+    match cluster.ha_topology_posture() {
+        port_model::HostedK3sHaTopologyPosture::NonHaTopology => {
+            HostedK3sStableEndpointPosture::ManualRewriteRequired
+        }
+        port_model::HostedK3sHaTopologyPosture::HaEligibleTopology => {
+            HostedK3sStableEndpointPosture::HaEligible
+        }
+    }
+}
+
+fn hosted_k3s_access_stable_endpoint_posture(
+    ha_status: HostedK3sHaStatus,
+) -> HostedK3sStableEndpointPosture {
+    match ha_status {
+        HostedK3sHaStatus::SpreadSatisfied => HostedK3sStableEndpointPosture::HaEligible,
+        HostedK3sHaStatus::NonHaTopology
+        | HostedK3sHaStatus::PendingPlacement
+        | HostedK3sHaStatus::SpreadUnsatisfied => {
+            HostedK3sStableEndpointPosture::ManualRewriteRequired
+        }
+    }
+}
+
+fn hosted_k3s_bootstrap_stable_endpoint_detail(cluster: &K3sClusterSpec) -> String {
+    match hosted_k3s_bootstrap_stable_endpoint_posture(cluster) {
+        HostedK3sStableEndpointPosture::ManualRewriteRequired => format!(
+            "Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required: Port hands off configured api_endpoint '{}' but this topology still declares {} control-plane microVM{} with scheduler '{}'. Losing the selected control-plane guest would still require manual downstream rewrites or unsupported operator intervention.",
+            cluster.api_endpoint,
+            cluster.server_machines.len(),
+            if cluster.server_machines.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            cluster.control_plane_scheduler
+        ),
+        HostedK3sStableEndpointPosture::HaEligible => format!(
+            "Hosted AWS x86_64 PVM stable endpoint posture is ha-eligible: Port hands off configured api_endpoint '{}' as the canonical cluster address for this spread-scheduled topology. Supported failover condition: one control-plane guest replacement or host loss while at least {} spread control-plane microVMs continue backing that endpoint. External LB/DNS ownership remains outside Port.",
+            cluster.api_endpoint,
+            port_model::HOSTED_K3S_REAL_HA_MIN_CONTROL_PLANES
+        ),
+    }
+}
+
+fn hosted_k3s_access_stable_endpoint_detail(
+    cluster: &K3sClusterSpec,
+    ha_status: HostedK3sHaStatus,
+) -> String {
+    match hosted_k3s_access_stable_endpoint_posture(ha_status) {
+        HostedK3sStableEndpointPosture::ManualRewriteRequired => format!(
+            "Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required: Port rewrites kubeconfig to configured api_endpoint '{}' but the current real-HA status is '{}'. Losing the selected control-plane guest would still require manual downstream rewrites or unsupported operator intervention.",
+            cluster.api_endpoint, ha_status
+        ),
+        HostedK3sStableEndpointPosture::HaEligible => format!(
+            "Hosted AWS x86_64 PVM stable endpoint posture is ha-eligible: Port rewrites kubeconfig to configured api_endpoint '{}' and the current real-HA status is '{}'. Supported failover condition: one control-plane guest replacement or host loss while at least {} spread control-plane microVMs continue backing that endpoint. External LB/DNS ownership remains outside Port.",
+            cluster.api_endpoint,
+            ha_status,
+            port_model::HOSTED_K3S_REAL_HA_MIN_CONTROL_PLANES
+        ),
+    }
+}
+
 fn hosted_k3s_boundary_summary() -> String {
     hosted_k3s_boundary_notes().join(" ")
 }
@@ -2893,6 +2978,8 @@ pub fn hosted_k3s_cluster_access(
     let control_plane_placements = hosted_k3s_control_plane_placements(&machine_access);
     let ha_status = hosted_k3s_ha_status(&cluster, &control_plane_placements);
     let ha_status_detail = hosted_k3s_ha_status_detail(&cluster, &control_plane_placements);
+    let stable_endpoint_posture = hosted_k3s_access_stable_endpoint_posture(ha_status);
+    let stable_endpoint_detail = hosted_k3s_access_stable_endpoint_detail(&cluster, ha_status);
 
     Ok(HostedK3sClusterAccessReport {
         cluster_name: cluster_name.to_string(),
@@ -2901,6 +2988,8 @@ pub fn hosted_k3s_cluster_access(
         server_machines: cluster.server_machines.clone(),
         worker_machines: cluster.worker_machines,
         api_endpoint: cluster.api_endpoint,
+        stable_endpoint_posture,
+        stable_endpoint_detail,
         ha_status,
         ha_status_detail,
         control_plane_placements,
@@ -3024,6 +3113,8 @@ pub fn bootstrap_hosted_k3s_cluster(
     }
 
     let boundary_notes = hosted_k3s_cluster_boundary_notes(&cluster);
+    let stable_endpoint_posture = hosted_k3s_bootstrap_stable_endpoint_posture(&cluster);
+    let stable_endpoint_detail = hosted_k3s_bootstrap_stable_endpoint_detail(&cluster);
     Ok(HostedK3sBootstrapResult {
         cluster_name: cluster_name.to_string(),
         control_plane: cluster.control_plane,
@@ -3031,6 +3122,8 @@ pub fn bootstrap_hosted_k3s_cluster(
         server_machines: cluster.server_machines,
         worker_machines: cluster.worker_machines,
         api_endpoint: cluster.api_endpoint,
+        stable_endpoint_posture,
+        stable_endpoint_detail,
         version: cluster.version,
         join_token,
         server_launches,
@@ -17469,6 +17562,17 @@ exec sleep 30
             vec![String::from("cloud-aws-worker")]
         );
         assert_eq!(result.api_endpoint, "https://demo-k3s.internal:6443");
+        assert_eq!(
+            result.stable_endpoint_posture,
+            super::HostedK3sStableEndpointPosture::ManualRewriteRequired
+        );
+        assert!(
+            result
+                .stable_endpoint_detail
+                .contains("stable endpoint posture is manual-rewrite-required"),
+            "{}",
+            result.stable_endpoint_detail
+        );
         assert_eq!(result.join_token, "demo-join-token");
         assert_eq!(result.server_launches.len(), 1);
         assert_eq!(result.worker_launches.len(), 1);
@@ -17716,6 +17820,17 @@ exec sleep 30
             vec![String::from("cloud-aws-worker")]
         );
         assert_eq!(report.api_endpoint, "https://demo-k3s.internal:6443");
+        assert_eq!(
+            report.stable_endpoint_posture,
+            super::HostedK3sStableEndpointPosture::ManualRewriteRequired
+        );
+        assert!(
+            report
+                .stable_endpoint_detail
+                .contains("stable endpoint posture is manual-rewrite-required"),
+            "{}",
+            report.stable_endpoint_detail
+        );
         assert!(
             report
                 .kubeconfig_surface
@@ -17847,6 +17962,20 @@ exec sleep 30
         assert!(detail.contains("Hosted AWS x86_64 PVM"));
         assert!(detail.contains("spread-satisfied"));
         assert!(detail.contains("3 distinct execution hosts"));
+
+        assert_eq!(
+            super::hosted_k3s_access_stable_endpoint_posture(
+                super::HostedK3sHaStatus::SpreadSatisfied
+            ),
+            super::HostedK3sStableEndpointPosture::HaEligible
+        );
+        let endpoint_detail = super::hosted_k3s_access_stable_endpoint_detail(
+            &cluster,
+            super::HostedK3sHaStatus::SpreadSatisfied,
+        );
+        assert!(endpoint_detail.contains("stable endpoint posture is ha-eligible"));
+        assert!(endpoint_detail.contains("https://demo-k3s.internal:6443"));
+        assert!(endpoint_detail.contains("Supported failover condition"));
     }
 
     #[test]
