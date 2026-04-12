@@ -16511,11 +16511,13 @@ exec sleep 30
             runtime_class: Some(port_model::MachineRuntimeClassSpec {
                 kind: port_model::MachineRuntimeClassKind::WorkspaceScratchBuilder,
                 trust: port_model::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+                state_isolation: port_model::MachineRuntimeStateIsolation::WorkspaceWritable,
                 writable_roots: vec![
                     port_model::MachineRuntimeWritableRoot::NixStore,
                     port_model::MachineRuntimeWritableRoot::SourceRoot,
                     port_model::MachineRuntimeWritableRoot::TempRoot,
                 ],
+                declared_inputs: Vec::new(),
                 workspace: Some(port_model::MachineRuntimeWorkspaceBinding {
                     workspace: String::from("demo"),
                     lane: String::from("scratch"),
@@ -16580,11 +16582,13 @@ exec sleep 30
             runtime_class: Some(port_model::MachineRuntimeClassSpec {
                 kind: port_model::MachineRuntimeClassKind::WorkspaceScratchBuilder,
                 trust: port_model::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+                state_isolation: port_model::MachineRuntimeStateIsolation::WorkspaceWritable,
                 writable_roots: vec![
                     port_model::MachineRuntimeWritableRoot::NixStore,
                     port_model::MachineRuntimeWritableRoot::SourceRoot,
                     port_model::MachineRuntimeWritableRoot::TempRoot,
                 ],
+                declared_inputs: Vec::new(),
                 workspace: Some(port_model::MachineRuntimeWorkspaceBinding {
                     workspace: String::from("demo"),
                     lane: String::from("scratch"),

@@ -1923,8 +1923,11 @@ pub struct MachineSpec {
 pub struct MachineRuntimeClassSpec {
     pub kind: MachineRuntimeClassKind,
     pub trust: MachineRuntimeTrustPosture,
+    pub state_isolation: MachineRuntimeStateIsolation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub writable_roots: Vec<MachineRuntimeWritableRoot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_inputs: Vec<MachineRuntimeDeclaredInput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<MachineRuntimeWorkspaceBinding>,
 }
@@ -1933,12 +1936,14 @@ pub struct MachineRuntimeClassSpec {
 #[serde(rename_all = "kebab-case")]
 pub enum MachineRuntimeClassKind {
     WorkspaceScratchBuilder,
+    BlessedClosurePromotionRunner,
 }
 
 impl std::fmt::Display for MachineRuntimeClassKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::WorkspaceScratchBuilder => f.write_str("workspace-scratch-builder"),
+            Self::BlessedClosurePromotionRunner => f.write_str("blessed-closure-promotion-runner"),
         }
     }
 }
@@ -1961,6 +1966,22 @@ impl std::fmt::Display for MachineRuntimeTrustPosture {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub enum MachineRuntimeStateIsolation {
+    WorkspaceWritable,
+    CleanRoom,
+}
+
+impl std::fmt::Display for MachineRuntimeStateIsolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WorkspaceWritable => f.write_str("workspace-writable"),
+            Self::CleanRoom => f.write_str("clean-room"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum MachineRuntimeWritableRoot {
     NixStore,
     SourceRoot,
@@ -1971,6 +1992,21 @@ pub enum MachineRuntimeWritableRoot {
 impl std::fmt::Display for MachineRuntimeWritableRoot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(runtime_writable_root_label(*self))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineRuntimeDeclaredInput {
+    SourceBundle,
+    RequestedOutputs,
+    PolicySnapshot,
+    CandidateClosure,
+}
+
+impl std::fmt::Display for MachineRuntimeDeclaredInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(runtime_declared_input_label(*self))
     }
 }
 
@@ -2995,6 +3031,15 @@ fn runtime_writable_root_label(root: MachineRuntimeWritableRoot) -> &'static str
     }
 }
 
+fn runtime_declared_input_label(input: MachineRuntimeDeclaredInput) -> &'static str {
+    match input {
+        MachineRuntimeDeclaredInput::SourceBundle => "source-bundle",
+        MachineRuntimeDeclaredInput::RequestedOutputs => "requested-outputs",
+        MachineRuntimeDeclaredInput::PolicySnapshot => "policy-snapshot",
+        MachineRuntimeDeclaredInput::CandidateClosure => "candidate-closure",
+    }
+}
+
 fn validate_machine_runtime_class(
     machine_name: &str,
     machine: &MachineSpec,
@@ -3014,6 +3059,19 @@ fn validate_machine_runtime_class(
             )));
         }
         seen_writable_roots.push(*root);
+    }
+
+    let mut seen_declared_inputs = Vec::new();
+    for input in &runtime_class.declared_inputs {
+        if seen_declared_inputs.contains(input) {
+            return Err(ValidationError::new(format!(
+                "machine '{}' runtime class '{}' declares duplicate declared input '{}'",
+                machine_name,
+                runtime_class.kind,
+                runtime_declared_input_label(*input)
+            )));
+        }
+        seen_declared_inputs.push(*input);
     }
 
     match runtime_class.kind {
@@ -3042,6 +3100,12 @@ fn validate_machine_runtime_class(
                     machine_name, runtime_class.kind
                 )));
             }
+            if runtime_class.state_isolation != MachineRuntimeStateIsolation::WorkspaceWritable {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must use state isolation 'workspace-writable'",
+                    machine_name, runtime_class.kind
+                )));
+            }
             if !machine.rootfs_read_only || machine.rootfs_overlay.is_none() {
                 return Err(ValidationError::new(format!(
                     "machine '{}' runtime class '{}' requires a read-only base guest plus a writable rootfs overlay so scratch state stays explicit",
@@ -3059,6 +3123,70 @@ fn validate_machine_runtime_class(
                         machine_name,
                         runtime_class.kind,
                         runtime_writable_root_label(required_root)
+                    )));
+                }
+            }
+        }
+        MachineRuntimeClassKind::BlessedClosurePromotionRunner => {
+            if runtime_class.workspace.is_some() {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must not carry a workspace binding or creator-scoped identity",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if runtime_class.trust != MachineRuntimeTrustPosture::PromotionTrusted {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must stay 'promotion-trusted'",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if runtime_class.state_isolation != MachineRuntimeStateIsolation::CleanRoom {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must use state isolation 'clean-room'",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if !machine.rootfs_read_only || machine.rootfs_overlay.is_none() {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' requires a read-only base guest plus a writable rootfs overlay for clean-room execution",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if runtime_class
+                .writable_roots
+                .contains(&MachineRuntimeWritableRoot::NixStore)
+                || runtime_class
+                    .writable_roots
+                    .contains(&MachineRuntimeWritableRoot::SourceRoot)
+                || runtime_class
+                    .writable_roots
+                    .contains(&MachineRuntimeWritableRoot::TempRoot)
+            {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must not reuse scratch writable roots 'nix-store', 'source-root', or 'temp-root'",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            if !runtime_class
+                .writable_roots
+                .contains(&MachineRuntimeWritableRoot::EvidenceRoot)
+            {
+                return Err(ValidationError::new(format!(
+                    "machine '{}' runtime class '{}' must declare writable root 'evidence-root'",
+                    machine_name, runtime_class.kind
+                )));
+            }
+            for required_input in [
+                MachineRuntimeDeclaredInput::SourceBundle,
+                MachineRuntimeDeclaredInput::RequestedOutputs,
+                MachineRuntimeDeclaredInput::PolicySnapshot,
+            ] {
+                if !runtime_class.declared_inputs.contains(&required_input) {
+                    return Err(ValidationError::new(format!(
+                        "machine '{}' runtime class '{}' must declare input '{}'",
+                        machine_name,
+                        runtime_class.kind,
+                        runtime_declared_input_label(required_input)
                     )));
                 }
             }
@@ -4248,11 +4376,13 @@ mod tests {
         machine.runtime_class = Some(super::MachineRuntimeClassSpec {
             kind: super::MachineRuntimeClassKind::WorkspaceScratchBuilder,
             trust: super::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+            state_isolation: super::MachineRuntimeStateIsolation::WorkspaceWritable,
             writable_roots: vec![
                 super::MachineRuntimeWritableRoot::NixStore,
                 super::MachineRuntimeWritableRoot::SourceRoot,
                 super::MachineRuntimeWritableRoot::TempRoot,
             ],
+            declared_inputs: Vec::new(),
             workspace: Some(super::MachineRuntimeWorkspaceBinding {
                 workspace: String::from("demo"),
                 lane: String::from("scratch"),
@@ -4291,11 +4421,13 @@ mod tests {
         machine.runtime_class = Some(super::MachineRuntimeClassSpec {
             kind: super::MachineRuntimeClassKind::WorkspaceScratchBuilder,
             trust: super::MachineRuntimeTrustPosture::PromotionTrusted,
+            state_isolation: super::MachineRuntimeStateIsolation::WorkspaceWritable,
             writable_roots: vec![
                 super::MachineRuntimeWritableRoot::NixStore,
                 super::MachineRuntimeWritableRoot::SourceRoot,
                 super::MachineRuntimeWritableRoot::TempRoot,
             ],
+            declared_inputs: Vec::new(),
             workspace: Some(super::MachineRuntimeWorkspaceBinding {
                 workspace: String::from("demo"),
                 lane: String::from("scratch"),
@@ -4327,10 +4459,12 @@ mod tests {
         machine.runtime_class = Some(super::MachineRuntimeClassSpec {
             kind: super::MachineRuntimeClassKind::WorkspaceScratchBuilder,
             trust: super::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+            state_isolation: super::MachineRuntimeStateIsolation::WorkspaceWritable,
             writable_roots: vec![
                 super::MachineRuntimeWritableRoot::NixStore,
                 super::MachineRuntimeWritableRoot::SourceRoot,
             ],
+            declared_inputs: Vec::new(),
             workspace: Some(super::MachineRuntimeWorkspaceBinding {
                 workspace: String::from("demo"),
                 lane: String::from("scratch"),
@@ -4344,6 +4478,122 @@ mod tests {
             error
                 .to_string()
                 .contains("must declare writable root 'temp-root'"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn promotion_runner_runtime_class_round_trips() {
+        let mut sample = PortConfig::sample();
+        sample.clusters.clear();
+        let machine = sample
+            .machines
+            .get_mut("cloud-aws")
+            .expect("sample machine should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+        machine.runtime_class = Some(super::MachineRuntimeClassSpec {
+            kind: super::MachineRuntimeClassKind::BlessedClosurePromotionRunner,
+            trust: super::MachineRuntimeTrustPosture::PromotionTrusted,
+            state_isolation: super::MachineRuntimeStateIsolation::CleanRoom,
+            writable_roots: vec![super::MachineRuntimeWritableRoot::EvidenceRoot],
+            declared_inputs: vec![
+                super::MachineRuntimeDeclaredInput::SourceBundle,
+                super::MachineRuntimeDeclaredInput::RequestedOutputs,
+                super::MachineRuntimeDeclaredInput::PolicySnapshot,
+            ],
+            workspace: None,
+        });
+
+        sample
+            .validate()
+            .expect("promotion runner runtime class should validate");
+
+        let encoded = sample.to_toml_string().expect("sample should encode");
+        assert!(encoded.contains("kind = \"blessed-closure-promotion-runner\""));
+        assert!(encoded.contains("trust = \"promotion-trusted\""));
+        assert!(encoded.contains("state_isolation = \"clean-room\""));
+        assert!(encoded.contains("\"source-bundle\""));
+        assert!(encoded.contains("\"requested-outputs\""));
+        assert!(encoded.contains("\"policy-snapshot\""));
+
+        let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
+        assert_eq!(decoded, sample);
+    }
+
+    #[test]
+    fn promotion_runner_runtime_class_rejects_workspace_binding() {
+        let mut sample = PortConfig::sample();
+        sample.clusters.clear();
+        let machine = sample
+            .machines
+            .get_mut("cloud-aws")
+            .expect("sample machine should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+        machine.runtime_class = Some(super::MachineRuntimeClassSpec {
+            kind: super::MachineRuntimeClassKind::BlessedClosurePromotionRunner,
+            trust: super::MachineRuntimeTrustPosture::PromotionTrusted,
+            state_isolation: super::MachineRuntimeStateIsolation::CleanRoom,
+            writable_roots: vec![super::MachineRuntimeWritableRoot::EvidenceRoot],
+            declared_inputs: vec![
+                super::MachineRuntimeDeclaredInput::SourceBundle,
+                super::MachineRuntimeDeclaredInput::RequestedOutputs,
+                super::MachineRuntimeDeclaredInput::PolicySnapshot,
+            ],
+            workspace: Some(super::MachineRuntimeWorkspaceBinding {
+                workspace: String::from("demo"),
+                lane: String::from("scratch"),
+            }),
+        });
+
+        let error = sample
+            .validate()
+            .expect_err("promotion runner should reject workspace binding");
+        assert!(
+            error
+                .to_string()
+                .contains("must not carry a workspace binding or creator-scoped identity"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn promotion_runner_runtime_class_rejects_scratch_writable_roots() {
+        let mut sample = PortConfig::sample();
+        sample.clusters.clear();
+        let machine = sample
+            .machines
+            .get_mut("cloud-aws")
+            .expect("sample machine should exist");
+        machine.architecture = MachineArchitecture::X86_64;
+        machine.rootfs_read_only = true;
+        machine.rootfs_overlay = Some(super::MachineRootfsOverlaySpec { size_mib: 4096 });
+        machine.runtime_class = Some(super::MachineRuntimeClassSpec {
+            kind: super::MachineRuntimeClassKind::BlessedClosurePromotionRunner,
+            trust: super::MachineRuntimeTrustPosture::PromotionTrusted,
+            state_isolation: super::MachineRuntimeStateIsolation::CleanRoom,
+            writable_roots: vec![
+                super::MachineRuntimeWritableRoot::EvidenceRoot,
+                super::MachineRuntimeWritableRoot::TempRoot,
+            ],
+            declared_inputs: vec![
+                super::MachineRuntimeDeclaredInput::SourceBundle,
+                super::MachineRuntimeDeclaredInput::RequestedOutputs,
+                super::MachineRuntimeDeclaredInput::PolicySnapshot,
+            ],
+            workspace: None,
+        });
+
+        let error = sample
+            .validate()
+            .expect_err("promotion runner should reject scratch writable roots");
+        assert!(
+            error
+                .to_string()
+                .contains("must not reuse scratch writable roots"),
             "{error}"
         );
     }

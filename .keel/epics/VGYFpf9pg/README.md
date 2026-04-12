@@ -22,8 +22,8 @@ mission: VGYFo0XIj
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 0/1 stories done
+**Progress:** 1/1 voyages complete, 1/1 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Prove Runtime Class Identity And Guard Rails](voyages/VGYQ50GrI/) | planned | 0/1 |
+| [Prove Runtime Class Identity And Guard Rails](voyages/VGYQ50GrI/) | done | 1/1 |
 <!-- END GENERATED -->

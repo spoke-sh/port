@@ -197,6 +197,7 @@ size_mib = 4096
 [machines.workspace-scratch-demo.runtime_class]
 kind = "workspace-scratch-builder"
 trust = "workspace-untrusted"
+state_isolation = "workspace-writable"
 writable_roots = ["nix-store", "source-root", "temp-root"]
 
 [machines.workspace-scratch-demo.runtime_class.workspace]
@@ -216,6 +217,42 @@ Read that shape with these rules:
   lanes even when the backing storage substrate differs
 - trusted promotion remains a separate follow-on runtime class rather than an
   upgrade flag on the scratch lane
+
+The promotion lane is explicit and clean-room:
+
+```toml
+[machines.promotion-runner-demo]
+host = "aws-linux"
+kernel = "demo-kernel"
+guest_image = "demo-guest"
+substrate = "firecracker"
+protection_mode = "standard"
+architecture = "x86_64"
+vcpu_count = 2
+memory_mib = 4096
+kernel_args = "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw"
+rootfs_read_only = true
+
+[machines.promotion-runner-demo.rootfs_overlay]
+size_mib = 4096
+
+[machines.promotion-runner-demo.runtime_class]
+kind = "blessed-closure-promotion-runner"
+trust = "promotion-trusted"
+state_isolation = "clean-room"
+writable_roots = ["evidence-root"]
+declared_inputs = ["source-bundle", "requested-outputs", "policy-snapshot"]
+```
+
+Read that shape with these rules:
+
+- promotion-runner must not carry a workspace binding or creator-scoped
+  identity
+- declared inputs stay explicit and immutable at the contract layer
+- scratch writable roots such as `nix-store`, `source-root`, and `temp-root`
+  must not appear on the promotion runner
+- Port exposes the runtime class and proof surface, but publication policy,
+  signing, and rollback ownership remain downstream
 
 ### Hosted K3s Clusters
 

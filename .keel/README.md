@@ -185,11 +185,11 @@
 |--------|--------|
 | [Define Builder And Promotion Runtime Class Contracts](epics/VGYFpewpf/voyages/VGYQ4zrrX/) | done |
 
-### [Ship Blessed Closure Promotion Runner Runtime Class](epics/VGYFpf9pg/) (active)
+### [Ship Blessed Closure Promotion Runner Runtime Class](epics/VGYFpf9pg/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Prove Runtime Class Identity And Guard Rails](epics/VGYFpf9pg/voyages/VGYQ50GrI/) | planned |
+| [Prove Runtime Class Identity And Guard Rails](epics/VGYFpf9pg/voyages/VGYQ50GrI/) | done |
 
 ### [Ship Multi-Host Control Plane Placement For Hosted AWS PVM Clusters](epics/VGYFpfUph/) (draft)
 

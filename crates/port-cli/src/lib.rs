@@ -2242,9 +2242,18 @@ fn format_runtime_class(runtime_class: &Option<MachineRuntimeClassSpec>) -> Stri
     let mut output = String::new();
     writeln!(&mut output, "runtime class: {}", runtime_class.kind).expect("write should succeed");
     writeln!(&mut output, "trust posture: {}", runtime_class.trust).expect("write should succeed");
+    writeln!(
+        &mut output,
+        "state isolation: {}",
+        runtime_class.state_isolation
+    )
+    .expect("write should succeed");
     if let Some(workspace) = &runtime_class.workspace {
         writeln!(&mut output, "workspace: {}", workspace.workspace).expect("write should succeed");
         writeln!(&mut output, "workspace lane: {}", workspace.lane).expect("write should succeed");
+    }
+    for input in &runtime_class.declared_inputs {
+        writeln!(&mut output, "declared input: {}", input).expect("write should succeed");
     }
     for root in &runtime_class.writable_roots {
         writeln!(&mut output, "writable root: {}", root).expect("write should succeed");
@@ -3591,11 +3600,13 @@ mod tests {
             runtime_class: Some(port_model::MachineRuntimeClassSpec {
                 kind: port_model::MachineRuntimeClassKind::WorkspaceScratchBuilder,
                 trust: port_model::MachineRuntimeTrustPosture::WorkspaceUntrusted,
+                state_isolation: port_model::MachineRuntimeStateIsolation::WorkspaceWritable,
                 writable_roots: vec![
                     port_model::MachineRuntimeWritableRoot::NixStore,
                     port_model::MachineRuntimeWritableRoot::SourceRoot,
                     port_model::MachineRuntimeWritableRoot::TempRoot,
                 ],
+                declared_inputs: Vec::new(),
                 workspace: Some(port_model::MachineRuntimeWorkspaceBinding {
                     workspace: String::from("acme"),
                     lane: String::from("scratch"),
@@ -3841,11 +3852,46 @@ mod tests {
         for expected in [
             "runtime class: workspace-scratch-builder",
             "trust posture: workspace-untrusted",
+            "state isolation: workspace-writable",
             "workspace: acme",
             "workspace lane: scratch",
             "writable root: nix-store",
             "writable root: source-root",
             "writable root: temp-root",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing '{expected}' in:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn machine_status_render_includes_promotion_runner_contract() {
+        let mut status = sample_hosted_status(Vec::new(), "promotion contract should render");
+        status.runtime_class = Some(port_model::MachineRuntimeClassSpec {
+            kind: port_model::MachineRuntimeClassKind::BlessedClosurePromotionRunner,
+            trust: port_model::MachineRuntimeTrustPosture::PromotionTrusted,
+            state_isolation: port_model::MachineRuntimeStateIsolation::CleanRoom,
+            writable_roots: vec![port_model::MachineRuntimeWritableRoot::EvidenceRoot],
+            declared_inputs: vec![
+                port_model::MachineRuntimeDeclaredInput::SourceBundle,
+                port_model::MachineRuntimeDeclaredInput::RequestedOutputs,
+                port_model::MachineRuntimeDeclaredInput::PolicySnapshot,
+            ],
+            workspace: None,
+        });
+
+        let rendered = format_machine_status(&status);
+
+        for expected in [
+            "runtime class: blessed-closure-promotion-runner",
+            "trust posture: promotion-trusted",
+            "state isolation: clean-room",
+            "declared input: source-bundle",
+            "declared input: requested-outputs",
+            "declared input: policy-snapshot",
+            "writable root: evidence-root",
         ] {
             assert!(
                 rendered.contains(expected),
