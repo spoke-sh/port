@@ -305,6 +305,29 @@ impl std::fmt::Display for HostedK3sStableEndpointPosture {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sLegacyRuntimeArtifact {
+    pub machine_name: String,
+    pub path: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedK3sLegacyRuntimeDriftState {
+    Clear,
+    DetachedRuntimeDetected,
+}
+
+impl std::fmt::Display for HostedK3sLegacyRuntimeDriftState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Clear => f.write_str("clear"),
+            Self::DetachedRuntimeDetected => f.write_str("detached-runtime-detected"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sClusterAccessReport {
     pub cluster_name: String,
     pub control_plane: String,
@@ -316,6 +339,10 @@ pub struct HostedK3sClusterAccessReport {
     pub stable_endpoint_detail: String,
     pub ha_status: HostedK3sHaStatus,
     pub ha_status_detail: String,
+    pub legacy_runtime_drift: HostedK3sLegacyRuntimeDriftState,
+    pub legacy_runtime_drift_detail: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legacy_runtime_artifacts: Vec<HostedK3sLegacyRuntimeArtifact>,
     pub control_plane_placements: Vec<HostedK3sControlPlanePlacement>,
     pub kubeconfig_surface: String,
     pub kubeconfig: String,
@@ -2896,6 +2923,100 @@ pub fn hosted_k3s_visibility_command() -> Vec<String> {
     ]
 }
 
+const HOSTED_K3S_SERVER_LEGACY_RUNTIME_ARTIFACT_PATHS: [&str; 2] =
+    ["/run/port/k3s-server.pid", "/var/log/k3s-server.log"];
+
+fn hosted_k3s_legacy_runtime_drift_command() -> Vec<String> {
+    let legacy_paths = HOSTED_K3S_SERVER_LEGACY_RUNTIME_ARTIFACT_PATHS
+        .iter()
+        .map(|path| shell_single_quote(path))
+        .collect::<Vec<_>>()
+        .join(" ");
+    vec![
+        String::from("/bin/sh"),
+        String::from("-lc"),
+        format!(
+            "set -eu; for path in {legacy_paths}; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done"
+        ),
+    ]
+}
+
+fn hosted_k3s_legacy_runtime_artifact_detail(path: &str) -> String {
+    format!(
+        "Legacy detached K3s server artifact '{}' sits outside the canonical managed-service runtime path (/run/port/services/*).",
+        path
+    )
+}
+
+fn hosted_k3s_legacy_runtime_artifacts(
+    config: &PortConfig,
+    runtime_root: &Path,
+    cluster_name: &str,
+    machine_name: &str,
+) -> Result<Vec<HostedK3sLegacyRuntimeArtifact>> {
+    let mut artifacts = Vec::new();
+    let output = execute_hosted_k3s_exec(
+        config,
+        runtime_root,
+        machine_name,
+        hosted_k3s_legacy_runtime_drift_command(),
+        "inspect legacy detached K3s runtime drift",
+        cluster_name,
+    )?
+    .stdout;
+    for path in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        artifacts.push(HostedK3sLegacyRuntimeArtifact {
+            machine_name: machine_name.to_string(),
+            path: path.to_string(),
+            detail: hosted_k3s_legacy_runtime_artifact_detail(path),
+        });
+    }
+    artifacts.sort_by(|left, right| {
+        left.machine_name
+            .cmp(&right.machine_name)
+            .then(left.path.cmp(&right.path))
+    });
+    Ok(artifacts)
+}
+
+fn hosted_k3s_legacy_runtime_drift_state(
+    artifacts: &[HostedK3sLegacyRuntimeArtifact],
+) -> HostedK3sLegacyRuntimeDriftState {
+    if artifacts.is_empty() {
+        HostedK3sLegacyRuntimeDriftState::Clear
+    } else {
+        HostedK3sLegacyRuntimeDriftState::DetachedRuntimeDetected
+    }
+}
+
+fn hosted_k3s_legacy_runtime_drift_detail(artifacts: &[HostedK3sLegacyRuntimeArtifact]) -> String {
+    if artifacts.is_empty() {
+        return String::from(
+            "Hosted AWS x86_64 PVM legacy-runtime drift is clear: no detached K3s server PID/log artifacts were found outside the canonical managed-service runtime path (/run/port/services/*) on the primary control-plane machine.",
+        );
+    }
+
+    let mut by_machine: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for artifact in artifacts {
+        by_machine
+            .entry(artifact.machine_name.clone())
+            .or_default()
+            .push(artifact.path.clone());
+    }
+    let rendered = by_machine
+        .into_iter()
+        .map(|(machine_name, paths)| format!("{machine_name}: {}", paths.join(", ")))
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "Hosted AWS x86_64 PVM legacy-runtime drift is detached-runtime-detected: detached K3s server PID/log artifacts remain outside the canonical managed-service runtime path (/run/port/services/*) on {rendered}."
+    )
+}
+
 pub fn hosted_k3s_cluster_access(
     config: &PortConfig,
     runtime_root: &Path,
@@ -2980,6 +3101,11 @@ pub fn hosted_k3s_cluster_access(
     let ha_status_detail = hosted_k3s_ha_status_detail(&cluster, &control_plane_placements);
     let stable_endpoint_posture = hosted_k3s_access_stable_endpoint_posture(ha_status);
     let stable_endpoint_detail = hosted_k3s_access_stable_endpoint_detail(&cluster, ha_status);
+    let legacy_runtime_artifacts =
+        hosted_k3s_legacy_runtime_artifacts(config, runtime_root, cluster_name, &primary_server)?;
+    let legacy_runtime_drift = hosted_k3s_legacy_runtime_drift_state(&legacy_runtime_artifacts);
+    let legacy_runtime_drift_detail =
+        hosted_k3s_legacy_runtime_drift_detail(&legacy_runtime_artifacts);
 
     Ok(HostedK3sClusterAccessReport {
         cluster_name: cluster_name.to_string(),
@@ -2992,6 +3118,9 @@ pub fn hosted_k3s_cluster_access(
         stable_endpoint_detail,
         ha_status,
         ha_status_detail,
+        legacy_runtime_drift,
+        legacy_runtime_drift_detail,
+        legacy_runtime_artifacts,
         control_plane_placements,
         kubeconfig_surface: hosted_k3s_kubeconfig_surface(&primary_server),
         kubeconfig,
@@ -17782,6 +17911,10 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
                 },
+                HostedGuestExpectedOperation::Exec {
+                    command: super::hosted_k3s_legacy_runtime_drift_command(),
+                    stdout: String::new(),
+                },
             ],
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
@@ -17867,6 +18000,18 @@ exec sleep 30
             "{}",
             report.ha_status_detail
         );
+        assert_eq!(
+            report.legacy_runtime_drift,
+            super::HostedK3sLegacyRuntimeDriftState::Clear
+        );
+        assert!(report.legacy_runtime_artifacts.is_empty());
+        assert!(
+            report
+                .legacy_runtime_drift_detail
+                .contains("legacy-runtime drift is clear"),
+            "{}",
+            report.legacy_runtime_drift_detail
+        );
         assert!(
             report
                 .boundary_notes
@@ -17900,6 +18045,135 @@ exec sleep 30
             vec![String::from("aws-linux-node")]
         );
         assert!(server.detail.contains("host group 'aws-builders'"));
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(bootstrap.server_launches[0].pid.to_string())
+            .status();
+        for metadata in bootstrap.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+    }
+
+    #[test]
+    fn hosted_k3s_cluster_access_reports_legacy_detached_runtime_drift() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let worker_paths =
+            RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
+        let worker_join_paths = RuntimePaths::for_machine(
+            &config.nodes["aws-linux-node"].runtime_root,
+            "cloud-aws-worker",
+        );
+        let server_guest = spawn_hosted_guest_sequence_server(
+            worker_paths,
+            vec![
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
+                        "server",
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_kubeconfig_command(),
+                    stdout: String::from(
+                        "apiVersion: v1\nclusters:\n- cluster:\n    server: https://demo-k3s.internal:6443\n",
+                    ),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_visibility_command(),
+                    stdout: String::from(
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    ),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: super::hosted_k3s_legacy_runtime_drift_command(),
+                    stdout: String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),
+                },
+            ],
+        );
+        let worker_guest = spawn_hosted_guest_sequence_server(
+            worker_join_paths,
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                policy: hosted_k3s_service_policy("agent"),
+            }],
+        );
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+
+        let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+        let report = hosted_k3s_cluster_access(&config, tempdir.path(), "demo")
+            .expect("hosted k3s access should succeed");
+
+        assert_eq!(
+            report.legacy_runtime_drift,
+            super::HostedK3sLegacyRuntimeDriftState::DetachedRuntimeDetected
+        );
+        assert_eq!(report.legacy_runtime_artifacts.len(), 2);
+        assert_eq!(report.legacy_runtime_artifacts[0].machine_name, "cloud-aws");
+        assert_eq!(
+            report.legacy_runtime_artifacts[0].path,
+            "/run/port/k3s-server.pid"
+        );
+        assert_eq!(
+            report.legacy_runtime_artifacts[1].path,
+            "/var/log/k3s-server.log"
+        );
+        assert!(
+            report
+                .legacy_runtime_drift_detail
+                .contains("detached-runtime-detected"),
+            "{}",
+            report.legacy_runtime_drift_detail
+        );
+        assert!(
+            report
+                .legacy_runtime_drift_detail
+                .contains("/run/port/services/*"),
+            "{}",
+            report.legacy_runtime_drift_detail
+        );
 
         server_guest
             .join()
@@ -18122,6 +18396,10 @@ exec sleep 30
                     stdout: String::from(
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: super::hosted_k3s_legacy_runtime_drift_command(),
+                    stdout: String::new(),
                 },
             ],
         );

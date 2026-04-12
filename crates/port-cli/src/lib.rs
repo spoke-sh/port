@@ -1688,6 +1688,17 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
     println!("stable-endpoint detail: {}", report.stable_endpoint_detail);
     println!("real-ha status: {}", report.ha_status);
     println!("real-ha detail: {}", report.ha_status_detail);
+    println!("legacy-runtime drift: {}", report.legacy_runtime_drift);
+    println!(
+        "legacy-runtime detail: {}",
+        report.legacy_runtime_drift_detail
+    );
+    for artifact in &report.legacy_runtime_artifacts {
+        println!(
+            "legacy-runtime artifact: machine={} path={}",
+            artifact.machine_name, artifact.path
+        );
+    }
     for placement in &report.control_plane_placements {
         println!(
             "control-plane placement: {} -> {}",

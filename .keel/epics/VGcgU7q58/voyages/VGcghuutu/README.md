@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGcghuutu
-status: planned
+status: in-progress
 epic: VGcgU7q58
 created_at: 2026-04-12T16:38:27
 # authored
 title: Expose Hosted Cluster Status Schema
 index: 1
 updated_at: 2026-04-12T16:39:43
+started_at: 2026-04-12T16:50:24
 ---
 
 # Expose Hosted Cluster Status Schema
@@ -26,11 +27,11 @@ updated_at: 2026-04-12T16:39:43
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Model Hosted Machine And Service Truth In Cluster Status](../../../../stories/VGcgt729o/README.md) | feat | backlog |
-| [Report Legacy Detached Runtime Drift In Cluster Status](../../../../stories/VGcgt8hAx/README.md) | feat | backlog |
+| [Report Legacy Detached Runtime Drift In Cluster Status](../../../../stories/VGcgt8hAx/README.md) | feat | done |
 | [Document Downstream Hosted Status Contract](../../../../stories/VGcgtAKBo/README.md) | feat | backlog |
 <!-- END GENERATED -->

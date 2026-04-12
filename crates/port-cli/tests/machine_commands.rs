@@ -715,6 +715,16 @@ fn spawn_hosted_exec_sequence_server(
     )
 }
 
+fn hosted_k3s_legacy_runtime_drift_command() -> Vec<String> {
+    vec![
+        String::from("/bin/sh"),
+        String::from("-lc"),
+        String::from(
+            "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+        ),
+    ]
+}
+
 fn write_forward_manifest(
     runtime_root: &Path,
     machine: &str,
@@ -1187,6 +1197,10 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 ),
             },
             HostedGuestExpectedOperation::Exec {
+                command: hosted_k3s_legacy_runtime_drift_command(),
+                stdout: String::new(),
+            },
+            HostedGuestExpectedOperation::Exec {
                 command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
@@ -1205,6 +1219,10 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 stdout: String::from(
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: hosted_k3s_legacy_runtime_drift_command(),
+                stdout: String::new(),
             },
         ],
     );
@@ -1255,6 +1273,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
             "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
         )
     );
+    assert!(status_stdout.contains("legacy-runtime drift: clear"));
     assert!(status_stdout.contains("control-plane machines: cloud-aws"));
     assert!(status_stdout.contains("visibility output:"));
     assert!(status_stdout.contains("route: role=control-plane machine=cloud-aws"));
@@ -1398,6 +1417,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
             ),
+            (hosted_k3s_legacy_runtime_drift_command(), String::new()),
             (
                 vec![
                     String::from("/bin/sh"),
@@ -1418,6 +1438,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
             ),
+            (hosted_k3s_legacy_runtime_drift_command(), String::new()),
         ],
     );
 
@@ -1449,6 +1470,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
             .contains("real-ha detail: Hosted AWS x86_64 PVM real-HA status is non-ha-topology"),
         "{status_stdout}"
     );
+    assert!(status_stdout.contains("legacy-runtime drift: clear"));
     assert!(status_stdout.contains("control-plane placement: cloud-aws -> aws-linux-node"));
     assert!(status_stdout.contains("control-plane placement: cloud-aws-b -> aws-linux-node-b"));
 
@@ -1479,6 +1501,122 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
         .join()
         .expect("primary control-plane guest thread should complete");
 
+    drop(_servers);
+    cleanup_hosted_registration_state();
+}
+
+#[test]
+fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
+    let temp = tempdir().expect("tempdir should exist");
+    let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
+    let server_config_path = temp.path().join("server-port.toml");
+    let client_config_path = temp.path().join("client-port.toml");
+    let node_addr = reserve_addr();
+    let control_plane_addr = reserve_addr();
+
+    let mut server_config = hosted_k3s_config(&hosted_runtime_root);
+    server_config
+        .control_planes
+        .get_mut("demo")
+        .expect("demo control plane should exist")
+        .endpoint = format!("http://{control_plane_addr}");
+    write_config(&server_config_path, &server_config);
+
+    let mut client_config = server_config.clone();
+    client_config
+        .nodes
+        .get_mut("aws-linux-node")
+        .expect("aws-linux-node should exist")
+        .runtime_root = temp.path().join("bogus/aws-linux-node");
+    write_config(&client_config_path, &client_config);
+
+    let _servers =
+        spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
+    write_registered_node_state(
+        "demo",
+        BTreeMap::from([(
+            String::from("aws-linux-node"),
+            port_model::HostedNodeRegistration {
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+                registered_at: 1,
+                refreshed_at: 1,
+                ttl_seconds: 30,
+            },
+        )]),
+    );
+
+    let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
+    let server_paths = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+    let server_guest = spawn_hosted_exec_sequence_server(
+        server_paths,
+        vec![
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("cat /etc/rancher/k3s/k3s.yaml"),
+                ],
+                String::from(
+                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                ),
+            ),
+            (
+                vec![
+                    String::from("/bin/sh"),
+                    String::from("-lc"),
+                    String::from("k3s kubectl get nodes -o wide"),
+                ],
+                String::from(
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                ),
+            ),
+            (
+                hosted_k3s_legacy_runtime_drift_command(),
+                String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),
+            ),
+        ],
+    );
+
+    let status = Command::new(port_bin())
+        .env("PORT_DEMO_TOKEN", "demo-token")
+        .arg("--config")
+        .arg(&client_config_path)
+        .arg("cluster")
+        .arg("status")
+        .arg("--cluster")
+        .arg("demo")
+        .arg("--runtime-root")
+        .arg(temp.path().join("ignored-runtime"))
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("hosted cluster status json command should run");
+    assert!(status.status.success(), "{status:?}");
+    let report: serde_json::Value =
+        serde_json::from_slice(&status.stdout).expect("status report should decode");
+    assert_eq!(
+        report["legacy_runtime_drift"],
+        serde_json::Value::String(String::from("detached-runtime-detected"))
+    );
+    assert!(
+        report["legacy_runtime_drift_detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("/run/port/services/*"),
+        "{report}"
+    );
+    let artifacts = report["legacy_runtime_artifacts"]
+        .as_array()
+        .expect("legacy runtime artifacts should be an array");
+    assert_eq!(artifacts.len(), 2);
+    assert_eq!(artifacts[0]["machine_name"], "cloud-aws");
+    assert_eq!(artifacts[0]["path"], "/run/port/k3s-server.pid");
+    assert_eq!(artifacts[1]["path"], "/var/log/k3s-server.log");
+
+    server_guest
+        .join()
+        .expect("primary control-plane guest thread should complete");
     drop(_servers);
     cleanup_hosted_registration_state();
 }

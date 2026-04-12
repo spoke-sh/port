@@ -207,7 +207,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Expose Hosted Cluster Status Schema](epics/VGcgU7q58/voyages/VGcghuutu/) | planned |
+| [Expose Hosted Cluster Status Schema](epics/VGcgU7q58/voyages/VGcghuutu/) | in-progress |
 
 ### [Seal Managed Hosted Service Ownership](epics/VGcgU9T57/) (active)
 

@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-12T16:55:32.410202813-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-runtime hosted_k3s_cluster_access_reports_legacy_detached_runtime_drift && cargo test -q -p port --test machine_commands cli_cluster_status_json_surfaces_legacy_detached_runtime_drift'
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 166 filtered out; finished in 6.14s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.08s
+
