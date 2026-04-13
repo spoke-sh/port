@@ -22,8 +22,8 @@ mission: VGcgTAwn4
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 2/3 stories done
+**Progress:** 1/1 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Expose Hosted Cluster Status Schema](voyages/VGcghuutu/) | in-progress | 2/3 |
+| [Expose Hosted Cluster Status Schema](voyages/VGcghuutu/) | done | 3/3 |
 <!-- END GENERATED -->

@@ -65,7 +65,7 @@ Three logical components shape the voyage:
   Projects that payload through `port cluster status`.
 - `HostedStatusContractDocs`
   Defines the fields, semantics, and proof posture expected by downstream
-  consumers.
+  consumers in [CONTRACT.md](CONTRACT.md).
 
 ## Interfaces
 
@@ -73,7 +73,7 @@ Planned interfaces:
 
 - canonical hosted status JSON within existing cluster status output
 - typed internal representation for hosted machine/service truth
-- authored contract docs for downstream consumers
+- authored contract docs for downstream consumers in [CONTRACT.md](CONTRACT.md)
 
 ## Data Flow
 

@@ -203,11 +203,11 @@
 |--------|--------|
 | [Define Stable Endpoint Handoff And Failover Proof](epics/VGYFpfmpi/voyages/VGafx2vn4/) | done |
 
-### [Export Canonical Hosted Cluster Status Contract](epics/VGcgU7q58/) (active)
+### [Export Canonical Hosted Cluster Status Contract](epics/VGcgU7q58/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Expose Hosted Cluster Status Schema](epics/VGcgU7q58/voyages/VGcghuutu/) | in-progress |
+| [Expose Hosted Cluster Status Schema](epics/VGcgU7q58/voyages/VGcghuutu/) | done |
 
 ### [Seal Managed Hosted Service Ownership](epics/VGcgU9T57/) (active)
 

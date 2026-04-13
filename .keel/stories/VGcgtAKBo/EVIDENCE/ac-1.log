@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T17:14:49.048097692-07:00
+mode: manual
+---
+Reviewed .keel/epics/VGcgU7q58/voyages/VGcghuutu/CONTRACT.md: the document defines the canonical hosted status JSON surface, enumerates the stable downstream contract fields, and separates stable consumer keys from best-effort diagnostics for machines, managed services, placements, and legacy-runtime drift.

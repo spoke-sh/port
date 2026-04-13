@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-12T17:14:53.349198002-07:00
+mode: manual
+---
+Reviewed .keel/epics/VGcgU7q58/voyages/VGcghuutu/CONTRACT.md plus the voyage README/SDD links: the Proof Posture section names the runtime and CLI commands that validate the hosted status contract and notes that hosted CLI proof should run sequentially because the current harness shares .port/hosted/demo state.
