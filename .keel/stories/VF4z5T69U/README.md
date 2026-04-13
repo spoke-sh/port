@@ -2,9 +2,9 @@
 id: VF4z5T69U
 title: Review ATXT Mission Proof Adoption
 type: feat
-status: backlog
+status: icebox
 created_at: 2026-03-27T14:49:19
-updated_at: 2026-03-27T14:49:19
+updated_at: 2026-04-12T17:22:11
 index: 1
 operator-signal: pulse
 ---
