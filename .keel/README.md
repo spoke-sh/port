@@ -209,11 +209,11 @@
 |--------|--------|
 | [Expose Hosted Cluster Status Schema](epics/VGcgU7q58/voyages/VGcghuutu/) | done |
 
-### [Seal Managed Hosted Service Ownership](epics/VGcgU9T57/) (active)
+### [Seal Managed Hosted Service Ownership](epics/VGcgU9T57/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | in-progress |
+| [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

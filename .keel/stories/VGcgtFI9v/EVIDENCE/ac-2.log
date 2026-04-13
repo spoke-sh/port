@@ -1,0 +1,36 @@
+$ rg -n 'control_plane_name|cloud-aws-worker|simulate primary control-plane guest replacement|real-ha status|stable-endpoint posture' scripts/render-hosted-k3s-ha-failover-proof.sh
+32:control_plane_name = f"proofdemoha{os.getpid()}"
+405:        [control_planes.{control_plane_name}]
+409:        [control_planes.{control_plane_name}.auth]
+413:        [control_planes.{control_plane_name}.auth.source]
+423:        control_plane = "{control_plane_name}"
+522:        [machines.cloud-aws-worker]
+534:        [machines.cloud-aws-worker.guest]
+537:        console_log = "runtime/cloud-aws-worker/console.log"
+540:        control_plane = "{control_plane_name}"
+544:        worker_machines = ["cloud-aws-worker"]
+602:worker_paths = machine_paths(runtime_c, "cloud-aws-worker")
+606:    control_plane_name,
+643:                control_plane_name,
+698:        control_plane_name,
+734:    write_manifest(worker_paths, "cloud-aws-worker", worker_process.pid)
+737:        control_plane_name,
+754:            "cloud-aws-worker": (
+770:                worker placement: cloud-aws-worker -> aws-linux-node-c
+788:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
+811:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
+878:                    "stable-endpoint posture:",
+880:                    "real-ha status:",
+881:                    "cloud-aws-worker",
+907:                    "stable-endpoint posture:",
+923:        control_plane_name,
+940:            "cloud-aws-worker": (
+949:            "simulate primary control-plane guest replacement",
+961:        control_plane_name,
+999:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
+1022:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
+1061:                    "stable-endpoint posture:",
+1063:                    "real-ha status:",
+1064:                    "cloud-aws-worker",
+1090:                    "stable-endpoint posture:",
+1125:    shutil.rmtree(hosted_state_root(control_plane_name), ignore_errors=True)

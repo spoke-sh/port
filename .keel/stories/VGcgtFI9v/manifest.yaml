@@ -1,0 +1,7 @@
+id: VGcgtFI9v
+git_sha: a55d0f3090450707208602e48c48c3afa0fcbcc4
+evidence:
+  EVIDENCE/ac-1.gif: e31ad0c028047848f01f33f3f2dccdf949acb70bf96bb40c175b9f7a2eaf6ab0
+  EVIDENCE/ac-1.log: 4803eb9cc1e839a4a32472f5343d54fd5f6bd05d5e082c1395edea4dead0e4f6
+  EVIDENCE/ac-2.log: 87170dc1da6f49c240127fba2c4d85687478e2acddd02518e3e5e2e193594212
+  EVIDENCE/hosted-k3s-ha-failover-workflow.cast: 2d227e326d552dfddfce2f442ac9b2b20b05f988eab907cc6713c5f4f172b377

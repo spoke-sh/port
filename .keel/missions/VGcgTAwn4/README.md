@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGcgTAwn4
-status: active
+status: achieved
 created_at: 2026-04-12T16:37:31
-updated_at: 2026-04-12T16:39:43
+updated_at: 2026-04-12T17:45:28
 # authored
 title: Export Canonical Hosted Cluster Truth And Seal Managed Lifecycle Ownership
 watch: ~
 activated_at: 2026-04-12T16:39:43
+achieved_at: 2026-04-12T17:45:28
 ---
 
 # Export Canonical Hosted Cluster Truth And Seal Managed Lifecycle Ownership

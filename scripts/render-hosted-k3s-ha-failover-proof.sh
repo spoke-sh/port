@@ -29,6 +29,7 @@ output_dir = pathlib.Path(sys.argv[2]).resolve()
 cast_path = output_dir / "hosted-k3s-ha-failover-workflow.cast"
 gif_path = output_dir / "ac-1.gif"
 tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="phk3sha-", dir="/tmp"))
+control_plane_name = f"proofdemoha{os.getpid()}"
 
 
 def cargo_target_root() -> pathlib.Path:
@@ -191,8 +192,24 @@ def write_machine_placement_state(
     )
 
 
+def running_managed_service_status(name: str) -> dict[str, object]:
+    return {
+        "result": "status",
+        "name": name,
+        "kind": "service",
+        "state": "running",
+        "restart_count": 0,
+        "pid": 4242,
+        "exit_code": None,
+        "health_state": "unknown",
+        "stdout_path": f"/run/port/services/{name}.stdout.log",
+        "stderr_path": f"/run/port/services/{name}.stderr.log",
+        "detail": "managed process is running",
+    }
+
+
 def spawn_exec_sequence_server(
-    paths: dict[str, pathlib.Path], expected: list[tuple[list[str], str]]
+    paths: dict[str, pathlib.Path], expected: list[dict[str, object]]
 ) -> threading.Thread:
     def worker() -> None:
         manifest_path = paths["manifest_path"]
@@ -219,7 +236,7 @@ def spawn_exec_sequence_server(
         listener.listen(1)
 
         try:
-            for expected_command, stdout in expected:
+            for expected_operation in expected:
                 conn, _ = listener.accept()
                 with conn:
                     reader = conn.makefile("r", encoding="utf-8")
@@ -231,24 +248,49 @@ def spawn_exec_sequence_server(
                     conn.sendall(b"OK\n")
                     request = json.loads(reader.readline())
                     operation = request["operation"]
-                    if operation["type"] != "exec":
+                    if expected_operation["type"] == "exec":
+                        if operation["type"] != "exec":
+                            raise AssertionError(
+                                f"unexpected hosted guest operation: {operation!r}"
+                            )
+                        expected_command = expected_operation["command"]
+                        if operation["command"] != expected_command:
+                            raise AssertionError(
+                                f"unexpected command {operation['command']!r}; expected {expected_command!r}"
+                            )
+                        response = {
+                            "status": "completed",
+                            "id": request["id"],
+                            "exit_code": 0,
+                            "result": {
+                                "type": "exec",
+                                "stdout": expected_operation["stdout"],
+                                "stderr": "",
+                            },
+                        }
+                    elif expected_operation["type"] == "managed-service-list":
+                        if operation["type"] != "managed-service":
+                            raise AssertionError(
+                                f"unexpected hosted guest operation: {operation!r}"
+                            )
+                        if operation["operation"]["verb"] != "list":
+                            raise AssertionError(
+                                f"unexpected managed-service verb: {operation['operation']!r}"
+                            )
+                        response = {
+                            "status": "completed",
+                            "id": request["id"],
+                            "exit_code": 0,
+                            "result": {
+                                "type": "managed-service",
+                                "result": "list",
+                                "services": expected_operation["services"],
+                            },
+                        }
+                    else:
                         raise AssertionError(
-                            f"unexpected hosted guest operation: {operation!r}"
+                            f"unsupported expected operation type: {expected_operation['type']!r}"
                         )
-                    if operation["command"] != expected_command:
-                        raise AssertionError(
-                            f"unexpected command {operation['command']!r}; expected {expected_command!r}"
-                        )
-                    response = {
-                        "status": "completed",
-                        "id": request["id"],
-                        "exit_code": 0,
-                        "result": {
-                            "type": "exec",
-                            "stdout": stdout,
-                            "stderr": "",
-                        },
-                    }
                     conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
         finally:
             listener.close()
@@ -360,15 +402,15 @@ config_path.write_text(
         substrate = "firecracker"
         protection_mode = "standard"
 
-        [control_planes.demo]
+        [control_planes.{control_plane_name}]
         endpoint = "http://{control_addr}"
         audience = "port-hosted-demo"
 
-        [control_planes.demo.auth]
+        [control_planes.{control_plane_name}.auth]
         scheme = "bearer"
         header = "authorization"
 
-        [control_planes.demo.auth.source]
+        [control_planes.{control_plane_name}.auth.source]
         kind = "env"
         variable = "PORT_DEMO_TOKEN"
 
@@ -378,7 +420,7 @@ config_path.write_text(
 
         [hosts.aws-linux.connection]
         mode = "hosted-control-plane"
-        control_plane = "demo"
+        control_plane = "{control_plane_name}"
 
         [hosts.aws-linux.firecracker]
         local_launch = false
@@ -495,7 +537,7 @@ config_path.write_text(
         console_log = "runtime/cloud-aws-worker/console.log"
 
         [k3s_clusters.demo]
-        control_plane = "demo"
+        control_plane = "{control_plane_name}"
         host_group = "aws-builders"
         server_machine = "cloud-aws"
         server_machines = ["cloud-aws", "cloud-aws-b", "cloud-aws-c"]
@@ -558,30 +600,52 @@ primary_paths = machine_paths(runtime_a, "cloud-aws")
 secondary_paths = machine_paths(runtime_b, "cloud-aws-b")
 tertiary_paths = machine_paths(runtime_c, "cloud-aws-c")
 worker_paths = machine_paths(runtime_c, "cloud-aws-worker")
+registered_at = int(time.time())
+
+write_registered_node_state(
+    control_plane_name,
+    {
+        "aws-linux-node": {
+            "endpoint": f"http://{node_a_addr}",
+            "token": "node-secret",
+            "registered_at": registered_at,
+            "refreshed_at": registered_at,
+            "ttl_seconds": 30,
+        },
+        "aws-linux-node-b": {
+            "endpoint": f"http://{node_b_addr}",
+            "token": "node-secret",
+            "registered_at": registered_at,
+            "refreshed_at": registered_at,
+            "ttl_seconds": 30,
+        },
+        "aws-linux-node-c": {
+            "endpoint": f"http://{node_c_addr}",
+            "token": "node-secret",
+            "registered_at": registered_at,
+            "refreshed_at": registered_at,
+            "ttl_seconds": 30,
+        },
+    },
+)
 
 try:
-    for name, bind, node in [
-        ("control-plane", control_addr, None),
-        ("node-agent-a", node_a_addr, "aws-linux-node"),
-        ("node-agent-b", node_b_addr, "aws-linux-node-b"),
-        ("node-agent-c", node_c_addr, "aws-linux-node-c"),
+    for name, argv in [
+        (
+            "control-plane",
+            [
+                "port",
+                "--config",
+                str(config_path),
+                "control-plane",
+                "serve",
+                "--control-plane",
+                control_plane_name,
+                "--bind",
+                control_addr,
+            ],
+        )
     ]:
-        argv = ["port", "--config", str(config_path)]
-        if node is None:
-            argv.extend(["control-plane", "serve", "--control-plane", "demo", "--bind", bind])
-        else:
-            argv.extend(
-                [
-                    "node-agent",
-                    "serve",
-                    "--node",
-                    node,
-                    "--bind",
-                    bind,
-                    "--token",
-                    "node-secret",
-                ]
-            )
         stdout_handle = (tmpdir / f"{name}.stdout.log").open("w", encoding="utf-8")
         stderr_handle = (tmpdir / f"{name}.stderr.log").open("w", encoding="utf-8")
         process = subprocess.Popen(
@@ -595,32 +659,63 @@ try:
         processes.append((process, stdout_handle, stderr_handle))
 
     wait_for_tcp(control_addr)
+
+    for name, bind, node in [
+        ("node-agent-a", node_a_addr, "aws-linux-node"),
+        ("node-agent-b", node_b_addr, "aws-linux-node-b"),
+        ("node-agent-c", node_c_addr, "aws-linux-node-c"),
+    ]:
+        argv = [
+            "port",
+            "--config",
+            str(config_path),
+            "node-agent",
+            "serve",
+            "--node",
+            node,
+            "--bind",
+            bind,
+            "--token",
+            "node-secret",
+        ]
+        stdout_handle = (tmpdir / f"{name}.stdout.log").open("w", encoding="utf-8")
+        stderr_handle = (tmpdir / f"{name}.stderr.log").open("w", encoding="utf-8")
+        process = subprocess.Popen(
+            argv,
+            cwd=repo_root,
+            env=env,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+        )
+        processes.append((process, stdout_handle, stderr_handle))
+
     wait_for_tcp(node_a_addr)
     wait_for_tcp(node_b_addr)
     wait_for_tcp(node_c_addr)
 
     write_registered_node_state(
-        "demo",
+        control_plane_name,
         {
             "aws-linux-node": {
                 "endpoint": f"http://{node_a_addr}",
                 "token": "node-secret",
-                "registered_at": 1,
-                "refreshed_at": 1,
+                "registered_at": registered_at,
+                "refreshed_at": registered_at,
                 "ttl_seconds": 30,
             },
             "aws-linux-node-b": {
                 "endpoint": f"http://{node_b_addr}",
                 "token": "node-secret",
-                "registered_at": 1,
-                "refreshed_at": 1,
+                "registered_at": registered_at,
+                "refreshed_at": registered_at,
                 "ttl_seconds": 30,
             },
             "aws-linux-node-c": {
                 "endpoint": f"http://{node_c_addr}",
                 "token": "node-secret",
-                "registered_at": 1,
-                "refreshed_at": 1,
+                "registered_at": registered_at,
+                "refreshed_at": registered_at,
                 "ttl_seconds": 30,
             },
         },
@@ -639,7 +734,7 @@ try:
     write_manifest(worker_paths, "cloud-aws-worker", worker_process.pid)
 
     write_machine_placement_state(
-        "demo",
+        control_plane_name,
         {
             "cloud-aws": (
                 "aws-linux-node",
@@ -682,25 +777,83 @@ try:
         spawn_exec_sequence_server(
             primary_paths,
             [
-                (
-                    ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
-                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
-                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
-                ),
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
+                    "stdout": "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-server")],
+                },
+                {
+                    "type": "exec",
+                    "command": [
+                        "/bin/sh",
+                        "-lc",
+                        "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+                    ],
+                    "stdout": "",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
+                    "stdout": "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-server")],
+                },
+                {
+                    "type": "exec",
+                    "command": [
+                        "/bin/sh",
+                        "-lc",
+                        "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+                    ],
+                    "stdout": "",
+                },
             ],
         )
     )
+    for paths, service_name in [
+        (secondary_paths, "k3s-server"),
+        (tertiary_paths, "k3s-server"),
+        (worker_paths, "k3s-agent"),
+    ]:
+        threads.append(
+            spawn_exec_sequence_server(
+                paths,
+                [
+                    {
+                        "type": "managed-service-list",
+                        "services": [running_managed_service_status(service_name)],
+                    },
+                    {
+                        "type": "managed-service-list",
+                        "services": [running_managed_service_status(service_name)],
+                    },
+                    {
+                        "type": "managed-service-list",
+                        "services": [running_managed_service_status(service_name)],
+                    },
+                    {
+                        "type": "managed-service-list",
+                        "services": [running_managed_service_status(service_name)],
+                    },
+                ],
+            )
+        )
 
     status_before = [
         "port",
@@ -721,9 +874,11 @@ try:
                 [
                     "cluster:",
                     "api endpoint:",
+                    "machine truth:",
                     "stable-endpoint posture:",
                     "stable-endpoint detail:",
                     "real-ha status:",
+                    "cloud-aws-worker",
                     "control-plane placement:",
                 ],
             ),
@@ -765,7 +920,7 @@ try:
     write_manifest(primary_paths, "cloud-aws", replacement_primary.pid)
 
     write_machine_placement_state(
-        "demo",
+        control_plane_name,
         {
             "cloud-aws": (
                 "aws-linux-node",
@@ -803,27 +958,27 @@ try:
         )
     )
     write_registered_node_state(
-        "demo",
+        control_plane_name,
         {
             "aws-linux-node": {
                 "endpoint": f"http://{node_a_addr}",
                 "token": "node-secret",
-                "registered_at": 1,
-                "refreshed_at": 1,
+                "registered_at": registered_at,
+                "refreshed_at": registered_at,
                 "ttl_seconds": 30,
             },
             "aws-linux-node-b": {
                 "endpoint": f"http://{node_b_addr}",
                 "token": "node-secret",
-                "registered_at": 1,
-                "refreshed_at": 1,
+                "registered_at": registered_at,
+                "refreshed_at": registered_at,
                 "ttl_seconds": 30,
             },
             "aws-linux-node-c": {
                 "endpoint": f"http://{node_c_addr}",
                 "token": "node-secret",
-                "registered_at": 1,
-                "refreshed_at": 1,
+                "registered_at": registered_at,
+                "refreshed_at": registered_at,
                 "ttl_seconds": 30,
             },
         },
@@ -833,22 +988,52 @@ try:
         spawn_exec_sequence_server(
             primary_paths,
             [
-                (
-                    ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
-                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
-                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
-                ),
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
+                    "stdout": "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-server")],
+                },
+                {
+                    "type": "exec",
+                    "command": [
+                        "/bin/sh",
+                        "-lc",
+                        "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+                    ],
+                    "stdout": "",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
+                    "stdout": "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-server")],
+                },
+                {
+                    "type": "exec",
+                    "command": [
+                        "/bin/sh",
+                        "-lc",
+                        "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+                    ],
+                    "stdout": "",
+                },
             ],
         )
     )
@@ -872,9 +1057,11 @@ try:
                 [
                     "cluster:",
                     "api endpoint:",
+                    "machine truth:",
                     "stable-endpoint posture:",
                     "stable-endpoint detail:",
                     "real-ha status:",
+                    "cloud-aws-worker",
                     "control-plane placement:",
                 ],
             ),
@@ -935,7 +1122,7 @@ try:
     print(f"generated cast: {cast_path}")
     print(f"generated gif: {gif_path}")
 finally:
-    shutil.rmtree(hosted_state_root("demo"), ignore_errors=True)
+    shutil.rmtree(hosted_state_root(control_plane_name), ignore_errors=True)
     for thread in threads:
         thread.join(timeout=5)
     for process in extra_processes:
