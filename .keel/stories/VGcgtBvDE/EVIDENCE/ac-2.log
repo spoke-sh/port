@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-04-12T17:20:31.359190709-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-runtime hosted_k3s_service_status_survives_from_persisted_records_after_launch'
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 168 filtered out; finished in 6.16s
+

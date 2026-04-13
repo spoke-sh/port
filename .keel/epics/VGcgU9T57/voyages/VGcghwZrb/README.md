@@ -1,13 +1,14 @@
 ---
 # system-managed
 id: VGcghwZrb
-status: planned
+status: in-progress
 epic: VGcgU9T57
 created_at: 2026-04-12T16:38:27
 # authored
 title: Seal Managed Hosted K3s Ownership
 index: 1
 updated_at: 2026-04-12T16:39:43
+started_at: 2026-04-12T17:15:58
 ---
 
 # Seal Managed Hosted K3s Ownership
@@ -26,11 +27,11 @@ updated_at: 2026-04-12T16:39:43
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Persist Hosted Placement And Service Records Across Reuse](../../../../stories/VGcgtBvDE/README.md) | feat | backlog |
+| [Persist Hosted Placement And Service Records Across Reuse](../../../../stories/VGcgtBvDE/README.md) | feat | done |
 | [Enforce Managed Service Ownership For Hosted K3s](../../../../stories/VGcgtDfDT/README.md) | feat | backlog |
 | [Record Hosted Worker Stability Soak Proof](../../../../stories/VGcgtFI9v/README.md) | feat | backlog |
 <!-- END GENERATED -->

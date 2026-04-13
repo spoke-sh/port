@@ -18074,6 +18074,258 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_k3s_bootstrap_persists_placement_and_service_records() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let hosted_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let server_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+        let worker_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws-worker");
+        let server_guest = spawn_hosted_guest_sequence_server(
+            server_paths.clone(),
+            vec![
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
+                        "server",
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
+            ],
+        );
+        let worker_guest = spawn_hosted_guest_sequence_server(
+            worker_paths.clone(),
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                policy: hosted_k3s_service_policy("agent"),
+            }],
+        );
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+        let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+
+        let placement_state_path =
+            hosted_placeholder_runtime_root("demo").join("machine-placements.json");
+        let placement_state: serde_json::Value = serde_json::from_slice(
+            &fs::read(&placement_state_path).expect("machine placement state should exist"),
+        )
+        .expect("machine placement state should decode");
+        for machine_name in ["cloud-aws", "cloud-aws-worker"] {
+            assert_eq!(
+                placement_state["machines"][machine_name]["node_name"].as_str(),
+                Some("aws-linux-node")
+            );
+            assert_eq!(
+                placement_state["machines"][machine_name]["runtime_root"].as_str(),
+                Some(hosted_runtime_root.to_string_lossy().as_ref())
+            );
+        }
+
+        let server_record: ServiceDefinitionRecord = read_json_file(
+            &service_definition_dir(&server_paths.runtime_dir).join("k3s-server.json"),
+        )
+        .expect("server service definition should persist");
+        assert_eq!(server_record.machine_name, "cloud-aws");
+        assert_eq!(server_record.name, "k3s-server");
+        assert_eq!(server_record.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            server_record.target_host_group.as_deref(),
+            Some("aws-builders")
+        );
+        assert_eq!(server_record.desired_state, ServiceDesiredState::Active);
+
+        let worker_record: ServiceDefinitionRecord = read_json_file(
+            &service_definition_dir(&worker_paths.runtime_dir).join("k3s-agent.json"),
+        )
+        .expect("worker service definition should persist");
+        assert_eq!(worker_record.machine_name, "cloud-aws-worker");
+        assert_eq!(worker_record.name, "k3s-agent");
+        assert_eq!(worker_record.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            worker_record.target_host_group.as_deref(),
+            Some("aws-builders")
+        );
+        assert_eq!(worker_record.desired_state, ServiceDesiredState::Active);
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(bootstrap.server_launches[0].pid.to_string())
+            .status();
+        for metadata in bootstrap.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
+    fn hosted_k3s_service_status_survives_from_persisted_records_after_launch() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let hosted_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let server_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
+        let worker_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws-worker");
+        let server_guest = spawn_hosted_guest_sequence_server(
+            server_paths,
+            vec![
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-server"),
+                    command: k3s_bootstrap_command(
+                        "server",
+                        &[
+                            String::from("--disable=traefik"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws"),
+                        ],
+                        Some("--cluster-init"),
+                        None,
+                        None,
+                    ),
+                    policy: hosted_k3s_service_policy("server"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
+            ],
+        );
+        let worker_guest = spawn_hosted_guest_sequence_server(
+            worker_paths,
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                policy: hosted_k3s_service_policy("agent"),
+            }],
+        );
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+        let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let stale_control_plane = start_live_control_plane_with_bindings(&config, Vec::new())
+            .expect("stale control plane should start");
+        let mut stale_config = config.clone();
+        stale_config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{stale_control_plane}");
+
+        let server_status =
+            machine_service_status(&stale_config, tempdir.path(), "cloud-aws", "k3s-server")
+                .expect("server service status should survive from persisted records");
+        assert_eq!(server_status.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            server_status.target_host_group.as_deref(),
+            Some("aws-builders")
+        );
+        assert_eq!(server_status.desired_state, ServiceDesiredState::Active);
+        assert_eq!(server_status.runtime.state, ServiceRuntimeState::Running);
+        assert!(
+            server_status
+                .detail
+                .contains("no live registered node-agent endpoint for it"),
+            "{}",
+            server_status.detail
+        );
+
+        let worker_status = machine_service_status(
+            &stale_config,
+            tempdir.path(),
+            "cloud-aws-worker",
+            "k3s-agent",
+        )
+        .expect("worker service status should survive from persisted records");
+        assert_eq!(worker_status.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(
+            worker_status.target_host_group.as_deref(),
+            Some("aws-builders")
+        );
+        assert_eq!(worker_status.desired_state, ServiceDesiredState::Active);
+        assert_eq!(worker_status.runtime.state, ServiceRuntimeState::Running);
+        assert!(
+            worker_status
+                .detail
+                .contains("no live registered node-agent endpoint for it"),
+            "{}",
+            worker_status.detail
+        );
+
+        let _ = Command::new("kill")
+            .arg(bootstrap.server_launches[0].pid.to_string())
+            .status();
+        for metadata in bootstrap.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+    }
+
+    #[test]
     fn hosted_k3s_cluster_access_contract() {
         let _guard = hosted_server_lock()
             .lock()

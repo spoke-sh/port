@@ -213,7 +213,7 @@
 
 | Voyage | Status |
 |--------|--------|
-| [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | planned |
+| [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

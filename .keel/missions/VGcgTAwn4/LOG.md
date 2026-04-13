@@ -14,3 +14,7 @@ Completed story VGcgt729o: hosted cluster status now publishes canonical machine
 ## 2026-04-12T17:15:39
 
 Completed story VGcgtAKBo: authored the downstream hosted status contract in .keel/epics/VGcgU7q58/voyages/VGcghuutu/CONTRACT.md, documented the proof posture, and accepted the manual-review story; Keel auto-completed voyage VGcghuutu and finalized epic VGcgU7q58.
+
+## 2026-04-12T17:21:04
+
+Completed story VGcgtBvDE: added hosted K3s persistence coverage proving bootstrap writes durable placement plus managed-service records and that hosted service-status lookups survive from persisted records after launch-time control-plane state is gone.
