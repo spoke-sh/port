@@ -1,0 +1,7 @@
+$ bash /home/alex/workspace/spoke-sh/port/.keel/stories/VGgBIcexb/verify-ac-2.sh
+== build exported keel package ==
+warning: Git tree '/home/alex/workspace/spoke-sh/port' has uncommitted changes
+
+== built keel version ==
+warning: Git tree '/home/alex/workspace/spoke-sh/port' has uncommitted changes
+keel 0.2.1

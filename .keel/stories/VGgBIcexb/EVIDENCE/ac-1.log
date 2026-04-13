@@ -1,0 +1,5 @@
+$ bash /home/alex/workspace/spoke-sh/port/.keel/stories/VGgBIcexb/verify-ac-1.sh
+== locked keel revision ==
+65af71bb72f871fcd7249913a9580d8cfb1fbf2b
+== verify keel follow edges ==
+follow-edges-ok
