@@ -31,6 +31,16 @@ gif_path = output_dir / "ac-2.gif"
 tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="phk3s-", dir="/tmp"))
 
 
+def cargo_target_root() -> pathlib.Path:
+    configured = os.environ.get("CARGO_TARGET_DIR")
+    if not configured:
+        return repo_root / "target"
+    candidate = pathlib.Path(configured)
+    if candidate.is_absolute():
+        return candidate
+    return (repo_root / candidate).resolve()
+
+
 def write_executable(path: pathlib.Path, contents: str) -> None:
     path.write_text(contents, encoding="utf-8")
     path.chmod(0o755)
@@ -43,8 +53,15 @@ def run_checked(argv: list[str], *, env: dict[str, str], cwd: pathlib.Path) -> s
         env=env,
         capture_output=True,
         text=True,
-        check=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "command failed: {}\nstdout:\n{}\nstderr:\n{}".format(
+                " ".join(argv),
+                result.stdout,
+                result.stderr,
+            )
+        )
     output = result.stdout
     if result.stderr:
         output += result.stderr
@@ -118,8 +135,70 @@ def machine_paths(runtime_root: pathlib.Path, machine_name: str) -> dict[str, pa
     }
 
 
+def running_managed_service_status(name: str) -> dict[str, object]:
+    return {
+        "result": "status",
+        "name": name,
+        "kind": "service",
+        "state": "running",
+        "restart_count": 0,
+        "pid": 4242,
+        "exit_code": None,
+        "health_state": "unknown",
+        "stdout_path": f"/run/port/services/{name}.stdout.log",
+        "stderr_path": f"/run/port/services/{name}.stderr.log",
+        "detail": "managed process is running",
+    }
+
+
+def k3s_service_command(
+    role: str,
+    args: list[str],
+    *,
+    bootstrap_flag: str | None = None,
+    server_url: str | None = None,
+    join_token: str | None = None,
+) -> list[str]:
+    command = ["/usr/bin/k3s", role]
+    if bootstrap_flag is not None:
+        command.append(bootstrap_flag)
+    if server_url is not None:
+        command.extend(["--server", server_url])
+    if join_token is not None:
+        command.extend(["--token", join_token])
+    command.extend(args)
+    return command
+
+
+def k3s_service_healthcheck_command(role: str) -> list[str]:
+    k3s = "/usr/bin/k3s"
+    if role == "server":
+        shell = (
+            f"{k3s} crictl info >/dev/null 2>&1 && "
+            f"{k3s} kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "
+            "--request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
+        )
+    else:
+        shell = (
+            f"{k3s} crictl info >/dev/null 2>&1 && "
+            f"{k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig "
+            "--request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
+        )
+    return ["/bin/sh", "-lc", shell]
+
+
+def k3s_service_policy(role: str) -> dict[str, object]:
+    return {
+        "restart": "always",
+        "healthcheck": {
+            "policy": "command",
+            "command": k3s_service_healthcheck_command(role),
+        },
+    }
+
+
 def spawn_exec_sequence_server(
-    paths: dict[str, pathlib.Path], expected: list[tuple[list[str], str]]
+    paths: dict[str, pathlib.Path], expected: list[dict[str, object]]
 ) -> threading.Thread:
     def worker() -> None:
         manifest_path = paths["manifest_path"]
@@ -146,7 +225,7 @@ def spawn_exec_sequence_server(
         listener.listen(1)
 
         try:
-            for expected_command, stdout in expected:
+            for expected_operation in expected:
                 conn, _ = listener.accept()
                 with conn:
                     reader = conn.makefile("r", encoding="utf-8")
@@ -157,24 +236,122 @@ def spawn_exec_sequence_server(
                         )
                     conn.sendall(b"OK\n")
                     request = json.loads(reader.readline())
-                    if request["operation"]["type"] != "exec":
+                    operation = request["operation"]
+                    expected_type = expected_operation["type"]
+                    if expected_type == "exec":
+                        if operation["type"] != "exec":
+                            raise AssertionError(
+                                f"unexpected hosted guest operation: {operation!r}"
+                            )
+                        expected_command = expected_operation["command"]
+                        if operation["command"] != expected_command:
+                            raise AssertionError(
+                                f"unexpected command {operation['command']!r}; expected {expected_command!r}"
+                            )
+                        response = {
+                            "status": "completed",
+                            "id": request["id"],
+                            "exit_code": 0,
+                            "result": {
+                                "type": "exec",
+                                "stdout": expected_operation["stdout"],
+                                "stderr": "",
+                            },
+                        }
+                    elif expected_type == "managed-service-start":
+                        if operation["type"] != "managed-service":
+                            raise AssertionError(
+                                f"unexpected hosted guest operation: {operation!r}"
+                            )
+                        service_operation = operation["operation"]
+                        if service_operation["verb"] != "start":
+                            raise AssertionError(
+                                f"unexpected managed-service verb: {service_operation!r}"
+                            )
+                        if service_operation["name"] != expected_operation["name"]:
+                            raise AssertionError(
+                                f"unexpected service name {service_operation['name']!r}; expected {expected_operation['name']!r}"
+                            )
+                        if service_operation["kind"] != "service":
+                            raise AssertionError(
+                                f"unexpected managed-service kind: {service_operation!r}"
+                            )
+                        if service_operation["command"] != expected_operation["command"]:
+                            raise AssertionError(
+                                f"unexpected managed-service command {service_operation['command']!r}; expected {expected_operation['command']!r}"
+                            )
+                        if service_operation["env"] != {}:
+                            raise AssertionError(
+                                f"expected empty managed-service env, got {service_operation['env']!r}"
+                            )
+                        if service_operation["cwd"] is not None:
+                            raise AssertionError(
+                                f"expected managed-service cwd to be null, got {service_operation['cwd']!r}"
+                            )
+                        if service_operation["policy"] != expected_operation["policy"]:
+                            raise AssertionError(
+                                f"unexpected managed-service policy {service_operation['policy']!r}; expected {expected_operation['policy']!r}"
+                            )
+                        response = {
+                            "status": "completed",
+                            "id": request["id"],
+                            "exit_code": 0,
+                            "result": {
+                                "type": "managed-service",
+                                **running_managed_service_status(
+                                    str(expected_operation["name"])
+                                ),
+                            },
+                        }
+                    elif expected_type == "managed-service-status":
+                        if operation["type"] != "managed-service":
+                            raise AssertionError(
+                                f"unexpected hosted guest operation: {operation!r}"
+                            )
+                        service_operation = operation["operation"]
+                        if service_operation["verb"] != "status":
+                            raise AssertionError(
+                                f"unexpected managed-service verb: {service_operation!r}"
+                            )
+                        if service_operation["name"] != expected_operation["name"]:
+                            raise AssertionError(
+                                f"unexpected service name {service_operation['name']!r}; expected {expected_operation['name']!r}"
+                            )
+                        response = {
+                            "status": "completed",
+                            "id": request["id"],
+                            "exit_code": 0,
+                            "result": {
+                                "type": "managed-service",
+                                **running_managed_service_status(
+                                    str(expected_operation["name"])
+                                ),
+                            },
+                        }
+                    elif expected_type == "managed-service-list":
+                        if operation["type"] != "managed-service":
+                            raise AssertionError(
+                                f"unexpected hosted guest operation: {operation!r}"
+                            )
+                        service_operation = operation["operation"]
+                        if service_operation["verb"] != "list":
+                            raise AssertionError(
+                                f"unexpected managed-service verb: {service_operation!r}"
+                            )
+                        response = {
+                            "status": "completed",
+                            "id": request["id"],
+                            "exit_code": 0,
+                            "result": {
+                                "type": "managed-service",
+                                "result": "list",
+                                "services": expected_operation["services"],
+                            },
+                        }
+                    else:
                         raise AssertionError(
-                            f"unexpected hosted guest operation: {request['operation']!r}"
+                            f"unsupported expected operation type: {expected_type!r}"
                         )
-                    if request["operation"]["command"] != expected_command:
-                        raise AssertionError(
-                            f"unexpected command {request['operation']['command']!r}; expected {expected_command!r}"
-                        )
-                    response = {
-                        "status": "completed",
-                        "id": request["id"],
-                        "exit_code": 0,
-                        "result": {
-                            "type": "exec",
-                            "stdout": stdout,
-                            "stderr": "",
-                        },
-                    }
                     conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
         finally:
             listener.close()
@@ -195,6 +372,10 @@ def filter_lines(output: str, needles: list[str]) -> str:
     if not filtered:
         return output
     return "\n".join(filtered) + "\n"
+
+
+api_endpoint = "https://demo-k3s.internal:6443"
+control_plane_name = f"proofdemo{os.getpid()}"
 
 
 control_addr = reserve_addr()
@@ -274,15 +455,15 @@ config_path.write_text(
         substrate = "firecracker"
         protection_mode = "standard"
 
-        [control_planes.demo]
+        [control_planes.{control_plane_name}]
         endpoint = "http://{control_addr}"
         audience = "port-hosted-demo"
 
-        [control_planes.demo.auth]
+        [control_planes.{control_plane_name}.auth]
         scheme = "bearer"
         header = "authorization"
 
-        [control_planes.demo.auth.source]
+        [control_planes.{control_plane_name}.auth.source]
         kind = "env"
         variable = "PORT_DEMO_TOKEN"
 
@@ -292,7 +473,7 @@ config_path.write_text(
 
         [hosts.generic-linux.connection]
         mode = "hosted-control-plane"
-        control_plane = "demo"
+        control_plane = "{control_plane_name}"
 
         [hosts.generic-linux.firecracker]
         local_launch = false
@@ -304,7 +485,7 @@ config_path.write_text(
 
         [hosts.aws-linux.connection]
         mode = "hosted-control-plane"
-        control_plane = "demo"
+        control_plane = "{control_plane_name}"
 
         [hosts.aws-linux.firecracker]
         local_launch = false
@@ -357,6 +538,9 @@ config_path.write_text(
         control_port = 7000
         console_log = "runtime/cloud-generic/console.log"
 
+        [machines.cloud-generic.network]
+        enabled = false
+
         [machines.cloud-aws]
         host = "aws-linux"
         kernel = "demo-kernel"
@@ -374,11 +558,17 @@ config_path.write_text(
         control_port = 7000
         console_log = "runtime/cloud-aws/console.log"
 
+        [machines.cloud-aws.network]
+        enabled = false
+
         [k3s_clusters.demo]
-        control_plane = "demo"
+        control_plane = "{control_plane_name}"
         host_group = "remote-linux"
         server_machine = "cloud-generic"
+        server_machines = ["cloud-generic"]
         worker_machines = ["cloud-aws"]
+        api_endpoint = "{api_endpoint}"
+        control_plane_scheduler = "spread"
         version = "v1.32.0+k3s1"
         server_args = ["--disable=traefik"]
         worker_args = ["--node-label=role=worker"]
@@ -388,9 +578,33 @@ config_path.write_text(
     encoding="utf-8",
 )
 
-port_bin = repo_root / "target" / "debug" / "port"
+port_bin = cargo_target_root() / "debug" / "port"
 write_executable(bin_dir / "port", f"#!/usr/bin/env bash\nexec '{port_bin}' \"$@\"\n")
 write_executable(bin_dir / "firecracker", "#!/usr/bin/env bash\nsleep 30\n")
+write_executable(
+    bin_dir / "ip",
+    """#!/usr/bin/env bash
+if [[ "${1:-}" == "-V" || "${1:-}" == "--version" ]]; then
+  echo "ip utility, iproute2-6.12.0"
+  exit 0
+fi
+if [[ "${1:-}" == "route" && "${2:-}" == "show" && "${3:-}" == "default" ]]; then
+  echo "default via 192.0.2.1 dev eth0"
+  exit 0
+fi
+exit 0
+""",
+)
+write_executable(
+    bin_dir / "iptables",
+    """#!/usr/bin/env bash
+if [[ "${1:-}" == "-V" || "${1:-}" == "--version" ]]; then
+  echo "iptables v1.8.11"
+  exit 0
+fi
+exit 0
+""",
+)
 
 env = os.environ.copy()
 env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
@@ -418,11 +632,27 @@ try:
                 "control-plane",
                 "serve",
                 "--control-plane",
-                "demo",
+                control_plane_name,
                 "--bind",
                 control_addr,
             ],
-        ),
+        )
+    ]:
+        stdout_handle = (tmpdir / f"{name}.stdout.log").open("w", encoding="utf-8")
+        stderr_handle = (tmpdir / f"{name}.stderr.log").open("w", encoding="utf-8")
+        process = subprocess.Popen(
+            argv,
+            cwd=repo_root,
+            env=env,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+        )
+        processes.append((process, stdout_handle, stderr_handle))
+
+    wait_for_tcp(control_addr)
+
+    for name, argv in [
         (
             "generic-node-agent",
             [
@@ -468,36 +698,87 @@ try:
         )
         processes.append((process, stdout_handle, stderr_handle))
 
-    wait_for_tcp(control_addr)
     wait_for_tcp(generic_addr)
     wait_for_tcp(aws_addr)
 
     generic_paths = machine_paths(generic_runtime_root, "cloud-generic")
     aws_paths = machine_paths(aws_runtime_root, "cloud-aws")
+    join_token = "demo-join-token"
+    proof_runtime_root = tmpdir / "proof-runtime"
+
     threads.append(
         spawn_exec_sequence_server(
             generic_paths,
             [
-                (
-                    [
+                {
+                    "type": "managed-service-start",
+                    "name": "k3s-server",
+                    "command": k3s_service_command(
+                        "server",
+                        ["--disable=traefik", "--node-name", "cloud-generic"],
+                        bootstrap_flag="--cluster-init",
+                    ),
+                    "policy": k3s_service_policy("server"),
+                },
+                {
+                    "type": "exec",
+                    "command": [
                         "/bin/sh",
                         "-lc",
-                        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-server.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" server --disable=traefik ) >'/var/log/k3s-server.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh \"$installer\"",
+                        "cat /var/lib/rancher/k3s/server/token 2>/dev/null || cat /var/lib/rancher/k3s/server/node-token",
                     ],
-                    "server bootstrapped\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "attempt=0; while [ \"$attempt\" -lt 120 ]; do if [ -s /var/lib/rancher/k3s/server/node-token ]; then cat /var/lib/rancher/k3s/server/node-token; exit 0; fi; attempt=$((attempt + 1)); sleep 1; done; echo 'timed out waiting for /var/lib/rancher/k3s/server/node-token' >&2; exit 1"],
-                    "demo-join-token\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
-                    "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-generic:6443\n",
-                ),
-                (
-                    ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
-                ),
+                    "stdout": f"{join_token}\n",
+                },
+                {
+                    "type": "managed-service-status",
+                    "name": "k3s-server",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
+                    "stdout": f"apiVersion: v1\nclusters:\n- cluster:\n    server: {api_endpoint}\n",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
+                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-server")],
+                },
+                {
+                    "type": "exec",
+                    "command": [
+                        "/bin/sh",
+                        "-lc",
+                        "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+                    ],
+                    "stdout": "",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "cat /etc/rancher/k3s/k3s.yaml"],
+                    "stdout": f"apiVersion: v1\nclusters:\n- cluster:\n    server: {api_endpoint}\n",
+                },
+                {
+                    "type": "exec",
+                    "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
+                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-server")],
+                },
+                {
+                    "type": "exec",
+                    "command": [
+                        "/bin/sh",
+                        "-lc",
+                        "set -eu; for path in '/run/port/k3s-server.pid' '/var/log/k3s-server.log'; do if [ -e \"$path\" ]; then printf '%s\\n' \"$path\"; fi; done",
+                    ],
+                    "stdout": "",
+                },
             ],
         )
     )
@@ -505,167 +786,230 @@ try:
         spawn_exec_sequence_server(
             aws_paths,
             [
-                (
-                    [
-                        "/bin/sh",
-                        "-lc",
-                        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-agent.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" agent --server 'https://cloud-generic:6443' --token 'demo-join-token' --node-label=role=worker ) >'/var/log/k3s-agent.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='demo-join-token' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh \"$installer\"",
-                    ],
-                    "worker joined\n",
-                )
+                {
+                    "type": "managed-service-start",
+                    "name": "k3s-agent",
+                    "command": k3s_service_command(
+                        "agent",
+                        ["--node-label=role=worker", "--node-name", "cloud-aws"],
+                        server_url=api_endpoint,
+                        join_token=join_token,
+                    ),
+                    "policy": k3s_service_policy("agent"),
+                },
+                {
+                    "type": "managed-service-status",
+                    "name": "k3s-agent",
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-agent")],
+                },
+                {
+                    "type": "managed-service-list",
+                    "services": [running_managed_service_status("k3s-agent")],
+                },
             ],
         )
     )
 
-    launch_server = [
+    cluster_up = [
         "port",
         "--config",
         str(config_path),
-        "machine",
-        "launch",
-        "--machine",
-        "cloud-generic",
-    ]
-    steps.append((" ".join(launch_server), run_checked(launch_server, env=env, cwd=repo_root)))
-
-    launch_worker = [
-        "port",
-        "--config",
-        str(config_path),
-        "machine",
-        "launch",
-        "--machine",
-        "cloud-aws",
-    ]
-    steps.append((" ".join(launch_worker), run_checked(launch_worker, env=env, cwd=repo_root)))
-
-    status_server = [
-        "port",
-        "--config",
-        str(config_path),
-        "machine",
-        "status",
-        "--machine",
-        "cloud-generic",
+        "cluster",
+        "up",
+        "--cluster",
+        "demo",
+        "--runtime-root",
+        str(proof_runtime_root),
     ]
     steps.append(
         (
-            " ".join(status_server),
+            " ".join(cluster_up),
             filter_lines(
-                run_checked(status_server, env=env, cwd=repo_root),
+                run_checked(cluster_up, env=env, cwd=repo_root),
+                [
+                    "cluster:",
+                    "control plane:",
+                    "host group:",
+                    "api endpoint:",
+                    "stable-endpoint posture:",
+                    "stable-endpoint detail:",
+                    "control-plane machines:",
+                    "worker machines:",
+                    "control-plane launch:",
+                    "worker launch:",
+                    "boundary:",
+                ],
+            ),
+        )
+    )
+
+    server_status = [
+        "port",
+        "--config",
+        str(config_path),
+        "service",
+        "status",
+        "--machine",
+        "cloud-generic",
+        "--name",
+        "k3s-server",
+    ]
+    steps.append(
+        (
+            " ".join(server_status),
+            filter_lines(
+                run_checked(server_status, env=env, cwd=repo_root),
                 [
                     "machine:",
-                    "state:",
+                    "name:",
+                    "desired state:",
+                    "runtime state:",
+                    "lifecycle owner:",
+                    "service route:",
                     "control plane:",
                     "node:",
                     "host groups:",
-                    "launch route:",
-                    "status route:",
-                    "guest route:",
+                    "target host group:",
+                    "restart policy:",
+                    "health policy:",
+                    "runtime record:",
+                    "runtime pid:",
+                    "stdout log:",
+                    "stderr log:",
                     "detail:",
                 ],
             ),
         )
     )
 
-    server_install = [
+    worker_status = [
         "port",
         "--config",
         str(config_path),
-        "guest",
-        "exec",
-        "--machine",
-        "cloud-generic",
-        "--",
-        "/bin/sh",
-        "-lc",
-        "set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-server.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" server --disable=traefik ) >'/var/log/k3s-server.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' INSTALL_K3S_EXEC='server --disable=traefik' sh \"$installer\"",
-    ]
-    steps.append((" ".join(server_install), run_checked(server_install, env=env, cwd=repo_root)))
-
-    token_command = [
-        "port",
-        "--config",
-        str(config_path),
-        "guest",
-        "exec",
-        "--machine",
-        "cloud-generic",
-        "--",
-        "/bin/sh",
-        "-lc",
-        "attempt=0; while [ \"$attempt\" -lt 120 ]; do if [ -s /var/lib/rancher/k3s/server/node-token ]; then cat /var/lib/rancher/k3s/server/node-token; exit 0; fi; attempt=$((attempt + 1)); sleep 1; done; echo 'timed out waiting for /var/lib/rancher/k3s/server/node-token' >&2; exit 1",
-    ]
-    token_output = run_checked(token_command, env=env, cwd=repo_root)
-    steps.append((" ".join(token_command), token_output))
-    join_token = token_output.strip()
-
-    worker_install = [
-        "port",
-        "--config",
-        str(config_path),
-        "guest",
-        "exec",
+        "service",
+        "status",
         "--machine",
         "cloud-aws",
-        "--",
-        "/bin/sh",
-        "-lc",
-        f"set -eu; mkdir -p /run/port /var/log /etc/rancher/k3s /var/lib/rancher/k3s /tmp; pid_path='/run/port/k3s-agent.pid'; if [ -s \"$pid_path\" ] && kill -0 \"$(cat \"$pid_path\")\" 2>/dev/null; then echo k3s-already-running; exit 0; fi; k3s_bin=\"$(command -v k3s 2>/dev/null || true)\"; if [ -z \"$k3s_bin\" ] && [ -x /usr/bin/k3s ]; then k3s_bin=/usr/bin/k3s; fi; if [ -n \"$k3s_bin\" ]; then ( trap '' HUP INT TERM; exec \"$k3s_bin\" agent --server 'https://cloud-generic:6443' --token '{join_token}' --node-label=role=worker ) >'/var/log/k3s-agent.log' 2>&1 < /dev/null & child=$!; printf '%s\\n' \"$child\" > \"$pid_path\"; echo \"k3s-launched:$child\"; exit 0; fi; installer=/tmp/install-k3s.sh; rm -f \"$installer\"; if command -v curl >/dev/null 2>&1; then curl -fsSL https://get.k3s.io -o \"$installer\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$installer\" https://get.k3s.io; elif command -v busybox >/dev/null 2>&1; then busybox wget -qO \"$installer\" https://get.k3s.io; else echo 'no supported fetcher found for get.k3s.io' >&2; exit 127; fi; chmod +x \"$installer\"; INSTALL_K3S_VERSION='v1.32.0+k3s1' K3S_URL='https://cloud-generic:6443' K3S_TOKEN='{join_token}' INSTALL_K3S_EXEC='agent --node-label=role=worker' sh \"$installer\"",
+        "--name",
+        "k3s-agent",
     ]
-    steps.append((" ".join(worker_install), run_checked(worker_install, env=env, cwd=repo_root)))
+    steps.append(
+        (
+            " ".join(worker_status),
+            filter_lines(
+                run_checked(worker_status, env=env, cwd=repo_root),
+                [
+                    "machine:",
+                    "name:",
+                    "desired state:",
+                    "runtime state:",
+                    "lifecycle owner:",
+                    "service route:",
+                    "control plane:",
+                    "node:",
+                    "host groups:",
+                    "target host group:",
+                    "restart policy:",
+                    "health policy:",
+                    "runtime record:",
+                    "runtime pid:",
+                    "stdout log:",
+                    "stderr log:",
+                    "detail:",
+                ],
+            ),
+        )
+    )
+
+    cluster_status = [
+        "port",
+        "--config",
+        str(config_path),
+        "cluster",
+        "status",
+        "--cluster",
+        "demo",
+        "--runtime-root",
+        str(proof_runtime_root),
+    ]
+    steps.append(
+        (
+            " ".join(cluster_status),
+            filter_lines(
+                run_checked(cluster_status, env=env, cwd=repo_root),
+                [
+                    "cluster:",
+                    "control plane:",
+                    "host group:",
+                    "control-plane machines:",
+                    "worker machines:",
+                    "api endpoint:",
+                    "machine truth:",
+                    "managed-service truth:",
+                    "stable-endpoint posture:",
+                    "stable-endpoint detail:",
+                    "legacy-runtime drift:",
+                    "legacy-runtime detail:",
+                    "managed-service detail:",
+                    "control-plane placement:",
+                ],
+            ),
+        )
+    )
 
     kubeconfig_command = [
         "port",
         "--config",
         str(config_path),
-        "guest",
-        "exec",
-        "--machine",
-        "cloud-generic",
-        "--",
-        "/bin/sh",
-        "-lc",
-        "cat /etc/rancher/k3s/k3s.yaml",
+        "cluster",
+        "kubeconfig",
+        "--cluster",
+        "demo",
+        "--runtime-root",
+        str(proof_runtime_root),
     ]
-    steps.append((" ".join(kubeconfig_command), run_checked(kubeconfig_command, env=env, cwd=repo_root)))
+    steps.append(
+        (
+            " ".join(kubeconfig_command),
+            filter_lines(
+                run_checked(kubeconfig_command, env=env, cwd=repo_root),
+                [
+                    "cluster:",
+                    "control plane:",
+                    "host group:",
+                    "api endpoint:",
+                    "stable-endpoint posture:",
+                    "stable-endpoint detail:",
+                    "kubeconfig surface:",
+                    "server:",
+                ],
+            ),
+        )
+    )
 
-    nodes_command = [
+    cluster_down = [
         "port",
         "--config",
         str(config_path),
-        "guest",
-        "exec",
-        "--machine",
-        "cloud-generic",
-        "--",
-        "/bin/sh",
-        "-lc",
-        "k3s kubectl get nodes -o wide",
+        "cluster",
+        "down",
+        "--cluster",
+        "demo",
+        "--runtime-root",
+        str(proof_runtime_root),
     ]
-    steps.append((" ".join(nodes_command), run_checked(nodes_command, env=env, cwd=repo_root)))
-
-    stop_worker = [
-        "port",
-        "--config",
-        str(config_path),
-        "machine",
-        "stop",
-        "--machine",
-        "cloud-aws",
-    ]
-    steps.append((" ".join(stop_worker), run_checked(stop_worker, env=env, cwd=repo_root)))
-
-    stop_server = [
-        "port",
-        "--config",
-        str(config_path),
-        "machine",
-        "stop",
-        "--machine",
-        "cloud-generic",
-    ]
-    steps.append((" ".join(stop_server), run_checked(stop_server, env=env, cwd=repo_root)))
+    steps.append(
+        (
+            " ".join(cluster_down),
+            filter_lines(
+                run_checked(cluster_down, env=env, cwd=repo_root),
+                ["control-plane stop:", "worker stop:"],
+            ),
+        )
+    )
 
     write_cast(cast_path, steps, width=132, height=36)
     subprocess.run(

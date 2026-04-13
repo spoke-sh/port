@@ -27,11 +27,11 @@ started_at: 2026-04-12T17:15:58
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Persist Hosted Placement And Service Records Across Reuse](../../../../stories/VGcgtBvDE/README.md) | feat | done |
-| [Enforce Managed Service Ownership For Hosted K3s](../../../../stories/VGcgtDfDT/README.md) | feat | backlog |
+| [Enforce Managed Service Ownership For Hosted K3s](../../../../stories/VGcgtDfDT/README.md) | feat | done |
 | [Record Hosted Worker Stability Soak Proof](../../../../stories/VGcgtFI9v/README.md) | feat | backlog |
 <!-- END GENERATED -->

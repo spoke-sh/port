@@ -1,0 +1,18 @@
+$ rg -n 'managed-service-(start|status|list)|cluster\s+(up|status|kubeconfig|down)|service\s+status|server_machines|api_endpoint' scripts/render-hosted-k3s-proof.sh
+261:                    elif expected_type == "managed-service-start":
+306:                    elif expected_type == "managed-service-status":
+331:                    elif expected_type == "managed-service-list":
+377:api_endpoint = "https://demo-k3s.internal:6443"
+568:        server_machines = ["cloud-generic"]
+570:        api_endpoint = "{api_endpoint}"
+714:                    "type": "managed-service-start",
+733:                    "type": "managed-service-status",
+739:                    "stdout": f"apiVersion: v1\nclusters:\n- cluster:\n    server: {api_endpoint}\n",
+747:                    "type": "managed-service-list",
+762:                    "stdout": f"apiVersion: v1\nclusters:\n- cluster:\n    server: {api_endpoint}\n",
+770:                    "type": "managed-service-list",
+790:                    "type": "managed-service-start",
+795:                        server_url=api_endpoint,
+801:                    "type": "managed-service-status",
+805:                    "type": "managed-service-list",
+809:                    "type": "managed-service-list",
