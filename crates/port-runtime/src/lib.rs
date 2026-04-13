@@ -4585,12 +4585,12 @@ fn resolve_live_pid_by_existence(
     manifest_pid: Option<u32>,
 ) -> Result<Option<u32>> {
     if let Some(pid) = pid_from_file {
-        if process_exists(pid)? {
+        if process_is_live(pid)? {
             return Ok(Some(pid));
         }
     }
     if let Some(pid) = manifest_pid {
-        if Some(pid) != pid_from_file && process_exists(pid)? {
+        if Some(pid) != pid_from_file && process_is_live(pid)? {
             return Ok(Some(pid));
         }
     }
@@ -5938,7 +5938,7 @@ fn cloud_hypervisor_runtime_metadata_path(paths: &RuntimePaths) -> PathBuf {
 
 fn prepare_avf_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()> {
     if let Some(pid) = read_pid_file(&paths.pid_path)? {
-        if process_exists(pid)? {
+        if process_is_live(pid)? {
             bail!(
                 "machine '{}' already appears to be running with pid {} in '{}'; stop it first or choose a different --runtime-root",
                 machine_name,
@@ -5957,7 +5957,7 @@ fn prepare_avf_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result
 
 fn prepare_cloud_hypervisor_runtime_state(paths: &RuntimePaths, machine_name: &str) -> Result<()> {
     if let Some(pid) = read_pid_file(&paths.pid_path)? {
-        if process_exists(pid)? {
+        if process_is_live(pid)? {
             bail!(
                 "machine '{}' already appears to be running with pid {} in '{}'; stop it first or choose a different --runtime-root",
                 machine_name,
@@ -6159,11 +6159,43 @@ fn resolve_live_machine_pid(
 }
 
 fn is_live_firecracker_pid(pid: u32, machine_name: &str) -> Result<bool> {
+    if !process_is_live(pid)? {
+        return Ok(false);
+    }
+
     let Some(cmdline) = process_cmdline(pid)? else {
         return Ok(false);
     };
 
     Ok(matches_firecracker_process(&cmdline, machine_name))
+}
+
+#[cfg(target_os = "linux")]
+fn process_state_code(pid: u32) -> Result<Option<char>> {
+    let status_path = PathBuf::from("/proc").join(pid.to_string()).join("status");
+    if !status_path.exists() {
+        return Ok(None);
+    }
+
+    let status = fs::read_to_string(&status_path)
+        .with_context(|| format!("failed to read process status '{}'", status_path.display()))?;
+    Ok(status
+        .lines()
+        .find_map(|line| line.strip_prefix("State:"))
+        .and_then(|state| state.trim().chars().next()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_state_code(_pid: u32) -> Result<Option<char>> {
+    Ok(None)
+}
+
+fn process_is_live(pid: u32) -> Result<bool> {
+    if !process_exists(pid)? {
+        return Ok(false);
+    }
+
+    Ok(!matches!(process_state_code(pid)?, Some('Z')))
 }
 
 fn matches_firecracker_process(cmdline: &str, machine_name: &str) -> bool {
@@ -6460,7 +6492,7 @@ fn load_detached_forward_statuses(
             continue;
         }
 
-        let state = if process_exists(manifest.pid)? {
+        let state = if process_is_live(manifest.pid)? {
             MachineRuntimeState::Running
         } else {
             MachineRuntimeState::Stale
@@ -6594,7 +6626,7 @@ pub(crate) fn stop_detached_forward(
     let manifest: DetachedForwardManifestRecord = serde_json::from_slice(&bytes)
         .with_context(|| format!("failed to parse '{}'", manifest_path.display()))?;
 
-    if process_exists(manifest.pid)? {
+    if process_is_live(manifest.pid)? {
         terminate_pid(manifest.pid)?;
     }
     if let Some(socket_path) = manifest.listen.strip_prefix("unix:") {
@@ -15059,6 +15091,17 @@ exec sleep 30
         ))
     }
 
+    #[cfg(target_os = "linux")]
+    fn wait_for_process_state(pid: u32, expected: char) {
+        for _ in 0..100 {
+            if matches!(super::process_state_code(pid), Ok(Some(state)) if state == expected) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("process {pid} did not reach state {expected} in time");
+    }
+
     fn start_live_hosted_servers_inner(
         config: &PortConfig,
         bind_node: bool,
@@ -17030,6 +17073,57 @@ exec sleep 30
         assert!(broken.detail.contains("failed to parse"));
 
         let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_is_live_treats_zombie_pid_as_not_running() {
+        let mut child = Command::new("bash")
+            .args(["-lc", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("zombie candidate should start");
+        wait_for_process_state(child.id(), 'Z');
+
+        assert!(!super::process_is_live(child.id()).expect("zombie liveness probe should succeed"));
+
+        let _ = child.wait();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn detached_forward_status_treats_zombie_pid_as_stale() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+
+        let mut child = Command::new("bash")
+            .args(["-lc", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("forward helper should start");
+        wait_for_process_state(child.id(), 'Z');
+
+        write_detached_forward_manifest(
+            &paths,
+            "web",
+            child.id(),
+            "127.0.0.1:8081",
+            "127.0.0.1:80",
+        );
+
+        let forwards = super::load_detached_forward_statuses(&paths.runtime_dir, "demo")
+            .expect("forward status should load");
+        assert_eq!(forwards.len(), 1);
+        assert_eq!(forwards[0].state, MachineRuntimeState::Stale);
+        assert_eq!(forwards[0].pid, Some(child.id()));
+        assert!(forwards[0].detail.contains("no longer live"));
+
         let _ = child.wait();
     }
 

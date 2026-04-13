@@ -441,8 +441,10 @@ impl AgentService {
             }
             let file = File::open(entry.path())
                 .with_context(|| format!("failed to open '{}'", entry.path().display()))?;
-            let record: ManagedProcessRecord = serde_json::from_reader(file)
+            let mut record: ManagedProcessRecord = serde_json::from_reader(file)
                 .with_context(|| format!("failed to decode '{}'", entry.path().display()))?;
+            reconcile_detached_managed_process_record(&mut record);
+            self.persist_managed_process_record(&record)?;
             statuses.push(managed_service_status(&record));
         }
         Ok(statuses)
@@ -492,6 +494,48 @@ fn managed_service_status(record: &ManagedProcessRecord) -> ManagedServiceStatus
         stderr_path: Some(record.stderr_path.clone()),
         detail: record.detail.clone(),
     }
+}
+
+fn reconcile_detached_managed_process_record(record: &mut ManagedProcessRecord) {
+    if record.state != ManagedServiceRuntimeState::Running {
+        return;
+    }
+
+    record.detail = match record.pid {
+        Some(pid) => match managed_process_pid_is_live(pid) {
+            Ok(true) => {
+                record.health_state = ServiceHealthState::Unknown;
+                record.health_detail = None;
+                format!(
+                    "managed process pid {pid} is live but guest-agent does not hold a supervisor handle"
+                )
+            }
+            Ok(false) => {
+                record.state = ManagedServiceRuntimeState::Failed;
+                record.pid = None;
+                record.exit_code = None;
+                record.health_state = ServiceHealthState::Unknown;
+                record.health_detail = None;
+                let detail = format!(
+                    "recorded managed process pid {pid} is no longer live and guest-agent does not hold a supervisor handle"
+                );
+                record.last_exit_detail = Some(detail.clone());
+                detail
+            }
+            Err(error) => format!("failed to verify recorded managed process pid {pid}: {error}"),
+        },
+        None => {
+            record.state = ManagedServiceRuntimeState::Failed;
+            record.exit_code = None;
+            record.health_state = ServiceHealthState::Unknown;
+            record.health_detail = None;
+            let detail = String::from(
+                "managed process record claims running but does not record a live pid",
+            );
+            record.last_exit_detail = Some(detail.clone());
+            detail
+        }
+    };
 }
 
 fn spawn_managed_process_reconciler(
@@ -865,6 +909,49 @@ fn wait_for_child_exit(child: &mut Child) -> Result<std::process::ExitStatus> {
     }
     child.kill().context("failed to kill managed process")?;
     child.wait().context("failed to reap managed process")
+}
+
+fn managed_process_pid_is_live(pid: u32) -> Result<bool> {
+    if !managed_process_pid_exists(pid)? {
+        return Ok(false);
+    }
+
+    Ok(!matches!(managed_process_state_code(pid)?, Some('Z')))
+}
+
+fn managed_process_pid_exists(pid: u32) -> Result<bool> {
+    // SAFETY: `kill(pid, 0)` is the standard existence probe for a process id.
+    let status = unsafe { libc::kill(pid as i32, 0) };
+    if status == 0 {
+        return Ok(true);
+    }
+
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(anyhow!("failed to probe pid {pid}: {error}")),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn managed_process_state_code(pid: u32) -> Result<Option<char>> {
+    let status_path = PathBuf::from("/proc").join(pid.to_string()).join("status");
+    if !status_path.exists() {
+        return Ok(None);
+    }
+
+    let status = fs::read_to_string(&status_path)
+        .with_context(|| format!("failed to read process status '{}'", status_path.display()))?;
+    Ok(status
+        .lines()
+        .find_map(|line| line.strip_prefix("State:"))
+        .and_then(|state| state.trim().chars().next()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn managed_process_state_code(_pid: u32) -> Result<Option<char>> {
+    Ok(None)
 }
 
 trait AgentStream: Read + std::io::Write + Send + 'static {
@@ -1449,6 +1536,7 @@ mod tests {
     use std::net::{Shutdown, TcpListener};
     use std::os::unix::net::UnixStream;
     use std::path::Path;
+    use std::process::{Command, Stdio};
     use std::thread;
     use std::time::Duration;
 
@@ -1498,6 +1586,16 @@ mod tests {
             thread::sleep(Duration::from_millis(50));
         }
         panic!("background condition did not become true in time");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wait_for_process_state(pid: u32, expected: char) {
+        wait_for(|| {
+            matches!(
+                super::managed_process_state_code(pid),
+                Ok(Some(state)) if state == expected
+            )
+        });
     }
 
     #[test]
@@ -2170,6 +2268,148 @@ mod tests {
         assert_eq!(status.state, ManagedServiceRuntimeState::Running);
         assert!(status.restart_count >= 1);
         assert_eq!(status.health_state, ServiceHealthState::Unhealthy);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn persisted_running_record_with_live_pid_downgrades_stale_health_to_unknown() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("run/port/services/runtime"))
+            .expect("runtime dir should exist");
+
+        let mut child = Command::new("bash")
+            .args(["-lc", "trap 'exit 0' TERM; while :; do sleep 1; done"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("managed process should start");
+
+        super::write_managed_process_record(
+            &guest_root,
+            &super::ManagedProcessRecord {
+                name: String::from("orphanbox"),
+                kind: ManagedServiceKind::Service,
+                state: ManagedServiceRuntimeState::Running,
+                restart_count: 0,
+                pid: Some(child.id()),
+                exit_code: None,
+                last_exit_code: None,
+                last_exit_detail: None,
+                health_state: ServiceHealthState::Healthy,
+                health_detail: None,
+                stdout_path: String::from("/run/port/services/orphanbox.stdout.log"),
+                stderr_path: String::from("/run/port/services/orphanbox.stderr.log"),
+                detail: String::from("managed process is running"),
+            },
+        )
+        .expect("runtime record should write");
+
+        let service = AgentService::new(guest_root.clone());
+        let status = service.handle(RequestEnvelope {
+            id: 20,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("orphanbox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected orphan status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(status.pid, Some(child.id()));
+        assert_eq!(status.health_state, ServiceHealthState::Unknown);
+        assert_eq!(status.health_detail, None);
+        assert!(
+            status.detail.contains("does not hold a supervisor handle"),
+            "{}",
+            status.detail
+        );
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn persisted_running_record_with_zombie_pid_is_not_reported_healthy() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("run/port/services/runtime"))
+            .expect("runtime dir should exist");
+
+        let mut child = Command::new("bash")
+            .args(["-lc", "exit 0"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("managed process should start");
+        wait_for_process_state(child.id(), 'Z');
+
+        super::write_managed_process_record(
+            &guest_root,
+            &super::ManagedProcessRecord {
+                name: String::from("zombiebox"),
+                kind: ManagedServiceKind::Service,
+                state: ManagedServiceRuntimeState::Running,
+                restart_count: 0,
+                pid: Some(child.id()),
+                exit_code: None,
+                last_exit_code: None,
+                last_exit_detail: None,
+                health_state: ServiceHealthState::Healthy,
+                health_detail: None,
+                stdout_path: String::from("/run/port/services/zombiebox.stdout.log"),
+                stderr_path: String::from("/run/port/services/zombiebox.stderr.log"),
+                detail: String::from("managed process is running"),
+            },
+        )
+        .expect("runtime record should write");
+
+        let service = AgentService::new(guest_root.clone());
+        let status = service.handle(RequestEnvelope {
+            id: 21,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("zombiebox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected zombie status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Failed);
+        assert_eq!(status.pid, None);
+        assert_eq!(status.health_state, ServiceHealthState::Unknown);
+        assert_eq!(status.health_detail, None);
+        assert!(
+            status.detail.contains("no longer live"),
+            "{}",
+            status.detail
+        );
+
+        let runtime_record = guest_root.join("run/port/services/runtime/zombiebox.json");
+        wait_for(|| {
+            let record = read_to_string(&runtime_record);
+            record.contains("\"state\": \"failed\"")
+                && record.contains("no longer live")
+                && !record.contains("\"health_state\": \"healthy\"")
+        });
+
+        let _ = child.wait();
     }
 
     #[test]
