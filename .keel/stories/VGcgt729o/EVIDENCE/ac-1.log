@@ -1,0 +1,9 @@
+---
+recorded_at: 2026-04-12T17:11:36.562020723-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -q -p port-runtime hosted_k3s_cluster_access_contract'
+---
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 166 filtered out; finished in 6.17s
+

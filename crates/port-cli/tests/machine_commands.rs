@@ -584,10 +584,31 @@ enum HostedGuestExpectedOperation {
         command: Vec<String>,
         stdout: String,
     },
+    ManagedServiceList {
+        statuses: Vec<ManagedServiceStatus>,
+    },
     ManagedServiceStart {
         name: String,
         command: Vec<String>,
     },
+}
+
+fn running_managed_service_status(name: &str) -> ManagedServiceStatus {
+    ManagedServiceStatus {
+        name: name.to_string(),
+        kind: ManagedServiceKind::Service,
+        state: ManagedServiceRuntimeState::Running,
+        restart_count: 0,
+        pid: Some(4242),
+        exit_code: None,
+        last_exit_code: None,
+        last_exit_detail: None,
+        health_state: ServiceHealthState::Unknown,
+        health_detail: None,
+        stdout_path: Some(format!("/run/port/services/{name}.stdout.log")),
+        stderr_path: Some(format!("/run/port/services/{name}.stderr.log")),
+        detail: String::from("managed process is running"),
+    }
 }
 
 fn spawn_hosted_guest_sequence_server(
@@ -648,6 +669,24 @@ fn spawn_hosted_guest_sequence_server(
                     .expect("response should encode");
                 }
                 (
+                    HostedGuestExpectedOperation::ManagedServiceList { statuses },
+                    GuestOperation::ManagedService(ManagedServiceRequest {
+                        operation: ManagedServiceOperation::List,
+                    }),
+                ) => {
+                    write_frame(
+                        &mut stream,
+                        &ResponseEnvelope::Completed {
+                            id: request_id,
+                            exit_code: 0,
+                            result: OperationResult::ManagedService(ManagedServiceResult::List {
+                                services: statuses,
+                            }),
+                        },
+                    )
+                    .expect("response should encode");
+                }
+                (
                     HostedGuestExpectedOperation::ManagedServiceStart { name, command },
                     GuestOperation::ManagedService(ManagedServiceRequest {
                         operation:
@@ -700,19 +739,6 @@ fn spawn_hosted_guest_sequence_server(
             }
         }
     })
-}
-
-fn spawn_hosted_exec_sequence_server(
-    paths: port_runtime::RuntimePaths,
-    expected: Vec<(Vec<String>, String)>,
-) -> thread::JoinHandle<()> {
-    spawn_hosted_guest_sequence_server(
-        paths,
-        expected
-            .into_iter()
-            .map(|(command, stdout)| HostedGuestExpectedOperation::Exec { command, stdout })
-            .collect(),
-    )
 }
 
 fn hosted_k3s_legacy_runtime_drift_command() -> Vec<String> {
@@ -1071,6 +1097,7 @@ fn cli_cluster_list_and_show_surface_local_contract() {
 
 #[test]
 fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
+    cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let bogus_runtime_root = temp.path().join("bogus/aws-linux-node");
@@ -1196,6 +1223,9 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
             },
+            HostedGuestExpectedOperation::ManagedServiceList {
+                statuses: vec![running_managed_service_status("k3s-server")],
+            },
             HostedGuestExpectedOperation::Exec {
                 command: hosted_k3s_legacy_runtime_drift_command(),
                 stdout: String::new(),
@@ -1219,6 +1249,9 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 stdout: String::from(
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
+            },
+            HostedGuestExpectedOperation::ManagedServiceList {
+                statuses: vec![running_managed_service_status("k3s-server")],
             },
             HostedGuestExpectedOperation::Exec {
                 command: hosted_k3s_legacy_runtime_drift_command(),
@@ -1328,6 +1361,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
 
 #[test]
 fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
+    cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let alternate_runtime_root = temp.path().join("hosted/aws-linux-node-b");
@@ -1394,51 +1428,63 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
     );
 
     let server_a = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
-    let server_a_guest = spawn_hosted_exec_sequence_server(
+    let server_a_guest = spawn_hosted_guest_sequence_server(
         server_a,
         vec![
-            (
-                vec![
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("cat /etc/rancher/k3s/k3s.yaml"),
                 ],
-                String::from(
+                stdout: String::from(
                     "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
                 ),
-            ),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
-                String::from(
+                stdout: String::from(
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
-            ),
-            (hosted_k3s_legacy_runtime_drift_command(), String::new()),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::ManagedServiceList {
+                statuses: vec![running_managed_service_status("k3s-server")],
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: hosted_k3s_legacy_runtime_drift_command(),
+                stdout: String::new(),
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("cat /etc/rancher/k3s/k3s.yaml"),
                 ],
-                String::from(
+                stdout: String::from(
                     "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
                 ),
-            ),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
-                String::from(
+                stdout: String::from(
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
-            ),
-            (hosted_k3s_legacy_runtime_drift_command(), String::new()),
+            },
+            HostedGuestExpectedOperation::ManagedServiceList {
+                statuses: vec![running_managed_service_status("k3s-server")],
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: hosted_k3s_legacy_runtime_drift_command(),
+                stdout: String::new(),
+            },
         ],
     );
 
@@ -1471,6 +1517,29 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
         "{status_stdout}"
     );
     assert!(status_stdout.contains("legacy-runtime drift: clear"));
+    assert!(
+        status_stdout
+            .contains("machine truth: role=control-plane machine=cloud-aws node=aws-linux-node"),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains(
+            "machine truth: role=control-plane machine=cloud-aws-b node=aws-linux-node-b"
+        ),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains(
+            "managed-service truth: role=control-plane machine=cloud-aws name=k3s-server state=missing pid=(none) restart-count=0"
+        ),
+        "{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains(
+            "managed-service truth: role=control-plane machine=cloud-aws-b name=k3s-server state=unreachable pid=(none) restart-count=0"
+        ),
+        "{status_stdout}"
+    );
     assert!(status_stdout.contains("control-plane placement: cloud-aws -> aws-linux-node"));
     assert!(status_stdout.contains("control-plane placement: cloud-aws-b -> aws-linux-node-b"));
 
@@ -1507,6 +1576,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
 
 #[test]
 fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
+    cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let server_config_path = temp.path().join("server-port.toml");
@@ -1548,33 +1618,33 @@ fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
 
     let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
     let server_paths = port_runtime::RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
-    let server_guest = spawn_hosted_exec_sequence_server(
+    let server_guest = spawn_hosted_guest_sequence_server(
         server_paths,
         vec![
-            (
-                vec![
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("cat /etc/rancher/k3s/k3s.yaml"),
                 ],
-                String::from(
+                stdout: String::from(
                     "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
                 ),
-            ),
-            (
-                vec![
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
-                String::from(
+                stdout: String::from(
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
                 ),
-            ),
-            (
-                hosted_k3s_legacy_runtime_drift_command(),
-                String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),
-            ),
+            },
+            HostedGuestExpectedOperation::Exec {
+                command: hosted_k3s_legacy_runtime_drift_command(),
+                stdout: String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),
+            },
         ],
     );
 
@@ -1613,6 +1683,39 @@ fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
     assert_eq!(artifacts[0]["machine_name"], "cloud-aws");
     assert_eq!(artifacts[0]["path"], "/run/port/k3s-server.pid");
     assert_eq!(artifacts[1]["path"], "/var/log/k3s-server.log");
+    let machines = report["machines"]
+        .as_array()
+        .expect("machines should be an array");
+    assert!(
+        machines.iter().any(|machine| {
+            machine["machine_name"] == "cloud-aws" && machine["role"] == "control-plane"
+        }),
+        "{report}"
+    );
+    let managed_services = report["managed_services"]
+        .as_array()
+        .expect("managed services should be an array");
+    let server_service = managed_services
+        .iter()
+        .find(|service| {
+            service["machine_name"] == "cloud-aws" && service["service_name"] == "k3s-server"
+        })
+        .expect("control-plane managed service truth should exist");
+    assert!(
+        server_service["state"].is_string(),
+        "managed service state should stay machine-readable: {report}"
+    );
+    assert!(
+        server_service["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Canonical managed service")
+            || server_service["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("managed process"),
+        "{report}"
+    );
 
     server_guest
         .join()

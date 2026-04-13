@@ -1681,6 +1681,27 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
         }
     );
     println!("api endpoint: {}", report.api_endpoint);
+    for machine in &report.machines {
+        println!(
+            "machine truth: role={} machine={} node={}",
+            machine.role,
+            machine.machine_name,
+            machine.node_name.as_deref().unwrap_or("(unresolved)")
+        );
+    }
+    for service in &report.managed_services {
+        println!(
+            "managed-service truth: role={} machine={} name={} state={} pid={} restart-count={}",
+            service.role,
+            service.machine_name,
+            service.service_name,
+            service.state,
+            service
+                .pid
+                .map_or_else(|| String::from("(none)"), |pid| pid.to_string()),
+            service.restart_count
+        );
+    }
     println!(
         "stable-endpoint posture: {}",
         report.stable_endpoint_posture
@@ -1698,6 +1719,9 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
             "legacy-runtime artifact: machine={} path={}",
             artifact.machine_name, artifact.path
         );
+    }
+    for service in &report.managed_services {
+        println!("managed-service detail: {}", service.detail);
     }
     for placement in &report.control_plane_placements {
         println!(

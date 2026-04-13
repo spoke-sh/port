@@ -27,11 +27,11 @@ started_at: 2026-04-12T16:50:24
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/3 stories complete
+**Progress:** 2/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Model Hosted Machine And Service Truth In Cluster Status](../../../../stories/VGcgt729o/README.md) | feat | backlog |
+| [Model Hosted Machine And Service Truth In Cluster Status](../../../../stories/VGcgt729o/README.md) | feat | done |
 | [Report Legacy Detached Runtime Drift In Cluster Status](../../../../stories/VGcgt8hAx/README.md) | feat | done |
 | [Document Downstream Hosted Status Contract](../../../../stories/VGcgtAKBo/README.md) | feat | backlog |
 <!-- END GENERATED -->

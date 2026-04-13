@@ -259,6 +259,17 @@ pub struct HostedK3sMachineAccess {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sMachineTruth {
+    pub role: String,
+    pub machine_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_root: Option<PathBuf>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sControlPlanePlacement {
     pub machine_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -327,6 +338,48 @@ impl std::fmt::Display for HostedK3sLegacyRuntimeDriftState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedK3sManagedServiceTruthState {
+    Missing,
+    Stored,
+    Starting,
+    Running,
+    Exited,
+    Stopped,
+    Failed,
+    Unreachable,
+}
+
+impl std::fmt::Display for HostedK3sManagedServiceTruthState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => f.write_str("missing"),
+            Self::Stored => f.write_str("stored"),
+            Self::Starting => f.write_str("starting"),
+            Self::Running => f.write_str("running"),
+            Self::Exited => f.write_str("exited"),
+            Self::Stopped => f.write_str("stopped"),
+            Self::Failed => f.write_str("failed"),
+            Self::Unreachable => f.write_str("unreachable"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sManagedServiceTruth {
+    pub role: String,
+    pub machine_name: String,
+    pub service_name: String,
+    pub state: HostedK3sManagedServiceTruthState,
+    pub restart_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_name: Option<String>,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sClusterAccessReport {
     pub cluster_name: String,
@@ -335,6 +388,8 @@ pub struct HostedK3sClusterAccessReport {
     pub server_machines: Vec<String>,
     pub worker_machines: Vec<String>,
     pub api_endpoint: String,
+    pub machines: Vec<HostedK3sMachineTruth>,
+    pub managed_services: Vec<HostedK3sManagedServiceTruth>,
     pub stable_endpoint_posture: HostedK3sStableEndpointPosture,
     pub stable_endpoint_detail: String,
     pub ha_status: HostedK3sHaStatus,
@@ -2630,6 +2685,122 @@ fn hosted_k3s_control_plane_placements(
         .collect()
 }
 
+fn hosted_k3s_machine_truth(
+    machine_access: &[HostedK3sMachineAccess],
+) -> Vec<HostedK3sMachineTruth> {
+    let mut machines = machine_access
+        .iter()
+        .map(|machine| HostedK3sMachineTruth {
+            role: machine.role.clone(),
+            machine_name: machine
+                .route
+                .machine_name
+                .clone()
+                .unwrap_or_else(|| String::from("(unknown)")),
+            node_name: machine.route.node_name.clone(),
+            runtime_root: machine.route.runtime_root.clone(),
+            detail: machine.detail.clone(),
+        })
+        .collect::<Vec<_>>();
+    machines.sort_by(|left, right| {
+        left.role
+            .cmp(&right.role)
+            .then(left.machine_name.cmp(&right.machine_name))
+    });
+    machines
+}
+
+fn hosted_k3s_service_role(role: &str) -> Option<&'static str> {
+    match role {
+        "control-plane" => Some("server"),
+        "worker" => Some("agent"),
+        _ => None,
+    }
+}
+
+fn hosted_k3s_managed_service_truth_state(
+    state: ServiceRuntimeState,
+) -> HostedK3sManagedServiceTruthState {
+    match state {
+        ServiceRuntimeState::Stored => HostedK3sManagedServiceTruthState::Stored,
+        ServiceRuntimeState::Starting => HostedK3sManagedServiceTruthState::Starting,
+        ServiceRuntimeState::Running => HostedK3sManagedServiceTruthState::Running,
+        ServiceRuntimeState::Exited => HostedK3sManagedServiceTruthState::Exited,
+        ServiceRuntimeState::Stopped => HostedK3sManagedServiceTruthState::Stopped,
+        ServiceRuntimeState::Failed => HostedK3sManagedServiceTruthState::Failed,
+    }
+}
+
+fn hosted_k3s_managed_service_truth(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_access: &[HostedK3sMachineAccess],
+) -> Vec<HostedK3sManagedServiceTruth> {
+    let mut services = Vec::new();
+    for machine in machine_access {
+        let Some(service_role) = hosted_k3s_service_role(&machine.role) else {
+            continue;
+        };
+        let machine_name = machine
+            .route
+            .machine_name
+            .clone()
+            .unwrap_or_else(|| String::from("(unknown)"));
+        let service_name = hosted_k3s_service_name(service_role).to_string();
+        let service_truth = match list_machine_services(config, runtime_root, &machine_name) {
+            Ok(service_statuses) => match service_statuses
+                .into_iter()
+                .find(|status| status.name == service_name)
+            {
+                Some(status) => HostedK3sManagedServiceTruth {
+                    role: machine.role.clone(),
+                    machine_name: machine_name.clone(),
+                    service_name: status.name,
+                    state: hosted_k3s_managed_service_truth_state(status.runtime.state),
+                    restart_count: status.runtime.restart_count,
+                    pid: status.runtime.pid,
+                    node_name: status.node_name.or_else(|| machine.route.node_name.clone()),
+                    detail: status.detail,
+                },
+                None => HostedK3sManagedServiceTruth {
+                    role: machine.role.clone(),
+                    machine_name: machine_name.clone(),
+                    service_name: service_name.clone(),
+                    state: HostedK3sManagedServiceTruthState::Missing,
+                    restart_count: 0,
+                    pid: None,
+                    node_name: machine.route.node_name.clone(),
+                    detail: format!(
+                        "Canonical managed service '{}' is not recorded for machine '{}'; hosted cluster status must treat service ownership as missing instead of inferring detached runtime truth.",
+                        service_name, machine_name
+                    ),
+                },
+            },
+            Err(error) => HostedK3sManagedServiceTruth {
+                role: machine.role.clone(),
+                machine_name: machine_name.clone(),
+                service_name: service_name.clone(),
+                state: HostedK3sManagedServiceTruthState::Unreachable,
+                restart_count: 0,
+                pid: None,
+                node_name: machine.route.node_name.clone(),
+                detail: format!(
+                    "Canonical managed service '{}' could not be inspected for machine '{}': {error}",
+                    service_name, machine_name
+                ),
+            },
+        };
+        services.push(service_truth);
+    }
+    services.sort_by(|left, right| {
+        left.role
+            .cmp(&right.role)
+            .then(left.machine_name.cmp(&right.machine_name))
+            .then(left.service_name.cmp(&right.service_name))
+    });
+    services
+}
+
 fn hosted_k3s_ha_status(
     cluster: &K3sClusterSpec,
     placements: &[HostedK3sControlPlanePlacement],
@@ -3095,6 +3266,8 @@ pub fn hosted_k3s_cluster_access(
             hosted_k3s_boundary_summary()
         );
     }
+    let machines = hosted_k3s_machine_truth(&machine_access);
+    let managed_services = hosted_k3s_managed_service_truth(config, runtime_root, &machine_access);
     let boundary_notes = hosted_k3s_report_boundary_notes(&cluster, &machine_access);
     let control_plane_placements = hosted_k3s_control_plane_placements(&machine_access);
     let ha_status = hosted_k3s_ha_status(&cluster, &control_plane_placements);
@@ -3114,6 +3287,8 @@ pub fn hosted_k3s_cluster_access(
         server_machines: cluster.server_machines.clone(),
         worker_machines: cluster.worker_machines,
         api_endpoint: cluster.api_endpoint,
+        machines,
+        managed_services,
         stable_endpoint_posture,
         stable_endpoint_detail,
         ha_status,
@@ -15151,11 +15326,32 @@ exec sleep 30
             command: Vec<String>,
             stdout: String,
         },
+        ManagedServiceList {
+            statuses: Vec<ManagedServiceStatus>,
+        },
         ManagedServiceStart {
             name: String,
             command: Vec<String>,
             policy: ServicePolicy,
         },
+    }
+
+    fn running_managed_service_status(name: &str) -> ManagedServiceStatus {
+        ManagedServiceStatus {
+            name: name.to_string(),
+            kind: ManagedServiceKind::Service,
+            state: ManagedServiceRuntimeState::Running,
+            restart_count: 0,
+            pid: Some(4242),
+            exit_code: None,
+            last_exit_code: None,
+            last_exit_detail: None,
+            health_state: ServiceHealthState::Unknown,
+            health_detail: None,
+            stdout_path: Some(format!("/run/port/services/{name}.stdout.log")),
+            stderr_path: Some(format!("/run/port/services/{name}.stderr.log")),
+            detail: String::from("managed process is running"),
+        }
     }
 
     fn spawn_hosted_guest_sequence_server(
@@ -15265,6 +15461,24 @@ exec sleep 30
                                         )),
                                         detail: String::from("managed process is running"),
                                     }),
+                                ),
+                            },
+                        )
+                        .expect("response should encode");
+                    }
+                    (
+                        HostedGuestExpectedOperation::ManagedServiceList { statuses },
+                        GuestOperation::ManagedService(ManagedServiceRequest {
+                            operation: ManagedServiceOperation::List,
+                        }),
+                    ) => {
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::ManagedService(
+                                    ManagedServiceResult::List { services: statuses },
                                 ),
                             },
                         )
@@ -17864,6 +18078,7 @@ exec sleep 30
         let _guard = hosted_server_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = sample_hosted_k3s_config(tempdir.path());
         write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
@@ -17911,6 +18126,9 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
                 },
+                HostedGuestExpectedOperation::ManagedServiceList {
+                    statuses: vec![running_managed_service_status("k3s-server")],
+                },
                 HostedGuestExpectedOperation::Exec {
                     command: super::hosted_k3s_legacy_runtime_drift_command(),
                     stdout: String::new(),
@@ -17919,21 +18137,26 @@ exec sleep 30
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![HostedGuestExpectedOperation::ManagedServiceStart {
-                name: String::from("k3s-agent"),
-                command: k3s_bootstrap_command(
-                    "agent",
-                    &[
-                        String::from("--node-label=role=worker"),
-                        String::from("--node-name"),
-                        String::from("cloud-aws-worker"),
-                    ],
-                    None,
-                    Some("https://demo-k3s.internal:6443"),
-                    Some("demo-join-token"),
-                ),
-                policy: hosted_k3s_service_policy("agent"),
-            }],
+            vec![
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-agent"),
+                    command: k3s_bootstrap_command(
+                        "agent",
+                        &[
+                            String::from("--node-label=role=worker"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws-worker"),
+                        ],
+                        None,
+                        Some("https://demo-k3s.internal:6443"),
+                        Some("demo-join-token"),
+                    ),
+                    policy: hosted_k3s_service_policy("agent"),
+                },
+                HostedGuestExpectedOperation::ManagedServiceList {
+                    statuses: vec![running_managed_service_status("k3s-agent")],
+                },
+            ],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -17953,6 +18176,27 @@ exec sleep 30
             vec![String::from("cloud-aws-worker")]
         );
         assert_eq!(report.api_endpoint, "https://demo-k3s.internal:6443");
+        assert_eq!(report.machines.len(), 2);
+        assert_eq!(report.machines[0].role, "control-plane");
+        assert_eq!(report.machines[0].machine_name, "cloud-aws");
+        assert_eq!(
+            report.machines[0].node_name.as_deref(),
+            Some("aws-linux-node")
+        );
+        assert_eq!(report.machines[1].role, "worker");
+        assert_eq!(report.machines[1].machine_name, "cloud-aws-worker");
+        assert_eq!(report.managed_services.len(), 2);
+        assert_eq!(report.managed_services[0].service_name, "k3s-server");
+        assert_eq!(
+            report.managed_services[0].state,
+            super::HostedK3sManagedServiceTruthState::Running
+        );
+        assert_eq!(report.managed_services[0].pid, Some(4242));
+        assert_eq!(report.managed_services[1].service_name, "k3s-agent");
+        assert_eq!(
+            report.managed_services[1].state,
+            super::HostedK3sManagedServiceTruthState::Running
+        );
         assert_eq!(
             report.stable_endpoint_posture,
             super::HostedK3sStableEndpointPosture::ManualRewriteRequired
@@ -18059,6 +18303,7 @@ exec sleep 30
         for metadata in bootstrap.worker_launches {
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
     }
 
     #[test]
@@ -18113,6 +18358,9 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
                 },
+                HostedGuestExpectedOperation::ManagedServiceList {
+                    statuses: vec![running_managed_service_status("k3s-server")],
+                },
                 HostedGuestExpectedOperation::Exec {
                     command: super::hosted_k3s_legacy_runtime_drift_command(),
                     stdout: String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),
@@ -18121,21 +18369,26 @@ exec sleep 30
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![HostedGuestExpectedOperation::ManagedServiceStart {
-                name: String::from("k3s-agent"),
-                command: k3s_bootstrap_command(
-                    "agent",
-                    &[
-                        String::from("--node-label=role=worker"),
-                        String::from("--node-name"),
-                        String::from("cloud-aws-worker"),
-                    ],
-                    None,
-                    Some("https://demo-k3s.internal:6443"),
-                    Some("demo-join-token"),
-                ),
-                policy: hosted_k3s_service_policy("agent"),
-            }],
+            vec![
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-agent"),
+                    command: k3s_bootstrap_command(
+                        "agent",
+                        &[
+                            String::from("--node-label=role=worker"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws-worker"),
+                        ],
+                        None,
+                        Some("https://demo-k3s.internal:6443"),
+                        Some("demo-join-token"),
+                    ),
+                    policy: hosted_k3s_service_policy("agent"),
+                },
+                HostedGuestExpectedOperation::ManagedServiceList {
+                    statuses: vec![running_managed_service_status("k3s-agent")],
+                },
+            ],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -18397,6 +18650,9 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
                     ),
                 },
+                HostedGuestExpectedOperation::ManagedServiceList {
+                    statuses: vec![running_managed_service_status("k3s-server")],
+                },
                 HostedGuestExpectedOperation::Exec {
                     command: super::hosted_k3s_legacy_runtime_drift_command(),
                     stdout: String::new(),
@@ -18405,21 +18661,26 @@ exec sleep 30
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![HostedGuestExpectedOperation::ManagedServiceStart {
-                name: String::from("k3s-agent"),
-                command: k3s_bootstrap_command(
-                    "agent",
-                    &[
-                        String::from("--node-label=role=worker"),
-                        String::from("--node-name"),
-                        String::from("cloud-aws-worker"),
-                    ],
-                    None,
-                    Some("https://demo-k3s.internal:6443"),
-                    Some("demo-join-token"),
-                ),
-                policy: hosted_k3s_service_policy("agent"),
-            }],
+            vec![
+                HostedGuestExpectedOperation::ManagedServiceStart {
+                    name: String::from("k3s-agent"),
+                    command: k3s_bootstrap_command(
+                        "agent",
+                        &[
+                            String::from("--node-label=role=worker"),
+                            String::from("--node-name"),
+                            String::from("cloud-aws-worker"),
+                        ],
+                        None,
+                        Some("https://demo-k3s.internal:6443"),
+                        Some("demo-join-token"),
+                    ),
+                    policy: hosted_k3s_service_policy("agent"),
+                },
+                HostedGuestExpectedOperation::ManagedServiceList {
+                    statuses: vec![running_managed_service_status("k3s-agent")],
+                },
+            ],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
