@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::env;
+use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use port_agent_protocol::{
     CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest, PtyRequest,
 };
@@ -20,6 +21,8 @@ use reqwest::blocking::Client as BlockingClient;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub use port_hosted_protocol::{
     HostedGuestSessionContract, HostedGuestSessionScope, HostedShellDriverContract,
@@ -162,7 +165,19 @@ impl HostedClient {
     where
         T: DeserializeOwned,
     {
+        self.execute_json_with_timeout(request, HOSTED_HTTP_TIMEOUT)
+    }
+
+    fn execute_json_with_timeout<T>(
+        &self,
+        request: HostedApiRequest,
+        timeout: Duration,
+    ) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
         let client = BlockingClient::builder()
+            .timeout(timeout)
             .build()
             .context("failed to build hosted HTTP client")?;
         let method = match request.method {
@@ -180,11 +195,21 @@ impl HostedClient {
             builder = builder.json(body);
         }
 
-        let response = builder.send().with_context(|| {
-            format!(
-                "failed to send hosted request {} {}",
-                request.method, request.url
-            )
+        let response = builder.send().map_err(|error| {
+            if error.is_timeout() {
+                anyhow!(
+                    "hosted request {} {} timed out after {:?}",
+                    request.method,
+                    request.url,
+                    timeout
+                )
+            } else {
+                anyhow!(
+                    "failed to send hosted request {} {}: {error}",
+                    request.method,
+                    request.url
+                )
+            }
         })?;
         let status = response.status();
         if status.is_success() {
@@ -1297,6 +1322,45 @@ mod tests {
         assert_eq!(
             observed.lock().expect("headers lock").as_slice(),
             &[String::from("Bearer demo-token")]
+        );
+    }
+
+    #[test]
+    fn hosted_client_times_out_slow_machine_requests() {
+        async fn slow_handler() -> Json<HostedSuccess<serde_json::Value>> {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(String::from("cloud-aws")),
+                    ..HostedRouteContext::default()
+                },
+                result: json!({
+                    "machine_name": "cloud-aws",
+                    "state": "running",
+                }),
+            })
+        }
+
+        let endpoint =
+            serve_router(Router::new().route("/v1/machines/cloud-aws", get(slow_handler)));
+        let client = HostedClient::new(
+            endpoint,
+            "port-hosted-demo",
+            "authorization",
+            "Bearer demo-token",
+        );
+        let error = client
+            .execute_json_with_timeout::<HostedSuccess<serde_json::Value>>(
+                client.machines().status("cloud-aws"),
+                Duration::from_millis(50),
+            )
+            .expect_err("slow request should time out");
+
+        assert!(
+            error.to_string().contains("hosted request GET")
+                && error.to_string().contains("timed out after 50ms"),
+            "{error}"
         );
     }
 

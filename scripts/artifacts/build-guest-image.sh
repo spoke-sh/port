@@ -230,7 +230,7 @@ EOF
 printf '%s\n' "$guest_architecture" >"$staging_dir/etc/port-guest-architecture"
 printf '%s\n' "$protection_mode" >"$staging_dir/etc/port-protection-mode"
 
-k3s_attr="nixpkgs#legacyPackages.${guest_nix_system}.k3s_1_34"
+k3s_attr="nixpkgs#legacyPackages.${guest_nix_system}.k3s"
 k3s_store="$(copy_store_closure "$k3s_attr")"
 k3s_version="$(nix eval --option eval-cache false --raw "${k3s_attr}.version")"
 printf '%s\n' "$k3s_version" >"$staging_dir/etc/port-k3s-version"

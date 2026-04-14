@@ -182,6 +182,8 @@ const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 #[cfg(not(test))]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
 
+const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
+
 trait HostedMachineProjection {
     fn apply_hosted_route(self, route: &HostedRouteContext) -> Self;
 }
@@ -3874,6 +3876,29 @@ async fn proxy_bytes(
     content_type: Option<&str>,
     route_context: HostedRouteContext,
 ) -> Result<(StatusCode, Bytes), String> {
+    proxy_bytes_with_timeout(
+        state,
+        binding,
+        route,
+        method,
+        body,
+        content_type,
+        route_context,
+        HOSTED_NODE_PROXY_TIMEOUT,
+    )
+    .await
+}
+
+async fn proxy_bytes_with_timeout(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+    content_type: Option<&str>,
+    route_context: HostedRouteContext,
+    timeout: Duration,
+) -> Result<(StatusCode, Bytes), String> {
     let url = format!("{}{}", binding.endpoint.trim_end_matches('/'), route.path());
     let method = reqwest::Method::from_bytes(method.as_str().as_bytes()).map_err(|error| {
         format!(
@@ -3891,22 +3916,44 @@ async fn proxy_bytes(
         }
         request = request.body(body.to_vec());
     }
-    let response = request.send().await.map_err(|error| {
-        format!(
-            "control plane '{}' could not reach node '{}' for machine '{}': {error}",
-            state.inner.control_plane,
-            binding.node_name,
-            route_context.machine_name.as_deref().unwrap_or("<unknown>")
-        )
-    })?;
+    let response = tokio::time::timeout(timeout, request.send())
+        .await
+        .map_err(|_| {
+            format!(
+                "control plane '{}' timed out after {:?} while reaching node '{}' for machine '{}'",
+                state.inner.control_plane,
+                timeout,
+                binding.node_name,
+                route_context.machine_name.as_deref().unwrap_or("<unknown>")
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "control plane '{}' could not reach node '{}' for machine '{}': {error}",
+                state.inner.control_plane,
+                binding.node_name,
+                route_context.machine_name.as_deref().unwrap_or("<unknown>")
+            )
+        })?;
     let status =
         StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let bytes = response.bytes().await.map_err(|error| {
-        format!(
-            "control plane '{}' received an unreadable response from node '{}': {error}",
-            state.inner.control_plane, binding.node_name
-        )
-    })?;
+    let bytes = tokio::time::timeout(timeout, response.bytes())
+        .await
+        .map_err(|_| {
+            format!(
+                "control plane '{}' timed out after {:?} while reading node '{}' for machine '{}'",
+                state.inner.control_plane,
+                timeout,
+                binding.node_name,
+                route_context.machine_name.as_deref().unwrap_or("<unknown>")
+            )
+        })?
+        .map_err(|error| {
+            format!(
+                "control plane '{}' received an unreadable response from node '{}': {error}",
+                state.inner.control_plane, binding.node_name
+            )
+        })?;
     Ok((status, bytes))
 }
 
@@ -6729,6 +6776,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proxy_bytes_times_out_when_node_agent_stalls() {
+        async fn ready_handler() -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn slow_status_handler() -> StatusCode {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            StatusCode::OK
+        }
+
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("proxy-timeout");
+        let token_var = unique_test_env("PORT_TEST_PROXY_TIMEOUT_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let router = Router::new()
+            .route("/__ready", get(ready_handler))
+            .route("/v1/node/machines/{machine}", get(slow_status_handler));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        wait_for_http_ready(addr, "/__ready", &[], true).await;
+
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+        let binding = HostedNodeBinding {
+            node_name: String::from("aws-linux-node"),
+            endpoint: format!("http://{addr}"),
+            token: String::from("node-secret"),
+        };
+
+        let error = proxy_bytes_with_timeout(
+            &state,
+            &binding,
+            HostedNodeRoute::Machine(HostedMachineRoute::Status {
+                machine_name: String::from("cloud-aws"),
+            }),
+            Method::GET,
+            None,
+            None,
+            HostedRouteContext {
+                control_plane: Some(control_plane.clone()),
+                machine_name: Some(String::from("cloud-aws")),
+                node_name: Some(String::from("aws-linux-node")),
+                ..HostedRouteContext::default()
+            },
+            Duration::from_millis(50),
+        )
+        .await
+        .expect_err("slow node response should time out");
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+
+        assert!(error.contains("timed out after 50ms"), "{error}");
+        assert!(error.contains("node 'aws-linux-node'"), "{error}");
+    }
+
+    #[tokio::test]
     async fn hosted_registry_persistence_reconstructs_routes_from_durable_state_after_restart() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
@@ -7431,7 +7555,7 @@ mod tests {
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -7589,7 +7713,7 @@ mod tests {
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },

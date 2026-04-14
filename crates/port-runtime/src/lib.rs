@@ -56,6 +56,9 @@ pub use hosted_control_plane::{
 };
 
 const PORT_IPTABLES_BINARY_ENV: &str = "PORT_IPTABLES_BINARY";
+const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
+const GUEST_TRANSPORT_IO_TIMEOUT: Duration = Duration::from_secs(120);
+const GUEST_TRANSPORT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedPvmNodePrepareRequest {
@@ -11117,6 +11120,7 @@ fn open_guest_operation_transport(
     let driver = driver_for_machine(config, request.machine_name)?;
     let endpoint = driver.guest_endpoint(config, request)?;
     let stream = connect_guest_endpoint(&endpoint)?;
+    configure_guest_operation_stream(&stream)?;
     let writer_stream = stream
         .try_clone()
         .context("failed to clone guest agent socket")?;
@@ -11583,6 +11587,7 @@ fn copy_guest_via_endpoint(
         },
     )?;
     let stream = connect_guest_endpoint(&endpoint)?;
+    configure_guest_operation_stream(&stream)?;
     let writer_stream = stream
         .try_clone()
         .context("failed to clone guest agent socket")?;
@@ -11683,6 +11688,7 @@ fn encode_copy_request_envelope(request: &port_agent_protocol::CopyRequest) -> R
 
 fn execute_hosted_request(request: HostedApiRequest) -> Result<reqwest::blocking::Response> {
     let client = reqwest::blocking::Client::builder()
+        .timeout(HOSTED_HTTP_TIMEOUT)
         .build()
         .context("failed to build hosted HTTP client")?;
     let method = match request.method {
@@ -11699,11 +11705,21 @@ fn execute_hosted_request(request: HostedApiRequest) -> Result<reqwest::blocking
     if let Some(body) = &request.body {
         builder = builder.json(body);
     }
-    let response = builder.send().with_context(|| {
-        format!(
-            "failed to send hosted request {} {}",
-            request.method, request.url
-        )
+    let response = builder.send().map_err(|error| {
+        if error.is_timeout() {
+            anyhow!(
+                "hosted request {} {} timed out after {:?}",
+                request.method,
+                request.url,
+                HOSTED_HTTP_TIMEOUT
+            )
+        } else {
+            anyhow!(
+                "failed to send hosted request {} {}: {error}",
+                request.method,
+                request.url
+            )
+        }
     })?;
     finalize_hosted_response(request.method, &request.url, response)
 }
@@ -11713,6 +11729,7 @@ fn execute_hosted_stream_request(
     body: reqwest::blocking::Body,
 ) -> Result<reqwest::blocking::Response> {
     let client = reqwest::blocking::Client::builder()
+        .timeout(HOSTED_HTTP_TIMEOUT)
         .build()
         .context("failed to build hosted HTTP client")?;
     let method = match request.request.method {
@@ -11730,11 +11747,21 @@ fn execute_hosted_stream_request(
         builder = builder.header(name, value);
     }
     builder = builder.header("content-type", "application/octet-stream");
-    let response = builder.body(body).send().with_context(|| {
-        format!(
-            "failed to send hosted request {} {}",
-            request.request.method, request.request.url
-        )
+    let response = builder.body(body).send().map_err(|error| {
+        if error.is_timeout() {
+            anyhow!(
+                "hosted request {} {} timed out after {:?}",
+                request.request.method,
+                request.request.url,
+                HOSTED_HTTP_TIMEOUT
+            )
+        } else {
+            anyhow!(
+                "failed to send hosted request {} {}: {error}",
+                request.request.method,
+                request.request.url
+            )
+        }
     })?;
     finalize_hosted_response(request.request.method, &request.request.url, response)
 }
@@ -12097,6 +12124,7 @@ fn proxy_guest_forward_connection<S: ProxyStream>(
     inbound: S,
 ) -> Result<()> {
     let stream = connect_guest_endpoint(&endpoint)?;
+    configure_guest_operation_stream(&stream)?;
     let writer_stream = stream
         .try_clone()
         .context("failed to clone guest transport stream")?;
@@ -12128,6 +12156,7 @@ fn proxy_guest_forward_connection<S: ProxyStream>(
 
     let buffered = reader.buffer().to_vec();
     let guest_stream = reader.into_inner();
+    set_guest_transport_timeouts(&guest_stream, None, "guest forward transport")?;
     let mut guest_write = guest_stream
         .try_clone()
         .context("failed to clone guest forward stream")?;
@@ -12287,6 +12316,24 @@ fn resolve_avf_guest_endpoint(
         paths.guest_agent_socket.display(),
         request.machine_name
     );
+}
+
+fn set_guest_transport_timeouts(
+    stream: &UnixStream,
+    timeout: Option<Duration>,
+    label: &str,
+) -> Result<()> {
+    stream
+        .set_read_timeout(timeout)
+        .with_context(|| format!("failed to set {label} read timeout"))?;
+    stream
+        .set_write_timeout(timeout)
+        .with_context(|| format!("failed to set {label} write timeout"))?;
+    Ok(())
+}
+
+fn configure_guest_operation_stream(stream: &UnixStream) -> Result<()> {
+    set_guest_transport_timeouts(stream, Some(GUEST_TRANSPORT_IO_TIMEOUT), "guest transport")
 }
 
 fn connect_guest_endpoint(endpoint: &GuestEndpoint) -> Result<UnixStream> {
@@ -12728,12 +12775,31 @@ fn connect_vsock_tunnel(
     host_socket_path: &Path,
     guest_port: u32,
 ) -> Result<UnixStream> {
+    connect_vsock_tunnel_with_timeout(
+        backend_name,
+        host_socket_path,
+        guest_port,
+        GUEST_TRANSPORT_HANDSHAKE_TIMEOUT,
+    )
+}
+
+fn connect_vsock_tunnel_with_timeout(
+    backend_name: &str,
+    host_socket_path: &Path,
+    guest_port: u32,
+    handshake_timeout: Duration,
+) -> Result<UnixStream> {
     let mut stream = UnixStream::connect(host_socket_path).with_context(|| {
         format!(
             "failed to connect to {backend_name} guest transport socket '{}'",
             host_socket_path.display(),
         )
     })?;
+    set_guest_transport_timeouts(
+        &stream,
+        Some(handshake_timeout),
+        "guest transport handshake",
+    )?;
     stream
         .write_all(format!("CONNECT {guest_port}\n").as_bytes())
         .with_context(|| {
@@ -12773,6 +12839,7 @@ fn connect_vsock_tunnel(
         );
     }
 
+    set_guest_transport_timeouts(&stream, None, "guest transport handshake")?;
     Ok(stream)
 }
 
@@ -14501,7 +14568,7 @@ exit 23
                 worker_machines: vec![String::from("cloud-aws-worker")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: port_model::HostedSchedulerPolicy::DeterministicFirstFit,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: vec![String::from("--node-label=role=worker")],
             },
@@ -14931,7 +14998,7 @@ set -eu
 state_root="var/lib/rancher/k3s"
 state_file="${state_root}/server.started"
 node_name="demo"
-version="v1.32.13+k3s1"
+version="v1.35.2+k3s1"
 write_kubeconfig="etc/rancher/k3s/k3s.yaml"
 
 if [ "$#" -gt 0 ] && [ "$1" = "server" ]; then
@@ -18469,7 +18536,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::ManagedServiceList {
@@ -18701,7 +18768,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::ManagedServiceList {
@@ -18802,7 +18869,7 @@ exec sleep 30
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
             control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-            version: String::from("v1.32.0+k3s1"),
+            version: String::from("v1.35.2+k3s1"),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
         };
@@ -18993,7 +19060,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.32.0+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::ManagedServiceList {
@@ -21525,6 +21592,42 @@ exec sleep 30
             OperationResult::Exec(result) => assert_eq!(result.stdout, "live-ch-ok\n"),
             other => panic!("unexpected result: {other:?}"),
         }
+
+        server.join().expect("server thread should complete");
+    }
+
+    #[test]
+    fn guest_vsock_tunnel_times_out_when_handshake_stalls() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener = UnixListener::bind(&paths.vsock_path).expect("vsock listener should bind");
+
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().expect("should accept guest transport");
+            thread::sleep(Duration::from_millis(150));
+        });
+
+        let start = std::time::Instant::now();
+        let error = super::connect_vsock_tunnel_with_timeout(
+            "Firecracker",
+            &paths.vsock_path,
+            7000,
+            Duration::from_millis(50),
+        )
+        .expect_err("stalled handshake should time out");
+
+        assert!(
+            start.elapsed() < Duration::from_millis(120),
+            "handshake timeout took {:?}",
+            start.elapsed()
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("failed to read Firecracker response"),
+            "{error}"
+        );
 
         server.join().expect("server thread should complete");
     }

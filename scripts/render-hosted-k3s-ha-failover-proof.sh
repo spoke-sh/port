@@ -544,7 +544,7 @@ config_path.write_text(
         worker_machines = ["cloud-aws-worker"]
         api_endpoint = "https://demo-k3s.internal:6443"
         control_plane_scheduler = "spread"
-        version = "v1.32.0+k3s1"
+        version = "v1.35.2+k3s1"
         server_args = ["--disable=traefik"]
         worker_args = []
         """
@@ -785,7 +785,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.2+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -808,7 +808,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.2+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -996,7 +996,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.2+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -1019,7 +1019,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.32.0+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.32.0+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.2+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",

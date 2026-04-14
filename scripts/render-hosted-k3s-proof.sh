@@ -569,7 +569,7 @@ config_path.write_text(
         worker_machines = ["cloud-aws"]
         api_endpoint = "{api_endpoint}"
         control_plane_scheduler = "spread"
-        version = "v1.32.0+k3s1"
+        version = "v1.35.2+k3s1"
         server_args = ["--disable=traefik"]
         worker_args = ["--node-label=role=worker"]
         """
@@ -741,7 +741,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.2+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -764,7 +764,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws       Ready    <none>                 1m    v1.32.0+k3s1\n",
+                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.2+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",

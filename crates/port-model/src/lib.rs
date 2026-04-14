@@ -384,7 +384,7 @@ impl PortConfig {
                 provider: ClusterProvider::Local,
                 count: 1,
                 machine: String::from("demo"),
-                version: String::from("v1.32.13+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 args: vec![String::from("--disable=traefik")],
                 bootstrap: ClusterBootstrapSpec {
                     stage_root: PathBuf::from("/opt/port/clusters/demo"),
@@ -4685,7 +4685,7 @@ mod tests {
                 provider: ClusterProvider::Local,
                 count: 1,
                 machine: String::from("demo"),
-                version: String::from("v1.32.13+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 args: vec![String::from("--disable=traefik")],
                 bootstrap: ClusterBootstrapSpec {
                     stage_root: PathBuf::from("/opt/port/clusters/demo"),
@@ -4727,7 +4727,7 @@ mod tests {
         assert!(encoded.contains("[clusters.demo]"));
         assert!(encoded.contains("count = 1"));
         assert!(encoded.contains("machine = \"demo\""));
-        assert!(encoded.contains("version = \"v1.32.13+k3s1\""));
+        assert!(encoded.contains("version = \"v1.35.2+k3s1\""));
         assert!(
             encoded.contains(
                 "install_script = \"examples/bootstrap/demo-k3s/install-k3s-offline.sh\""
@@ -4895,7 +4895,7 @@ mod tests {
                 worker_machines: vec![String::from("cloud-aws")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -4918,7 +4918,7 @@ mod tests {
                 worker_machines: vec![String::from("cloud-aws")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             }
@@ -4931,7 +4931,7 @@ mod tests {
         assert!(encoded.contains("worker_machines = [\"cloud-aws\"]"));
         assert!(encoded.contains("api_endpoint = \"https://demo-k3s.internal:6443\""));
         assert!(encoded.contains("control_plane_scheduler = \"spread\""));
-        assert!(encoded.contains("version = \"v1.32.0+k3s1\""));
+        assert!(encoded.contains("version = \"v1.35.2+k3s1\""));
 
         let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
         assert_eq!(decoded, sample);
@@ -4960,7 +4960,7 @@ mod tests {
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -4998,7 +4998,7 @@ mod tests {
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -5044,7 +5044,7 @@ mod tests {
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -5084,7 +5084,7 @@ mod tests {
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: String::from("v1.32.0+k3s1"),
+                version: String::from("v1.35.2+k3s1"),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },

@@ -83,7 +83,7 @@ set -eu
 if [ "$#" -ge 4 ] && [ "$1" = "kubectl" ] && [ "$2" = "get" ] && [ "$3" = "nodes" ]; then
   cat <<'EOF'
 NAME   STATUS   ROLES                  AGE   VERSION
-demo   Ready    control-plane,master   1m    v1.32.13+k3s1
+demo   Ready    control-plane,master   1m    v1.35.2+k3s1
 EOF
   exit 0
 fi
@@ -354,7 +354,7 @@ fn hosted_k3s_config(runtime_root: &Path) -> PortConfig {
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
             control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-            version: String::from("v1.32.0+k3s1"),
+            version: String::from("v1.35.2+k3s1"),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
         },
@@ -373,7 +373,7 @@ fn hosted_single_server_k3s_config(runtime_root: &Path) -> PortConfig {
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
             control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-            version: String::from("v1.32.0+k3s1"),
+            version: String::from("v1.35.2+k3s1"),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
         },
@@ -1078,7 +1078,7 @@ fn cli_cluster_list_and_show_surface_local_contract() {
     assert!(show.status.success());
     let show_stdout = String::from_utf8_lossy(&show.stdout);
     assert!(show_stdout.contains("cluster: demo"));
-    assert!(show_stdout.contains("version: v1.32.13+k3s1"));
+    assert!(show_stdout.contains("version: v1.35.2+k3s1"));
     assert!(show_stdout.contains("stage root: /opt/port/clusters/demo"));
     assert!(
         show_stdout.contains("install script: examples/bootstrap/demo-k3s/install-k3s-offline.sh")
@@ -1220,7 +1220,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
                 stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
             HostedGuestExpectedOperation::ManagedServiceList {
@@ -1247,7 +1247,7 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
                 stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
             HostedGuestExpectedOperation::ManagedServiceList {
@@ -1448,7 +1448,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
                 stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
             HostedGuestExpectedOperation::ManagedServiceList {
@@ -1475,7 +1475,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
                 stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
             HostedGuestExpectedOperation::ManagedServiceList {
@@ -1638,7 +1638,7 @@ fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
                     String::from("k3s kubectl get nodes -o wide"),
                 ],
                 stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.32.0+k3s1\n",
+                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
             HostedGuestExpectedOperation::Exec {
