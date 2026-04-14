@@ -374,7 +374,7 @@ fn hosted_k3s_config(runtime_root: &Path) -> PortConfig {
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
             control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-            version: String::from("v1.35.2+k3s1"),
+            version: Some(String::from("v1.35.2+k3s1")),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
         },
@@ -393,7 +393,7 @@ fn hosted_single_server_k3s_config(runtime_root: &Path) -> PortConfig {
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
             control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-            version: String::from("v1.35.2+k3s1"),
+            version: Some(String::from("v1.35.2+k3s1")),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
         },
@@ -1134,7 +1134,7 @@ fn cli_cluster_list_and_show_surface_local_contract() {
     assert!(show.status.success());
     let show_stdout = String::from_utf8_lossy(&show.stdout);
     assert!(show_stdout.contains("cluster: demo"));
-    assert!(show_stdout.contains("version: v1.35.2+k3s1"));
+    assert!(show_stdout.contains("version: default (packaged guest image)"));
     assert!(show_stdout.contains("stage root: /opt/port/clusters/demo"));
     assert!(
         show_stdout.contains("install script: examples/bootstrap/demo-k3s/install-k3s-offline.sh")

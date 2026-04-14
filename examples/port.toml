@@ -576,7 +576,7 @@ flavor = "k3s"
 provider = "local"
 count = 1
 machine = "demo"
-version = "v1.35.2+k3s1"
+# Optional override: set `version` to force a specific K3s release.
 args = ["--disable=traefik"]
 
 [clusters.demo.bootstrap]

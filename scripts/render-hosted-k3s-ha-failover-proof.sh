@@ -544,7 +544,6 @@ config_path.write_text(
         worker_machines = ["cloud-aws-worker"]
         api_endpoint = "https://demo-k3s.internal:6443"
         control_plane_scheduler = "spread"
-        version = "v1.35.2+k3s1"
         server_args = ["--disable=traefik"]
         worker_args = []
         """

@@ -569,7 +569,6 @@ config_path.write_text(
         worker_machines = ["cloud-aws"]
         api_endpoint = "{api_endpoint}"
         control_plane_scheduler = "spread"
-        version = "v1.35.2+k3s1"
         server_args = ["--disable=traefik"]
         worker_args = ["--node-label=role=worker"]
         """

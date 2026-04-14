@@ -152,7 +152,7 @@ flavor = "k3s"
 provider = "local"
 count = 1
 machine = "demo"
-version = "v1.35.2+k3s1"
+# Optional override: add `version = "vX.Y.Z+k3s1"` to force a specific K3s release.
 args = ["--disable=traefik"]
 
 [clusters.demo.bootstrap]
@@ -222,7 +222,7 @@ server_machines = ["cloud-aws-a", "cloud-aws-b", "cloud-aws-c"]
 worker_machines = ["cloud-aws-worker-a", "cloud-aws-worker-b"]
 api_endpoint = "https://demo-k3s.internal:6443"
 control_plane_scheduler = "spread"
-version = "v1.35.2+k3s1"
+# Optional override: add `version = "vX.Y.Z+k3s1"` to pin a hosted K3s release.
 server_args = ["--disable=traefik"]
 worker_args = ["--node-label=role=worker"]
 ```

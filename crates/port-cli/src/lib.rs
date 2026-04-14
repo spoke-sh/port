@@ -1586,7 +1586,7 @@ fn render_cluster_record(name: &str, cluster: &port_model::ClusterSpec) -> Rende
         provider: cluster.provider.to_string(),
         count: cluster.count,
         machine: cluster.machine.clone(),
-        version: cluster.version.clone(),
+        version: port_model::render_k3s_version_label(cluster.version.as_deref()),
         args: cluster.args.clone(),
         stage_root: cluster.bootstrap.stage_root.display().to_string(),
         install_script: cluster.bootstrap.install_script.display().to_string(),
@@ -1616,7 +1616,7 @@ fn render_hosted_k3s_cluster_record(
         control_plane_machines: cluster.server_machines.clone(),
         worker_machines: cluster.worker_machines.clone(),
         api_endpoint: cluster.api_endpoint.clone(),
-        version: cluster.version.clone(),
+        version: port_model::render_k3s_version_label(cluster.version.as_deref()),
         server_args: cluster.server_args.clone(),
         worker_args: cluster.worker_args.clone(),
         boundary: String::from(

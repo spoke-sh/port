@@ -278,10 +278,12 @@ server_machines = ["cloud-aws-a", "cloud-aws-b", "cloud-aws-c"]
 worker_machines = ["cloud-aws-worker-a", "cloud-aws-worker-b"]
 api_endpoint = "https://demo-k3s.internal:6443"
 control_plane_scheduler = "spread"
-version = "v1.32.0+k3s1"
 server_args = ["--disable=traefik"]
 worker_args = ["--node-label=role=worker"]
 ```
+
+Omit `version` to use Port's packaged guest-image default, or set it explicitly as
+an override.
 
 Hosted K3s is a microVM-backed cluster contract:
 
@@ -428,7 +430,6 @@ flavor = "k3s"
 provider = "local"
 count = 1
 machine = "demo"
-version = "v1.32.2+k3s1"
 args = ["--disable=traefik"]
 
 [clusters.demo.bootstrap]
