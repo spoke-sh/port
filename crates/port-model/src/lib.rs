@@ -18,6 +18,8 @@ pub struct PortConfig {
     pub clusters: BTreeMap<String, ClusterSpec>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub k3s_clusters: BTreeMap<String, K3sClusterSpec>,
+    #[serde(skip)]
+    state_root: Option<PathBuf>,
 }
 
 impl PortConfig {
@@ -431,6 +433,7 @@ impl PortConfig {
             machines,
             clusters,
             k3s_clusters: BTreeMap::new(),
+            state_root: None,
         }
     }
 
@@ -445,14 +448,30 @@ impl PortConfig {
             source,
         })?;
 
-        Self::from_toml_str(&input).map_err(|source| ModelError::Parse {
+        let mut config = Self::from_toml_str(&input).map_err(|source| ModelError::Parse {
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+        config.set_state_root(path.parent().unwrap_or_else(|| Path::new(".")));
+        Ok(config)
     }
 
     pub fn to_toml_string(&self) -> Result<String, toml::ser::Error> {
         toml::to_string_pretty(self)
+    }
+
+    pub fn state_root(&self) -> Option<&Path> {
+        self.state_root.as_deref()
+    }
+
+    pub fn set_state_root(&mut self, path: impl Into<PathBuf>) {
+        self.state_root = Some(path.into());
+    }
+
+    #[must_use]
+    pub fn with_state_root(mut self, path: impl Into<PathBuf>) -> Self {
+        self.set_state_root(path);
+        self
     }
 
     pub fn artifact(&self, name: &str) -> Option<&ArtifactSpec> {
@@ -6600,6 +6619,17 @@ mod tests {
             ExecutionSubstrate::Avf,
             ProtectionMode::Standard
         ));
+    }
+
+    #[test]
+    fn from_path_tracks_config_directory_as_state_root() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/port.toml")
+            .canonicalize()
+            .expect("example config path should resolve");
+        let config = PortConfig::from_path(&path).expect("example config should parse");
+
+        assert_eq!(config.state_root(), path.parent());
     }
 
     #[test]

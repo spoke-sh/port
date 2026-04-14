@@ -43,13 +43,13 @@ use crate::{
     MachineStatus, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
     ServiceSecretBinding, StopResult, apply_machine_service_live, architecture_dir,
     copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
-    hosted_placeholder_runtime_root, hosted_stored_service_placements, launch_local_machine,
-    list_detached_forwards, list_machine_secrets_local, machine_monitor as runtime_machine_monitor,
-    machine_monitor_report, machine_status as runtime_machine_status,
-    machine_top as runtime_machine_top, machine_top_report, prepare_guest_forward,
-    put_machine_secret_local, refresh_machine_service_list, refresh_machine_service_runtime,
-    start_detached_forward, stop_detached_forward, stop_machine as runtime_stop_machine,
-    stop_machine_service_live,
+    hosted_placeholder_runtime_root, hosted_placeholder_runtime_root_for_config,
+    hosted_stored_service_placements, launch_local_machine, list_detached_forwards,
+    list_machine_secrets_local, machine_monitor as runtime_machine_monitor, machine_monitor_report,
+    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
+    machine_top_report, prepare_guest_forward, put_machine_secret_local,
+    refresh_machine_service_list, refresh_machine_service_runtime, start_detached_forward,
+    stop_detached_forward, stop_machine as runtime_stop_machine, stop_machine_service_live,
 };
 use port_agent_protocol::{
     CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
@@ -257,9 +257,18 @@ fn registered_node_state_path(control_plane: &str) -> PathBuf {
     hosted_placeholder_runtime_root(control_plane).join("registered-nodes.json")
 }
 
+fn registered_node_state_path_for_config(config: &PortConfig, control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root_for_config(config, control_plane).join("registered-nodes.json")
+}
+
 #[allow(dead_code)]
 fn imported_inventory_state_path(control_plane: &str) -> PathBuf {
     hosted_placeholder_runtime_root(control_plane).join("imported-inventory.json")
+}
+
+fn imported_inventory_state_path_for_config(config: &PortConfig, control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root_for_config(config, control_plane)
+        .join("imported-inventory.json")
 }
 
 fn load_registered_node_state(
@@ -371,6 +380,11 @@ fn persist_imported_inventory_state(
 #[allow(dead_code)]
 fn machine_placement_state_path(control_plane: &str) -> PathBuf {
     hosted_placeholder_runtime_root(control_plane).join("machine-placements.json")
+}
+
+fn machine_placement_state_path_for_config(config: &PortConfig, control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root_for_config(config, control_plane)
+        .join("machine-placements.json")
 }
 
 fn load_machine_placement_state(
@@ -987,7 +1001,8 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
         .map(|binding| (binding.node_name.clone(), binding))
         .collect();
 
-    let registered_state_path = registered_node_state_path(&request.control_plane);
+    let registered_state_path =
+        registered_node_state_path_for_config(&config, &request.control_plane);
     let registered_state =
         load_registered_node_state(&registered_state_path, &request.control_plane).with_context(
             || {
@@ -1004,7 +1019,8 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
                 request.control_plane
             )
         })?;
-    let imported_inventory_path = imported_inventory_state_path(&request.control_plane);
+    let imported_inventory_path =
+        imported_inventory_state_path_for_config(&config, &request.control_plane);
     let imported_inventory_state =
         load_imported_inventory_state(&imported_inventory_path, &request.control_plane)
             .with_context(|| {
@@ -1021,7 +1037,8 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
                     request.control_plane
                 )
             })?;
-    let machine_placement_state_path = machine_placement_state_path(&request.control_plane);
+    let machine_placement_state_path =
+        machine_placement_state_path_for_config(&config, &request.control_plane);
     let machine_placement_state =
         load_machine_placement_state(&machine_placement_state_path, &request.control_plane)
             .with_context(|| {
@@ -1335,7 +1352,10 @@ async fn node_registration_refresh(
 fn hosted_artifact_route_context(state: &ControlPlaneState) -> HostedRouteContext {
     HostedRouteContext {
         control_plane: Some(state.inner.control_plane.clone()),
-        runtime_root: Some(hosted_placeholder_runtime_root(&state.inner.control_plane)),
+        runtime_root: Some(hosted_placeholder_runtime_root_for_config(
+            &state.inner.config,
+            &state.inner.control_plane,
+        )),
         ..HostedRouteContext::default()
     }
 }
@@ -2979,7 +2999,12 @@ fn resolve_known_node_binding(
             .nodes
             .get(node_name)
             .map(|node| node.runtime_root.clone())
-            .unwrap_or_else(|| hosted_placeholder_runtime_root(&state.inner.control_plane));
+            .unwrap_or_else(|| {
+                hosted_placeholder_runtime_root_for_config(
+                    &state.inner.config,
+                    &state.inner.control_plane,
+                )
+            });
         return Ok(Some((binding, runtime_root)));
     }
     Ok(None)
@@ -3550,7 +3575,8 @@ fn effective_control_plane_config(state: &ControlPlaneState) -> Result<PortConfi
 }
 
 fn effective_node_agent_config(state: &NodeAgentState) -> Result<PortConfig, Response> {
-    let imported_inventory_path = imported_inventory_state_path(&state.inner.control_plane);
+    let imported_inventory_path =
+        imported_inventory_state_path_for_config(&state.inner.config, &state.inner.control_plane);
     let imported_inventory_state = load_imported_inventory_state(
         &imported_inventory_path,
         &state.inner.control_plane,

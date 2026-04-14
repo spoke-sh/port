@@ -7390,7 +7390,7 @@ fn hosted_stored_machine_placement(
         .ok_or_else(|| {
             anyhow!("machine '{machine_name}' does not target a hosted control plane")
         })?;
-    let path = hosted_placeholder_runtime_root(&hosted_identity.control_plane)
+    let path = hosted_placeholder_runtime_root_for_config(config, &hosted_identity.control_plane)
         .join("machine-placements.json");
     if !path.exists() {
         return Ok(None);
@@ -7435,18 +7435,31 @@ struct HostedImportedInventoryStateFile {
     nodes: BTreeMap<String, HostedImportedNodeRecord>,
 }
 
+pub(crate) fn hosted_placeholder_runtime_root_for_config(
+    config: &PortConfig,
+    control_plane: &str,
+) -> PathBuf {
+    config
+        .state_root()
+        .map(|root| root.join(".port/hosted"))
+        .unwrap_or_else(|| PathBuf::from(".port/hosted"))
+        .join(control_plane)
+}
+
 fn hosted_placeholder_runtime_root(control_plane: &str) -> PathBuf {
     PathBuf::from(".port/hosted").join(control_plane)
 }
 
-fn hosted_imported_inventory_state_path(control_plane: &str) -> PathBuf {
-    hosted_placeholder_runtime_root(control_plane).join("imported-inventory.json")
+fn hosted_imported_inventory_state_path(config: &PortConfig, control_plane: &str) -> PathBuf {
+    hosted_placeholder_runtime_root_for_config(config, control_plane)
+        .join("imported-inventory.json")
 }
 
 fn read_hosted_imported_inventory_state(
+    config: &PortConfig,
     control_plane: &str,
 ) -> Result<Option<HostedImportedInventoryStateFile>> {
-    let path = hosted_imported_inventory_state_path(control_plane);
+    let path = hosted_imported_inventory_state_path(config, control_plane);
     if !path.exists() {
         return Ok(None);
     }
@@ -7559,7 +7572,7 @@ fn effective_config_with_hosted_imported_inventory(config: &PortConfig) -> Resul
         if !imported_by_control_plane.contains_key(control_plane) {
             imported_by_control_plane.insert(
                 control_plane.to_string(),
-                read_hosted_imported_inventory_state(control_plane).with_context(|| {
+                read_hosted_imported_inventory_state(config, control_plane).with_context(|| {
                     format!(
                         "failed to load imported hosted inventory for control plane '{}'",
                         control_plane
@@ -7804,7 +7817,8 @@ fn hosted_machine_resolution(
         .ok_or_else(|| {
             anyhow!("machine '{machine_name}' does not target a hosted control plane")
         })?;
-    let placeholder_root = hosted_placeholder_runtime_root(&hosted_identity.control_plane);
+    let placeholder_root =
+        hosted_placeholder_runtime_root_for_config(config, &hosted_identity.control_plane);
 
     let summary = match effective_config.hosted_machine_summary_contract(machine_name) {
         Ok(Some(summary)) => summary,
@@ -9316,7 +9330,7 @@ fn hosted_pvm_lane_checks(config: &PortConfig) -> Vec<DoctorCheck> {
     for (node_name, node) in &config.nodes {
         let hosted_control_plane = hosted_control_plane_for_node(config, node_name);
         let imported_record = if let Some(control_plane) = hosted_control_plane {
-            match read_hosted_imported_inventory_state(control_plane) {
+            match read_hosted_imported_inventory_state(config, control_plane) {
                 Ok(Some(state)) => state.nodes.get(node_name).cloned(),
                 Ok(None) => None,
                 Err(error) => {
@@ -13398,13 +13412,14 @@ mod tests {
         collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
         down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
         hosted_k3s_cluster_access, hosted_k3s_join_token_command, hosted_k3s_kubeconfig_command,
-        hosted_k3s_service_policy, hosted_k3s_visibility_command, hosted_placeholder_runtime_root,
-        k3s_bootstrap_command, launch_local_machine, list_artifacts, list_machine_secrets,
-        list_machine_services, list_machines, local_cluster_kubeconfig, local_cluster_status,
-        machine_monitor, machine_service_status, machine_status, machine_top, path_check,
-        prepare_guest_forward, prepare_runtime_state, pull_artifact, push_artifact,
-        put_machine_secret, read_json_file, read_pid_file, render_hosted_route_context, repo_root,
-        resolve_artifact_metadata, resolve_artifact_script_path, resolve_artifact_store_contract,
+        hosted_k3s_machine_access, hosted_k3s_service_policy, hosted_k3s_visibility_command,
+        hosted_placeholder_runtime_root, k3s_bootstrap_command, launch_local_machine,
+        list_artifacts, list_machine_secrets, list_machine_services, list_machines,
+        local_cluster_kubeconfig, local_cluster_status, machine_monitor, machine_service_status,
+        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
+        pull_artifact, push_artifact, put_machine_secret, read_json_file, read_pid_file,
+        render_hosted_route_context, repo_root, resolve_artifact_metadata,
+        resolve_artifact_script_path, resolve_artifact_store_contract,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
         stage_local_cluster_bootstrap, stop_machine, stop_machine_service, sudo_caller_ids,
@@ -14493,12 +14508,15 @@ exit 23
         nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
     }
 
-    fn write_imported_inventory_state(
+    fn write_imported_inventory_state_at(
+        root: &Path,
         control_plane: &str,
         nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
     ) {
-        let state_path =
-            hosted_placeholder_runtime_root(control_plane).join("imported-inventory.json");
+        let state_path = root
+            .join(".port/hosted")
+            .join(control_plane)
+            .join("imported-inventory.json");
         fs::create_dir_all(
             state_path
                 .parent()
@@ -14514,6 +14532,13 @@ exit 23
             .expect("imported inventory state should encode"),
         )
         .expect("imported inventory state should write");
+    }
+
+    fn write_imported_inventory_state(
+        control_plane: &str,
+        nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
+    ) {
+        write_imported_inventory_state_at(Path::new("."), control_plane, nodes);
     }
 
     fn write_registered_node_state(
@@ -14640,6 +14665,35 @@ exit 23
     fn hosted_server_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn current_dir_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct CurrentDirGuard {
+        original: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn change(path: &Path) -> Self {
+            let original = std::env::current_dir().expect("current dir should resolve");
+            std::env::set_current_dir(path).expect("current dir should change");
+            Self { original }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.original).expect("current dir should restore");
+        }
+    }
+
+    fn with_current_dir<T>(path: &Path, f: impl FnOnce() -> T) -> T {
+        let _lock = current_dir_lock().lock().expect("cwd lock should work");
+        let _guard = CurrentDirGuard::change(path);
+        f()
     }
 
     fn reserve_addr() -> String {
@@ -18491,6 +18545,67 @@ exec sleep 30
         for metadata in bootstrap.worker_launches {
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
+    }
+
+    #[test]
+    fn hosted_k3s_machine_access_uses_loaded_config_state_root_when_cwd_differs() {
+        let model_root = tempdir().expect("model root should exist");
+        let cwd_root = tempdir().expect("cwd root should exist");
+        let runtime_root = model_root.path().join("runtime");
+        let config_path = model_root.path().join("port.toml");
+        let config = sample_hosted_k3s_config(&runtime_root);
+
+        fs::write(
+            &config_path,
+            config.to_toml_string().expect("config should encode"),
+        )
+        .expect("config path should write");
+
+        let host_kit = config.nodes["aws-linux-node"].capabilities.pvm_lanes[0]
+            .host_kit
+            .clone()
+            .expect("aws x86_64 PVM lane should define a host-kit");
+        let mut imported_summary = config.nodes["aws-linux-node"].capabilities.clone();
+        imported_summary.pvm_lanes[0].state = PvmCapabilityState::Ready;
+        imported_summary.pvm_lanes[0].host_kit = Some(host_kit.clone());
+        write_imported_inventory_state_at(
+            model_root.path(),
+            "demo",
+            BTreeMap::from([(
+                String::from("aws-linux-node"),
+                HostedImportedNodeRecord {
+                    provider: HostProvider::Aws,
+                    provenance: String::from("inventory-sync"),
+                    imported_at: 1,
+                    capability_summary: imported_summary,
+                    pvm_host_kit_packages: vec![port_model::HostedPvmHostKitPackageAttachment {
+                        architecture: MachineArchitecture::X86_64,
+                        package: host_kit.package,
+                    }],
+                },
+            )]),
+        );
+
+        let loaded = PortConfig::from_path(&config_path).expect("config should load");
+        let access = with_current_dir(cwd_root.path(), || {
+            hosted_k3s_machine_access(
+                &loaded,
+                "demo",
+                "demo",
+                "aws-builders",
+                "cloud-aws",
+                "control-plane",
+            )
+        })
+        .expect("hosted k3s machine access should resolve through config state root");
+
+        assert_eq!(access.route.control_plane.as_deref(), Some("demo"));
+        assert_eq!(access.route.node_name.as_deref(), Some("aws-linux-node"));
+        assert!(
+            access.detail.contains("selected node 'aws-linux-node'"),
+            "{}",
+            access.detail
+        );
     }
 
     #[test]

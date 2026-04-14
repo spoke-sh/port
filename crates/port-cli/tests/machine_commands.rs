@@ -178,7 +178,17 @@ fn hosted_server_lock() -> &'static Mutex<()> {
 }
 
 fn cleanup_hosted_registration_state() {
-    let _ = fs::remove_dir_all(Path::new(".port/hosted/demo"));
+    cleanup_hosted_registration_state_at(Path::new("."));
+}
+
+fn cleanup_hosted_registration_state_at(root: &Path) {
+    let _ = fs::remove_dir_all(root.join(".port/hosted/demo"));
+}
+
+fn hosted_state_path(root: &Path, control_plane: &str, file_name: &str) -> PathBuf {
+    root.join(".port/hosted")
+        .join(control_plane)
+        .join(file_name)
 }
 
 #[derive(Debug)]
@@ -255,7 +265,11 @@ fn spawn_hosted_server_harness_with_cleanup(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if cleanup_state {
-        cleanup_hosted_registration_state();
+        cleanup_hosted_registration_state_at(
+            server_config_path
+                .parent()
+                .unwrap_or_else(|| Path::new(".")),
+        );
     }
 
     let mut control_command = Command::new(port_bin());
@@ -478,6 +492,7 @@ fn write_machine_manifest(runtime_root: &Path, machine: &str, pid: u32) -> PathB
     manifest_path
 }
 
+#[allow(dead_code)]
 fn write_machine_placement_state(
     control_plane: &str,
     machine_name: &str,
@@ -485,16 +500,37 @@ fn write_machine_placement_state(
     runtime_root: &Path,
     placement_detail: &str,
 ) {
+    write_machine_placement_state_at(
+        Path::new("."),
+        control_plane,
+        machine_name,
+        node_name,
+        runtime_root,
+        placement_detail,
+    );
+}
+
+fn write_machine_placement_state_at(
+    root: &Path,
+    control_plane: &str,
+    machine_name: &str,
+    node_name: &str,
+    runtime_root: &Path,
+    placement_detail: &str,
+) {
     write_machine_placement_entries(
+        root,
         control_plane,
         &[(machine_name, node_name, runtime_root, placement_detail)],
     );
 }
 
-fn write_machine_placement_entries(control_plane: &str, placements: &[(&str, &str, &Path, &str)]) {
-    let state_path = Path::new(".port/hosted")
-        .join(control_plane)
-        .join("machine-placements.json");
+fn write_machine_placement_entries(
+    root: &Path,
+    control_plane: &str,
+    placements: &[(&str, &str, &Path, &str)],
+) {
+    let state_path = hosted_state_path(root, control_plane, "machine-placements.json");
     fs::create_dir_all(
         state_path
             .parent()
@@ -531,13 +567,20 @@ fn write_machine_placement_entries(control_plane: &str, placements: &[(&str, &st
     .expect("machine placement state should write");
 }
 
+#[allow(dead_code)]
 fn write_imported_inventory_state(
     control_plane: &str,
     nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
 ) {
-    let state_path = Path::new(".port/hosted")
-        .join(control_plane)
-        .join("imported-inventory.json");
+    write_imported_inventory_state_at(Path::new("."), control_plane, nodes);
+}
+
+fn write_imported_inventory_state_at(
+    root: &Path,
+    control_plane: &str,
+    nodes: BTreeMap<String, port_model::HostedImportedNodeRecord>,
+) {
+    let state_path = hosted_state_path(root, control_plane, "imported-inventory.json");
     fs::create_dir_all(
         state_path
             .parent()
@@ -558,13 +601,20 @@ fn write_imported_inventory_state(
     .expect("imported inventory state should write");
 }
 
+#[allow(dead_code)]
 fn write_registered_node_state(
     control_plane: &str,
     nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
 ) {
-    let state_path = Path::new(".port/hosted")
-        .join(control_plane)
-        .join("registered-nodes.json");
+    write_registered_node_state_at(Path::new("."), control_plane, nodes);
+}
+
+fn write_registered_node_state_at(
+    root: &Path,
+    control_plane: &str,
+    nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
+) {
+    let state_path = hosted_state_path(root, control_plane, "registered-nodes.json");
     fs::create_dir_all(
         state_path
             .parent()
@@ -1170,7 +1220,8 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
         &control_plane_addr,
         &[("PATH", joined_path.as_path())],
     );
-    write_registered_node_state(
+    write_registered_node_state_at(
+        temp.path(),
         "demo",
         BTreeMap::from([(
             String::from("aws-linux-node"),
@@ -1399,7 +1450,8 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
 
     let _servers =
         spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
-    write_registered_node_state(
+    write_registered_node_state_at(
+        temp.path(),
         "demo",
         BTreeMap::from([(
             String::from("aws-linux-node"),
@@ -1416,6 +1468,7 @@ fn cli_cluster_status_surfaces_hosted_real_ha_truth() {
     let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
     let _ = write_machine_manifest(&alternate_runtime_root, "cloud-aws-b", 434343);
     write_machine_placement_entries(
+        temp.path(),
         "demo",
         &[
             (
@@ -1608,7 +1661,8 @@ fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
 
     let _servers =
         spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
-    write_registered_node_state(
+    write_registered_node_state_at(
+        temp.path(),
         "demo",
         BTreeMap::from([(
             String::from("aws-linux-node"),
@@ -2934,7 +2988,8 @@ fn cli_machine_status_prefers_stored_hosted_placement_over_live_candidate() {
     let _servers =
         spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
     let _ = write_machine_manifest(&hosted_runtime_root, "cloud-aws", 424242);
-    write_machine_placement_state(
+    write_machine_placement_state_at(
+        temp.path(),
         "demo",
         "cloud-aws",
         "aws-linux-node-b",
@@ -3026,7 +3081,7 @@ fn cli_machine_status_surfaces_hosted_fleet_node_state() {
             pvm_host_kit_packages: Vec::new(),
         },
     );
-    write_imported_inventory_state("demo", imported_inventory);
+    write_imported_inventory_state_at(temp.path(), "demo", imported_inventory);
 
     let mut registered_nodes = BTreeMap::new();
     registered_nodes.insert(
@@ -3039,7 +3094,7 @@ fn cli_machine_status_surfaces_hosted_fleet_node_state() {
             ttl_seconds: 1,
         },
     );
-    write_registered_node_state("demo", registered_nodes);
+    write_registered_node_state_at(temp.path(), "demo", registered_nodes);
 
     let _servers =
         spawn_hosted_server_harness(&server_config_path, &node_addr, &control_plane_addr, &[]);
@@ -3246,7 +3301,8 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
     cleanup_hosted_registration_state();
     let mut imported_summary = server_config.nodes["aws-linux-node"].capabilities.clone();
     imported_summary.pvm_lanes[0].state = PvmCapabilityState::Ready;
-    write_imported_inventory_state(
+    write_imported_inventory_state_at(
+        temp.path(),
         "demo",
         BTreeMap::from([(
             String::from("aws-linux-node"),
@@ -3293,8 +3349,11 @@ fn cli_machine_launch_routes_hosted_pvm_through_live_control_plane() {
         .expect("pid should parse");
     assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
     let placement_state: serde_json::Value = serde_json::from_slice(
-        &fs::read(".port/hosted/demo/machine-placements.json")
-            .expect("machine placement state should exist"),
+        &fs::read(
+            temp.path()
+                .join(".port/hosted/demo/machine-placements.json"),
+        )
+        .expect("machine placement state should exist"),
     )
     .expect("machine placement state should decode");
     assert_eq!(
@@ -3598,8 +3657,11 @@ fn cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch() {
     assert!(prepare_stdout.contains("firecracker-pvm-host-kit@2026.04"));
 
     let imported_inventory: serde_json::Value = serde_json::from_slice(
-        &fs::read(".port/hosted/demo/imported-inventory.json")
-            .expect("imported inventory state should exist"),
+        &fs::read(
+            temp.path()
+                .join(".port/hosted/demo/imported-inventory.json"),
+        )
+        .expect("imported inventory state should exist"),
     )
     .expect("imported inventory state should decode");
     assert_eq!(
@@ -3637,8 +3699,11 @@ fn cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch() {
     assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
 
     let placement_state: serde_json::Value = serde_json::from_slice(
-        &fs::read(".port/hosted/demo/machine-placements.json")
-            .expect("machine placement state should exist"),
+        &fs::read(
+            temp.path()
+                .join(".port/hosted/demo/machine-placements.json"),
+        )
+        .expect("machine placement state should exist"),
     )
     .expect("machine placement state should decode");
     assert_eq!(
@@ -3715,8 +3780,11 @@ fn cli_hosted_standard_cloud_launch_round_trip() {
     assert!(hosted_runtime_root.join("cloud-aws/manifest.json").exists());
 
     let placement_state: serde_json::Value = serde_json::from_slice(
-        &fs::read(".port/hosted/demo/machine-placements.json")
-            .expect("machine placement state should exist"),
+        &fs::read(
+            temp.path()
+                .join(".port/hosted/demo/machine-placements.json"),
+        )
+        .expect("machine placement state should exist"),
     )
     .expect("machine placement state should decode");
     assert_eq!(
