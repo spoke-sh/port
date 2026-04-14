@@ -9,19 +9,16 @@ mod demo '.justfiles/demo.just'
 default:
   @printf '%s\n' \
     'Common recipes:' \
-    '  just mission               Show mission artifact report' \
+    '  just test                  Run workspace tests and doctests' \
+    '  just quality               Run formatting and clippy' \
     '  just docs-install          Install docs site dependencies' \
     '  just docs-dev              Run the public docs site locally' \
     '  just docs-build            Build the public docs site' \
-    '  just check                 Run formatting, tests, and doctests' \
-    '  keel doctor                Validate the Keel board' \
-    '  keel flow --scene          Show workflow lane state' \
-    '  keel mission next --status Show next board moves' \
-    '  just test                  Run workspace tests' \
     '  just build                 Build the port CLI binary' \
     '  just package <target>      Build a canonical install tarball' \
     '  just package-proof <tgt>   Prove packaged Port works from an installed path' \
     '  just port --help           Run the Port CLI in the dev shell' \
+    '  just mission               Show mission artifact report' \
     '' \
     'More recipes:' \
     '  just --list board' \
@@ -49,19 +46,12 @@ check:
   @just checks::check
 
 quality:
-  @just checks::check
+  @just checks::fmt-check
+  @just checks::clippy
 
 test *args:
   @just checks::test {{args}}
-
-doctest *args:
   @just checks::doctest {{args}}
-
-doctor:
-  @just board::doctor
-
-flow:
-  @just board::flow
 
 build:
   @just cli::build

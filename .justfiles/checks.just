@@ -8,13 +8,10 @@ doctest *args:
   cargo test --doc {{args}}
 
 clippy *args:
-  cargo clippy --workspace --all-targets -- {{args}}
+  cargo clippy --workspace --all-targets -- -D warnings {{args}}
 
 test *args:
-  RUST_TEST_THREADS=1 cargo test {{args}}
-
-nextest *args:
-  cargo nextest run {{args}}
+  cargo nextest run -j 1 {{args}}
 
 coverage args="":
   mkdir -p coverage

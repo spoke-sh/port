@@ -158,19 +158,16 @@ fn extract_output_value(output: &str, prefix: &str) -> String {
 fn fetch_http_response(addr: &str, path: &str) -> String {
     let request = format!("GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n");
     for _ in 0..100 {
-        match TcpStream::connect(addr) {
-            Ok(mut stream) => {
-                if stream.write_all(request.as_bytes()).is_err() {
-                    thread::sleep(Duration::from_millis(20));
-                    continue;
-                }
-                let _ = stream.shutdown(std::net::Shutdown::Write);
-                let mut response = Vec::new();
-                if stream.read_to_end(&mut response).is_ok() && !response.is_empty() {
-                    return String::from_utf8_lossy(&response).into_owned();
-                }
+        if let Ok(mut stream) = TcpStream::connect(addr) {
+            if stream.write_all(request.as_bytes()).is_err() {
+                thread::sleep(Duration::from_millis(20));
+                continue;
             }
-            Err(_) => {}
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+            let mut response = Vec::new();
+            if stream.read_to_end(&mut response).is_ok() && !response.is_empty() {
+                return String::from_utf8_lossy(&response).into_owned();
+            }
         }
         thread::sleep(Duration::from_millis(20));
     }

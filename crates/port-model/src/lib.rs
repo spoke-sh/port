@@ -988,14 +988,14 @@ impl PortConfig {
             }
 
             validate_artifact_spec(machine_name, "kernel", &machine.kernel, kernel)
-                .map_err(|message| ValidationError::new(message))?;
+                .map_err(ValidationError::new)?;
             validate_artifact_spec(
                 machine_name,
                 "guest image",
                 &machine.guest_image,
                 guest_image,
             )
-            .map_err(|message| ValidationError::new(message))?;
+            .map_err(ValidationError::new)?;
             validate_machine_rootfs_overlay(machine_name, machine, resolved_architecture)?;
             validate_machine_runtime_class(machine_name, machine)?;
             validate_machine_volumes(machine_name, machine)?;

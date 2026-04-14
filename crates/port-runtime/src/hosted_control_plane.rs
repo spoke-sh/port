@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
@@ -261,7 +263,7 @@ fn imported_inventory_state_path(control_plane: &str) -> PathBuf {
 }
 
 fn load_registered_node_state(
-    path: &PathBuf,
+    path: &std::path::Path,
     control_plane: &str,
 ) -> Result<RegisteredNodeStateFile> {
     if !path.exists() {
@@ -286,7 +288,10 @@ fn load_registered_node_state(
     Ok(state)
 }
 
-fn persist_registered_node_state(path: &PathBuf, state: &RegisteredNodeStateFile) -> Result<()> {
+fn persist_registered_node_state(
+    path: &std::path::Path,
+    state: &RegisteredNodeStateFile,
+) -> Result<()> {
     let parent = path.parent().with_context(|| {
         format!(
             "registered node state path '{}' has no parent directory",
@@ -308,7 +313,7 @@ fn persist_registered_node_state(path: &PathBuf, state: &RegisteredNodeStateFile
 }
 
 fn load_imported_inventory_state(
-    path: &PathBuf,
+    path: &std::path::Path,
     control_plane: &str,
 ) -> Result<ImportedInventoryStateFile> {
     if !path.exists() {
@@ -335,7 +340,7 @@ fn load_imported_inventory_state(
 
 #[allow(dead_code)]
 fn persist_imported_inventory_state(
-    path: &PathBuf,
+    path: &std::path::Path,
     state: &ImportedInventoryStateFile,
 ) -> Result<()> {
     let parent = path.parent().with_context(|| {
@@ -369,7 +374,7 @@ fn machine_placement_state_path(control_plane: &str) -> PathBuf {
 }
 
 fn load_machine_placement_state(
-    path: &PathBuf,
+    path: &std::path::Path,
     control_plane: &str,
 ) -> Result<MachinePlacementStateFile> {
     if !path.exists() {
@@ -395,7 +400,7 @@ fn load_machine_placement_state(
 }
 
 fn persist_machine_placement_state(
-    path: &PathBuf,
+    path: &std::path::Path,
     state: &MachinePlacementStateFile,
 ) -> Result<()> {
     let parent = path.parent().with_context(|| {
@@ -597,7 +602,7 @@ fn canonical_pvm_host_kit(
 }
 
 fn imported_capability_summary_conflict(
-    path: &PathBuf,
+    path: &std::path::Path,
     node_name: &str,
     detail: impl Into<String>,
 ) -> anyhow::Error {
@@ -609,10 +614,10 @@ fn imported_capability_summary_conflict(
     )
 }
 
-fn imported_pvm_attachment_for_architecture<'a>(
-    attachments: &'a [HostedPvmHostKitPackageAttachment],
+fn imported_pvm_attachment_for_architecture(
+    attachments: &[HostedPvmHostKitPackageAttachment],
     architecture: MachineArchitecture,
-) -> Option<&'a HostedPvmHostKitPackageAttachment> {
+) -> Option<&HostedPvmHostKitPackageAttachment> {
     attachments
         .iter()
         .find(|attachment| attachment.architecture == architecture)
@@ -620,7 +625,7 @@ fn imported_pvm_attachment_for_architecture<'a>(
 
 fn validate_imported_pvm_capability_summary(
     config: &PortConfig,
-    path: &PathBuf,
+    path: &std::path::Path,
     node_name: &str,
     configured: &port_model::HostedNodeContract,
     imported: &HostedImportedNodeRecord,
@@ -817,7 +822,7 @@ fn validate_imported_pvm_capability_summary(
 
 fn imported_inventory_records(
     config: &PortConfig,
-    path: &PathBuf,
+    path: &std::path::Path,
     state: &ImportedInventoryStateFile,
 ) -> Result<BTreeMap<String, ImportedNodeRecord>> {
     if state.control_plane.trim().is_empty() {
@@ -3889,6 +3894,7 @@ async fn proxy_bytes(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn proxy_bytes_with_timeout(
     state: &ControlPlaneState,
     binding: &HostedNodeBinding,
@@ -4309,11 +4315,9 @@ pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> R
             .await
             .map_err(|error| {
                 anyhow!(
-                    "{}: {error}",
-                    format!(
-                        "node agent '{}' registration failed against control plane '{}'",
-                        state.inner.node_name, registration_target.control_plane
-                    )
+                    "node agent '{}' registration failed against control plane '{}': {error}",
+                    state.inner.node_name,
+                    registration_target.control_plane
                 )
             })?;
         let refresh_state = state.clone();

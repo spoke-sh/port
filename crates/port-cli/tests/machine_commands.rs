@@ -208,6 +208,12 @@ struct HostedServerHarness {
     _node: ChildGuard,
 }
 
+impl Drop for HostedServerHarness {
+    fn drop(&mut self) {
+        cleanup_hosted_registration_state();
+    }
+}
+
 fn spawn_hosted_server_harness(
     server_config_path: &Path,
     node_addr: &str,
@@ -3008,8 +3014,7 @@ fn cli_machine_status_surfaces_hosted_fleet_node_state() {
         .hosts
         .get(&imported_only_node.host)
         .expect("aws-linux-node-c host should exist")
-        .provider
-        .clone();
+        .provider;
     let mut imported_inventory = BTreeMap::new();
     imported_inventory.insert(
         String::from("aws-linux-node-c"),
@@ -3082,6 +3087,7 @@ fn cli_machine_status_surfaces_hosted_fleet_node_state() {
 
 #[test]
 fn cli_machine_launch_rejects_unplaceable_hosted_pvm_machine() {
+    cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let config_path = temp.path().join("port.toml");
     let mut config = PortConfig::sample();
@@ -3107,10 +3113,12 @@ fn cli_machine_launch_rejects_unplaceable_hosted_pvm_machine() {
     assert!(stderr.contains("generic-linux-node"));
     assert!(stderr.contains("planned"));
     assert!(stderr.contains("PVM"));
+    cleanup_hosted_registration_state();
 }
 
 #[test]
 fn cli_machine_launch_rejects_unprepared_aws_hosted_pvm_machine() {
+    cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let config_path = temp.path().join("port.toml");
     let mut config = PortConfig::sample();
@@ -3133,11 +3141,12 @@ fn cli_machine_launch_rejects_unprepared_aws_hosted_pvm_machine() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cloud-aws"));
-    assert!(stderr.contains("aws-linux-node"));
+    assert!(stderr.contains("aws-linux-node"), "{stderr}");
     assert!(stderr.contains("provider 'aws'"));
     assert!(stderr.contains("prepare-pvm-node"));
     assert!(stderr.contains("planned"));
     assert!(!stderr.contains("generic-linux-node"));
+    cleanup_hosted_registration_state();
 }
 
 #[test]
@@ -3461,7 +3470,7 @@ fn cli_machine_launch_status_and_stop_route_hosted_pvm_through_live_control_plan
     assert!(status_stdout.contains("detail:"));
     assert!(status_stdout.contains("control plane 'demo'"));
     assert!(status_stdout.contains("node 'aws-linux-node'"));
-    assert!(status_stdout.contains("provider 'aws'"));
+    assert!(status_stdout.contains("provider 'aws'"), "{status_stdout}");
 
     let stop = Command::new(port_bin())
         .env("PORT_DEMO_TOKEN", "demo-token")
@@ -3480,7 +3489,7 @@ fn cli_machine_launch_status_and_stop_route_hosted_pvm_through_live_control_plan
     assert!(stop_stdout.contains("detail:"));
     assert!(stop_stdout.contains("control plane 'demo'"));
     assert!(stop_stdout.contains("node 'aws-linux-node'"));
-    assert!(stop_stdout.contains("provider 'aws'"));
+    assert!(stop_stdout.contains("provider 'aws'"), "{stop_stdout}");
 
     drop(_servers);
     cleanup_hosted_registration_state();

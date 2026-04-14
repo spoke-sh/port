@@ -779,7 +779,7 @@ fn materialize_runtime_guest_storage_with_overlay(
     rootfs_read_only: bool,
     rootfs_overlay: Option<&MachineRootfsOverlaySpec>,
 ) -> Result<RuntimeGuestStorage> {
-    if rootfs_overlay.is_some() {
+    if let Some(rootfs_overlay) = rootfs_overlay {
         let initrd_source = firecracker_initrd_path_for_rootfs(source).with_context(|| {
             format!(
                 "guest image '{}' requires a sibling initrd.cpio.gz when booting with a rootfs overlay",
@@ -795,10 +795,7 @@ fn materialize_runtime_guest_storage_with_overlay(
 
         return Ok(RuntimeGuestStorage {
             rootfs_path: source.to_path_buf(),
-            rootfs_overlay_path: Some(materialize_runtime_rootfs_overlay(
-                paths,
-                rootfs_overlay.expect("overlay should exist"),
-            )?),
+            rootfs_overlay_path: Some(materialize_runtime_rootfs_overlay(paths, rootfs_overlay)?),
         });
     }
 
@@ -3536,6 +3533,7 @@ fn execute_hosted_k3s_exec(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_hosted_k3s_managed_service_start(
     config: &PortConfig,
     runtime_root: &Path,
@@ -12852,6 +12850,7 @@ fn connect_vsock_tunnel_with_timeout(
     Ok(stream)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_firecracker_config(
     kernel_image_path: PathBuf,
     rootfs_path: PathBuf,
@@ -13696,7 +13695,7 @@ mod tests {
     #[test]
     fn oci_registry_backend_requires_basic_auth_environment_variables() {
         let tempdir = tempdir().expect("tempdir should exist");
-        let _path = ScopedPathEnv::prepend(&tempdir.path().to_path_buf());
+        let _path = ScopedPathEnv::prepend(tempdir.path());
         fs::write(tempdir.path().join("oras"), "#!/usr/bin/env bash\nexit 0\n")
             .expect("fake oras should write");
         #[cfg(unix)]
@@ -15977,8 +15976,7 @@ exec sleep 30
 
     #[test]
     fn default_network_activates_via_unwrap_or_default() {
-        let machine_network: Option<port_model::MachineNetworkSpec> = None;
-        let effective = machine_network.unwrap_or_default();
+        let effective = port_model::MachineNetworkSpec::default();
         assert!(
             effective.enabled,
             "unwrap_or_default on None should produce enabled=true"
@@ -21144,7 +21142,10 @@ exec sleep 30
 
         let message = error.to_string();
         assert!(message.contains("cloud-aws"));
-        assert!(message.contains("live hosted control-plane route"));
+        assert!(
+            message.contains("failed to resolve live hosted client transport"),
+            "{message}"
+        );
         assert!(!message.contains("Run Port on the AWS Linux host itself"));
     }
 
@@ -22678,11 +22679,7 @@ exec sleep 30
             HostedSchedulerPolicy::DeterministicFirstFit
         );
         assert_eq!(
-            applied
-                .runtime
-                .stderr_path
-                .as_ref()
-                .map(|path| path.as_path()),
+            applied.runtime.stderr_path.as_deref(),
             Some(Path::new("/run/port/services/buildbox.stderr.log"))
         );
         assert_eq!(applied.secret_sources.len(), 1);
