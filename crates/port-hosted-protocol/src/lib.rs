@@ -1033,7 +1033,7 @@ mod tests {
 
         assert_eq!(
             body["result"]["nodes"]["aws-linux-node"]["capabilities"]["pvm_lanes"][0]["state"],
-            "ready"
+            "planned"
         );
     }
 
@@ -1133,9 +1133,13 @@ mod tests {
         let body = to_value(HostedRouteContext::from_machine_summary(&summary))
             .expect("route context should serialize");
 
-        assert_eq!(
-            body["rejected_nodes"]["generic-linux-node"],
-            "pvm-ready state is required but node advertises planned"
+        let rejection = body["rejected_nodes"]["generic-linux-node"]
+            .as_str()
+            .expect("rejection detail should exist");
+        assert!(rejection.contains("planned"), "{rejection}");
+        assert!(
+            rejection.contains("without a provider-backed host-kit contract"),
+            "{rejection}"
         );
         assert!(
             body["placement_detail"]

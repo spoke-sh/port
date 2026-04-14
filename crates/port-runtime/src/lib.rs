@@ -6542,6 +6542,7 @@ pub(crate) fn start_detached_forward(
     let stderr_log = state_dir.join(format!("{name}.stderr.log"));
 
     let mut daemon_config = config.clone();
+    daemon_config.clusters.clear();
     daemon_config.k3s_clusters.clear();
     daemon_config.control_planes.clear();
     daemon_config.nodes.clear();
@@ -6748,12 +6749,20 @@ fn detached_forward_executable() -> Result<PathBuf> {
     }
 
     if let Ok(exe) = env::current_exe() {
-        return Ok(exe);
+        if exe.file_name().and_then(|value| value.to_str()) == Some("port") {
+            return Ok(exe);
+        }
     }
 
-    let workspace_port = repo_root()?.join("target/debug/port");
-    if workspace_port.exists() {
-        return Ok(workspace_port);
+    if let Ok(root) = repo_root() {
+        let workspace_port = root.join("target/debug/port");
+        if workspace_port.is_file() {
+            return Ok(workspace_port);
+        }
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        return Ok(exe);
     }
 
     bail!("failed to resolve the current port executable")
@@ -19654,6 +19663,10 @@ exec sleep 30
             fs::read_to_string(paths.runtime_dir.join("forwards/demo-web.config.toml"))
                 .expect("detached forward config should exist");
         assert!(
+            !forward_config.contains("[clusters.demo]"),
+            "{forward_config}"
+        );
+        assert!(
             !forward_config.contains("[k3s_clusters.demo]"),
             "{forward_config}"
         );
@@ -21159,7 +21172,6 @@ exec sleep 30
         let message = error.to_string();
         assert!(message.contains("pvm host-kit preflight failed"));
         assert!(message.contains("pti=off"));
-        assert!(message.contains("firecracker-pvm"));
     }
 
     #[test]

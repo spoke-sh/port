@@ -8173,6 +8173,7 @@ mod tests {
     #[tokio::test]
     async fn node_agent_serves_status_and_guest_exec_from_runtime_root() {
         let tempdir = TempDir::new().expect("tempdir should be created");
+        cleanup_registered_state("demo");
         let config = sample_control_plane_config(tempdir.path());
         let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
         let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
@@ -8410,6 +8411,7 @@ mod tests {
     #[tokio::test]
     async fn node_agent_reports_missing_guest_socket_with_runtime_context() {
         let tempdir = TempDir::new().expect("tempdir should be created");
+        cleanup_registered_state("demo");
         let config = sample_control_plane_config(tempdir.path());
         let node_addr = serve_test_node_agent(config, "aws-linux-node", "node-secret").await;
 

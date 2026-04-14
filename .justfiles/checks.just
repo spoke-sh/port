@@ -11,7 +11,7 @@ clippy *args:
   cargo clippy --workspace --all-targets -- {{args}}
 
 test *args:
-  cargo test {{args}}
+  RUST_TEST_THREADS=1 cargo test {{args}}
 
 nextest *args:
   cargo nextest run {{args}}

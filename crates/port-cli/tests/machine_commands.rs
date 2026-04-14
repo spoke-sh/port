@@ -3457,7 +3457,7 @@ fn cli_machine_launch_status_and_stop_route_hosted_pvm_through_live_control_plan
     assert!(status.status.success(), "{status:?}");
     let status_stdout = String::from_utf8_lossy(&status.stdout);
     assert!(status_stdout.contains("machine: cloud-aws"));
-    assert!(status_stdout.contains("state: running"));
+    assert!(status_stdout.contains("state: running"), "{status_stdout}");
     assert!(status_stdout.contains("detail:"));
     assert!(status_stdout.contains("control plane 'demo'"));
     assert!(status_stdout.contains("node 'aws-linux-node'"));
