@@ -1,0 +1,52 @@
+name: Publish Docs
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: publish-port-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  DOCS_APP_NAME: port
+  DOCS_SITE_URL: https://www.spoke.sh
+  DOCS_PREVIEW_BUCKET: ${{ vars.DOCS_PREVIEW_BUCKET || 'spoke-previews' }}
+
+jobs:
+  publish:
+    name: Publish Port docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME || 'arn:aws:iam::102431379291:role/spoke-port-docs-publisher' }}
+
+      - name: Publish docs
+        env:
+          DOCS_BRANCH: ${{ github.ref_name }}
+          DOCS_PUBLISH_STABLE: ${{ github.ref == 'refs/heads/main' && 'true' || 'false' }}
+        run: ./scripts/publish-docs.sh

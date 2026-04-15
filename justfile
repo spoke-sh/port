@@ -31,13 +31,13 @@ mission *args:
   @bash {{justfile_directory()}}/scripts/keel-mission-show.sh {{args}}
 
 docs-install:
-  nix shell nixpkgs#nodejs_22 -c sh -lc 'cd website && npm install'
+  nix shell nixpkgs#nodejs_24 -c sh -lc 'cd website && npm install'
 
 docs-dev:
-  nix shell nixpkgs#nodejs_22 -c sh -lc 'cd website && npm run start -- --host "${HOST:-0.0.0.0}" --port "${PORT:-3000}"'
+  nix shell nixpkgs#nodejs_24 -c sh -lc 'cd website && npm run start -- --host "${HOST:-0.0.0.0}" --port "${PORT:-3000}"'
 
 docs-build:
-  nix shell nixpkgs#nodejs_22 -c sh -lc 'cd website && npm run build'
+  nix shell nixpkgs#nodejs_24 -c sh -lc 'cd website && npm run build'
 
 screen *args:
   if command -v nix >/dev/null 2>&1; then nix develop {{justfile_directory()}} -c keel screen {{args}}; else keel screen {{args}}; fi
