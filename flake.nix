@@ -12,7 +12,7 @@
       inputs.flake-utils.follows = "flake-utils";
     };
     atxt = {
-      url = "git+ssh://git@github.com/spoke-sh/atxt.git?ref=main";
+      url = "github:spoke-sh/atxt?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -20,7 +20,7 @@
       inputs.sift.follows = "sift";
     };
     paddles = {
-      url = "git+ssh://git@github.com/spoke-sh/paddles.git?ref=main";
+      url = "github:spoke-sh/paddles?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -28,7 +28,7 @@
       inputs.sift.follows = "sift";
     };
     keel = {
-      url = "git+ssh://git@github.com/spoke-sh/keel.git?ref=main";
+      url = "github:spoke-sh/keel?ref=main";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.rust-overlay.follows = "rust-overlay";
       inputs.flake-utils.follows = "flake-utils";
@@ -122,7 +122,7 @@
                 cargoLock = {
                   lockFile = "${atxt}/Cargo.lock";
                   outputHashes = {
-                    "txtplot-0.1.0" = "sha256-XPDnH8Bo461tdizRS00P3A7eg+yEgUyKIls7W/OHCt4=";
+                    "txtplot-0.1.0" = "sha256-bC6zo1yhJg41iz69XbXqwIKOfNVXwFke0vzcSMbqvFE=";
                   };
                 };
 
