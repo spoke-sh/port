@@ -27,7 +27,9 @@ For production publication, the repository-owned
 preferred lane. It publishes the stable Port site plus the `main` preview into
 the shared `spoke-previews` bucket through the infra-managed OIDC role. The
 checked-in [`publish-docs.sh`](../scripts/publish-docs.sh) script is the local
-repair and CI execution surface for that contract.
+repair and CI execution surface for that contract. Published docs objects use
+`Cache-Control: no-cache` so browsers revalidate with `ETag` and
+`Last-Modified`.
 
 ## Deployment Inputs
 

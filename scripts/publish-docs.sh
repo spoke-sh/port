@@ -45,8 +45,11 @@ sync_build() {
     return 0
   fi
 
-  echo "Syncing docs build to s3://$preview_bucket/$prefix"
-  aws s3 sync "$docs_root/build/" "s3://$preview_bucket/$prefix" --delete
+  local destination="s3://$preview_bucket/$prefix"
+  echo "Uploading docs build to $destination with Cache-Control: no-cache"
+  aws s3 cp "$docs_root/build/" "$destination" --recursive --cache-control "no-cache"
+  echo "Removing stale docs objects from $destination"
+  aws s3 sync "$docs_root/build/" "$destination" --delete
 }
 
 if [[ ! -f "$docs_root/package.json" ]]; then
