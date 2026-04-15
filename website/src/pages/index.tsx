@@ -1,70 +1,131 @@
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
-import Heading from '@theme/Heading';
 
 import styles from './index.module.css';
 
-const narrativeTracks = [
+const signalItems = [
   {
-    title: 'Local First',
+    eyebrow: 'One Operator Surface',
+    title: 'Keep local and hosted verbs aligned',
     body:
-      'Start with the strongest Port feedback loop: local Linux Firecracker or macOS AVF, one operator vocabulary, and proof you can run yourself.',
-    href: '/docs/start-here/local-first',
-    cta: 'Read the local path',
+      'Port keeps the same CLI vocabulary across local machines, hosted control planes, and provider-shaped rollout paths instead of forcing a new operating surface at each step.',
+    href: '/docs/intro',
+    cta: 'Read Port, Explained',
   },
   {
-    title: 'Path To Production',
+    eyebrow: 'Proof Before Drift',
+    title: 'Stay explicit about what works today',
     body:
-      'Move from local proof to hosted control-plane operation without changing the core Port verbs. The site keeps the current boundaries explicit instead of implying platform magic.',
+      'The public narrative keeps the current Firecracker, AVF, AWS, GCP, and Azure boundaries visible so operators can choose a path from real support instead of a vague promise.',
     href: '/docs/path-to-production/overview',
     cta: 'Read the production path',
   },
   {
-    title: 'Host Guides',
+    eyebrow: 'Host-Aware Guidance',
+    title: 'Match the docs to the host you actually have',
     body:
-      'Choose the right operator host for your team: Linux for the deepest runtime lane, macOS for AVF and control work, Windows through WSL or remote Linux.',
+      'Linux, macOS, and Windows each get an explicit Port story. The site shows which host is the runtime truth, which one is the workstation, and how the contract changes.',
     href: '/docs/hosts/linux',
     cta: 'Browse host guides',
   },
 ];
 
-const cloudTracks = [
+const laneItems = [
   {
-    title: 'AWS',
+    eyebrow: 'Local First',
+    title: 'Prove the runtime where you control the box',
     body:
-      'The clearest current cloud narrative: hosted control plane, registered AWS Linux node, standard Firecracker lane, and proof-backed external app hosting.',
+      'The strongest starting path is still a Linux-backed local proof with explicit cluster, machine, and guest lifecycle. macOS stays first-class through AVF with the same operator verbs.',
+    href: '/docs/start-here/local-first',
+    cta: 'Follow the local narrative',
+  },
+  {
+    eyebrow: 'Hosted Control Plane',
+    title: 'Move to cloud-shaped operation without changing the CLI',
+    body:
+      'Port’s hosted path keeps `port machine`, `port guest`, and `port cluster` readable while shifting placement, routing, and node ownership into the hosted control-plane model.',
+    href: '/docs/path-to-production/overview',
+    cta: 'Read the hosted path',
+  },
+  {
+    eyebrow: 'Provider Boundaries',
+    title: 'Choose AWS, GCP, or Azure with honest constraints',
+    body:
+      'AWS and GCP currently have the clearest rollout narrative. Azure remains explicit as a design target with a visible runtime boundary instead of a paper feature.',
+    href: '/docs/path-to-production/aws',
+    cta: 'See provider tracks',
+  },
+];
+
+const providerItems = [
+  {
+    eyebrow: 'AWS',
+    title: 'The clearest provider-backed production story',
+    body:
+      'Hosted standard and hosted PVM paths stay explicit, with AWS-specific node preparation and readiness captured in the same Port operator contract.',
     href: '/docs/path-to-production/aws',
   },
   {
-    title: 'GCP',
+    eyebrow: 'GCP',
+    title: 'A provider-aware hosted lane without rewriting the model',
     body:
-      'The same hosted operating model with a GCP-aligned node and machine identity, useful when the provider decision is already set but the Port contract should stay stable.',
+      'GCP keeps the same hosted control-plane and node vocabulary, making it a good fit when the provider choice is set but the Port workflow should stay stable.',
     href: '/docs/path-to-production/gcp',
   },
   {
-    title: 'Azure',
+    eyebrow: 'Azure',
+    title: 'A real track with the current limits left visible',
     body:
-      'An honest boundary track. Azure is modeled explicitly, but the current Firecracker MVP is not a shipped Azure lane yet. The docs explain what is true today and what must change.',
+      'Azure is modeled in the docs and config surface, but the Firecracker MVP lane is not a shipped Azure path yet. The site keeps that distinction obvious.',
     href: '/docs/path-to-production/azure',
   },
 ];
 
-const hostTracks = [
+const hostItems = [
   {
-    title: 'Linux',
-    body: 'Primary Port runtime host for local Firecracker, local cluster work, hosted control-plane demos, and SSH-managed execution.',
+    eyebrow: 'Linux',
+    title: 'Primary runtime host',
+    body:
+      'Use Linux for the deepest Port story today: local Firecracker, local clusters, hosted control-plane demos, and the strongest path toward hosted provider rollout.',
     href: '/docs/hosts/linux',
   },
   {
-    title: 'macOS',
-    body: 'First-class local operator path through Apple Virtualization Framework, plus a strong control workstation for Linux-hosted environments.',
+    eyebrow: 'macOS',
+    title: 'First-class AVF workstation and local lane',
+    body:
+      'macOS remains a real Port environment through Apple Virtualization Framework, while still acting as a strong control workstation for Linux-hosted execution.',
     href: '/docs/hosts/macos',
   },
   {
-    title: 'Windows',
-    body: 'A workstation story through WSL or a remote Linux host. The site keeps native-package limits explicit while still showing a workable operator path.',
+    eyebrow: 'Windows',
+    title: 'A workstation path through Linux-backed runtime',
+    body:
+      'Windows stays part of the operator story through WSL or a remote Linux host. The docs keep the runtime boundary honest without forcing a second mental model.',
     href: '/docs/hosts/windows',
+  },
+];
+
+const operatorLoop = [
+  {
+    label: 'Verify The Host',
+    command: 'port doctor',
+    href: '/docs/start-here/install-port',
+  },
+  {
+    label: 'Prove The Local Path',
+    command: 'port cluster up',
+    href: '/docs/start-here/local-first',
+  },
+  {
+    label: 'Launch A Machine',
+    command: 'port machine launch',
+    href: '/docs/path-to-production/overview',
+  },
+  {
+    label: 'Inspect Runtime State',
+    command: 'port machine status',
+    href: '/docs/hosts/linux',
   },
 ];
 
@@ -72,128 +133,170 @@ export default function Home(): JSX.Element {
   return (
     <Layout
       title="Port"
-      description="User-facing Port docs for local and hosted microVM workflows.">
+      description="Port is the public operator docs site for local and hosted microVM workflows.">
       <main className={styles.page}>
         <section className={styles.hero}>
-          <div className={styles.heroBackdrop} />
-          <div className={clsx('container', styles.heroInner)}>
-            <div className={styles.heroPanel}>
-              <p className={styles.eyebrow}>Agentic Compute Orchestration</p>
-              <Heading as="h1" className={styles.title}>
-                Port turns microVM infrastructure into one readable operator
-                surface.
-              </Heading>
-              <p className={styles.subtitle}>
-                Use the same `port` vocabulary across local bring-up, hosted
-                control planes, and cloud-shaped rollout paths. Start locally,
-                then follow the production narratives without rewriting the
-                mental model.
-              </p>
-              <div className={styles.heroActions}>
-                <Link className="button button--primary button--lg" to="/docs/intro">
-                  Read the Docs
-                </Link>
-                <Link
-                  className="button button--secondary button--lg"
-                  to="/docs/path-to-production/overview">
-                  Path To Production
-                </Link>
+          <div className="container">
+            <div className={styles.heroGrid}>
+              <div className={styles.heroCopy}>
+                <p className={styles.eyebrow}>Agentic Compute Orchestration</p>
+                <h1>Operate local and hosted microVM workflows with one readable CLI surface.</h1>
+                <p className={styles.lede}>
+                  Port keeps the operator contract legible across local proof,
+                  hosted control planes, and provider-shaped rollout paths. The
+                  docs show what is true today, what host to trust, and how to
+                  move toward production without switching mental models.
+                </p>
+                <div className={styles.actions}>
+                  <Link className={styles.primaryAction} to="/docs/intro">
+                    Read The Docs
+                  </Link>
+                  <Link className={styles.secondaryAction} to="/docs/start-here/local-first">
+                    Start Local
+                  </Link>
+                </div>
+                <ul className={styles.heroPoints}>
+                  <li>Keep the same `port` verbs across local and hosted lanes.</li>
+                  <li>Read explicit AWS, GCP, Azure, Linux, macOS, and Windows boundaries.</li>
+                  <li>Use the docs to prove the runtime path before expanding scope.</li>
+                </ul>
               </div>
-              <div className={styles.statRow}>
-                <div className={styles.statCard}>
-                  <span className={styles.statLabel}>Best Current Lane</span>
-                  <strong>Linux local + hosted standard</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.statLabel}>Cloud Focus</span>
-                  <strong>AWS, GCP, Azure boundaries</strong>
-                </div>
-                <div className={styles.statCard}>
-                  <span className={styles.statLabel}>Host Coverage</span>
-                  <strong>Linux, macOS, Windows</strong>
+              <div className={styles.scenePanel}>
+                <div className={styles.sceneFrame}>
+                  <div className={styles.sceneChrome} aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <p className={styles.sceneLabel}>Typical Operator Loop</p>
+                  <ol className={styles.sceneSteps}>
+                    {operatorLoop.map((item) => (
+                      <li key={item.command}>
+                        <Link className={styles.sceneStepLink} to={item.href}>
+                          <span>{item.label}</span>
+                          <code>{item.command}</code>
+                        </Link>
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section className={clsx('container', styles.section)}>
-          <div className={styles.sectionHeader}>
-            <p className={styles.kicker}>Narrative Tracks</p>
-            <Heading as="h2" className={styles.sectionTitle}>
-              Read Port from the operator path outward.
-            </Heading>
-            <p className={styles.sectionBody}>
-              The site is organized around the decisions operators actually make:
-              where to start, how to move toward production, and which host lane
-              to trust.
-            </p>
-          </div>
-          <div className={styles.cardGrid}>
-            {narrativeTracks.map((track) => (
-              <Link
-                key={track.title}
-                className={styles.card}
-                to={track.href}>
-                <Heading as="h3" className={styles.cardTitle}>
-                  {track.title}
-                </Heading>
-                <p className={styles.cardBody}>{track.body}</p>
-                <span className={styles.cardCta}>{track.cta}</span>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        <section className={clsx('container', styles.section)}>
-          <div className={styles.band}>
+        <section className={styles.section}>
+          <div className="container">
             <div className={styles.sectionHeader}>
-              <p className={styles.kicker}>Major Cloud Paths</p>
-              <Heading as="h2" className={styles.sectionTitle}>
-                Make cloud decisions without blurring the current truth.
-              </Heading>
-              <p className={styles.sectionBody}>
-                Port’s strongest public docs story is now the staged path from a
-                local proof to a provider-shaped rollout. AWS and GCP have the
-                clearest hosted narrative today. Azure stays explicit as a real
-                design target with current runtime limits.
+              <p className={styles.sectionEyebrow}>Why Port</p>
+              <h2>Port behaves like one operator model, not a stack of disconnected setup guides.</h2>
+              <p>
+                The public docs stay structured around how operators actually
+                work: verify the host, prove the local path, understand the
+                current runtime boundary, and then pick the hosted lane that
+                matches the target environment.
               </p>
             </div>
-            <div className={styles.cloudGrid}>
-              {cloudTracks.map((track) => (
-                <Link
-                  key={track.title}
-                  className={styles.cloudCard}
-                  to={track.href}>
-                  <Heading as="h3" className={styles.cloudTitle}>
-                    {track.title}
-                  </Heading>
-                  <p className={styles.cloudBody}>{track.body}</p>
+            <div className={styles.cardGrid}>
+              {signalItems.map((item) => (
+                <Link key={item.title} className={styles.card} to={item.href}>
+                  <p className={styles.cardEyebrow}>{item.eyebrow}</p>
+                  <h3 className={styles.cardTitle}>{item.title}</h3>
+                  <p className={styles.cardBody}>{item.body}</p>
+                  <span className={styles.cardCta}>{item.cta}</span>
                 </Link>
               ))}
             </div>
           </div>
         </section>
 
-        <section className={clsx('container', styles.section, styles.sectionTight)}>
-          <div className={styles.sectionHeader}>
-            <p className={styles.kicker}>Host Platforms</p>
-            <Heading as="h2" className={styles.sectionTitle}>
-              Pick the right workstation and runtime host deliberately.
-            </Heading>
+        <section className={styles.sectionAlt}>
+          <div className="container">
+            <div className={styles.sectionHeader}>
+              <p className={styles.sectionEyebrow}>Operating Lanes</p>
+              <h2>Start small, keep the truth visible, and scale out without changing the surface.</h2>
+              <p>
+                Port’s strongest docs story is the progression from local proof
+                to hosted control-plane ownership. Each lane keeps the same
+                operator vocabulary while making the infrastructure boundary more
+                explicit instead of more hidden.
+              </p>
+            </div>
+            <div className={styles.cardGrid}>
+              {laneItems.map((item) => (
+                <Link key={item.title} className={styles.card} to={item.href}>
+                  <p className={styles.cardEyebrow}>{item.eyebrow}</p>
+                  <h3 className={styles.cardTitle}>{item.title}</h3>
+                  <p className={styles.cardBody}>{item.body}</p>
+                  <span className={styles.cardCta}>{item.cta}</span>
+                </Link>
+              ))}
+            </div>
           </div>
-          <div className={styles.hostGrid}>
-            {hostTracks.map((track) => (
-              <Link
-                key={track.title}
-                className={styles.hostCard}
-                to={track.href}>
-                <Heading as="h3" className={styles.hostTitle}>
-                  {track.title}
-                </Heading>
-                <p className={styles.hostBody}>{track.body}</p>
-              </Link>
-            ))}
+        </section>
+
+        <section className={styles.section}>
+          <div className="container">
+            <div className={styles.sectionHeader}>
+              <p className={styles.sectionEyebrow}>Provider Tracks</p>
+              <h2>Pick the rollout path that matches the provider decision you already have.</h2>
+              <p>
+                The provider guides use the same Port contract, but they stay
+                honest about what is shipped, what is partial, and what is still
+                an explicit planning boundary.
+              </p>
+            </div>
+            <div className={styles.cardGrid}>
+              {providerItems.map((item) => (
+                <Link key={item.title} className={styles.card} to={item.href}>
+                  <p className={styles.cardEyebrow}>{item.eyebrow}</p>
+                  <h3 className={styles.cardTitle}>{item.title}</h3>
+                  <p className={styles.cardBody}>{item.body}</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.sectionAlt}>
+          <div className="container">
+            <div className={styles.sectionHeader}>
+              <p className={styles.sectionEyebrow}>Host Guides</p>
+              <h2>Choose the right workstation and runtime host deliberately.</h2>
+              <p>
+                The host guides explain what each platform can do in Port today,
+                where the runtime truth lives, and when a workstation host is
+                different from the execution host.
+              </p>
+            </div>
+            <div className={styles.cardGrid}>
+              {hostItems.map((item) => (
+                <Link key={item.title} className={styles.card} to={item.href}>
+                  <p className={styles.cardEyebrow}>{item.eyebrow}</p>
+                  <h3 className={styles.cardTitle}>{item.title}</h3>
+                  <p className={styles.cardBody}>{item.body}</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.ctaBand}>
+          <div className="container">
+            <div className={styles.ctaCard}>
+              <div>
+                <p className={styles.sectionEyebrow}>Start Here</p>
+                <h2>Read the narrative, verify the host, and prove the first Port lane.</h2>
+              </div>
+              <div className={clsx(styles.actions, styles.ctaActions)}>
+                <Link className={styles.primaryAction} to="/docs/intro">
+                  Open The Docs
+                </Link>
+                <Link className={styles.secondaryAction} to="/docs/start-here/install-port">
+                  Install Port
+                </Link>
+              </div>
+            </div>
           </div>
         </section>
       </main>

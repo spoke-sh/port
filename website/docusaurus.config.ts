@@ -47,6 +47,12 @@ const config: Config = {
   ],
   themeConfig: {
     image: 'img/port-social-card.svg',
+    metadata: [
+      {
+        property: 'og:site_name',
+        content: 'Port',
+      },
+    ],
     colorMode: {
       defaultMode: 'light',
       disableSwitch: true,
@@ -54,14 +60,16 @@ const config: Config = {
     },
     navbar: {
       title: 'Port',
-      logo: {
-        alt: 'Port logo',
-        src: 'img/logo.svg',
-      },
       items: [
         {
-          to: '/docs/intro',
+          type: 'doc',
+          docId: 'intro',
           label: 'Docs',
+          position: 'left',
+        },
+        {
+          to: '/docs/start-here/local-first',
+          label: 'Start Here',
           position: 'left',
         },
         {
