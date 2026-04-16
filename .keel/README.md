@@ -215,6 +215,21 @@
 |--------|--------|
 | [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | done |
 
+### [Wedge Detection And Guest Heartbeat Surface](epics/VGzxKV9OX/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Guest-Agent Heartbeat And Age Surface](epics/VGzxKV9OX/voyages/VGzxkoGrw/) | planned |
+| [Wedge Detector And Cluster Status Fields](epics/VGzxKV9OX/voyages/VGzxlScKS/) | draft |
+
+### [Hosted Fleet Recovery Ladder And Host Recycle](epics/VGzxMc4G4/) (draft)
+
+| Voyage | Status |
+|--------|--------|
+| [Tier-1 Guest Restart And Attempt Accounting](epics/VGzxMc4G4/voyages/VGzxmpqrI/) | draft |
+| [Tier-2 Overlay Recreate And Tier-3 Host Recycle](epics/VGzxMc4G4/voyages/VGzxnR97R/) | draft |
+| [Recovery Exhaustion Reset And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | draft |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
