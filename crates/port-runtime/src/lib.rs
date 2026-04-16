@@ -3730,6 +3730,7 @@ const HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS: u64 = 30;
 
 fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec<String> {
     let k3s = "/usr/bin/k3s";
+    let busybox = "/bin/busybox";
     let shell = match role {
         "server" => format!(
             "{k3s} crictl info >/dev/null 2>&1 && {k3s} kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml --request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
@@ -3739,9 +3740,9 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
             {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1 && \
             lease_renew_time=$({k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s -n kube-node-lease get lease {} -o jsonpath='{{.spec.renewTime}}' 2>/dev/null) && \
             test -n \"$lease_renew_time\" && \
-            lease_epoch=$(date -u -d \"$lease_renew_time\" +%s 2>/dev/null) && \
+            lease_epoch=$({busybox} date -u -D '%Y-%m-%dT%H:%M:%S' -d \"$lease_renew_time\" +%s 2>/dev/null) && \
             test -n \"$lease_epoch\" && \
-            now_epoch=$(date -u +%s) && \
+            now_epoch=$({busybox} date -u +%s) && \
             test $((now_epoch - lease_epoch)) -le {HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS}",
             shell_single_quote(machine_name)
         ),
@@ -18195,7 +18196,8 @@ exec sleep 30
         ));
         assert!(shell.contains("-n kube-node-lease get lease 'cloud-aws-worker'"));
         assert!(shell.contains(".spec.renewTime"));
-        assert!(shell.contains("date -u -d"));
+        assert!(shell.contains("/bin/busybox date -u -D '%Y-%m-%dT%H:%M:%S'"));
+        assert!(shell.contains("now_epoch=$(/bin/busybox date -u +%s)"));
         assert!(shell.contains("test $((now_epoch - lease_epoch)) -le 30"));
     }
 
