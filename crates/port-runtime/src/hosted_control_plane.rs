@@ -5,7 +5,7 @@ use std::io::{BufReader, Cursor};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use axum::Router;
@@ -84,6 +84,7 @@ struct ControlPlaneStateInner {
     registered_state_path: PathBuf,
     registered_state: RwLock<RegisteredNodeStateFile>,
     registered_nodes: RwLock<BTreeMap<String, RegisteredNodeRecord>>,
+    node_receipt_instants: RwLock<BTreeMap<String, Instant>>,
     #[allow(dead_code)]
     imported_inventory_path: PathBuf,
     #[allow(dead_code)]
@@ -1061,6 +1062,7 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             registered_state_path,
             registered_state: RwLock::new(registered_state),
             registered_nodes: RwLock::new(registered_nodes),
+            node_receipt_instants: RwLock::new(BTreeMap::new()),
             imported_inventory_path,
             imported_inventory_state: RwLock::new(imported_inventory_state),
             imported_inventory: RwLock::new(imported_inventory),
@@ -2848,6 +2850,17 @@ fn store_registered_node_refresh(
             state.inner.control_plane
         )
     })? = next_records;
+    state
+        .inner
+        .node_receipt_instants
+        .write()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not update node receipt instants",
+                state.inner.control_plane
+            )
+        })?
+        .insert(node_name.to_string(), Instant::now());
     Ok(record)
 }
 
@@ -4045,6 +4058,13 @@ fn hosted_fleet_node_statuses(
             state.inner.control_plane, summary.machine_name
         )
     })?;
+    let node_receipt_instants = state.inner.node_receipt_instants.read().map_err(|_| {
+        format!(
+            "control plane '{}' could not inspect hosted fleet state for machine '{}': node-receipt state lock poisoned",
+            state.inner.control_plane, summary.machine_name
+        )
+    })?;
+    let now_instant = Instant::now();
     let imported_inventory = state.inner.imported_inventory.read().map_err(|_| {
         format!(
             "control plane '{}' could not inspect hosted fleet state for machine '{}': imported-inventory state lock poisoned",
@@ -4183,6 +4203,9 @@ fn hosted_fleet_node_statuses(
             }
         };
 
+        let refresh_age_seconds = node_receipt_instants
+            .get(&node_name)
+            .map(|instant| now_instant.saturating_duration_since(*instant).as_secs());
         statuses.push(HostedFleetNodeStatus {
             node_name,
             configured: true,
@@ -4194,6 +4217,7 @@ fn hosted_fleet_node_statuses(
             import_provenance: imported.map(|record| record.provenance.clone()),
             imported_at_unix_s: imported.map(|record| record.imported_at),
             refreshed_at_unix_s,
+            refresh_age_seconds,
             ttl_seconds,
             fresh_until_unix_s,
             detail: detail_parts.join(" "),
@@ -6418,6 +6442,95 @@ mod tests {
         )
         .expect("registered node state should decode");
         assert_eq!(state_after_refresh.nodes["aws-linux-node"].refreshed_at, 25);
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn hosted_fleet_node_status_surfaces_refresh_age_seconds_after_heartbeat() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("refresh-age");
+        let token_var = unique_test_env("PORT_TEST_REFRESH_AGE_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("state should build");
+
+        let summary = match resolve_summary(&state, "cloud-aws") {
+            Ok(summary) => summary,
+            Err(_) => panic!("summary should resolve for cloud-aws"),
+        };
+        let route = HostedRouteContext::default();
+
+        let statuses_before = hosted_fleet_node_statuses(&state, &summary, &route)
+            .expect("fleet node statuses should render");
+        let before = statuses_before
+            .iter()
+            .find(|status| status.node_name == "aws-linux-node")
+            .expect("candidate node should appear in fleet");
+        assert_eq!(
+            before.refresh_age_seconds, None,
+            "refresh_age_seconds should be None before any registration"
+        );
+
+        let now = current_unix_timestamp_seconds().expect("unix time should compute");
+        let registration = HostedNodeRegistration {
+            endpoint: String::from("http://127.0.0.1:9234"),
+            token: String::from("node-secret"),
+            registered_at: now,
+            refreshed_at: now,
+            ttl_seconds: 30,
+        };
+        store_registered_node_refresh(&state, "aws-linux-node", registration)
+            .expect("registration should store");
+
+        let statuses_fresh = hosted_fleet_node_statuses(&state, &summary, &route)
+            .expect("fleet node statuses should render");
+        let fresh = statuses_fresh
+            .iter()
+            .find(|status| status.node_name == "aws-linux-node")
+            .expect("registered node should appear in fleet");
+        let age_fresh = fresh
+            .refresh_age_seconds
+            .expect("refresh_age_seconds should be Some after heartbeat");
+        assert!(
+            age_fresh <= 2,
+            "refresh_age_seconds should be small immediately after heartbeat: got {age_fresh}"
+        );
+
+        std::thread::sleep(Duration::from_millis(1100));
+        let statuses_later = hosted_fleet_node_statuses(&state, &summary, &route)
+            .expect("fleet node statuses should render");
+        let later = statuses_later
+            .iter()
+            .find(|status| status.node_name == "aws-linux-node")
+            .expect("registered node should appear in fleet");
+        let age_later = later
+            .refresh_age_seconds
+            .expect("refresh_age_seconds should remain Some");
+        assert!(
+            age_later >= age_fresh,
+            "refresh_age_seconds should not regress across reads: {age_fresh} -> {age_later}"
+        );
+        assert!(
+            age_later >= 1,
+            "refresh_age_seconds should advance by at least one second after a 1.1s sleep: got {age_later}"
+        );
 
         cleanup_registered_state(&control_plane);
         unsafe {

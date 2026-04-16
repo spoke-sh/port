@@ -2390,6 +2390,13 @@ fn format_hosted_fleet_nodes(nodes: &[port_runtime::HostedFleetNodeStatus]) -> S
         .expect("write should succeed");
         writeln!(
             &mut output,
+            "  refresh age seconds: {}",
+            node.refresh_age_seconds
+                .map_or_else(|| String::from("(none)"), |value| value.to_string())
+        )
+        .expect("write should succeed");
+        writeln!(
+            &mut output,
             "  ttl seconds: {}",
             node.ttl_seconds
                 .map_or_else(|| String::from("(none)"), |value| value.to_string())
@@ -3792,6 +3799,7 @@ mod tests {
                 import_provenance: None,
                 imported_at_unix_s: None,
                 refreshed_at_unix_s: Some(1773044061),
+                refresh_age_seconds: Some(3),
                 ttl_seconds: Some(15),
                 fresh_until_unix_s: Some(1773044076),
                 detail: String::from("Selected by the current control-plane route."),
@@ -3808,6 +3816,7 @@ mod tests {
                 import_provenance: Some(String::from("imported/aws-linux-node-c.json")),
                 imported_at_unix_s: Some(1_700_000_123),
                 refreshed_at_unix_s: None,
+                refresh_age_seconds: None,
                 ttl_seconds: None,
                 fresh_until_unix_s: None,
                 detail: String::from("Imported inventory from aws-linux-node-c.json."),
@@ -3820,12 +3829,14 @@ mod tests {
             "selected: true",
             "freshness: live",
             "routing eligibility: eligible",
+            "refresh age seconds: 3",
             "node: aws-linux-node-c",
             "imported: true",
             "registered: false",
             "import provenance: imported/aws-linux-node-c.json",
             "freshness: missing-registration",
             "routing eligibility: missing-registration",
+            "refresh age seconds: (none)",
         ] {
             assert!(
                 rendered.contains(expected),
@@ -3849,6 +3860,7 @@ mod tests {
                     import_provenance: None,
                     imported_at_unix_s: None,
                     refreshed_at_unix_s: Some(1773044061),
+                    refresh_age_seconds: Some(3),
                     ttl_seconds: Some(15),
                     fresh_until_unix_s: Some(1773044076),
                     detail: String::from("Live node."),
@@ -3865,6 +3877,7 @@ mod tests {
                     import_provenance: None,
                     imported_at_unix_s: None,
                     refreshed_at_unix_s: Some(1),
+                    refresh_age_seconds: Some(120),
                     ttl_seconds: Some(1),
                     fresh_until_unix_s: Some(2),
                     detail: String::from("Registration is stale."),
@@ -3881,6 +3894,7 @@ mod tests {
                     import_provenance: Some(String::from("imported/aws-linux-node-c.json")),
                     imported_at_unix_s: Some(1_700_000_123),
                     refreshed_at_unix_s: None,
+                    refresh_age_seconds: None,
                     ttl_seconds: None,
                     fresh_until_unix_s: None,
                     detail: String::from("No registered node-agent endpoint."),

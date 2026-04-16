@@ -519,6 +519,8 @@ pub struct HostedFleetNodeStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refreshed_at_unix_s: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_age_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fresh_until_unix_s: Option<u64>,
