@@ -13440,8 +13440,8 @@ mod tests {
         CopyDirection, ExecRequest, ExecResult, ForwardRequest, GuestOperation, LogsRequest,
         LogsResult, ManagedServiceKind, ManagedServiceOperation, ManagedServiceRequest,
         ManagedServiceResult, ManagedServiceRuntimeState, ManagedServiceStatus, OperationResult,
-        PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind, StreamResponseFrame, read_frame,
-        write_frame,
+        PtyRequest, RequestEnvelope, ResponseEnvelope, StreamKind, StreamRequestFrame,
+        StreamResponseFrame, read_frame, write_frame,
     };
     use port_guest_agent::serve as serve_guest_agent;
     use port_hosted_protocol::{
@@ -17996,6 +17996,9 @@ exec sleep 30
                 },
             )
             .expect("pty accepted should encode");
+            let close: StreamRequestFrame =
+                read_frame(&mut reader).expect("pty close should decode");
+            assert!(matches!(close, StreamRequestFrame::Close));
             write_frame(
                 &mut stream,
                 &StreamResponseFrame::Data {
