@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use port_agent_protocol::{
@@ -33,6 +33,11 @@ const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_sec
 const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
 const MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD: u32 = 3;
+const MANAGED_PROCESS_EVIDENCE_RETENTION_LIMIT: usize = 5;
+#[cfg(not(test))]
+const MANAGED_PROCESS_EVIDENCE_LOG_SETTLE_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(test)]
+const MANAGED_PROCESS_EVIDENCE_LOG_SETTLE_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Default)]
 struct ManagedProcessSupervisor {
@@ -474,8 +479,192 @@ fn managed_service_stderr_relative_path(name: &str) -> PathBuf {
     PathBuf::from("run/port/services").join(format!("{name}.stderr.log"))
 }
 
+fn managed_service_evidence_relative_root() -> PathBuf {
+    PathBuf::from("run/port/service-evidence")
+}
+
+fn managed_service_evidence_relative_dir(
+    name: &str,
+    captured_at_unix_ms: u128,
+    restart_attempt: u32,
+) -> PathBuf {
+    managed_service_evidence_relative_root()
+        .join(name)
+        .join(format!("{captured_at_unix_ms}-restart-{restart_attempt}"))
+}
+
 fn guest_visible_path(relative: &Path) -> String {
     format!("/{}", relative.display())
+}
+
+fn managed_service_evidence_candidates(name: &str) -> Vec<PathBuf> {
+    let mut candidates = vec![
+        managed_service_stdout_relative_path(name),
+        managed_service_stderr_relative_path(name),
+    ];
+    if matches!(name, "k3s-agent" | "k3s-server") {
+        candidates.push(PathBuf::from(
+            "var/lib/rancher/k3s/agent/containerd/containerd.log",
+        ));
+        candidates.push(PathBuf::from("var/log/port-agent.log"));
+    }
+    candidates
+}
+
+fn append_evidence_detail(detail: &str, evidence_path: &str) -> String {
+    format!("{detail}; evidence captured at {evidence_path}")
+}
+
+fn write_evidence_file(root: &Path, relative: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
+    let path = root.join(relative);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create '{}'", parent.display()))?;
+    }
+    fs::write(&path, contents)
+        .with_context(|| format!("failed to write evidence file '{}'", path.display()))
+}
+
+fn copy_evidence_file(root: &Path, relative: &Path, evidence_relative_dir: &Path) -> Result<()> {
+    let source = root.join(relative);
+    if !source.exists() {
+        return Ok(());
+    }
+    let destination = root.join(evidence_relative_dir).join(relative);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create '{}'", parent.display()))?;
+    }
+    fs::copy(&source, &destination).with_context(|| {
+        format!(
+            "failed to copy evidence file '{}' to '{}'",
+            source.display(),
+            destination.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn prune_managed_process_evidence(root: &Path, name: &str) -> Result<()> {
+    let service_root = root
+        .join(managed_service_evidence_relative_root())
+        .join(name);
+    if !service_root.exists() {
+        return Ok(());
+    }
+
+    let mut entries = fs::read_dir(&service_root)
+        .with_context(|| format!("failed to read '{}'", service_root.display()))?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|file_type| file_type.is_dir())
+                .map(|_| entry)
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+    while entries.len() > MANAGED_PROCESS_EVIDENCE_RETENTION_LIMIT {
+        let entry = entries.remove(0);
+        fs::remove_dir_all(entry.path()).with_context(|| {
+            format!(
+                "failed to prune managed service evidence '{}'",
+                entry.path().display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn capture_managed_process_evidence(
+    root: &Path,
+    record: &ManagedProcessRecord,
+    reason: &str,
+    restart_attempt: u32,
+) -> Result<String> {
+    let captured_at_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let evidence_relative_dir =
+        managed_service_evidence_relative_dir(&record.name, captured_at_unix_ms, restart_attempt);
+    let evidence_guest_path = guest_visible_path(&evidence_relative_dir);
+    fs::create_dir_all(root.join(&evidence_relative_dir)).with_context(|| {
+        format!(
+            "failed to create managed service evidence directory '{}'",
+            root.join(&evidence_relative_dir).display()
+        )
+    })?;
+
+    let metadata = format!(
+        concat!(
+            "name: {}\n",
+            "restart_attempt: {}\n",
+            "captured_at_unix_ms: {}\n",
+            "reason: {}\n",
+            "state: {:?}\n",
+            "exit_code: {:?}\n",
+            "last_exit_code: {:?}\n",
+            "health_state: {:?}\n",
+            "health_detail: {}\n",
+            "detail: {}\n"
+        ),
+        record.name,
+        restart_attempt,
+        captured_at_unix_ms,
+        reason,
+        record.state,
+        record.exit_code,
+        record.last_exit_code,
+        record.health_state,
+        record.health_detail.as_deref().unwrap_or(""),
+        record.detail
+    );
+    write_evidence_file(
+        root,
+        &evidence_relative_dir.join("metadata.txt"),
+        metadata.as_bytes(),
+    )?;
+
+    let runtime_relative = evidence_relative_dir
+        .join("run/port/services/runtime")
+        .join(format!("{}.json", record.name));
+    let runtime_json = serde_json::to_vec_pretty(record)
+        .context("failed to encode managed service runtime record for evidence capture")?;
+    write_evidence_file(
+        root,
+        &runtime_relative,
+        format!("{}\n", String::from_utf8_lossy(&runtime_json)).as_bytes(),
+    )?;
+
+    for candidate in managed_service_evidence_candidates(&record.name) {
+        copy_evidence_file(root, &candidate, &evidence_relative_dir)?;
+    }
+    prune_managed_process_evidence(root, &record.name)?;
+    Ok(evidence_guest_path)
+}
+
+fn capture_managed_process_evidence_best_effort(
+    root: &Path,
+    record: &ManagedProcessRecord,
+    reason: &str,
+    restart_attempt: u32,
+) -> Option<String> {
+    match capture_managed_process_evidence(root, record, reason, restart_attempt) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            eprintln!(
+                "port-guest-agent failed to capture evidence for managed service '{}': {error}",
+                record.name
+            );
+            None
+        }
+    }
+}
+
+fn settle_managed_process_logs_after_exit() {
+    thread::sleep(MANAGED_PROCESS_EVIDENCE_LOG_SETTLE_INTERVAL);
 }
 
 fn managed_service_status(record: &ManagedProcessRecord) -> ManagedServiceStatus {
@@ -585,24 +774,35 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
         } else {
             ManagedServiceRuntimeState::Failed
         };
-        let exit_detail = format!(
+        let mut exit_detail = format!(
             "managed process exited with code {}",
             handle.record.exit_code.unwrap_or(1)
         );
+        let mut restart_detail = format!(
+            "managed process restarted after exit code {}",
+            handle.record.exit_code.unwrap_or(1)
+        );
         handle.record.last_exit_code = handle.record.exit_code;
-        handle.record.last_exit_detail = Some(exit_detail.clone());
         handle.record.health_state = ServiceHealthState::Unknown;
         handle.record.health_detail = None;
-        handle.record.detail = exit_detail;
+        handle.record.detail = exit_detail.clone();
         if should_restart_managed_service(handle.policy.restart, handle.record.state) {
-            restart_managed_process(
+            settle_managed_process_logs_after_exit();
+            if let Some(evidence_path) = capture_managed_process_evidence_best_effort(
                 root,
-                handle,
-                format!(
-                    "managed process restarted after exit code {}",
-                    handle.record.last_exit_code.unwrap_or(1)
-                ),
-            )?;
+                &handle.record,
+                &exit_detail,
+                handle.record.restart_count.saturating_add(1),
+            ) {
+                exit_detail = append_evidence_detail(&exit_detail, &evidence_path);
+                restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
+            }
+            handle.record.last_exit_detail = Some(exit_detail.clone());
+            handle.record.detail = exit_detail;
+            restart_managed_process(root, handle, restart_detail)?;
+        } else {
+            handle.record.last_exit_detail = Some(exit_detail.clone());
+            handle.record.detail = exit_detail;
         }
     }
 
@@ -630,14 +830,19 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
             handle.record.pid = None;
             handle.record.exit_code = exit_status.code();
             handle.record.last_exit_code = exit_status.code();
-            handle.record.last_exit_detail = Some(format!(
-                "managed process restarted after health check failure: {health_detail}"
-            ));
-            restart_managed_process(
+            let mut restart_detail =
+                format!("managed process restarted after health check failure: {health_detail}");
+            settle_managed_process_logs_after_exit();
+            if let Some(evidence_path) = capture_managed_process_evidence_best_effort(
                 root,
-                handle,
-                format!("managed process restarted after health check failure: {health_detail}"),
-            )?;
+                &handle.record,
+                &restart_detail,
+                handle.record.restart_count.saturating_add(1),
+            ) {
+                restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
+            }
+            handle.record.last_exit_detail = Some(restart_detail.clone());
+            restart_managed_process(root, handle, restart_detail)?;
         }
     }
     write_managed_process_record(root, &handle.record)
@@ -2128,7 +2333,7 @@ mod tests {
                         String::from("/bin/sh"),
                         String::from("-lc"),
                         String::from(
-                            "count_file=health-restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; trap 'exit 0' TERM; while :; do sleep 1; done",
+                            "count_file=health-restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; printf 'pre-restart-%s\\n' \"$count\" >&2; trap 'exit 0' TERM; while :; do sleep 1; done",
                         ),
                     ],
                     env: BTreeMap::new(),
@@ -2268,6 +2473,52 @@ mod tests {
         assert_eq!(status.state, ManagedServiceRuntimeState::Running);
         assert!(status.restart_count >= 1);
         assert_eq!(status.health_state, ServiceHealthState::Unhealthy);
+        assert!(
+            status
+                .detail
+                .contains("/run/port/service-evidence/healthbox/")
+        );
+
+        let evidence_root = guest_root.join("run/port/service-evidence/healthbox");
+        wait_for_background(|| {
+            evidence_root.exists()
+                && fs::read_dir(&evidence_root)
+                    .ok()
+                    .map(|entries| {
+                        entries
+                            .filter_map(|entry| entry.ok())
+                            .any(|entry| entry.path().is_dir())
+                    })
+                    .unwrap_or(false)
+        });
+
+        let mut found_evidence = false;
+        for entry in fs::read_dir(&evidence_root).expect("evidence root should exist") {
+            let entry = entry.expect("evidence entry should read");
+            if !entry
+                .file_type()
+                .expect("evidence entry type should read")
+                .is_dir()
+            {
+                continue;
+            }
+            let evidence_dir = entry.path();
+            let metadata_path = evidence_dir.join("metadata.txt");
+            let runtime_path = evidence_dir.join("run/port/services/runtime/healthbox.json");
+            let stderr_path = evidence_dir.join("run/port/services/healthbox.stderr.log");
+            if metadata_path.exists()
+                && runtime_path.exists()
+                && stderr_path.exists()
+                && read_to_string(&metadata_path).contains("health check failure")
+            {
+                found_evidence = true;
+                break;
+            }
+        }
+        assert!(
+            found_evidence,
+            "expected healthbox restart evidence with metadata, runtime record, and stderr snapshot"
+        );
     }
 
     #[cfg(target_os = "linux")]

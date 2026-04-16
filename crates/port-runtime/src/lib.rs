@@ -3558,7 +3558,7 @@ fn execute_hosted_k3s_managed_service_start(
         host_group: Some(host_group),
         command: hosted_k3s_service_command(role, args, bootstrap_flag, server_url, join_token),
         secret_bindings: Vec::new(),
-        policy: hosted_k3s_service_policy(role),
+        policy: hosted_k3s_service_policy(role, machine_name),
     };
     let started = Instant::now();
     let last_error = loop {
@@ -3726,26 +3726,36 @@ fn hosted_k3s_service_command(
     command
 }
 
-fn hosted_k3s_service_healthcheck_command(role: &str) -> Vec<String> {
+const HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS: u64 = 30;
+
+fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec<String> {
     let k3s = "/usr/bin/k3s";
     let shell = match role {
         "server" => format!(
             "{k3s} crictl info >/dev/null 2>&1 && {k3s} kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml --request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
         ),
         "agent" => format!(
-            "{k3s} crictl info >/dev/null 2>&1 && {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
+            "{k3s} crictl info >/dev/null 2>&1 && \
+            {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1 && \
+            lease_renew_time=$({k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s -n kube-node-lease get lease {} -o jsonpath='{{.spec.renewTime}}' 2>/dev/null) && \
+            test -n \"$lease_renew_time\" && \
+            lease_epoch=$(date -u -d \"$lease_renew_time\" +%s 2>/dev/null) && \
+            test -n \"$lease_epoch\" && \
+            now_epoch=$(date -u +%s) && \
+            test $((now_epoch - lease_epoch)) -le {HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS}",
+            shell_single_quote(machine_name)
         ),
         _ => String::from("/usr/bin/k3s crictl info >/dev/null 2>&1"),
     };
     vec![String::from("/bin/sh"), String::from("-lc"), shell]
 }
 
-fn hosted_k3s_service_policy(role: &str) -> ServicePolicy {
+fn hosted_k3s_service_policy(role: &str, machine_name: &str) -> ServicePolicy {
     ServicePolicy {
         restart: ServiceRestartPolicy::Always,
         healthcheck: ServiceHealthcheck {
             policy: ServiceHealthPolicy::Command,
-            command: hosted_k3s_service_healthcheck_command(role),
+            command: hosted_k3s_service_healthcheck_command(role, machine_name),
         },
     }
 }
@@ -18085,7 +18095,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -18108,7 +18118,7 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                policy: hosted_k3s_service_policy("agent"),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
             }],
         );
 
@@ -18159,7 +18169,7 @@ exec sleep 30
 
     #[test]
     fn hosted_k3s_server_healthcheck_requires_runtime_and_readyz() {
-        let policy = hosted_k3s_service_policy("server");
+        let policy = hosted_k3s_service_policy("server", "cloud-aws");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
@@ -18172,8 +18182,8 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_k3s_agent_healthcheck_requires_runtime_and_kubelet_api() {
-        let policy = hosted_k3s_service_policy("agent");
+    fn hosted_k3s_agent_healthcheck_requires_runtime_and_kubelet_api_and_fresh_lease() {
+        let policy = hosted_k3s_service_policy("agent", "cloud-aws-worker");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
@@ -18183,6 +18193,10 @@ exec sleep 30
         assert!(shell.contains(
             "/usr/bin/k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz"
         ));
+        assert!(shell.contains("-n kube-node-lease get lease 'cloud-aws-worker'"));
+        assert!(shell.contains(".spec.renewTime"));
+        assert!(shell.contains("date -u -d"));
+        assert!(shell.contains("test $((now_epoch - lease_epoch)) -le 30"));
     }
 
     #[test]
@@ -18245,7 +18259,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -18269,7 +18283,7 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                policy: hosted_k3s_service_policy("agent"),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
             }],
         );
 
@@ -18327,7 +18341,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -18350,7 +18364,7 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                policy: hosted_k3s_service_policy("agent"),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
             }],
         );
 
@@ -18450,7 +18464,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -18473,7 +18487,7 @@ exec sleep 30
                     Some("https://demo-k3s.internal:6443"),
                     Some("demo-join-token"),
                 ),
-                policy: hosted_k3s_service_policy("agent"),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
             }],
         );
 
@@ -18643,7 +18657,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -18686,7 +18700,7 @@ exec sleep 30
                         Some("https://demo-k3s.internal:6443"),
                         Some("demo-join-token"),
                     ),
-                    policy: hosted_k3s_service_policy("agent"),
+                    policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
                 },
                 HostedGuestExpectedOperation::ManagedServiceList {
                     statuses: vec![running_managed_service_status("k3s-agent")],
@@ -18875,7 +18889,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -18918,7 +18932,7 @@ exec sleep 30
                         Some("https://demo-k3s.internal:6443"),
                         Some("demo-join-token"),
                     ),
-                    policy: hosted_k3s_service_policy("agent"),
+                    policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
                 },
                 HostedGuestExpectedOperation::ManagedServiceList {
                     statuses: vec![running_managed_service_status("k3s-agent")],
@@ -19167,7 +19181,7 @@ exec sleep 30
                         None,
                         None,
                     ),
-                    policy: hosted_k3s_service_policy("server"),
+                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
                 },
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_join_token_command(),
@@ -19210,7 +19224,7 @@ exec sleep 30
                         Some("https://demo-k3s.internal:6443"),
                         Some("demo-join-token"),
                     ),
-                    policy: hosted_k3s_service_policy("agent"),
+                    policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
                 },
                 HostedGuestExpectedOperation::ManagedServiceList {
                     statuses: vec![running_managed_service_status("k3s-agent")],
