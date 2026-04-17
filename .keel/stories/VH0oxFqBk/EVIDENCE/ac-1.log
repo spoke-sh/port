@@ -1,0 +1,15 @@
+---
+recorded_at: 2026-04-16T23:46:15.438158786-07:00
+command: cargo test -p port-runtime --lib recovery_runner_executes_decided_action_when_enabled
+---
+
+running 1 test
+test hosted_control_plane::tests::recovery_runner_executes_decided_action_when_enabled ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.00s
+
+
+--- stderr ---
+   Compiling port-runtime v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.40s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)

@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-16T23:46:16.133655995-07:00
+command: cargo test -p port-runtime --lib launch_clears_awaiting_tier_3_record_via_post_launch_hook
+---
+
+running 1 test
+test hosted_control_plane::tests::launch_clears_awaiting_tier_3_record_via_post_launch_hook ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.01s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)

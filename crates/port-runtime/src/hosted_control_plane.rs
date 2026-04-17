@@ -1138,6 +1138,7 @@ pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest
             .with_context(|| format!("failed to bind control plane on '{bind}'"))?;
         let state = build_state(config, request)?;
         spawn_wedge_detector_loop(state.clone());
+        spawn_recovery_runner_loop(state.clone());
         axum::serve(listener, control_plane_router(state))
             .await
             .context("control-plane server exited unexpectedly")
@@ -1255,6 +1256,214 @@ fn resolve_placed_node_for_machine(
     placements
         .get(machine_name)
         .map(|record| record.node_name.clone())
+}
+
+/// Resolve the per-machine runtime root from stored placements.
+fn resolve_runtime_root_for_machine(
+    state: &ControlPlaneState,
+    machine_name: &str,
+) -> Option<PathBuf> {
+    let placements = state.inner.machine_placements.read().ok()?;
+    placements
+        .get(machine_name)
+        .map(|record| record.runtime_root.clone())
+}
+
+/// Resolve the per-cluster recovery config for a k3s cluster by
+/// matching its name against `PortConfig.clusters` (the higher-level
+/// ClusterSpec, where `recovery` lives). Returns the default config
+/// (disabled) when no matching ClusterSpec is found — recovery is
+/// opt-in per `ClusterRecoveryConfig.enabled` so the safe default is
+/// no action.
+fn resolve_recovery_config_for_cluster(
+    state: &ControlPlaneState,
+    cluster_name: &str,
+) -> port_model::ClusterRecoveryConfig {
+    state
+        .inner
+        .config
+        .clusters
+        .get(cluster_name)
+        .map(|spec| spec.recovery)
+        .unwrap_or_default()
+}
+
+/// Tick interval for the live recovery runner. Slightly longer than
+/// the detector tick so the wedge_state reading is from a tick that
+/// has already settled, and so a tier-1 restart has time to take
+/// effect before the next decision fires.
+const RECOVERY_RUNNER_TICK_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Spawn the live recovery runner worker. The worker periodically
+/// calls `reconcile_recovery_runner_tick`, which iterates every
+/// machine in every cluster bound to this control plane and routes
+/// each through `decide_recovery_action`. Recovery actions are opt-in
+/// per `ClusterRecoveryConfig.enabled`; for disabled clusters the
+/// runner is a no-op and never persists records or emits events.
+/// Each tick is wrapped in `catch_unwind` so a panic on one tick
+/// does not stop the loop or take down the control-plane HTTP server.
+fn spawn_recovery_runner_loop(state: ControlPlaneState) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(RECOVERY_RUNNER_TICK_INTERVAL);
+            let tick_state = state.clone();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                reconcile_recovery_runner_tick(&tick_state);
+            }));
+            if let Err(panic) = result {
+                let panic_message = panic_message(panic);
+                eprintln!(
+                    "control-plane '{}' recovery runner tick panicked: {}",
+                    state.inner.control_plane, panic_message
+                );
+            }
+        }
+    });
+}
+
+/// Run a single recovery reconciliation tick across every cluster
+/// bound to this control plane. For each machine in such a cluster,
+/// resolve the per-cluster recovery config, evaluate
+/// `decide_recovery_action`, and execute the resulting action.
+fn reconcile_recovery_runner_tick(state: &ControlPlaneState) {
+    let now_unix_s = match current_unix_timestamp_seconds() {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+
+    let machine_targets: Vec<(String, String)> = state
+        .inner
+        .config
+        .k3s_clusters
+        .iter()
+        .filter(|(_, cluster_spec)| cluster_spec.control_plane == state.inner.control_plane)
+        .flat_map(|(cluster_name, cluster_spec)| {
+            cluster_spec
+                .server_machines
+                .iter()
+                .chain(cluster_spec.worker_machines.iter())
+                .map(move |machine_name| (cluster_name.clone(), machine_name.clone()))
+        })
+        .collect();
+
+    for (cluster_name, machine_name) in machine_targets {
+        let recovery_config = resolve_recovery_config_for_cluster(state, &cluster_name);
+        if !recovery_config.enabled {
+            continue;
+        }
+        reconcile_machine_recovery(state, &machine_name, &recovery_config, now_unix_s);
+    }
+}
+
+/// Evaluate and execute one machine's recovery decision. Acquires the
+/// per-machine lock to serialize against in-flight human lifecycle
+/// operations; if the lock is contended, logs and skips. All side
+/// effects (event emission, record persistence) happen under the lock.
+fn reconcile_machine_recovery(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    recovery_config: &port_model::ClusterRecoveryConfig,
+    now_unix_s: u64,
+) {
+    let Some(_guard) = try_acquire_recovery_lock(state, machine_name) else {
+        eprintln!(
+            "control-plane '{}' recovery runner: machine '{}' lifecycle lock contended; will retry next tick",
+            state.inner.control_plane, machine_name
+        );
+        return;
+    };
+
+    let Some(runtime_root) = resolve_runtime_root_for_machine(state, machine_name) else {
+        // No placement yet — no runtime root, no record path. Skip.
+        return;
+    };
+
+    let mut record = match load_recovery_record(&runtime_root, machine_name) {
+        Ok(Some(existing)) => existing,
+        Ok(None) | Err(_) => PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: crate::RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+        },
+    };
+
+    let wedge = state.inner.wedge_state.read().ok().and_then(|wedge_state| {
+        wedge_state
+            .get(machine_name)
+            .map(|fact| (fact.wedge_class, fact.wedged_since_unix_s))
+    });
+    let heartbeats_fresh = wedge.is_none();
+
+    let action = decide_recovery_action(RecoveryDecisionInput {
+        recovery_config,
+        tier_2_after_attempts: recovery_config.tier_2_after_attempts,
+        tier_3_after_attempts: recovery_config.tier_3_after_attempts,
+        wedge,
+        recovery_state: record.recovery_state,
+        recovery_attempts: record.recovery_attempts,
+        heartbeats_fresh,
+    });
+
+    let Some(action) = action else {
+        return;
+    };
+
+    let sink = RecoveryEventSink::new(runtime_root.join("recovery").join("events.log"));
+
+    match action {
+        RecoveryAction::Tier1Restart => {
+            // Action effect (machine stop+launch) is intentionally deferred
+            // to a follow-up wiring story. The runner advances the ladder
+            // state, persists the attempt, and emits a Started event so
+            // operators see the transition in the events log.
+            record.recovery_attempts.tier_1 = record.recovery_attempts.tier_1.saturating_add(1);
+            record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                tier: 1,
+                timestamp_unix_s: now_unix_s,
+                outcome: String::from("tier-1-restart-requested"),
+            });
+            record.recovery_state = crate::RecoveryState::InProgress;
+            let _ = save_recovery_record(&runtime_root, machine_name, &record);
+            let _ = sink.emit(machine_name, 1, RecoveryEventOutcome::Started, now_unix_s);
+        }
+        RecoveryAction::Tier2Recreate => {
+            // Tier-2: drop the rootfs overlay (idempotent, in-process disk
+            // I/O — no node-agent round-trip needed). The relaunch is
+            // deferred along with tier-1's restart; the next detector tick
+            // will see whether the wedge has cleared.
+            let _ = drop_machine_rootfs_overlay(&runtime_root, machine_name);
+            record.recovery_attempts.tier_2 = record.recovery_attempts.tier_2.saturating_add(1);
+            record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                tier: 2,
+                timestamp_unix_s: now_unix_s,
+                outcome: String::from("tier-2-overlay-dropped"),
+            });
+            record.recovery_state = crate::RecoveryState::InProgress;
+            let _ = save_recovery_record(&runtime_root, machine_name, &record);
+            let _ = sink.emit(machine_name, 2, RecoveryEventOutcome::Started, now_unix_s);
+        }
+        RecoveryAction::Tier3Escalate => {
+            let _ = emit_tier_3_escalation(&sink, machine_name, now_unix_s);
+            record.recovery_attempts.tier_3 = record.recovery_attempts.tier_3.saturating_add(1);
+            record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                tier: 3,
+                timestamp_unix_s: now_unix_s,
+                outcome: String::from("awaiting-tier-3-host-recycle"),
+            });
+            record.recovery_state = crate::RecoveryState::AwaitingTier3HostRecycle;
+            let _ = save_recovery_record(&runtime_root, machine_name, &record);
+        }
+        RecoveryAction::Tier3AutoClear => {
+            let _ = emit_tier_3_host_returned(&sink, machine_name, now_unix_s);
+            clear_recovery_record(&mut record);
+            record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                tier: 3,
+                timestamp_unix_s: now_unix_s,
+                outcome: String::from("tier-3-auto-cleared"),
+            });
+            let _ = save_recovery_record(&runtime_root, machine_name, &record);
+        }
+    }
 }
 
 fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<ControlPlaneState> {
@@ -1930,6 +2139,11 @@ async fn machine_launch(
             ) {
                 return error_response(StatusCode::BAD_GATEWAY, message, Some(route_context));
             }
+            // Successful launch closes any pending tier-3
+            // host-recycle handoff: the machine is back, so the
+            // recovery ladder resets. Best-effort — failure here
+            // does not invalidate the launch itself.
+            clear_awaiting_tier_3_on_launch(&state, &machine);
             json_response(
                 StatusCode::OK,
                 &HostedSuccess {
@@ -1940,6 +2154,33 @@ async fn machine_launch(
         }
         Err(message) => error_response(StatusCode::BAD_GATEWAY, message, Some(route_context)),
     }
+}
+
+/// Best-effort post-launch hook: if the machine has a persisted
+/// recovery record in `AwaitingTier3HostRecycle`, clear it back to
+/// `Ok` and emit the `Tier3HostReturned` event. Mirrors the contract
+/// the recovery runner expects so a successful operator-driven launch
+/// doubles as the host-recycle "return" signal.
+fn clear_awaiting_tier_3_on_launch(state: &ControlPlaneState, machine_name: &str) {
+    let Some(runtime_root) = resolve_runtime_root_for_machine(state, machine_name) else {
+        return;
+    };
+    let Ok(Some(mut record)) = load_recovery_record(&runtime_root, machine_name) else {
+        return;
+    };
+    if !is_awaiting_tier_3(&record) {
+        return;
+    }
+    let now_unix_s = current_unix_timestamp_seconds().unwrap_or(0);
+    clear_recovery_record(&mut record);
+    record.last_recovery_action = Some(crate::RecoveryActionRecord {
+        tier: 3,
+        timestamp_unix_s: now_unix_s,
+        outcome: String::from("tier-3-cleared-on-launch"),
+    });
+    let _ = save_recovery_record(&runtime_root, machine_name, &record);
+    let sink = RecoveryEventSink::new(runtime_root.join("recovery").join("events.log"));
+    let _ = emit_tier_3_host_returned(&sink, machine_name, now_unix_s);
 }
 
 async fn machine_status(
@@ -7557,6 +7798,247 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(1),
             "spawn_wedge_detector_loop blocked caller for {elapsed:?}"
+        );
+
+        cleanup_registered_state("demo");
+    }
+
+    fn enabled_recovery_config() -> port_model::ClusterRecoveryConfig {
+        port_model::ClusterRecoveryConfig {
+            enabled: true,
+            settle_seconds: 1,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 600,
+        }
+    }
+
+    fn place_machine_for_recovery(
+        state: &super::ControlPlaneState,
+        machine_name: &str,
+        runtime_root: &std::path::Path,
+    ) {
+        let mut placements = state
+            .inner
+            .machine_placements
+            .write()
+            .expect("machine_placements write");
+        placements.insert(
+            String::from(machine_name),
+            super::HostedMachinePlacementRecord {
+                node_name: String::from("aws-linux-node"),
+                runtime_root: runtime_root.to_path_buf(),
+                placed_at_unix_s: 0,
+                placement_detail: None,
+            },
+        );
+    }
+
+    fn seed_guest_wedge(
+        state: &super::ControlPlaneState,
+        machine_name: &str,
+        wedged_since_unix_s: u64,
+    ) {
+        let mut wedge_state = state.inner.wedge_state.write().expect("wedge_state write");
+        wedge_state.insert(
+            String::from(machine_name),
+            super::WedgeFact {
+                wedged_since_unix_s,
+                wedge_class: super::WedgeClass::Guest,
+            },
+        );
+    }
+
+    #[test]
+    fn recovery_runner_executes_decided_action_when_enabled() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+        seed_guest_wedge(&state, "cloud-aws", 1_000);
+
+        super::reconcile_machine_recovery(&state, "cloud-aws", &enabled_recovery_config(), 2_000);
+
+        let record = super::load_recovery_record(&runtime_root, "cloud-aws")
+            .expect("load_recovery_record")
+            .expect("recovery record should exist after action");
+        assert_eq!(record.recovery_state, crate::RecoveryState::InProgress);
+        assert_eq!(record.recovery_attempts.tier_1, 1);
+        assert_eq!(
+            record
+                .last_recovery_action
+                .as_ref()
+                .map(|action| action.tier),
+            Some(1)
+        );
+        assert!(
+            runtime_root.join("recovery").join("events.log").exists(),
+            "tier-1 action should append to the recovery events log"
+        );
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn recovery_runner_skips_locked_machine_until_lock_releases() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+        seed_guest_wedge(&state, "cloud-aws", 1_000);
+
+        // Hold the per-machine lock; the runner tick should skip this
+        // machine entirely while the lock is held.
+        let guard = super::try_acquire_recovery_lock(&state, "cloud-aws")
+            .expect("first lock acquire should succeed");
+
+        super::reconcile_machine_recovery(&state, "cloud-aws", &enabled_recovery_config(), 2_000);
+
+        assert!(
+            super::load_recovery_record(&runtime_root, "cloud-aws")
+                .expect("load_recovery_record")
+                .is_none(),
+            "no recovery record should exist when the runner skipped on lock contention"
+        );
+
+        // Release the lock; the next tick should now act.
+        drop(guard);
+        super::reconcile_machine_recovery(&state, "cloud-aws", &enabled_recovery_config(), 3_000);
+        assert!(
+            super::load_recovery_record(&runtime_root, "cloud-aws")
+                .expect("load_recovery_record")
+                .is_some(),
+            "recovery record should exist after the lock releases and the runner acts"
+        );
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn recovery_runner_is_noop_when_cluster_recovery_disabled() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+        seed_guest_wedge(&state, "cloud-aws", 1_000);
+
+        // Default ClusterRecoveryConfig has enabled = false: the runner
+        // must persist no record and emit no event.
+        let disabled = port_model::ClusterRecoveryConfig::default();
+        assert!(!disabled.enabled);
+        super::reconcile_machine_recovery(&state, "cloud-aws", &disabled, 2_000);
+
+        assert!(
+            super::load_recovery_record(&runtime_root, "cloud-aws")
+                .expect("load_recovery_record")
+                .is_none(),
+            "no recovery record should exist when recovery is disabled"
+        );
+        assert!(
+            !runtime_root.join("recovery").join("events.log").exists(),
+            "no recovery event log should exist when recovery is disabled"
+        );
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn launch_clears_awaiting_tier_3_record_via_post_launch_hook() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+
+        // Pre-seed a record in AwaitingTier3HostRecycle.
+        let initial = super::PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 2,
+                tier_2: 1,
+                tier_3: 1,
+            },
+            last_recovery_action: Some(crate::RecoveryActionRecord {
+                tier: 3,
+                timestamp_unix_s: 1_000,
+                outcome: String::from("awaiting-tier-3-host-recycle"),
+            }),
+        };
+        super::save_recovery_record(&runtime_root, "cloud-aws", &initial)
+            .expect("save initial record");
+
+        super::clear_awaiting_tier_3_on_launch(&state, "cloud-aws");
+
+        let cleared = super::load_recovery_record(&runtime_root, "cloud-aws")
+            .expect("load_recovery_record")
+            .expect("record should still exist after auto-clear");
+        assert_eq!(cleared.recovery_state, crate::RecoveryState::Ok);
+        assert!(cleared.recovery_attempts.is_empty());
+        assert_eq!(
+            cleared
+                .last_recovery_action
+                .as_ref()
+                .map(|action| action.outcome.as_str()),
+            Some("tier-3-cleared-on-launch")
+        );
+        assert!(
+            runtime_root.join("recovery").join("events.log").exists(),
+            "Tier3HostReturned event should have appended to the events log"
         );
 
         cleanup_registered_state("demo");

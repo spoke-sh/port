@@ -21,9 +21,9 @@ index: 35
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 1/2 voyages complete, 2/3 stories done
+**Progress:** 2/2 voyages complete, 3/3 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Cluster Aggregate Wedge Field Threading](voyages/VH0mjMP8p/) | done | 1/1 |
-| [Live Detector And Recovery Runner Wiring](voyages/VH0mlnCSq/) | in-progress | 1/2 |
+| [Live Detector And Recovery Runner Wiring](voyages/VH0mlnCSq/) | done | 2/2 |
 <!-- END GENERATED -->
