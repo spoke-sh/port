@@ -421,6 +421,8 @@ impl PortConfig {
                     api_forward_target: String::from("127.0.0.1:6443"),
                     forwards: Vec::new(),
                 },
+                detection: ClusterDetectionConfig::default(),
+                recovery: ClusterRecoveryConfig::default(),
             },
         )]);
 
@@ -2137,6 +2139,93 @@ pub struct ClusterSpec {
     pub args: Vec<String>,
     pub bootstrap: ClusterBootstrapSpec,
     pub lifecycle: ClusterLifecycleSpec,
+    #[serde(default)]
+    pub detection: ClusterDetectionConfig,
+    #[serde(default)]
+    pub recovery: ClusterRecoveryConfig,
+}
+
+/// Per-cluster wedge-recovery configuration. Defaults keep recovery fully
+/// disabled so shipping this file takes no action until operators opt in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterRecoveryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_recovery_settle_seconds")]
+    pub settle_seconds: u64,
+}
+
+impl Default for ClusterRecoveryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            settle_seconds: default_recovery_settle_seconds(),
+        }
+    }
+}
+
+impl ClusterRecoveryConfig {
+    pub fn validate(&self, cluster_name: &str) -> Result<(), ValidationError> {
+        if self.settle_seconds == 0 {
+            return Err(ValidationError::new(format!(
+                "cluster '{cluster_name}' recovery.settle_seconds must be greater than zero"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn default_recovery_settle_seconds() -> u64 {
+    60
+}
+
+/// Per-cluster wedge-detection thresholds.
+///
+/// `node_trigger_refresh_age_seconds` bounds node-agent heartbeat
+/// staleness before the detector flags `wedge_class = "node"`.
+/// `guest_trigger_refresh_age_seconds` does the same for guest-agent
+/// heartbeats, producing `wedge_class = "guest"`. An absent `[detection]`
+/// block falls back to conservative defaults so production gets a
+/// sensible signal without explicit configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterDetectionConfig {
+    #[serde(default = "default_guest_trigger_refresh_age_seconds")]
+    pub guest_trigger_refresh_age_seconds: u64,
+    #[serde(default = "default_node_trigger_refresh_age_seconds")]
+    pub node_trigger_refresh_age_seconds: u64,
+}
+
+impl Default for ClusterDetectionConfig {
+    fn default() -> Self {
+        Self {
+            guest_trigger_refresh_age_seconds: default_guest_trigger_refresh_age_seconds(),
+            node_trigger_refresh_age_seconds: default_node_trigger_refresh_age_seconds(),
+        }
+    }
+}
+
+impl ClusterDetectionConfig {
+    pub fn validate(&self, cluster_name: &str) -> Result<(), ValidationError> {
+        if self.guest_trigger_refresh_age_seconds == 0 {
+            return Err(ValidationError::new(format!(
+                "cluster '{cluster_name}' detection.guest_trigger_refresh_age_seconds must be greater than zero"
+            )));
+        }
+        if self.node_trigger_refresh_age_seconds == 0 {
+            return Err(ValidationError::new(format!(
+                "cluster '{cluster_name}' detection.node_trigger_refresh_age_seconds must be greater than zero"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn default_guest_trigger_refresh_age_seconds() -> u64 {
+    90
+}
+
+fn default_node_trigger_refresh_age_seconds() -> u64 {
+    120
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4330,16 +4419,16 @@ mod tests {
     use super::{
         ArtifactReference, ArtifactSelector, ArtifactStore, AvfConsoleTransport,
         AvfExecutionContract, AvfGuestTransport, AvfLaunchOwner, ClusterBootstrapSpec,
-        ClusterFlavor, ClusterGuestProfileSpec, ClusterLifecycleSpec, ClusterProvider, ClusterSpec,
-        ExecutionSubstrate, FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection,
-        HostPlatform, HostProvider, HostedAuthTokenSource, HostedGuestAttachActor,
-        HostedGuestAttachHop, HostedGuestProtocolContract, HostedPlacementPolicy,
-        HostedSchedulerPolicy, K3sClusterSpec, MachineArchitecture, MachineCommandRoute,
-        MachineControlContract, MachineGuestBroker, MachineInventoryOwner, MachineInventoryScope,
-        MachineLifecycleOwner, MachineStatusSource, OciRegistryAuth, OciRegistryTransport,
-        PortConfig, ProtectionMode, PvmCapabilityState, PvmLaneDecision, ServiceHealthPolicy,
-        ServiceHealthcheck, ServiceKind, ServicePolicy, ServiceRestartPolicy,
-        hosted_artifact_store_path,
+        ClusterDetectionConfig, ClusterFlavor, ClusterGuestProfileSpec, ClusterLifecycleSpec,
+        ClusterProvider, ClusterRecoveryConfig, ClusterSpec, ExecutionSubstrate,
+        FirecrackerPvmLaneContract, GuestCommandVerb, HostConnection, HostPlatform, HostProvider,
+        HostedAuthTokenSource, HostedGuestAttachActor, HostedGuestAttachHop,
+        HostedGuestProtocolContract, HostedPlacementPolicy, HostedSchedulerPolicy, K3sClusterSpec,
+        MachineArchitecture, MachineCommandRoute, MachineControlContract, MachineGuestBroker,
+        MachineInventoryOwner, MachineInventoryScope, MachineLifecycleOwner, MachineStatusSource,
+        OciRegistryAuth, OciRegistryTransport, PortConfig, ProtectionMode, PvmCapabilityState,
+        PvmLaneDecision, ServiceHealthPolicy, ServiceHealthcheck, ServiceKind, ServicePolicy,
+        ServiceRestartPolicy, hosted_artifact_store_path,
     };
 
     fn sample_avf_config() -> PortConfig {
@@ -4355,6 +4444,104 @@ mod tests {
         machine.protection_mode = ProtectionMode::Standard;
 
         config
+    }
+
+    #[test]
+    fn cluster_recovery_config_defaults_to_disabled_with_sane_settle_seconds() {
+        let defaults = ClusterRecoveryConfig::default();
+        assert!(!defaults.enabled, "recovery must default to disabled");
+        assert_eq!(defaults.settle_seconds, 60);
+        defaults.validate("demo").expect("defaults should validate");
+
+        let zero_settle = ClusterRecoveryConfig {
+            enabled: true,
+            settle_seconds: 0,
+        };
+        let error = zero_settle
+            .validate("demo")
+            .expect_err("zero settle must fail");
+        assert!(error.to_string().contains("settle_seconds"));
+
+        // Absent recovery block: ClusterSpec still decodes and the block
+        // defaults to disabled (matching "absent = disabled" behavior).
+        let toml = r#"
+flavor = "k3s"
+provider = "local"
+count = 1
+machine = "demo"
+
+[bootstrap]
+stage_root = "/opt/port/clusters/demo"
+install_script = "install.sh"
+binary = "k3s"
+[bootstrap.guest_profile]
+name = "kube-ready"
+
+[lifecycle]
+kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
+api_forward_target = "127.0.0.1:6443"
+"#;
+        let spec: ClusterSpec =
+            toml::from_str(toml).expect("ClusterSpec without recovery should decode");
+        assert!(!spec.recovery.enabled);
+        assert_eq!(spec.recovery.settle_seconds, 60);
+    }
+
+    #[test]
+    fn cluster_detection_config_defaults_and_validates() {
+        let defaults = ClusterDetectionConfig::default();
+        assert_eq!(defaults.guest_trigger_refresh_age_seconds, 90);
+        assert_eq!(defaults.node_trigger_refresh_age_seconds, 120);
+        defaults.validate("demo").expect("defaults should validate");
+
+        let zero_guest = ClusterDetectionConfig {
+            guest_trigger_refresh_age_seconds: 0,
+            node_trigger_refresh_age_seconds: 120,
+        };
+        let error = zero_guest
+            .validate("demo")
+            .expect_err("zero guest trigger must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("guest_trigger_refresh_age_seconds")
+        );
+
+        let zero_node = ClusterDetectionConfig {
+            guest_trigger_refresh_age_seconds: 90,
+            node_trigger_refresh_age_seconds: 0,
+        };
+        let error = zero_node
+            .validate("demo")
+            .expect_err("zero node trigger must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("node_trigger_refresh_age_seconds")
+        );
+
+        // Absent block should decode via serde default on ClusterSpec — the
+        // resulting struct should have the same defaults as ::default().
+        let toml = r#"
+flavor = "k3s"
+provider = "local"
+count = 1
+machine = "demo"
+
+[bootstrap]
+stage_root = "/opt/port/clusters/demo"
+install_script = "install.sh"
+binary = "k3s"
+[bootstrap.guest_profile]
+name = "kube-ready"
+
+[lifecycle]
+kubeconfig_path = "/etc/rancher/k3s/k3s.yaml"
+api_forward_target = "127.0.0.1:6443"
+"#;
+        let spec: ClusterSpec =
+            toml::from_str(toml).expect("ClusterSpec without detection should decode");
+        assert_eq!(spec.detection, ClusterDetectionConfig::default());
     }
 
     #[test]
@@ -4758,6 +4945,8 @@ mod tests {
                     api_forward_target: String::from("127.0.0.1:6443"),
                     forwards: Vec::new(),
                 },
+                detection: ClusterDetectionConfig::default(),
+                recovery: ClusterRecoveryConfig::default(),
             }
         );
 

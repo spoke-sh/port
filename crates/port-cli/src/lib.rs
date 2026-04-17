@@ -2291,6 +2291,28 @@ fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
     )
     .expect("write should succeed");
     output.push_str(&format_hosted_fleet_nodes(&status.hosted_fleet_nodes));
+    writeln!(
+        &mut output,
+        "guest refresh age seconds: {}",
+        status
+            .guest_refresh_age_seconds
+            .map_or_else(|| String::from("(none)"), |value| value.to_string())
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "wedged since: {}",
+        status
+            .wedged_since_unix_s
+            .map_or_else(|| String::from("(none)"), |value| value.to_string())
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "wedge class: {}",
+        status.wedge_class.as_deref().unwrap_or("(none)")
+    )
+    .expect("write should succeed");
     writeln!(&mut output, "detail: {}", status.detail).expect("write should succeed");
     output
 }
@@ -3655,6 +3677,12 @@ mod tests {
         detail: &str,
     ) -> port_runtime::MachineStatus {
         port_runtime::MachineStatus {
+            guest_refresh_age_seconds: None,
+            wedged_since_unix_s: None,
+            wedge_class: None,
+            recovery_attempts: port_runtime::RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+            recovery_state: port_runtime::RecoveryState::default(),
             machine_name: String::from("cloud-aws"),
             state: port_runtime::MachineRuntimeState::Malformed,
             pid: Some(424242),

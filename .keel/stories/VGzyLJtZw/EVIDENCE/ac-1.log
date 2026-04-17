@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-04-16T17:00:57.151534231-07:00
+mode: manual
+files: [".keel/stories/VGzyLJtZw/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 3 tests
+test hosted_control_plane::tests::guest_heartbeat_probe_runs_concurrently_with_long_running_exec ... ok
+test hosted_control_plane::tests::guest_heartbeat_probe_skips_machines_without_live_socket ... ok
+test hosted_control_plane::tests::guest_heartbeat_probe_updates_sidecar_after_successful_pong ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 175 filtered out; finished in 0.50s
+
+

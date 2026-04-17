@@ -1,0 +1,53 @@
+---
+recorded_at: 2026-04-16T17:20:04.699833908-07:00
+mode: manual
+files: [".keel/stories/VH00CG8GV/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+warning: type `ControlPlaneState` is more private than the item `hosted_control_plane::apply_wedge_observation`
+    --> crates/port-runtime/src/hosted_control_plane.rs:4661:1
+     |
+4661 | / pub(crate) fn apply_wedge_observation(
+4662 | |     state: &ControlPlaneState,
+4663 | |     machine_name: &str,
+4664 | |     class: Option<WedgeClass>,
+4665 | |     now_unix_s: u64,
+4666 | | ) {
+     | |_^ function `hosted_control_plane::apply_wedge_observation` is reachable at visibility `pub(crate)`
+     |
+note: but type `ControlPlaneState` is only usable at visibility `pub(self)`
+    --> crates/port-runtime/src/hosted_control_plane.rs:75:1
+     |
+  75 | struct ControlPlaneState {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `ControlPlaneState` is more private than the item `hosted_control_plane::run_wedge_detector_tick`
+    --> crates/port-runtime/src/hosted_control_plane.rs:4693:1
+     |
+4693 | / pub(crate) fn run_wedge_detector_tick(
+4694 | |     state: &ControlPlaneState,
+4695 | |     ages: &BTreeMap<String, (Option<u64>, Option<u64>)>,
+4696 | |     node_threshold_seconds: u64,
+4697 | |     guest_threshold_seconds: u64,
+4698 | |     now_unix_s: u64,
+4699 | | ) {
+     | |_^ function `hosted_control_plane::run_wedge_detector_tick` is reachable at visibility `pub(crate)`
+     |
+note: but type `ControlPlaneState` is only usable at visibility `pub(self)`
+    --> crates/port-runtime/src/hosted_control_plane.rs:75:1
+     |
+  75 | struct ControlPlaneState {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `port-runtime` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 1 test
+test hosted_control_plane::tests::annotate_machine_status_surfaces_wedge_fields_from_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 183 filtered out; finished in 0.00s
+
+

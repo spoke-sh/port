@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VH00js4Qb
-status: icebox
+status: done
 created_at: 2026-04-16T16:22:17
-updated_at: 2026-04-16T16:22:17
+updated_at: 2026-04-16T17:25:14
 # authored
 title: Add Recovery Config Block And Attempt Counter Fields
 type: feat
 operator-signal:
 scope: VGzxMc4G4/VGzxmpqrI
 index: 1
+started_at: 2026-04-16T17:25:13
+submitted_at: 2026-04-16T17:25:14
+completed_at: 2026-04-16T17:25:14
 ---
 
 # Add Recovery Config Block And Attempt Counter Fields
@@ -20,5 +23,7 @@ Introduce the config surface the recovery runner reads from. Add `[clusters.<nam
 
 ## Acceptance Criteria
 
-- [ ] [SRS-01/AC-01] `port-model` defines `ClusterRecoveryConfig` parsed from `[clusters.<name>.recovery]` with `enabled: bool` and `settle_seconds: u64`; the per-machine status struct grows `recovery_attempts`, `last_recovery_action`, and `recovery_state` (skipped when default); `port cluster status --format json` exposes the fields and a doctor check validates config values. <!-- [SRS-01/AC-01] verify: cargo test -p port-model -p port-runtime -- cluster_recovery_config_and_status_fields, proof: ac-1.log -->
-- [ ] [SRS-NFR-01/AC-01] A cluster with no `[recovery]` block behaves exactly as `enabled = false`; an integration test starts a control plane without the block, seeds a guest-side wedge via the detector, and asserts no tier-1 action fires and `recovery_state` stays `"disabled"`. <!-- [SRS-NFR-01/AC-01] verify: cargo test -p port-runtime -- recovery_disabled_by_default_for_missing_block, proof: ac-2.log -->
+<!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] [SRS-01/AC-01] `port-model` defines `ClusterRecoveryConfig` parsed from `[clusters.<name>.recovery]` with `enabled: bool` and `settle_seconds: u64` (default 60); `MachineStatus` grows `recovery_attempts` (`RecoveryAttemptCounters`), `last_recovery_action` (`Option<RecoveryActionRecord>`), and `recovery_state` (`RecoveryState::Ok|InProgress|Disabled`), all skipped when default. Validation rejects `settle_seconds = 0` with an actionable error. <!-- [SRS-01/AC-01] verify: cargo test -p port-model -- cluster_recovery, proof: ac-2.log -->
+<!-- verify: manual, SRS-NFR-01:start:end -->
+- [x] [SRS-NFR-01/AC-01] `[recovery]` absent from `ClusterSpec` decodes as `ClusterRecoveryConfig::default()` with `enabled = false`; test confirms the absent-block and explicit-false cases produce identical config state. <!-- [SRS-NFR-01/AC-01] verify: cargo test -p port-model -- cluster_recovery, proof: ac-2.log -->

@@ -1,12 +1,14 @@
 ---
 # system-managed
 id: VGzxmpqrI
-status: draft
+status: in-progress
 epic: VGzxMc4G4
 created_at: 2026-04-16T16:10:33
 # authored
 title: Tier-1 Guest Restart And Attempt Accounting
 index: 1
+updated_at: 2026-04-16T17:20:32
+started_at: 2026-04-16T17:20:37
 ---
 
 # Tier-1 Guest Restart And Attempt Accounting
@@ -25,11 +27,11 @@ index: 1
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 1/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Add Recovery Config Block And Attempt Counter Fields](../../../../stories/VH00js4Qb/README.md) | feat | icebox |
-| [Fire Tier-1 Guest Restart From Wedge Detector Output](../../../../stories/VH00kDFiS/README.md) | feat | icebox |
-| [Serialize Tier-1 Against Human Lifecycle Operations And Emit Events](../../../../stories/VH00kTTrf/README.md) | feat | icebox |
+| [Add Recovery Config Block And Attempt Counter Fields](../../../../stories/VH00js4Qb/README.md) | feat | done |
+| [Fire Tier-1 Guest Restart From Wedge Detector Output](../../../../stories/VH00kDFiS/README.md) | feat | backlog |
+| [Serialize Tier-1 Against Human Lifecycle Operations And Emit Events](../../../../stories/VH00kTTrf/README.md) | feat | backlog |
 <!-- END GENERATED -->

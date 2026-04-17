@@ -1,0 +1,56 @@
+---
+recorded_at: 2026-04-16T17:16:08.700211851-07:00
+mode: manual
+files: [".keel/stories/VH00C3h3h/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+warning: type `ControlPlaneState` is more private than the item `apply_wedge_observation`
+    --> crates/port-runtime/src/hosted_control_plane.rs:4653:1
+     |
+4653 | / pub(crate) fn apply_wedge_observation(
+4654 | |     state: &ControlPlaneState,
+4655 | |     machine_name: &str,
+4656 | |     class: Option<WedgeClass>,
+4657 | |     now_unix_s: u64,
+4658 | | ) {
+     | |_^ function `apply_wedge_observation` is reachable at visibility `pub(crate)`
+     |
+note: but type `ControlPlaneState` is only usable at visibility `pub(self)`
+    --> crates/port-runtime/src/hosted_control_plane.rs:75:1
+     |
+  75 | struct ControlPlaneState {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `ControlPlaneState` is more private than the item `hosted_control_plane::run_wedge_detector_tick`
+    --> crates/port-runtime/src/hosted_control_plane.rs:4685:1
+     |
+4685 | / pub(crate) fn run_wedge_detector_tick(
+4686 | |     state: &ControlPlaneState,
+4687 | |     ages: &BTreeMap<String, (Option<u64>, Option<u64>)>,
+4688 | |     node_threshold_seconds: u64,
+4689 | |     guest_threshold_seconds: u64,
+4690 | |     now_unix_s: u64,
+4691 | | ) {
+     | |_^ function `hosted_control_plane::run_wedge_detector_tick` is reachable at visibility `pub(crate)`
+     |
+note: but type `ControlPlaneState` is only usable at visibility `pub(self)`
+    --> crates/port-runtime/src/hosted_control_plane.rs:75:1
+     |
+  75 | struct ControlPlaneState {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `port-runtime` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 4 tests
+test hosted_control_plane::tests::wedge_class_prefers_node_when_both_triggers_fire ... ok
+test hosted_control_plane::tests::wedge_detector_interval_is_a_dedicated_positive_duration ... ok
+test hosted_control_plane::tests::wedge_detector_sets_and_clears_wedge_state ... ok
+test hosted_control_plane::tests::wedge_detector_tick_has_no_machine_lifecycle_side_effects ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 179 filtered out; finished in 0.00s
+
+

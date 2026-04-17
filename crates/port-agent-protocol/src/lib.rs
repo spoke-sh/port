@@ -21,6 +21,7 @@ pub enum GuestOperation {
     Logs(LogsRequest),
     Forward(ForwardRequest),
     ManagedService(ManagedServiceRequest),
+    Ping,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,6 +165,7 @@ pub enum OperationResult {
     Logs(LogsResult),
     Forward(ForwardResult),
     ManagedService(ManagedServiceResult),
+    Pong,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -419,6 +421,37 @@ mod tests {
             serde_json::from_str(&encoded).expect("request should decode");
 
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn ping_request_round_trips_through_json() {
+        let request = RequestEnvelope {
+            id: 99,
+            operation: GuestOperation::Ping,
+        };
+
+        let encoded = serde_json::to_string(&request).expect("ping request should encode");
+        assert!(encoded.contains("\"ping\""));
+
+        let decoded: RequestEnvelope =
+            serde_json::from_str(&encoded).expect("ping request should decode");
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn pong_response_round_trips_through_json() {
+        let response = ResponseEnvelope::Completed {
+            id: 99,
+            exit_code: 0,
+            result: OperationResult::Pong,
+        };
+
+        let encoded = serde_json::to_string(&response).expect("pong response should encode");
+        assert!(encoded.contains("\"pong\""));
+
+        let decoded: ResponseEnvelope =
+            serde_json::from_str(&encoded).expect("pong response should decode");
+        assert_eq!(decoded, response);
     }
 
     #[test]

@@ -215,18 +215,18 @@
 |--------|--------|
 | [Seal Managed Hosted K3s Ownership](epics/VGcgU9T57/voyages/VGcghwZrb/) | done |
 
-### [Wedge Detection And Guest Heartbeat Surface](epics/VGzxKV9OX/) (active)
+### [Wedge Detection And Guest Heartbeat Surface](epics/VGzxKV9OX/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Guest-Agent Heartbeat And Age Surface](epics/VGzxKV9OX/voyages/VGzxkoGrw/) | planned |
-| [Wedge Detector And Cluster Status Fields](epics/VGzxKV9OX/voyages/VGzxlScKS/) | draft |
+| [Guest-Agent Heartbeat And Age Surface](epics/VGzxKV9OX/voyages/VGzxkoGrw/) | done |
+| [Wedge Detector And Cluster Status Fields](epics/VGzxKV9OX/voyages/VGzxlScKS/) | done |
 
-### [Hosted Fleet Recovery Ladder And Host Recycle](epics/VGzxMc4G4/) (draft)
+### [Hosted Fleet Recovery Ladder And Host Recycle](epics/VGzxMc4G4/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Tier-1 Guest Restart And Attempt Accounting](epics/VGzxMc4G4/voyages/VGzxmpqrI/) | draft |
+| [Tier-1 Guest Restart And Attempt Accounting](epics/VGzxMc4G4/voyages/VGzxmpqrI/) | in-progress |
 | [Tier-2 Overlay Recreate And Tier-3 Host Recycle](epics/VGzxMc4G4/voyages/VGzxnR97R/) | draft |
 | [Recovery Exhaustion Reset And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | draft |
 

@@ -22,9 +22,9 @@ mission: VGzwzdKvB
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 voyages complete, 0/6 stories done
+**Progress:** 2/2 voyages complete, 6/6 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Guest-Agent Heartbeat And Age Surface](voyages/VGzxkoGrw/) | planned | 0/3 |
-| [Wedge Detector And Cluster Status Fields](voyages/VGzxlScKS/) | draft | 0/3 |
+| [Guest-Agent Heartbeat And Age Surface](voyages/VGzxkoGrw/) | done | 3/3 |
+| [Wedge Detector And Cluster Status Fields](voyages/VGzxlScKS/) | done | 3/3 |
 <!-- END GENERATED -->

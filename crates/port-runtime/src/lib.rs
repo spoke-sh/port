@@ -462,7 +462,61 @@ pub struct MachineStatus {
     pub attached_volumes: Vec<MachineVolumeSpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosted_fleet_nodes: Vec<HostedFleetNodeStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_refresh_age_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedged_since_unix_s: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedge_class: Option<String>,
+    #[serde(default, skip_serializing_if = "RecoveryAttemptCounters::is_empty")]
+    pub recovery_attempts: RecoveryAttemptCounters,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery_action: Option<RecoveryActionRecord>,
+    #[serde(default, skip_serializing_if = "RecoveryState::is_default")]
+    pub recovery_state: RecoveryState,
     pub detail: String,
+}
+
+/// Cumulative tier attempts within the configured rolling window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryAttemptCounters {
+    #[serde(default)]
+    pub tier_1: u32,
+    #[serde(default)]
+    pub tier_2: u32,
+    #[serde(default)]
+    pub tier_3: u32,
+}
+
+impl RecoveryAttemptCounters {
+    pub fn is_empty(&self) -> bool {
+        self.tier_1 == 0 && self.tier_2 == 0 && self.tier_3 == 0
+    }
+}
+
+/// Most recent recovery-ladder transition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryActionRecord {
+    pub tier: u8,
+    pub timestamp_unix_s: u64,
+    pub outcome: String,
+}
+
+/// Recovery ladder state for a machine. `Disabled` covers both the feature-flag-off
+/// case and the absent-config case — they behave identically.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecoveryState {
+    #[default]
+    Ok,
+    InProgress,
+    Disabled,
+}
+
+impl RecoveryState {
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Ok)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -4728,6 +4782,12 @@ fn avf_local_machine_status(runtime_root: &Path, machine_name: &str) -> Result<M
         runtime_class: manifest.runtime_class,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
+        guest_refresh_age_seconds: None,
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: RecoveryState::default(),
         detail,
     })
 }
@@ -4846,6 +4906,12 @@ fn cloud_hypervisor_local_machine_status(
         runtime_class: manifest.runtime_class,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
+        guest_refresh_age_seconds: None,
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: RecoveryState::default(),
         detail,
     })
 }
@@ -6073,6 +6139,12 @@ fn inspect_machine(
         runtime_class: manifest.runtime_class,
         attached_volumes: manifest.attached_volumes,
         hosted_fleet_nodes: Vec::new(),
+        guest_refresh_age_seconds: None,
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: RecoveryState::default(),
         detail,
     })
 }
@@ -6298,6 +6370,12 @@ fn cloud_hypervisor_malformed_machine_status(
         runtime_class: None,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
+        guest_refresh_age_seconds: None,
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: RecoveryState::default(),
         detail,
     }
 }
@@ -6324,6 +6402,12 @@ fn synthetic_machine_status(
         runtime_class: None,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
+        guest_refresh_age_seconds: None,
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: RecoveryState::default(),
         detail,
     }
 }
@@ -11388,6 +11472,9 @@ fn hosted_control_plane_guest_operation(
             bail!("managed service uses the canonical service control path")
         }
         GuestOperation::Copy(_) => bail!("copy uses a dedicated runtime flow"),
+        GuestOperation::Ping => {
+            bail!("ping uses the node-agent guest heartbeat probe loop, not the hosted guest RPC")
+        }
     }
     .map_err(|error| {
         anyhow!(

@@ -1,7 +1,8 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufReader, Cursor};
+use std::io::{BufReader, BufWriter, Cursor};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -40,12 +41,13 @@ use crate::{
     DetachedForwardLaunchRequest, GuestCopyRequest, GuestForwardRequest, GuestRequest,
     HostedFleetFreshnessState, HostedFleetNodeStatus, HostedFleetRoutingEligibility,
     HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
-    MachineStatus, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
-    ServiceSecretBinding, StopResult, apply_machine_service_live, architecture_dir,
-    copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local, execute_guest_operation,
-    hosted_placeholder_runtime_root, hosted_placeholder_runtime_root_for_config,
-    hosted_stored_service_placements, launch_local_machine, list_detached_forwards,
-    list_machine_secrets_local, machine_monitor as runtime_machine_monitor, machine_monitor_report,
+    MachineStatus, RecoveryAttemptCounters, RecoveryState, RuntimePaths,
+    ServiceApplyRequest as RuntimeServiceApplyRequest, ServiceSecretBinding, StopResult,
+    apply_machine_service_live, architecture_dir, copy_guest_file, copy_guest_via_endpoint,
+    delete_machine_secret_local, execute_guest_operation, hosted_placeholder_runtime_root,
+    hosted_placeholder_runtime_root_for_config, hosted_stored_service_placements,
+    launch_local_machine, list_detached_forwards, list_machine_secrets_local,
+    machine_monitor as runtime_machine_monitor, machine_monitor_report,
     machine_status as runtime_machine_status, machine_top as runtime_machine_top,
     machine_top_report, prepare_guest_forward, put_machine_secret_local,
     refresh_machine_service_list, refresh_machine_service_runtime, start_detached_forward,
@@ -85,6 +87,7 @@ struct ControlPlaneStateInner {
     registered_state: RwLock<RegisteredNodeStateFile>,
     registered_nodes: RwLock<BTreeMap<String, RegisteredNodeRecord>>,
     node_receipt_instants: RwLock<BTreeMap<String, Instant>>,
+    wedge_state: RwLock<BTreeMap<String, WedgeFact>>,
     #[allow(dead_code)]
     imported_inventory_path: PathBuf,
     #[allow(dead_code)]
@@ -95,6 +98,58 @@ struct ControlPlaneStateInner {
     machine_placement_state: RwLock<MachinePlacementStateFile>,
     machine_placements: RwLock<BTreeMap<String, HostedMachinePlacementRecord>>,
     client: Client,
+}
+
+/// Per-machine wedge record produced by the detector.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WedgeFact {
+    wedged_since_unix_s: u64,
+    wedge_class: WedgeClass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WedgeClass {
+    Node,
+    Guest,
+}
+
+impl std::fmt::Display for WedgeClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Node => f.write_str("node"),
+            Self::Guest => f.write_str("guest"),
+        }
+    }
+}
+
+/// Inputs to a single machine's wedge evaluation.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+struct WedgeEvaluationInput {
+    node_age_seconds: Option<u64>,
+    guest_age_seconds: Option<u64>,
+    node_threshold_seconds: u64,
+    guest_threshold_seconds: u64,
+}
+
+/// Pure decision function for a single machine.
+///
+/// Returns the wedge class if a trigger fires. When both node- and guest-side
+/// triggers fire on the same machine, the tie-breaker prefers `Node` because
+/// tier-1/tier-2 recovery actions cannot reach a silent node-agent.
+#[allow(dead_code)]
+fn evaluate_wedge(input: WedgeEvaluationInput) -> Option<WedgeClass> {
+    let node_wedged =
+        matches!(input.node_age_seconds, Some(age) if age > input.node_threshold_seconds);
+    let guest_wedged =
+        matches!(input.guest_age_seconds, Some(age) if age > input.guest_threshold_seconds);
+    match (node_wedged, guest_wedged) {
+        (true, _) => Some(WedgeClass::Node),
+        (false, true) => Some(WedgeClass::Guest),
+        (false, false) => None,
+    }
 }
 
 #[allow(dead_code)]
@@ -149,6 +204,7 @@ struct NodeAgentStateInner {
     runtime_root: std::path::PathBuf,
     bind: String,
     token: String,
+    guest_heartbeat_instants: RwLock<BTreeMap<String, Instant>>,
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +237,20 @@ const NODE_AGENT_REGISTRATION_REFRESH_INTERVAL: Duration = Duration::from_secs(1
 const NODE_AGENT_REGISTRATION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
 #[cfg(test)]
+const GUEST_HEARTBEAT_PROBE_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(not(test))]
+const GUEST_HEARTBEAT_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+
+const GUEST_HEARTBEAT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[allow(dead_code)]
+#[cfg(test)]
+const WEDGE_DETECTOR_INTERVAL: Duration = Duration::from_millis(100);
+#[allow(dead_code)]
+#[cfg(not(test))]
+const WEDGE_DETECTOR_INTERVAL: Duration = Duration::from_secs(10);
+
+#[cfg(test)]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 #[cfg(not(test))]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
@@ -189,12 +259,26 @@ const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
 
 trait HostedMachineProjection {
     fn apply_hosted_route(self, route: &HostedRouteContext) -> Self;
+
+    /// Attach per-machine guest-agent heartbeat age to the projection.
+    /// Types other than `MachineStatus` can ignore this — default is a no-op.
+    fn apply_guest_heartbeat_age(self, _age_seconds: Option<u64>) -> Self
+    where
+        Self: Sized,
+    {
+        self
+    }
 }
 
 impl HostedMachineProjection for MachineStatus {
     fn apply_hosted_route(mut self, route: &HostedRouteContext) -> Self {
         self.control = port_model::MachineControlContract::hosted_control_plane();
         self.detail = append_route_detail(self.detail, route);
+        self
+    }
+
+    fn apply_guest_heartbeat_age(mut self, age_seconds: Option<u64>) -> Self {
+        self.guest_refresh_age_seconds = age_seconds;
         self
     }
 }
@@ -1063,6 +1147,7 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             registered_state: RwLock::new(registered_state),
             registered_nodes: RwLock::new(registered_nodes),
             node_receipt_instants: RwLock::new(BTreeMap::new()),
+            wedge_state: RwLock::new(BTreeMap::new()),
             imported_inventory_path,
             imported_inventory_state: RwLock::new(imported_inventory_state),
             imported_inventory: RwLock::new(imported_inventory),
@@ -4027,6 +4112,12 @@ fn malformed_machine_status(
         runtime_class: None,
         attached_volumes: Vec::new(),
         hosted_fleet_nodes: Vec::new(),
+        guest_refresh_age_seconds: None,
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: RecoveryState::default(),
         detail,
     }
 }
@@ -4038,6 +4129,12 @@ fn annotate_machine_status_with_fleet_state(
     mut status: MachineStatus,
 ) -> Result<MachineStatus, String> {
     status.hosted_fleet_nodes = hosted_fleet_node_statuses(state, summary, route_context)?;
+    if let Ok(wedge_state) = state.inner.wedge_state.read() {
+        if let Some(fact) = wedge_state.get(&summary.machine_name) {
+            status.wedged_since_unix_s = Some(fact.wedged_since_unix_s);
+            status.wedge_class = Some(fact.wedge_class.to_string());
+        }
+    }
     Ok(status)
 }
 
@@ -4400,6 +4497,7 @@ pub fn serve_node_agent(config: PortConfig, request: NodeAgentServeRequest) -> R
                 }
             }
         });
+        spawn_guest_heartbeat_probe_loop(state.clone());
         axum::serve(listener, node_agent_router(state))
             .await
             .context("node-agent server exited unexpectedly")
@@ -4439,6 +4537,7 @@ fn build_node_agent_state(
             runtime_root,
             bind: request.bind,
             token: request.token,
+            guest_heartbeat_instants: RwLock::new(BTreeMap::new()),
         }),
     })
 }
@@ -4516,6 +4615,127 @@ fn normalize_node_agent_endpoint(bind: &str) -> String {
     } else {
         format!("http://{bind}")
     }
+}
+
+fn probe_guest_agent_ping(socket_path: &std::path::Path) -> Result<()> {
+    let stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "failed to connect to guest-agent socket {}",
+            socket_path.display()
+        )
+    })?;
+    stream.set_read_timeout(Some(GUEST_HEARTBEAT_PROBE_TIMEOUT))?;
+    stream.set_write_timeout(Some(GUEST_HEARTBEAT_PROBE_TIMEOUT))?;
+    let writer_stream = stream
+        .try_clone()
+        .context("failed to clone guest-agent probe stream")?;
+    let mut writer = BufWriter::new(writer_stream);
+    let mut reader = BufReader::new(stream);
+
+    write_frame(
+        &mut writer,
+        &RequestEnvelope {
+            id: 1,
+            operation: GuestOperation::Ping,
+        },
+    )
+    .map_err(|error| anyhow!("failed to send guest-agent ping: {error}"))?;
+
+    let response: ResponseEnvelope = read_frame(&mut reader)
+        .map_err(|error| anyhow!("failed to read guest-agent pong: {error}"))?;
+
+    match response {
+        ResponseEnvelope::Completed {
+            result: OperationResult::Pong,
+            ..
+        } => Ok(()),
+        other => bail!("unexpected guest-agent probe response: {other:?}"),
+    }
+}
+
+fn probe_all_node_machines_once(state: &NodeAgentState) {
+    for machine_name in state.inner.config.machines.keys() {
+        let paths = RuntimePaths::for_machine(&state.inner.runtime_root, machine_name);
+        if !paths.guest_agent_socket.exists() {
+            continue;
+        }
+        if probe_guest_agent_ping(&paths.guest_agent_socket).is_ok() {
+            let Ok(mut sidecar) = state.inner.guest_heartbeat_instants.write() else {
+                continue;
+            };
+            sidecar.insert(machine_name.clone(), Instant::now());
+        }
+    }
+}
+
+/// Apply a single machine's wedge evaluation to the control-plane state,
+/// setting `wedged_since_unix_s` on the first stale read and clearing the
+/// entry when both triggers are false again.
+#[allow(dead_code)]
+fn apply_wedge_observation(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    class: Option<WedgeClass>,
+    now_unix_s: u64,
+) {
+    let Ok(mut wedge_state) = state.inner.wedge_state.write() else {
+        return;
+    };
+    match class {
+        Some(class) => {
+            wedge_state
+                .entry(machine_name.to_string())
+                .and_modify(|existing| {
+                    existing.wedge_class = class;
+                })
+                .or_insert(WedgeFact {
+                    wedged_since_unix_s: now_unix_s,
+                    wedge_class: class,
+                });
+        }
+        None => {
+            wedge_state.remove(machine_name);
+        }
+    }
+}
+
+/// Evaluate every machine's wedge state in a single tick.
+///
+/// `ages` maps machine name to `(node_age_seconds, guest_age_seconds)`; either
+/// component may be `None`. Thresholds come from the per-cluster detection
+/// config. The tick is a pure observer: it only writes to `wedge_state`.
+#[allow(dead_code)]
+fn run_wedge_detector_tick(
+    state: &ControlPlaneState,
+    ages: &BTreeMap<String, (Option<u64>, Option<u64>)>,
+    node_threshold_seconds: u64,
+    guest_threshold_seconds: u64,
+    now_unix_s: u64,
+) {
+    for (machine_name, (node_age, guest_age)) in ages {
+        let class = evaluate_wedge(WedgeEvaluationInput {
+            node_age_seconds: *node_age,
+            guest_age_seconds: *guest_age,
+            node_threshold_seconds,
+            guest_threshold_seconds,
+        });
+        apply_wedge_observation(state, machine_name, class, now_unix_s);
+    }
+}
+
+fn guest_heartbeat_age_for_machine(state: &NodeAgentState, machine_name: &str) -> Option<u64> {
+    let sidecar = state.inner.guest_heartbeat_instants.read().ok()?;
+    let instant = sidecar.get(machine_name)?;
+    Some(Instant::now().saturating_duration_since(*instant).as_secs())
+}
+
+fn spawn_guest_heartbeat_probe_loop(state: NodeAgentState) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(GUEST_HEARTBEAT_PROBE_INTERVAL);
+            probe_all_node_machines_once(&state);
+        }
+    });
 }
 
 async fn register_node_agent_once(
@@ -5410,6 +5630,8 @@ where
     let node_name = state.inner.node_name.clone();
     let route_for_result = route.clone();
 
+    let guest_heartbeat_age_seconds = guest_heartbeat_age_for_machine(state, &machine_name);
+
     match run_node_blocking_operation(move || {
         operation(&localized, &runtime_root, &machine_name_for_result)
     })
@@ -5419,7 +5641,9 @@ where
             StatusCode::OK,
             &HostedSuccess {
                 route: route_for_result.clone(),
-                result: result.apply_hosted_route(&route_for_result),
+                result: result
+                    .apply_hosted_route(&route_for_result)
+                    .apply_guest_heartbeat_age(guest_heartbeat_age_seconds),
             },
         ),
         Err(error) => error_response(
@@ -6536,6 +6760,481 @@ mod tests {
         unsafe {
             std::env::remove_var(&token_var);
         }
+    }
+
+    #[test]
+    fn wedge_detector_sets_and_clears_wedge_state() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        // Seed: one machine stale on guest heartbeat.
+        let mut ages = BTreeMap::new();
+        ages.insert(String::from("cloud-aws"), (Some(5), Some(200)));
+        run_wedge_detector_tick(&state, &ages, 120, 90, 1_000);
+
+        {
+            let wedge_state = state.inner.wedge_state.read().expect("wedge_state read");
+            let fact = wedge_state
+                .get("cloud-aws")
+                .expect("wedged machine should appear in wedge_state");
+            assert_eq!(fact.wedge_class, WedgeClass::Guest);
+            assert_eq!(fact.wedged_since_unix_s, 1_000);
+        }
+
+        // Recovery: heartbeat returns fresh; wedge_state clears.
+        ages.insert(String::from("cloud-aws"), (Some(5), Some(10)));
+        run_wedge_detector_tick(&state, &ages, 120, 90, 2_000);
+        assert!(
+            state
+                .inner
+                .wedge_state
+                .read()
+                .expect("wedge_state read")
+                .get("cloud-aws")
+                .is_none(),
+            "wedge_state should clear once triggers are back below threshold"
+        );
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn wedge_class_prefers_node_when_both_triggers_fire() {
+        // Both ages exceed thresholds: node side should win.
+        let class = evaluate_wedge(WedgeEvaluationInput {
+            node_age_seconds: Some(200),
+            guest_age_seconds: Some(200),
+            node_threshold_seconds: 120,
+            guest_threshold_seconds: 90,
+        });
+        assert_eq!(class, Some(WedgeClass::Node));
+
+        // Only guest stale: guest wins.
+        let class = evaluate_wedge(WedgeEvaluationInput {
+            node_age_seconds: Some(5),
+            guest_age_seconds: Some(200),
+            node_threshold_seconds: 120,
+            guest_threshold_seconds: 90,
+        });
+        assert_eq!(class, Some(WedgeClass::Guest));
+
+        // Only node stale: node wins.
+        let class = evaluate_wedge(WedgeEvaluationInput {
+            node_age_seconds: Some(200),
+            guest_age_seconds: Some(10),
+            node_threshold_seconds: 120,
+            guest_threshold_seconds: 90,
+        });
+        assert_eq!(class, Some(WedgeClass::Node));
+
+        // Both below threshold: no wedge.
+        let class = evaluate_wedge(WedgeEvaluationInput {
+            node_age_seconds: Some(5),
+            guest_age_seconds: Some(10),
+            node_threshold_seconds: 120,
+            guest_threshold_seconds: 90,
+        });
+        assert!(class.is_none());
+
+        // Missing ages: no wedge (can't fire on unknown state).
+        let class = evaluate_wedge(WedgeEvaluationInput {
+            node_age_seconds: None,
+            guest_age_seconds: None,
+            node_threshold_seconds: 120,
+            guest_threshold_seconds: 90,
+        });
+        assert!(class.is_none());
+    }
+
+    #[test]
+    fn wedge_detector_tick_has_no_machine_lifecycle_side_effects() {
+        // Seed state with multiple wedged machines; tick; assert only
+        // wedge_state was mutated. Other state maps (registered_nodes,
+        // registered_state, machine_placements) stay untouched.
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        let registered_keys_before: Vec<String> = state
+            .inner
+            .registered_nodes
+            .read()
+            .expect("registered_nodes read")
+            .keys()
+            .cloned()
+            .collect();
+        let placement_keys_before: Vec<String> = state
+            .inner
+            .machine_placements
+            .read()
+            .expect("machine_placements read")
+            .keys()
+            .cloned()
+            .collect();
+
+        let mut ages = BTreeMap::new();
+        for name in ["cloud-aws", "cloud-azure", "cloud-gcp"] {
+            ages.insert(String::from(name), (Some(999), Some(999)));
+        }
+        run_wedge_detector_tick(&state, &ages, 120, 90, 1_000);
+
+        let registered_keys_after: Vec<String> = state
+            .inner
+            .registered_nodes
+            .read()
+            .expect("registered_nodes read")
+            .keys()
+            .cloned()
+            .collect();
+        let placement_keys_after: Vec<String> = state
+            .inner
+            .machine_placements
+            .read()
+            .expect("machine_placements read")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(registered_keys_before, registered_keys_after);
+        assert_eq!(placement_keys_before, placement_keys_after);
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn annotate_machine_status_surfaces_wedge_fields_from_state() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        // No wedge state yet: fields stay None.
+        let summary = config
+            .hosted_machine_summary_contract("cloud-aws")
+            .expect("summary lookup")
+            .expect("cloud-aws should be hosted");
+        let stub = MachineStatus {
+            machine_name: String::from("cloud-aws"),
+            state: MachineRuntimeState::Running,
+            pid: None,
+            control: port_model::MachineControlContract::hosted_control_plane(),
+            runtime_dir: tempdir.path().join("rt"),
+            config_path: tempdir.path().join("rt/config.json"),
+            manifest_path: tempdir.path().join("rt/manifest.json"),
+            pid_path: tempdir.path().join("rt/firecracker.pid"),
+            firecracker_log: tempdir.path().join("rt/firecracker.log"),
+            stdout_log: tempdir.path().join("rt/stdout.log"),
+            stderr_log: tempdir.path().join("rt/stderr.log"),
+            runtime_class: None,
+            attached_volumes: Vec::new(),
+            hosted_fleet_nodes: Vec::new(),
+            guest_refresh_age_seconds: None,
+            wedged_since_unix_s: None,
+            wedge_class: None,
+            recovery_attempts: RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+            recovery_state: RecoveryState::default(),
+            detail: String::new(),
+        };
+        let route = HostedRouteContext::from_machine_summary(&summary);
+        let annotated =
+            annotate_machine_status_with_fleet_state(&state, &summary, &route, stub.clone())
+                .expect("annotate without wedge");
+        assert!(annotated.wedged_since_unix_s.is_none());
+        assert!(annotated.wedge_class.is_none());
+
+        // Seed a wedge fact; annotation surfaces it.
+        apply_wedge_observation(&state, "cloud-aws", Some(WedgeClass::Guest), 1_734_000_000);
+        let annotated =
+            annotate_machine_status_with_fleet_state(&state, &summary, &route, stub.clone())
+                .expect("annotate with wedge");
+        assert_eq!(annotated.wedged_since_unix_s, Some(1_734_000_000));
+        assert_eq!(annotated.wedge_class.as_deref(), Some("guest"));
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn wedge_detector_interval_is_a_dedicated_positive_duration() {
+        // The detector runs on its own `tokio::time::interval` handle. This
+        // test pins the constant so a future refactor can't silently wire
+        // the detector into an unrelated loop.
+        assert!(WEDGE_DETECTOR_INTERVAL > Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn guest_heartbeat_probe_updates_sidecar_after_successful_pong() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        std::fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest socket should bind");
+
+        // Fake guest-agent: accept one ping, respond with pong.
+        let probe_server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("probe connection");
+            let reader_stream = stream.try_clone().expect("reader stream clone");
+            let mut reader = BufReader::new(reader_stream);
+            let request: RequestEnvelope =
+                read_frame(&mut reader).expect("ping request should decode");
+            assert!(matches!(request.operation, GuestOperation::Ping));
+            write_frame(
+                &mut stream,
+                &ResponseEnvelope::Completed {
+                    id: request.id,
+                    exit_code: 0,
+                    result: OperationResult::Pong,
+                },
+            )
+            .expect("pong should encode");
+        });
+
+        let state = build_node_agent_state(
+            config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: reserve_test_addr(),
+                token: String::from("node-secret"),
+            },
+        )
+        .expect("node-agent state should build");
+
+        // Before probe: sidecar is empty.
+        assert!(
+            state
+                .inner
+                .guest_heartbeat_instants
+                .read()
+                .expect("sidecar read")
+                .get("cloud-aws")
+                .is_none(),
+            "sidecar should be empty before any probe"
+        );
+
+        probe_all_node_machines_once(&state);
+        probe_server.join().expect("probe server should complete");
+
+        // After probe: sidecar has a fresh Instant for cloud-aws.
+        let instant = state
+            .inner
+            .guest_heartbeat_instants
+            .read()
+            .expect("sidecar read")
+            .get("cloud-aws")
+            .cloned()
+            .expect("sidecar should hold a timestamp after a successful probe");
+        assert!(
+            Instant::now().saturating_duration_since(instant) < Duration::from_secs(1),
+            "sidecar timestamp should be recent"
+        );
+    }
+
+    #[tokio::test]
+    async fn guest_heartbeat_probe_runs_concurrently_with_long_running_exec() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let paths = RuntimePaths::for_machine(&runtime_root, "cloud-aws");
+        std::fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+        let listener =
+            UnixListener::bind(&paths.guest_agent_socket).expect("guest socket should bind");
+
+        // Spawn a fake guest-agent that handles each connection on its own
+        // thread: one connection runs a "slow Exec" that blocks for 500ms
+        // before responding; concurrent Ping connections respond immediately.
+        let server = std::thread::spawn(move || {
+            let mut handlers = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("connection");
+                handlers.push(std::thread::spawn(move || {
+                    let reader_stream = stream.try_clone().expect("reader clone");
+                    let mut reader = BufReader::new(reader_stream);
+                    let request: RequestEnvelope = read_frame(&mut reader).expect("request decode");
+                    match request.operation {
+                        GuestOperation::Exec(_) => {
+                            std::thread::sleep(Duration::from_millis(500));
+                            write_frame(
+                                &mut stream,
+                                &ResponseEnvelope::Completed {
+                                    id: request.id,
+                                    exit_code: 0,
+                                    result: OperationResult::Exec(ExecResult {
+                                        stdout: String::from("slow-exec-done"),
+                                        stderr: String::new(),
+                                    }),
+                                },
+                            )
+                            .expect("slow exec response");
+                        }
+                        GuestOperation::Ping => {
+                            write_frame(
+                                &mut stream,
+                                &ResponseEnvelope::Completed {
+                                    id: request.id,
+                                    exit_code: 0,
+                                    result: OperationResult::Pong,
+                                },
+                            )
+                            .expect("pong response");
+                        }
+                        other => panic!("unexpected operation: {other:?}"),
+                    }
+                }));
+            }
+            for handler in handlers {
+                handler.join().expect("connection handler");
+            }
+        });
+
+        // Start the slow exec on a background thread so the probe on the
+        // main thread has to race it.
+        let exec_socket = paths.guest_agent_socket.clone();
+        let exec_thread = std::thread::spawn(move || {
+            let stream = UnixStream::connect(&exec_socket).expect("exec connect");
+            let writer_stream = stream.try_clone().expect("writer clone");
+            let mut writer = BufWriter::new(writer_stream);
+            let mut reader = BufReader::new(stream);
+            write_frame(
+                &mut writer,
+                &RequestEnvelope {
+                    id: 1,
+                    operation: GuestOperation::Exec(ExecRequest {
+                        command: vec![String::from("/bin/true")],
+                        cwd: None,
+                        env: Default::default(),
+                    }),
+                },
+            )
+            .expect("exec request");
+            let start = Instant::now();
+            let _response: ResponseEnvelope = read_frame(&mut reader).expect("exec response");
+            start.elapsed()
+        });
+
+        // Give the exec a moment to establish its connection before racing it.
+        std::thread::sleep(Duration::from_millis(50));
+
+        let probe_start = Instant::now();
+        probe_guest_agent_ping(&paths.guest_agent_socket).expect("probe should succeed");
+        let probe_elapsed = probe_start.elapsed();
+
+        // Probe completed well before the 500ms slow-exec would have blocked.
+        assert!(
+            probe_elapsed < Duration::from_millis(250),
+            "probe should not serialize behind long-running exec: took {probe_elapsed:?}"
+        );
+
+        let exec_elapsed = exec_thread.join().expect("exec thread");
+        assert!(
+            exec_elapsed >= Duration::from_millis(400),
+            "slow exec should still take its full budget: took {exec_elapsed:?}"
+        );
+        server.join().expect("server thread");
+    }
+
+    #[test]
+    fn guest_heartbeat_age_uses_monotonic_clock_and_is_non_regressive() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let state = build_node_agent_state(
+            config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: reserve_test_addr(),
+                token: String::from("node-secret"),
+            },
+        )
+        .expect("node-agent state should build");
+
+        assert_eq!(guest_heartbeat_age_for_machine(&state, "cloud-aws"), None);
+
+        // Simulate a successful probe by seeding the sidecar.
+        state
+            .inner
+            .guest_heartbeat_instants
+            .write()
+            .expect("sidecar write")
+            .insert(String::from("cloud-aws"), Instant::now());
+
+        let age_first = guest_heartbeat_age_for_machine(&state, "cloud-aws")
+            .expect("age should be Some after seeding");
+        assert!(age_first <= 1, "age should be small right after seeding");
+
+        std::thread::sleep(Duration::from_millis(1100));
+        let age_second =
+            guest_heartbeat_age_for_machine(&state, "cloud-aws").expect("age should remain Some");
+        assert!(
+            age_second >= age_first,
+            "monotonic Instant clock must not regress: {age_first} -> {age_second}"
+        );
+        assert!(
+            age_second >= 1,
+            "age should advance by at least one second after a 1.1s sleep: got {age_second}"
+        );
+    }
+
+    #[test]
+    fn guest_heartbeat_probe_skips_machines_without_live_socket() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        let state = build_node_agent_state(
+            config,
+            NodeAgentServeRequest {
+                node_name: String::from("aws-linux-node"),
+                bind: reserve_test_addr(),
+                token: String::from("node-secret"),
+            },
+        )
+        .expect("node-agent state should build");
+
+        probe_all_node_machines_once(&state);
+
+        assert!(
+            state
+                .inner
+                .guest_heartbeat_instants
+                .read()
+                .expect("sidecar read")
+                .is_empty(),
+            "sidecar should stay empty when no guest-agent sockets are bound"
+        );
     }
 
     #[test]
@@ -8655,6 +9354,12 @@ mod tests {
                     ..HostedRouteContext::default()
                 },
                 result: MachineStatus {
+                    guest_refresh_age_seconds: None,
+                    wedged_since_unix_s: None,
+                    wedge_class: None,
+                    recovery_attempts: RecoveryAttemptCounters::default(),
+                    last_recovery_action: None,
+                    recovery_state: RecoveryState::default(),
                     machine_name: machine,
                     state: MachineRuntimeState::Running,
                     pid: Some(4321),

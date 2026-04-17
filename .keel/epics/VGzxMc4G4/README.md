@@ -22,10 +22,10 @@ mission: VGzwzdKvB
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 0/9 stories done
+**Progress:** 0/3 voyages complete, 1/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Tier-1 Guest Restart And Attempt Accounting](voyages/VGzxmpqrI/) | draft | 0/3 |
+| [Tier-1 Guest Restart And Attempt Accounting](voyages/VGzxmpqrI/) | in-progress | 1/3 |
 | [Tier-2 Overlay Recreate And Tier-3 Host Recycle](voyages/VGzxnR97R/) | draft | 0/3 |
 | [Recovery Exhaustion Reset And End-To-End Proof](voyages/VGzxoN8WF/) | draft | 0/3 |
 <!-- END GENERATED -->

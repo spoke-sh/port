@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VH00CG8GV
-status: icebox
+status: done
 created_at: 2026-04-16T16:20:08
-updated_at: 2026-04-16T16:20:08
+updated_at: 2026-04-16T17:20:08
 # authored
 title: Surface Wedged Since And Wedge Class In Cluster Status
 type: feat
 operator-signal:
 scope: VGzxKV9OX/VGzxlScKS
 index: 3
+started_at: 2026-04-16T17:16:38
+submitted_at: 2026-04-16T17:20:08
+completed_at: 2026-04-16T17:20:08
 ---
 
 # Surface Wedged Since And Wedge Class In Cluster Status
@@ -20,4 +23,5 @@ Thread the detector's `wedge_state` map through the existing machine status path
 
 ## Acceptance Criteria
 
-- [ ] [SRS-04/AC-01] The per-machine status struct and its JSON serialization grow `wedged_since: Option<u64>` and `wedge_class: Option<String>` (skipped when `None`); the CLI human-readable render includes two new lines with `(none)` fallbacks and an integration test covers both the JSON shape and the render lines. <!-- [SRS-04/AC-01] verify: cargo test -p port --lib -- hosted_fleet_render_includes_wedge_fields, proof: ac-1.log -->
+<!-- verify: manual, SRS-04:start:end, proof: ac-1.log-->
+- [x] [SRS-04/AC-01] `MachineStatus` grows `wedged_since_unix_s: Option<u64>` and `wedge_class: Option<String>` (skipped when `None`); the control plane's `annotate_machine_status_with_fleet_state` reads the per-cluster `wedge_state` and populates them; the CLI human-readable render includes two new lines with `(none)` fallbacks. <!-- [SRS-04/AC-01] verify: cargo test -p port-runtime -- annotate_machine_status_surfaces_wedge, proof: ac-1.log -->

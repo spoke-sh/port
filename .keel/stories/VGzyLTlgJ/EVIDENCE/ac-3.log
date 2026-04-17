@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-04-16T17:07:21.506526594-07:00
+mode: manual
+files: [".keel/stories/VGzyLTlgJ/EVIDENCE/ac-3.log"]
+---
+
+--- File: ac-3.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 1 test
+test hosted_control_plane::tests::guest_heartbeat_age_uses_monotonic_clock_and_is_non_regressive ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 178 filtered out; finished in 1.10s
+
+

@@ -33,6 +33,12 @@ const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_sec
 const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
 const MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD: u32 = 3;
+
+/// Upper bound on the time a healthy guest-agent takes to answer a
+/// `GuestOperation::Ping` request on its main dispatch path. Node-agent probes
+/// size their timeout against this, and the test suite asserts handler latency
+/// stays under it.
+pub const PING_RESPONSE_BUDGET: Duration = Duration::from_millis(100);
 const MANAGED_PROCESS_EVIDENCE_RETENTION_LIMIT: usize = 5;
 #[cfg(not(test))]
 const MANAGED_PROCESS_EVIDENCE_LOG_SETTLE_INTERVAL: Duration = Duration::from_millis(100);
@@ -116,6 +122,7 @@ impl AgentService {
             GuestOperation::Pty(request) => self.pty(request),
             GuestOperation::Logs(request) => self.logs(request),
             GuestOperation::ManagedService(request) => self.managed_service(request),
+            GuestOperation::Ping => Ok((0, OperationResult::Pong)),
             GuestOperation::Copy(_) | GuestOperation::Forward(_) => {
                 bail!("operation requires a streaming guest-agent connection")
             }
@@ -1744,6 +1751,7 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::Duration;
+    use std::time::Instant;
 
     use port_agent_protocol::{
         CopyDirection, CopyRequest, ExecRequest, ForwardRequest, GuestOperation, LogsRequest,
@@ -1800,6 +1808,113 @@ mod tests {
                 super::managed_process_state_code(pid),
                 Ok(Some(state)) if state == expected
             )
+        });
+    }
+
+    #[test]
+    fn service_answers_ping_with_pong_under_response_budget() {
+        let temp = tempdir().expect("tempdir should exist");
+        let service = AgentService::new(temp.path().to_path_buf());
+
+        let start = Instant::now();
+        let response = service.handle(RequestEnvelope {
+            id: 42,
+            operation: GuestOperation::Ping,
+        });
+        let elapsed = start.elapsed();
+
+        match response {
+            ResponseEnvelope::Completed {
+                id,
+                exit_code,
+                result,
+            } => {
+                assert_eq!(id, 42);
+                assert_eq!(exit_code, 0);
+                assert!(matches!(result, OperationResult::Pong));
+            }
+            other => panic!("unexpected ping response: {other:?}"),
+        }
+        assert!(
+            elapsed < super::PING_RESPONSE_BUDGET,
+            "ping handler latency {elapsed:?} exceeded PING_RESPONSE_BUDGET {:?}",
+            super::PING_RESPONSE_BUDGET
+        );
+    }
+
+    #[test]
+    fn ping_leaves_running_managed_service_untouched() {
+        let temp = tempdir().expect("tempdir should exist");
+        let service = AgentService::new(temp.path().to_path_buf());
+
+        // Start a long-running managed service.
+        let start = service.handle(RequestEnvelope {
+            id: 1,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("ping-witness"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("sleep 30"),
+                    ],
+                    env: Default::default(),
+                    cwd: None,
+                    policy: ServicePolicy::default(),
+                },
+            }),
+        });
+        let pid_before = match start {
+            ResponseEnvelope::Completed {
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status.pid.expect("managed service should have a pid"),
+            other => panic!("unexpected start response: {other:?}"),
+        };
+
+        // Ping.
+        let ping = service.handle(RequestEnvelope {
+            id: 2,
+            operation: GuestOperation::Ping,
+        });
+        assert!(matches!(
+            ping,
+            ResponseEnvelope::Completed {
+                result: OperationResult::Pong,
+                ..
+            }
+        ));
+
+        // The managed service should still be the same process.
+        let status = service.handle(RequestEnvelope {
+            id: 3,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("ping-witness"),
+                },
+            }),
+        });
+        let pid_after = match status {
+            ResponseEnvelope::Completed {
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status.pid.expect("managed service should still have a pid"),
+            other => panic!("unexpected status response: {other:?}"),
+        };
+        assert_eq!(
+            pid_before, pid_after,
+            "ping must not disturb running managed services"
+        );
+
+        // Clean up.
+        let _ = service.handle(RequestEnvelope {
+            id: 4,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Stop {
+                    name: String::from("ping-witness"),
+                },
+            }),
         });
     }
 
