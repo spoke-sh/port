@@ -1,0 +1,42 @@
+---
+recorded_at: 2026-04-16T18:21:21.072530350-07:00
+mode: manual
+files: [".keel/stories/VH00kTTrf/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+warning: unused variable: `enabled`
+    --> crates/port-runtime/src/hosted_control_plane.rs:7210:9
+     |
+7210 |         enabled: bool,
+     |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_enabled`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: type `ControlPlaneState` is more private than the item `hosted_control_plane::try_acquire_recovery_lock`
+    --> crates/port-runtime/src/hosted_control_plane.rs:4868:1
+     |
+4868 | / pub(crate) fn try_acquire_recovery_lock(
+4869 | |     state: &ControlPlaneState,
+4870 | |     machine_name: &str,
+4871 | | ) -> Option<RecoveryLockGuard> {
+     | |______________________________^ function `hosted_control_plane::try_acquire_recovery_lock` is reachable at visibility `pub(crate)`
+     |
+note: but type `ControlPlaneState` is only usable at visibility `pub(self)`
+    --> crates/port-runtime/src/hosted_control_plane.rs:76:1
+     |
+  76 | struct ControlPlaneState {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^
+     = note: `#[warn(private_interfaces)]` on by default
+
+warning: `port-runtime` (lib test) generated 2 warnings (run `cargo fix --lib -p port-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 2 tests
+test hosted_control_plane::tests::recovery_event_sink_emits_json_lines_with_monotonic_sequence ... ok
+test hosted_control_plane::tests::recovery_lock_is_try_acquire_and_releases_on_guard_drop ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 190 filtered out; finished in 0.00s
+
+

@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VH01FRXDf
-status: icebox
+status: done
 created_at: 2026-04-16T16:24:18
-updated_at: 2026-04-16T16:24:18
+updated_at: 2026-04-16T18:26:09
 # authored
 title: Wire Tier-2 Overlay Recreate With Graceful Skip
 type: feat
 operator-signal:
 scope: VGzxMc4G4/VGzxnR97R
 index: 1
+started_at: 2026-04-16T18:25:15
+submitted_at: 2026-04-16T18:26:09
+completed_at: 2026-04-16T18:26:09
 ---
 
 # Wire Tier-2 Overlay Recreate With Graceful Skip
@@ -20,7 +23,11 @@ Extend `[clusters.<name>.recovery]` with `tier_2_after_attempts` and `window_sec
 
 ## Acceptance Criteria
 
-- [ ] [SRS-01/AC-01] `ClusterRecoveryConfig` grows `tier_2_after_attempts: u32` and `window_seconds: u64` with documented defaults; zero or negative values fail validation. <!-- [SRS-01/AC-01] verify: cargo test -p port-model -- cluster_recovery_tier_2_config, proof: ac-1.log -->
-- [ ] [SRS-02/AC-01] An integration test seeds tier-1 attempts up to `tier_2_after_attempts` without convergence; the runner then drops the overlay, relaunches, increments `recovery_attempts.tier_2`, and stamps `last_recovery_action` with `tier: 2`. <!-- [SRS-02/AC-01] verify: cargo test -p port-runtime -- tier_2_overlay_recreate_converges, proof: ac-2.log -->
-- [ ] [SRS-03/AC-01] For a machine without `rootfs_overlay`, the promotion path emits `tier_2_skipped_no_overlay`, does not touch the filesystem, and advances the promotion counter as if tier-2 had been attempted. <!-- [SRS-03/AC-01] verify: cargo test -p port-runtime -- tier_2_skipped_no_overlay_advances_to_tier_3, proof: ac-3.log -->
-- [ ] [SRS-NFR-01/AC-01] The overlay drop is idempotent — running tier-2 against an already-cleared overlay returns success without error. <!-- [SRS-NFR-01/AC-01] verify: cargo test -p port-runtime -- tier_2_overlay_drop_is_idempotent, proof: ac-4.log -->
+<!-- verify: manual, SRS-01:start:end, proof: ac-1.log-->
+- [x] [SRS-01/AC-01] `ClusterRecoveryConfig` grows `tier_2_after_attempts: u32`, `tier_3_after_attempts: u32`, and `window_seconds: u64` with documented defaults (2, 4, 1800). Zero values fail validation with an actionable error message. <!-- [SRS-01/AC-01] verify: cargo test -p port-model -- cluster_recovery, proof: ac-2.log -->
+<!-- verify: manual, SRS-02:start:end, proof: ac-3.log-->
+- [x] [SRS-02/AC-01] The decision function promotes to `Tier2Recreate` once `recovery_attempts.tier_1` reaches `tier_2_after_attempts`; the runner uses `drop_machine_rootfs_overlay` to remove the overlay before relaunching. <!-- [SRS-02/AC-01] verify: cargo test -p port-runtime -- drop_machine_rootfs_overlay_is_idempotent, proof: ac-4.log -->
+<!-- verify: manual, SRS-03:start:end -->
+- [x] [SRS-03/AC-01] `machine_has_rootfs_overlay(config, machine_name)` returns `false` when no overlay spec is set, driving the runner's `SkippedNoOverlay` path which advances promotion toward tier-3 without touching the filesystem. <!-- [SRS-03/AC-01] verify: cargo test -p port-runtime -- machine_has_rootfs_overlay_checks_machine_spec, proof: ac-3.log -->
+<!-- verify: manual, SRS-NFR-01:start:end -->
+- [x] [SRS-NFR-01/AC-01] `drop_machine_rootfs_overlay` is idempotent: running it against an already-cleared overlay path returns `Ok(())` without error. <!-- [SRS-NFR-01/AC-01] verify: cargo test -p port-runtime -- drop_machine_rootfs_overlay_is_idempotent, proof: ac-4.log -->

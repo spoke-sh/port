@@ -1,12 +1,15 @@
 ---
 # system-managed
 id: VGzxoN8WF
-status: draft
+status: done
 epic: VGzxMc4G4
 created_at: 2026-04-16T16:10:39
 # authored
 title: Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof
 index: 3
+updated_at: 2026-04-16T18:21:58
+started_at: 2026-04-16T18:31:47
+completed_at: 2026-04-16T18:38:23
 ---
 
 # Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof
@@ -20,16 +23,18 @@ index: 3
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 stories complete
+**Progress:** 3/3 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Persist Recovery State Across Control-Plane Restarts](../../../../stories/VH01kEV1x/README.md) | feat | icebox |
-| [Add Port Machine Unfence Command And Auto-Clear On Successful Launch](../../../../stories/VH01kQnAB/README.md) | feat | icebox |
-| [Prove Recovery Ladder End-To-End With Simulated Wedges](../../../../stories/VH01kf6IY/README.md) | feat | icebox |
+| [Persist Recovery State Across Control-Plane Restarts](../../../../stories/VH01kEV1x/README.md) | feat | done |
+| [Add Port Machine Unfence Command And Auto-Clear On Successful Launch](../../../../stories/VH01kQnAB/README.md) | feat | done |
+| [Prove Recovery Ladder End-To-End With Simulated Wedges](../../../../stories/VH01kf6IY/README.md) | feat | done |
 <!-- END GENERATED -->

@@ -2153,6 +2153,12 @@ pub struct ClusterRecoveryConfig {
     pub enabled: bool,
     #[serde(default = "default_recovery_settle_seconds")]
     pub settle_seconds: u64,
+    #[serde(default = "default_tier_2_after_attempts")]
+    pub tier_2_after_attempts: u32,
+    #[serde(default = "default_tier_3_after_attempts")]
+    pub tier_3_after_attempts: u32,
+    #[serde(default = "default_recovery_window_seconds")]
+    pub window_seconds: u64,
 }
 
 impl Default for ClusterRecoveryConfig {
@@ -2160,6 +2166,9 @@ impl Default for ClusterRecoveryConfig {
         Self {
             enabled: false,
             settle_seconds: default_recovery_settle_seconds(),
+            tier_2_after_attempts: default_tier_2_after_attempts(),
+            tier_3_after_attempts: default_tier_3_after_attempts(),
+            window_seconds: default_recovery_window_seconds(),
         }
     }
 }
@@ -2171,12 +2180,39 @@ impl ClusterRecoveryConfig {
                 "cluster '{cluster_name}' recovery.settle_seconds must be greater than zero"
             )));
         }
+        if self.tier_2_after_attempts == 0 {
+            return Err(ValidationError::new(format!(
+                "cluster '{cluster_name}' recovery.tier_2_after_attempts must be greater than zero"
+            )));
+        }
+        if self.tier_3_after_attempts == 0 {
+            return Err(ValidationError::new(format!(
+                "cluster '{cluster_name}' recovery.tier_3_after_attempts must be greater than zero"
+            )));
+        }
+        if self.window_seconds == 0 {
+            return Err(ValidationError::new(format!(
+                "cluster '{cluster_name}' recovery.window_seconds must be greater than zero"
+            )));
+        }
         Ok(())
     }
 }
 
 fn default_recovery_settle_seconds() -> u64 {
     60
+}
+
+fn default_tier_2_after_attempts() -> u32 {
+    2
+}
+
+fn default_tier_3_after_attempts() -> u32 {
+    4
+}
+
+fn default_recovery_window_seconds() -> u64 {
+    1800
 }
 
 /// Per-cluster wedge-detection thresholds.
@@ -4454,6 +4490,9 @@ mod tests {
         defaults.validate("demo").expect("defaults should validate");
 
         let zero_settle = ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
             enabled: true,
             settle_seconds: 0,
         };

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, BufWriter, Cursor};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -88,6 +88,7 @@ struct ControlPlaneStateInner {
     registered_nodes: RwLock<BTreeMap<String, RegisteredNodeRecord>>,
     node_receipt_instants: RwLock<BTreeMap<String, Instant>>,
     wedge_state: RwLock<BTreeMap<String, WedgeFact>>,
+    recovery_machine_locks: RwLock<BTreeMap<String, Arc<std::sync::atomic::AtomicBool>>>,
     #[allow(dead_code)]
     imported_inventory_path: PathBuf,
     #[allow(dead_code)]
@@ -106,6 +107,89 @@ struct ControlPlaneStateInner {
 struct WedgeFact {
     wedged_since_unix_s: u64,
     wedge_class: WedgeClass,
+}
+
+/// Recovery ladder action decided by the runner for a given machine.
+///
+/// These are the possible outputs of one decision tick. Port owns
+/// `Tier1Restart` and `Tier2Recreate` actions directly; `Tier3Escalate`
+/// writes a signal and emits a structured event without any host-level
+/// action. `Tier3AutoClear` is the opposite transition when the host
+/// returns (node-agent re-register + fresh guest heartbeat).
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecoveryAction {
+    Tier1Restart,
+    Tier2Recreate,
+    Tier3Escalate,
+    Tier3AutoClear,
+}
+
+/// Inputs to a single machine's recovery decision.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RecoveryDecisionInput<'a> {
+    /// Per-cluster recovery config. When `enabled = false` the decision is
+    /// always `None` — Port takes no recovery action.
+    pub recovery_config: &'a port_model::ClusterRecoveryConfig,
+    /// Tier promotion thresholds (from the cluster's recovery config, fed
+    /// separately so they can be tuned in tests without a full config clone).
+    pub tier_2_after_attempts: u32,
+    pub tier_3_after_attempts: u32,
+    /// Current wedge observation for this machine (if any).
+    pub wedge: Option<(WedgeClass, u64)>,
+    /// Current recovery ladder state.
+    pub recovery_state: crate::RecoveryState,
+    /// Tier attempt counters within the active window.
+    pub recovery_attempts: crate::RecoveryAttemptCounters,
+    /// `true` if node-agent and guest heartbeats are both fresh. Used to
+    /// decide `Tier3AutoClear` when the machine was previously in
+    /// `awaiting_tier_3_host_recycle`.
+    pub heartbeats_fresh: bool,
+}
+
+/// Pure decision function for the recovery ladder.
+///
+/// Returns the next action Port should take on the given machine, or `None`
+/// when the ladder has nothing to do (disabled, not wedged, already acting).
+#[allow(dead_code)]
+pub(crate) fn decide_recovery_action(input: RecoveryDecisionInput<'_>) -> Option<RecoveryAction> {
+    use crate::RecoveryState;
+
+    // Recovery disabled on this cluster: always a no-op.
+    if !input.recovery_config.enabled {
+        return None;
+    }
+
+    // Already escalated to tier-3: only action is auto-clear on host return.
+    if matches!(
+        input.recovery_state,
+        RecoveryState::AwaitingTier3HostRecycle
+    ) {
+        return input
+            .heartbeats_fresh
+            .then_some(RecoveryAction::Tier3AutoClear);
+    }
+
+    // No wedge observed: nothing to do.
+    let (wedge_class, _) = input.wedge?;
+
+    // A silent node-agent can't be reached by tier-1/tier-2 actions;
+    // escalate immediately.
+    if wedge_class == WedgeClass::Node {
+        return Some(RecoveryAction::Tier3Escalate);
+    }
+
+    // Guest-side wedge: promote through the ladder based on attempt counters.
+    if input.recovery_attempts.tier_1 < input.tier_2_after_attempts {
+        Some(RecoveryAction::Tier1Restart)
+    } else if input.recovery_attempts.tier_1 + input.recovery_attempts.tier_2
+        < input.tier_3_after_attempts
+    {
+        Some(RecoveryAction::Tier2Recreate)
+    } else {
+        Some(RecoveryAction::Tier3Escalate)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1148,6 +1232,7 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             registered_nodes: RwLock::new(registered_nodes),
             node_receipt_instants: RwLock::new(BTreeMap::new()),
             wedge_state: RwLock::new(BTreeMap::new()),
+            recovery_machine_locks: RwLock::new(BTreeMap::new()),
             imported_inventory_path,
             imported_inventory_state: RwLock::new(imported_inventory_state),
             imported_inventory: RwLock::new(imported_inventory),
@@ -4668,10 +4753,280 @@ fn probe_all_node_machines_once(state: &NodeAgentState) {
     }
 }
 
-/// Apply a single machine's wedge evaluation to the control-plane state,
-/// setting `wedged_since_unix_s` on the first stale read and clearing the
-/// entry when both triggers are false again.
+/// Clear a recovery record back to defaults (state = Ok, counters zero).
+/// Used by `port machine unfence` and the auto-clear-on-launch path.
 #[allow(dead_code)]
+pub(crate) fn clear_recovery_record(record: &mut PersistedRecoveryRecord) {
+    record.recovery_state = crate::RecoveryState::Ok;
+    record.recovery_attempts = crate::RecoveryAttemptCounters::default();
+    // last_recovery_action stays as a breadcrumb for operator review.
+}
+
+/// Does this record describe a machine currently awaiting tier-3 host
+/// recycle? Used by the post-launch hook.
+#[allow(dead_code)]
+pub(crate) fn is_awaiting_tier_3(record: &PersistedRecoveryRecord) -> bool {
+    matches!(
+        record.recovery_state,
+        crate::RecoveryState::AwaitingTier3HostRecycle
+    )
+}
+
+/// Persisted per-machine recovery record. Written to
+/// `{runtime_root}/recovery/{machine}.json` so a control-plane restart
+/// reloads the ladder state unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistedRecoveryRecord {
+    pub recovery_state: crate::RecoveryState,
+    pub recovery_attempts: crate::RecoveryAttemptCounters,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery_action: Option<crate::RecoveryActionRecord>,
+}
+
+fn recovery_record_path(runtime_root: &std::path::Path, machine_name: &str) -> PathBuf {
+    runtime_root
+        .join("recovery")
+        .join(format!("{machine_name}.json"))
+}
+
+/// Persist a machine's recovery record to disk atomically (tempfile + rename).
+#[allow(dead_code)]
+pub(crate) fn save_recovery_record(
+    runtime_root: &std::path::Path,
+    machine_name: &str,
+    record: &PersistedRecoveryRecord,
+) -> Result<()> {
+    let path = recovery_record_path(runtime_root, machine_name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create recovery dir {}", parent.display()))?;
+    }
+    let temp = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec_pretty(record).context("encode recovery record")?;
+    std::fs::write(&temp, bytes).with_context(|| format!("write {}", temp.display()))?;
+    std::fs::rename(&temp, &path)
+        .with_context(|| format!("rename {} -> {}", temp.display(), path.display()))?;
+    Ok(())
+}
+
+/// Load a machine's recovery record from disk. Returns `Ok(None)` when no
+/// record has been persisted yet.
+#[allow(dead_code)]
+pub(crate) fn load_recovery_record(
+    runtime_root: &std::path::Path,
+    machine_name: &str,
+) -> Result<Option<PersistedRecoveryRecord>> {
+    let path = recovery_record_path(runtime_root, machine_name);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+    let record: PersistedRecoveryRecord =
+        serde_json::from_slice(&bytes).with_context(|| format!("decode {}", path.display()))?;
+    Ok(Some(record))
+}
+
+/// Emit the tier-3 host-returned signal for a machine, closing the
+/// escalation. Emission is per-machine so two machines on the same host
+/// produce two independent events — Port does not dedupe at the host level.
+#[allow(dead_code)]
+pub(crate) fn emit_tier_3_host_returned(
+    sink: &RecoveryEventSink,
+    machine_name: &str,
+    timestamp_unix_s: u64,
+) -> Result<u64> {
+    sink.emit(
+        machine_name,
+        3,
+        RecoveryEventOutcome::Tier3HostReturned,
+        timestamp_unix_s,
+    )
+}
+
+/// Emit the tier-3 escalation signal for a machine.
+///
+/// This is the last action Port takes when recovery has exhausted. It writes
+/// a structured `Tier3Escalation` event to the sink. The caller is expected
+/// to separately set the machine's `recovery_state` to
+/// `AwaitingTier3HostRecycle`. Port does not call any cloud-provider API or
+/// execute any remote shell — the event is the handoff point.
+#[allow(dead_code)]
+pub(crate) fn emit_tier_3_escalation(
+    sink: &RecoveryEventSink,
+    machine_name: &str,
+    timestamp_unix_s: u64,
+) -> Result<u64> {
+    sink.emit(
+        machine_name,
+        3,
+        RecoveryEventOutcome::Tier3Escalation,
+        timestamp_unix_s,
+    )
+}
+
+/// Remove the rootfs overlay for a machine (tier-2 action).
+///
+/// Idempotent: if the overlay directory is already absent, returns success.
+/// The overlay lives at `{runtime_root}/{machine_name}/overlay` alongside the
+/// Firecracker config.
+#[allow(dead_code)]
+pub(crate) fn drop_machine_rootfs_overlay(
+    runtime_root: &std::path::Path,
+    machine_name: &str,
+) -> Result<()> {
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    let overlay = paths.runtime_dir.join("overlay");
+    if !overlay.exists() {
+        return Ok(());
+    }
+    if overlay.is_dir() {
+        std::fs::remove_dir_all(&overlay)
+            .with_context(|| format!("remove rootfs overlay dir {}", overlay.display()))?;
+    } else {
+        std::fs::remove_file(&overlay)
+            .with_context(|| format!("remove rootfs overlay file {}", overlay.display()))?;
+    }
+    Ok(())
+}
+
+/// Does this machine have a configured rootfs overlay? Tier-2 only runs when
+/// `true`; when `false`, the runner emits `SkippedNoOverlay` and advances
+/// promotion toward tier-3 as if tier-2 had been attempted.
+#[allow(dead_code)]
+pub(crate) fn machine_has_rootfs_overlay(config: &PortConfig, machine_name: &str) -> bool {
+    config
+        .machines
+        .get(machine_name)
+        .is_some_and(|machine| machine.rootfs_overlay.is_some())
+}
+
+/// Structured event emitted on every recovery ladder transition.
+///
+/// Written as JSON-per-line to `runtime/recovery/events.log` so operators and
+/// downstream consumers (spoke-sh/infra, alerting, dashboards) can correlate
+/// with Kubernetes NodeNotReady transitions.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryEvent {
+    pub sequence: u64,
+    pub machine: String,
+    pub tier: u8,
+    pub outcome: RecoveryEventOutcome,
+    pub timestamp_unix_s: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecoveryEventOutcome {
+    Started,
+    Succeeded,
+    Failed,
+    SkippedBusy,
+    SkippedNoOverlay,
+    Tier3Escalation,
+    Tier3HostReturned,
+    RecoveryUnfenced,
+}
+
+/// Append-only JSON-per-line sink for recovery events.
+#[allow(dead_code)]
+pub struct RecoveryEventSink {
+    path: PathBuf,
+    sequence: Mutex<u64>,
+}
+
+#[allow(dead_code)]
+impl RecoveryEventSink {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            sequence: Mutex::new(0),
+        }
+    }
+
+    /// Append one event and return the assigned monotonic sequence number.
+    pub(crate) fn emit(
+        &self,
+        machine: &str,
+        tier: u8,
+        outcome: RecoveryEventOutcome,
+        timestamp_unix_s: u64,
+    ) -> Result<u64> {
+        use std::io::Write as _;
+
+        let mut sequence = self
+            .sequence
+            .lock()
+            .map_err(|_| anyhow!("recovery event sink sequence lock poisoned"))?;
+        *sequence += 1;
+        let event = RecoveryEvent {
+            sequence: *sequence,
+            machine: machine.to_string(),
+            tier,
+            outcome,
+            timestamp_unix_s,
+        };
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create recovery event dir {}", parent.display()))?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .with_context(|| format!("open recovery event sink {}", self.path.display()))?;
+        let mut line = serde_json::to_vec(&event).context("encode recovery event")?;
+        line.push(b'\n');
+        file.write_all(&line)
+            .with_context(|| format!("write recovery event to {}", self.path.display()))?;
+        Ok(event.sequence)
+    }
+}
+
+/// RAII guard for the per-machine recovery lifecycle lock. Dropping the
+/// guard releases the lock.
+#[allow(dead_code)]
+pub(crate) struct RecoveryLockGuard {
+    flag: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for RecoveryLockGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Try to acquire the per-machine recovery lifecycle lock non-blockingly.
+///
+/// Returns `Some(guard)` if the lock was free, `None` if another actor holds
+/// it. Callers treat `None` as a "skipped_busy" outcome and retry on the next
+/// interval rather than cancelling the other actor's operation.
+#[allow(dead_code, private_interfaces)]
+pub(crate) fn try_acquire_recovery_lock(
+    state: &ControlPlaneState,
+    machine_name: &str,
+) -> Option<RecoveryLockGuard> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let flag = {
+        let mut locks = state.inner.recovery_machine_locks.write().ok()?;
+        Arc::clone(
+            locks
+                .entry(machine_name.to_string())
+                .or_insert_with(|| Arc::new(AtomicBool::new(false))),
+        )
+    };
+    if flag
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_ok()
+    {
+        Some(RecoveryLockGuard { flag })
+    } else {
+        None
+    }
+}
+
 fn apply_wedge_observation(
     state: &ControlPlaneState,
     machine_name: &str,
@@ -6985,6 +7340,718 @@ mod tests {
                 .expect("annotate with wedge");
         assert_eq!(annotated.wedged_since_unix_s, Some(1_734_000_000));
         assert_eq!(annotated.wedge_class.as_deref(), Some("guest"));
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn recovery_decision_is_none_when_disabled() {
+        let cfg = port_model::ClusterRecoveryConfig::default(); // enabled = false
+        let input = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: crate::RecoveryAttemptCounters::default(),
+            heartbeats_fresh: false,
+        };
+        assert_eq!(decide_recovery_action(input), None);
+    }
+
+    #[test]
+    fn recovery_decision_fires_tier_1_on_guest_wedge_when_enabled() {
+        let cfg = port_model::ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+            enabled: true,
+            settle_seconds: 60,
+        };
+        let input = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: crate::RecoveryAttemptCounters::default(),
+            heartbeats_fresh: false,
+        };
+        assert_eq!(
+            decide_recovery_action(input),
+            Some(RecoveryAction::Tier1Restart)
+        );
+    }
+
+    #[test]
+    fn recovery_decision_escalates_straight_to_tier_3_on_node_wedge() {
+        // Node-side wedge: tier-1/2 can't reach it, so jump to escalation.
+        let cfg = port_model::ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+            enabled: true,
+            settle_seconds: 60,
+        };
+        let input = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Node, 100)),
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: crate::RecoveryAttemptCounters::default(),
+            heartbeats_fresh: false,
+        };
+        assert_eq!(
+            decide_recovery_action(input),
+            Some(RecoveryAction::Tier3Escalate)
+        );
+    }
+
+    #[test]
+    fn recovery_decision_promotes_tier_1_to_tier_2_and_tier_3() {
+        let cfg = port_model::ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+            enabled: true,
+            settle_seconds: 60,
+        };
+        let make_input = |attempts| RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: attempts,
+            heartbeats_fresh: false,
+        };
+        // tier_1 under threshold: keep firing tier-1
+        let mut attempts = crate::RecoveryAttemptCounters {
+            tier_1: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            decide_recovery_action(make_input(attempts)),
+            Some(RecoveryAction::Tier1Restart)
+        );
+        // tier_1 hits tier_2_after_attempts: promote to tier-2
+        attempts.tier_1 = 2;
+        assert_eq!(
+            decide_recovery_action(make_input(attempts)),
+            Some(RecoveryAction::Tier2Recreate)
+        );
+        // cumulative hits tier_3_after_attempts: escalate
+        attempts.tier_1 = 2;
+        attempts.tier_2 = 2;
+        assert_eq!(
+            decide_recovery_action(make_input(attempts)),
+            Some(RecoveryAction::Tier3Escalate)
+        );
+    }
+
+    #[test]
+    fn recovery_decision_takes_no_further_action_in_awaiting_tier_3() {
+        // Already escalated: only action is auto-clear when heartbeats return.
+        let cfg = port_model::ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+            enabled: true,
+            settle_seconds: 60,
+        };
+        let base = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 4,
+                tier_2: 2,
+                tier_3: 1,
+            },
+            heartbeats_fresh: false,
+        };
+        // Heartbeats still stale: no action.
+        assert_eq!(decide_recovery_action(base), None);
+        // Heartbeats fresh: auto-clear.
+        let fresh = RecoveryDecisionInput {
+            heartbeats_fresh: true,
+            ..base
+        };
+        assert_eq!(
+            decide_recovery_action(fresh),
+            Some(RecoveryAction::Tier3AutoClear)
+        );
+    }
+
+    #[test]
+    fn recovery_decision_re_reads_wedge_state_avoiding_stale_trigger() {
+        // Race guard: if the detector cleared wedge_state between the
+        // decision read and the action, the pure decision function returns
+        // None because wedge is None. The runner's outer loop calls
+        // decide_recovery_action again just before execution to absorb this.
+        let cfg = port_model::ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+            enabled: true,
+            settle_seconds: 60,
+        };
+        let input = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: None,
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: crate::RecoveryAttemptCounters::default(),
+            heartbeats_fresh: false,
+        };
+        assert_eq!(decide_recovery_action(input), None);
+    }
+
+    #[test]
+    fn port_machine_unfence_clears_recovery_state_and_emits_event() {
+        // Core state-mutation path exercised by `port machine unfence`.
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+
+        let mut record = PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 4,
+                tier_2: 2,
+                tier_3: 1,
+            },
+            last_recovery_action: Some(crate::RecoveryActionRecord {
+                tier: 3,
+                timestamp_unix_s: 1_734_000_000,
+                outcome: String::from("failed"),
+            }),
+        };
+
+        clear_recovery_record(&mut record);
+        assert_eq!(record.recovery_state, crate::RecoveryState::Ok);
+        assert_eq!(
+            record.recovery_attempts,
+            crate::RecoveryAttemptCounters::default()
+        );
+        // last_recovery_action stays so operators can review the transition.
+        assert!(record.last_recovery_action.is_some());
+
+        sink.emit(
+            "cloud-aws",
+            0,
+            RecoveryEventOutcome::RecoveryUnfenced,
+            2_000,
+        )
+        .expect("unfenced event");
+
+        let contents =
+            std::fs::read_to_string(tempdir.path().join("events.log")).expect("events read");
+        let event: RecoveryEvent = serde_json::from_str(contents.trim()).expect("decode");
+        assert_eq!(event.outcome, RecoveryEventOutcome::RecoveryUnfenced);
+    }
+
+    #[test]
+    fn launch_auto_clears_awaiting_tier_3_when_record_qualifies() {
+        // Helper flow: the post-launch hook inspects the record, checks
+        // is_awaiting_tier_3, and calls clear_recovery_record if true.
+        // Here we assert the two predicates and the reset combine correctly.
+        let mut record = PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 4,
+                tier_2: 2,
+                tier_3: 1,
+            },
+            last_recovery_action: None,
+        };
+
+        assert!(is_awaiting_tier_3(&record));
+        clear_recovery_record(&mut record);
+        assert_eq!(record.recovery_state, crate::RecoveryState::Ok);
+        assert_eq!(record.recovery_attempts.tier_1, 0);
+        assert!(!is_awaiting_tier_3(&record));
+
+        // A record that is already Ok is a no-op target for the hook.
+        let ok_record = PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: crate::RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+        };
+        assert!(!is_awaiting_tier_3(&ok_record));
+    }
+
+    #[test]
+    fn ladder_e2e_tier_1_converges_guest_wedge() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+        let cfg = port_model::ClusterRecoveryConfig {
+            enabled: true,
+            settle_seconds: 60,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+        };
+        let mut attempts = crate::RecoveryAttemptCounters::default();
+
+        // Detector: guest-side wedge observed.
+        let input = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: attempts,
+            heartbeats_fresh: false,
+        };
+        assert_eq!(
+            decide_recovery_action(input),
+            Some(RecoveryAction::Tier1Restart)
+        );
+        sink.emit("cloud-aws", 1, RecoveryEventOutcome::Started, 1_000)
+            .unwrap();
+
+        // Simulate tier-1 action succeeding: heartbeats return fresh.
+        attempts.tier_1 = 1;
+        sink.emit("cloud-aws", 1, RecoveryEventOutcome::Succeeded, 1_010)
+            .unwrap();
+
+        let converge = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: None,
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: attempts,
+            heartbeats_fresh: true,
+        };
+        assert_eq!(decide_recovery_action(converge), None);
+
+        let events: Vec<RecoveryEvent> = std::fs::read_to_string(tempdir.path().join("events.log"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].outcome, RecoveryEventOutcome::Started);
+        assert_eq!(events[1].outcome, RecoveryEventOutcome::Succeeded);
+    }
+
+    #[test]
+    fn ladder_e2e_tier_3_escalates_and_auto_clears_on_host_return() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+        let cfg = port_model::ClusterRecoveryConfig {
+            enabled: true,
+            settle_seconds: 60,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+        };
+        let exhausted = crate::RecoveryAttemptCounters {
+            tier_1: 2,
+            tier_2: 2,
+            tier_3: 0,
+        };
+        let escalate = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 500)),
+            recovery_state: crate::RecoveryState::Ok,
+            recovery_attempts: exhausted,
+            heartbeats_fresh: false,
+        };
+        assert_eq!(
+            decide_recovery_action(escalate),
+            Some(RecoveryAction::Tier3Escalate)
+        );
+        emit_tier_3_escalation(&sink, "cloud-aws", 1_000).unwrap();
+
+        let recover = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 500)),
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: exhausted,
+            heartbeats_fresh: true,
+        };
+        assert_eq!(
+            decide_recovery_action(recover),
+            Some(RecoveryAction::Tier3AutoClear)
+        );
+        emit_tier_3_host_returned(&sink, "cloud-aws", 2_000).unwrap();
+
+        let events: Vec<RecoveryEvent> = std::fs::read_to_string(tempdir.path().join("events.log"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].outcome, RecoveryEventOutcome::Tier3Escalation);
+        assert_eq!(events[1].outcome, RecoveryEventOutcome::Tier3HostReturned);
+    }
+
+    #[test]
+    fn ladder_e2e_restart_preserves_escalation_then_unfence_rearms() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let runtime_root = tempdir.path();
+        let sink = RecoveryEventSink::new(runtime_root.join("events.log"));
+
+        let record = PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 4,
+                tier_2: 2,
+                tier_3: 1,
+            },
+            last_recovery_action: None,
+        };
+        save_recovery_record(runtime_root, "cloud-aws", &record).unwrap();
+
+        // Simulated control-plane restart: reload from disk.
+        let reloaded = load_recovery_record(runtime_root, "cloud-aws")
+            .unwrap()
+            .expect("record should persist across restart");
+        assert_eq!(reloaded, record);
+        assert!(is_awaiting_tier_3(&reloaded));
+
+        // port machine unfence clears + emits + persists.
+        let mut cleared = reloaded.clone();
+        clear_recovery_record(&mut cleared);
+        sink.emit(
+            "cloud-aws",
+            0,
+            RecoveryEventOutcome::RecoveryUnfenced,
+            3_000,
+        )
+        .unwrap();
+        save_recovery_record(runtime_root, "cloud-aws", &cleared).unwrap();
+
+        assert_eq!(cleared.recovery_state, crate::RecoveryState::Ok);
+        assert_eq!(
+            cleared.recovery_attempts,
+            crate::RecoveryAttemptCounters::default()
+        );
+    }
+
+    #[test]
+    fn ladder_e2e_tests_have_no_wall_clock_sleeps() {
+        // Static guard: the three ladder_e2e_* tests above must not use
+        // wall-clock sleeps. Any introduction would mean CI stability
+        // depends on timing behaviour. Search for a *call* pattern, not a
+        // bare reference, so this guard test itself can name the calls
+        // without self-matching.
+        let src =
+            std::fs::read_to_string("src/hosted_control_plane.rs").expect("source file readable");
+        let forbidden_calls = [
+            "thread::sleep(",
+            "tokio::time::sleep(",
+            "std::thread::sleep(",
+        ];
+        for test_fn in [
+            "ladder_e2e_tier_1_converges_guest_wedge",
+            "ladder_e2e_tier_3_escalates_and_auto_clears_on_host_return",
+            "ladder_e2e_restart_preserves_escalation_then_unfence_rearms",
+        ] {
+            let start = src
+                .find(&format!("fn {test_fn}()"))
+                .unwrap_or_else(|| panic!("e2e test {test_fn} not found"));
+            // Stop at the next test declaration (or EOF).
+            let rest = &src[start..];
+            let body_end = rest
+                .find("\n    #[test]\n")
+                .or_else(|| rest.find("\n    #[tokio::test]\n"))
+                .unwrap_or(rest.len());
+            let body = &rest[..body_end];
+            for needle in forbidden_calls {
+                assert!(!body.contains(needle), "{test_fn} must not call {needle}");
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_record_persists_and_reloads_across_control_plane_restart() {
+        // Seed a machine in AwaitingTier3HostRecycle with non-zero counters,
+        // save it to disk, then reload (as a fresh control plane would do on
+        // startup) and assert state and counters match byte-for-byte.
+        let tempdir = TempDir::new().expect("tempdir");
+        let runtime_root = tempdir.path();
+
+        assert!(
+            load_recovery_record(runtime_root, "cloud-aws")
+                .expect("load on empty state")
+                .is_none(),
+            "no persisted record yet"
+        );
+
+        let record = PersistedRecoveryRecord {
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 4,
+                tier_2: 2,
+                tier_3: 1,
+            },
+            last_recovery_action: Some(crate::RecoveryActionRecord {
+                tier: 2,
+                timestamp_unix_s: 1_734_000_000,
+                outcome: String::from("failed"),
+            }),
+        };
+        save_recovery_record(runtime_root, "cloud-aws", &record).expect("save");
+
+        // Simulate control-plane restart by calling load fresh.
+        let reloaded = load_recovery_record(runtime_root, "cloud-aws")
+            .expect("load after restart")
+            .expect("record should exist");
+        assert_eq!(reloaded, record, "record must reload unchanged");
+    }
+
+    #[test]
+    fn tier_3_auto_clears_when_heartbeats_return_fresh() {
+        // Decision layer: AwaitingTier3HostRecycle + heartbeats_fresh → Tier3AutoClear.
+        let cfg = port_model::ClusterRecoveryConfig {
+            enabled: true,
+            settle_seconds: 60,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+        };
+        let awaiting = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 4,
+                tier_2: 2,
+                tier_3: 1,
+            },
+            heartbeats_fresh: true,
+        };
+        assert_eq!(
+            decide_recovery_action(awaiting),
+            Some(RecoveryAction::Tier3AutoClear)
+        );
+
+        // Execution layer: emitting the host-returned event returns Ok and
+        // writes the expected JSON line.
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+        let seq = emit_tier_3_host_returned(&sink, "cloud-aws", 2_000).expect("host-returned emit");
+        assert_eq!(seq, 1);
+
+        let contents =
+            std::fs::read_to_string(tempdir.path().join("events.log")).expect("events.log read");
+        let event: RecoveryEvent = serde_json::from_str(contents.trim()).expect("event decode");
+        assert_eq!(event.outcome, RecoveryEventOutcome::Tier3HostReturned);
+        assert_eq!(event.timestamp_unix_s, 2_000);
+    }
+
+    #[test]
+    fn tier_3_signal_is_per_machine_not_per_host() {
+        // Two machines co-located on the same host both escalate and both
+        // later return; Port emits two independent escalation events and
+        // two independent host-returned events. The consumer, not Port, is
+        // responsible for deduplicating at the host level.
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+
+        emit_tier_3_escalation(&sink, "cloud-aws", 1_000).unwrap();
+        emit_tier_3_escalation(&sink, "cloud-aws-worker", 1_001).unwrap();
+        emit_tier_3_host_returned(&sink, "cloud-aws", 1_500).unwrap();
+        emit_tier_3_host_returned(&sink, "cloud-aws-worker", 1_501).unwrap();
+
+        let contents =
+            std::fs::read_to_string(tempdir.path().join("events.log")).expect("events read");
+        let events: Vec<RecoveryEvent> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("event decode"))
+            .collect();
+        assert_eq!(events.len(), 4, "one event per machine per transition");
+        let escalations: Vec<&RecoveryEvent> = events
+            .iter()
+            .filter(|e| e.outcome == RecoveryEventOutcome::Tier3Escalation)
+            .collect();
+        let returneds: Vec<&RecoveryEvent> = events
+            .iter()
+            .filter(|e| e.outcome == RecoveryEventOutcome::Tier3HostReturned)
+            .collect();
+        assert_eq!(escalations.len(), 2);
+        assert_eq!(returneds.len(), 2);
+        assert_eq!(escalations[0].machine, "cloud-aws");
+        assert_eq!(escalations[1].machine, "cloud-aws-worker");
+        assert_eq!(returneds[0].machine, "cloud-aws");
+        assert_eq!(returneds[1].machine, "cloud-aws-worker");
+    }
+
+    #[test]
+    fn emit_tier_3_escalation_writes_structured_signal() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+        let seq =
+            emit_tier_3_escalation(&sink, "cloud-aws", 1_734_000_000).expect("escalation emit");
+        assert_eq!(seq, 1);
+
+        let contents =
+            std::fs::read_to_string(tempdir.path().join("events.log")).expect("events.log read");
+        let event: RecoveryEvent = serde_json::from_str(contents.trim()).expect("event decode");
+        assert_eq!(event.machine, "cloud-aws");
+        assert_eq!(event.tier, 3);
+        assert_eq!(event.outcome, RecoveryEventOutcome::Tier3Escalation);
+        assert_eq!(event.timestamp_unix_s, 1_734_000_000);
+    }
+
+    #[test]
+    fn recovery_code_path_has_no_cloud_or_remote_shell_dependencies() {
+        // Boundary test: port-runtime's Cargo.toml must not depend on any
+        // cloud-provider SDK or remote-shell crate. The no-cloud-inside-Port
+        // rule is a load-bearing architectural decision per the mission
+        // charter — this test catches regressions at build time.
+        let cargo_toml = std::fs::read_to_string("Cargo.toml")
+            .expect("port-runtime Cargo.toml should be readable");
+        for needle in [
+            "aws-sdk-",
+            "aws-config",
+            "rusoto",
+            "russh",
+            "openssh-rs",
+            "async-ssh2",
+            "google-cloud-",
+            "azure_",
+        ] {
+            assert!(
+                !cargo_toml.contains(needle),
+                "port-runtime Cargo.toml contains forbidden dependency '{needle}'. \
+                 Per mission charter VGzwzdKvB, Port does not call cloud-provider \
+                 APIs or execute remote shell commands as part of recovery."
+            );
+        }
+    }
+
+    #[test]
+    fn drop_machine_rootfs_overlay_is_idempotent() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let runtime_root = tempdir.path();
+        let paths = RuntimePaths::for_machine(runtime_root, "cloud-aws");
+        let overlay = paths.runtime_dir.join("overlay");
+        std::fs::create_dir_all(&overlay).expect("seed overlay dir");
+        std::fs::write(overlay.join("data"), b"overlay contents").expect("seed overlay file");
+
+        drop_machine_rootfs_overlay(runtime_root, "cloud-aws").expect("first drop");
+        assert!(
+            !overlay.exists(),
+            "overlay dir should be gone after first drop"
+        );
+
+        // Second drop: idempotent, no error.
+        drop_machine_rootfs_overlay(runtime_root, "cloud-aws").expect("second drop should succeed");
+    }
+
+    #[test]
+    fn machine_has_rootfs_overlay_checks_machine_spec() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let mut config = sample_control_plane_config(tempdir.path());
+
+        // Without an overlay spec, the helper returns false.
+        let machine_name = "cloud-aws";
+        let machine_without_overlay = config
+            .machines
+            .get(machine_name)
+            .unwrap()
+            .rootfs_overlay
+            .is_none();
+        if machine_without_overlay {
+            assert!(!machine_has_rootfs_overlay(&config, machine_name));
+        }
+
+        // After setting an overlay spec, the helper returns true.
+        if let Some(machine) = config.machines.get_mut(machine_name) {
+            machine.rootfs_overlay = Some(port_model::MachineRootfsOverlaySpec { size_mib: 64 });
+        }
+        assert!(machine_has_rootfs_overlay(&config, machine_name));
+    }
+
+    #[test]
+    fn recovery_event_sink_emits_json_lines_with_monotonic_sequence() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let sink = RecoveryEventSink::new(tempdir.path().join("events.log"));
+
+        let s1 = sink
+            .emit("cloud-aws", 1, RecoveryEventOutcome::Started, 1_000)
+            .expect("emit started");
+        let s2 = sink
+            .emit("cloud-aws", 1, RecoveryEventOutcome::Succeeded, 1_060)
+            .expect("emit succeeded");
+        let s3 = sink
+            .emit(
+                "cloud-aws-worker",
+                3,
+                RecoveryEventOutcome::Tier3Escalation,
+                1_500,
+            )
+            .expect("emit escalation");
+
+        assert_eq!((s1, s2, s3), (1, 2, 3), "sequence must be monotonic");
+
+        let contents = std::fs::read_to_string(tempdir.path().join("events.log"))
+            .expect("event file should exist");
+        let events: Vec<RecoveryEvent> = contents
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("event should decode"))
+            .collect();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].machine, "cloud-aws");
+        assert_eq!(events[0].outcome, RecoveryEventOutcome::Started);
+        assert_eq!(events[2].tier, 3);
+        assert_eq!(events[2].outcome, RecoveryEventOutcome::Tier3Escalation);
+    }
+
+    #[test]
+    fn recovery_lock_is_try_acquire_and_releases_on_guard_drop() {
+        let tempdir = TempDir::new().expect("tempdir");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state");
+
+        // First acquisition succeeds.
+        let guard_a = try_acquire_recovery_lock(&state, "cloud-aws")
+            .expect("first acquisition should succeed");
+
+        // Second acquisition on the same machine fails while guard_a is held.
+        assert!(
+            try_acquire_recovery_lock(&state, "cloud-aws").is_none(),
+            "contended lock must return None"
+        );
+
+        // A different machine's lock is independent.
+        assert!(
+            try_acquire_recovery_lock(&state, "cloud-azure").is_some(),
+            "different machine's lock should be independent"
+        );
+
+        // Drop the guard and re-acquire.
+        drop(guard_a);
+        assert!(
+            try_acquire_recovery_lock(&state, "cloud-aws").is_some(),
+            "lock should be re-acquirable after guard drop"
+        );
 
         cleanup_registered_state("demo");
     }

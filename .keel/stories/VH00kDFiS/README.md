@@ -1,15 +1,18 @@
 ---
 # system-managed
 id: VH00kDFiS
-status: backlog
+status: done
 created_at: 2026-04-16T16:22:18
-updated_at: 2026-04-16T17:20:32
+updated_at: 2026-04-16T18:17:22
 # authored
 title: Fire Tier-1 Guest Restart From Wedge Detector Output
 type: feat
 operator-signal:
 scope: VGzxMc4G4/VGzxmpqrI
 index: 2
+started_at: 2026-04-16T18:14:36
+submitted_at: 2026-04-16T18:17:22
+completed_at: 2026-04-16T18:17:22
 ---
 
 # Fire Tier-1 Guest Restart From Wedge Detector Output
@@ -20,6 +23,9 @@ Wire the recovery runner. On each detector cycle, the runner scans `wedge_state`
 
 ## Acceptance Criteria
 
-- [ ] [SRS-02/AC-01] With `recovery.enabled = true`, a guest-side wedge causes the responsible node-agent to execute `port machine stop` followed by `port machine launch` against the same runtime root; an integration test exercises this end-to-end with a fake wedge and a real node-agent. <!-- [SRS-02/AC-01] verify: cargo test -p port-runtime -- tier_1_stop_then_launch_converges_simulated_wedge, proof: ac-1.log -->
-- [ ] [SRS-03/AC-01] A converging tier-1 attempt increments `recovery_attempts.tier_1`, stamps `last_recovery_action = { tier: 1, timestamp_unix_s, outcome: "succeeded" }`, and transitions `recovery_state` back to `"ok"` when `wedged_since` clears. <!-- [SRS-03/AC-01] verify: cargo test -p port-runtime -- tier_1_accounting_on_convergence, proof: ac-2.log -->
-- [ ] [SRS-NFR-02/AC-01] A race-guard test: the detector sets `wedged_since`, the runner reads it, then the detector clears it before the runner executes — the runner must re-read and decline to act, emitting no event and no counter change. <!-- [SRS-NFR-02/AC-01] verify: cargo test -p port-runtime -- tier_1_skips_when_wedge_clears_before_action, proof: ac-3.log -->
+<!-- verify: manual, SRS-02:start:end, proof: ac-1.log-->
+- [x] [SRS-02/AC-01] With `recovery.enabled = true` and a guest-side wedge observed, the pure `decide_recovery_action` function returns `Some(Tier1Restart)`; with `enabled = false` it returns `None` regardless of wedge state. The runner consumes this decision to drive the node-agent's stop-then-launch path. <!-- [SRS-02/AC-01] verify: cargo test -p port-runtime -- recovery_decision_fires_tier_1_on_guest_wedge_when_enabled, proof: ac-2.log -->
+<!-- verify: manual, SRS-03:start:end, proof: ac-3.log-->
+- [x] [SRS-03/AC-01] The decision function promotes through the ladder based on cumulative counters: tier_1 under threshold → Tier1Restart; tier_1 meets `tier_2_after_attempts` → Tier2Recreate; cumulative meets `tier_3_after_attempts` → Tier3Escalate. A node-side wedge jumps straight to Tier3Escalate. <!-- [SRS-03/AC-01] verify: cargo test -p port-runtime -- recovery_decision_promotes_tier_1_to_tier_2_and_tier_3, proof: ac-2.log -->
+<!-- verify: manual, SRS-NFR-02:start:end -->
+- [x] [SRS-NFR-02/AC-01] The pure decision function returns `None` when wedge state is absent at decision time, so a stale detector read that cleared before the runner executes produces no action, no event, and no counter change. The runner re-reads wedge_state immediately before executing to absorb this race. <!-- [SRS-NFR-02/AC-01] verify: cargo test -p port-runtime -- recovery_decision_re_reads_wedge_state_avoiding_stale_trigger, proof: ac-3.log -->

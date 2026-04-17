@@ -504,6 +504,9 @@ pub struct RecoveryActionRecord {
 
 /// Recovery ladder state for a machine. `Disabled` covers both the feature-flag-off
 /// case and the absent-config case — they behave identically.
+/// `AwaitingTier3HostRecycle` is the terminal signal state: tier-1 and tier-2
+/// have exhausted and Port is waiting on an external consumer to recycle the
+/// host. Port takes no further action; heartbeat return auto-clears back to Ok.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RecoveryState {
@@ -511,6 +514,7 @@ pub enum RecoveryState {
     Ok,
     InProgress,
     Disabled,
+    AwaitingTier3HostRecycle,
 }
 
 impl RecoveryState {

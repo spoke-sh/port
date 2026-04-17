@@ -1,0 +1,17 @@
+---
+recorded_at: 2026-04-16T18:31:11.015010924-07:00
+mode: manual
+files: [".keel/stories/VH01FzHcw/EVIDENCE/ac-1.log"]
+---
+
+--- File: ac-1.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 2 tests
+test hosted_control_plane::tests::tier_3_auto_clears_when_heartbeats_return_fresh ... ok
+test hosted_control_plane::tests::tier_3_signal_is_per_machine_not_per_host ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 196 filtered out; finished in 0.00s
+
+

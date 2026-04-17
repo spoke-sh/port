@@ -222,13 +222,13 @@
 | [Guest-Agent Heartbeat And Age Surface](epics/VGzxKV9OX/voyages/VGzxkoGrw/) | done |
 | [Wedge Detector And Cluster Status Fields](epics/VGzxKV9OX/voyages/VGzxlScKS/) | done |
 
-### [Hosted Fleet Recovery Ladder And Host Recycle](epics/VGzxMc4G4/) (active)
+### [Hosted Fleet Recovery Ladder And Host Recycle](epics/VGzxMc4G4/) (done)
 
 | Voyage | Status |
 |--------|--------|
-| [Tier-1 Guest Restart And Attempt Accounting](epics/VGzxMc4G4/voyages/VGzxmpqrI/) | in-progress |
-| [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](epics/VGzxMc4G4/voyages/VGzxnR97R/) | draft |
-| [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | draft |
+| [Tier-1 Guest Restart And Attempt Accounting](epics/VGzxMc4G4/voyages/VGzxmpqrI/) | done |
+| [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](epics/VGzxMc4G4/voyages/VGzxnR97R/) | done |
+| [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | done |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

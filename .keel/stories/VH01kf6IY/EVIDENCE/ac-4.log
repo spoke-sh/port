@@ -1,0 +1,19 @@
+---
+recorded_at: 2026-04-16T18:38:13.868313757-07:00
+mode: manual
+files: [".keel/stories/VH01kf6IY/EVIDENCE/ac-4.log"]
+---
+
+--- File: ac-4.log ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/port/debug/deps/port_runtime-7f216da9bdde7c62)
+
+running 4 tests
+test hosted_control_plane::tests::ladder_e2e_restart_preserves_escalation_then_unfence_rearms ... ok
+test hosted_control_plane::tests::ladder_e2e_tests_have_no_wall_clock_sleeps ... ok
+test hosted_control_plane::tests::ladder_e2e_tier_1_converges_guest_wedge ... ok
+test hosted_control_plane::tests::ladder_e2e_tier_3_escalates_and_auto_clears_on_host_return ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 201 filtered out; finished in 0.00s
+
+

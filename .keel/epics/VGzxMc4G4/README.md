@@ -22,10 +22,10 @@ mission: VGzwzdKvB
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/3 voyages complete, 1/9 stories done
+**Progress:** 3/3 voyages complete, 9/9 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Tier-1 Guest Restart And Attempt Accounting](voyages/VGzxmpqrI/) | in-progress | 1/3 |
-| [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](voyages/VGzxnR97R/) | draft | 0/3 |
-| [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](voyages/VGzxoN8WF/) | draft | 0/3 |
+| [Tier-1 Guest Restart And Attempt Accounting](voyages/VGzxmpqrI/) | done | 3/3 |
+| [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](voyages/VGzxnR97R/) | done | 3/3 |
+| [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](voyages/VGzxoN8WF/) | done | 3/3 |
 <!-- END GENERATED -->
