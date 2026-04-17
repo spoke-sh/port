@@ -1,12 +1,14 @@
 ---
 # system-managed
 id: VH0mlnCSq
-status: draft
+status: in-progress
 epic: VH0mU3DbK
 created_at: 2026-04-16T19:33:04
 # authored
 title: Live Detector And Recovery Runner Wiring
 index: 2
+updated_at: 2026-04-16T20:37:29
+started_at: 2026-04-16T20:37:35
 ---
 
 # Live Detector And Recovery Runner Wiring
@@ -25,10 +27,10 @@ index: 2
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/2 stories complete
+**Progress:** 1/2 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Spawn Wedge Detector Tick Loop From Live Control Plane](../../../../stories/VH0owEJfH/README.md) | feat | icebox |
-| [Spawn Recovery Runner Loop With Tier-1 Through Tier-3](../../../../stories/VH0oxFqBk/README.md) | feat | icebox |
+| [Spawn Wedge Detector Tick Loop From Live Control Plane](../../../../stories/VH0owEJfH/README.md) | feat | done |
+| [Spawn Recovery Runner Loop With Tier-1 Through Tier-3](../../../../stories/VH0oxFqBk/README.md) | feat | backlog |
 <!-- END GENERATED -->

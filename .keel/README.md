@@ -235,7 +235,7 @@
 | Voyage | Status |
 |--------|--------|
 | [Cluster Aggregate Wedge Field Threading](epics/VH0mU3DbK/voyages/VH0mjMP8p/) | done |
-| [Live Detector And Recovery Runner Wiring](epics/VH0mU3DbK/voyages/VH0mlnCSq/) | draft |
+| [Live Detector And Recovery Runner Wiring](epics/VH0mU3DbK/voyages/VH0mlnCSq/) | in-progress |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 

@@ -1137,10 +1137,124 @@ pub fn serve_control_plane(config: PortConfig, request: ControlPlaneServeRequest
             .await
             .with_context(|| format!("failed to bind control plane on '{bind}'"))?;
         let state = build_state(config, request)?;
+        spawn_wedge_detector_loop(state.clone());
         axum::serve(listener, control_plane_router(state))
             .await
             .context("control-plane server exited unexpectedly")
     })
+}
+
+/// Tick interval for the live wedge detector. Kept conservative because
+/// the detector only writes to `wedge_state` and an extra few seconds of
+/// latency on first detection is much cheaper than waking up under
+/// every node-agent registration refresh.
+const WEDGE_DETECTOR_TICK_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Spawn the live wedge detector worker. The worker periodically calls
+/// `reconcile_wedge_detector_tick`, which is a pure observer over
+/// `node_receipt_instants` and per-cluster `ClusterDetectionConfig` —
+/// it only writes to `wedge_state`. Each tick is wrapped in
+/// `catch_unwind` so a panic on one tick does not stop the loop or
+/// take down the control-plane HTTP server.
+fn spawn_wedge_detector_loop(state: ControlPlaneState) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(WEDGE_DETECTOR_TICK_INTERVAL);
+            let tick_state = state.clone();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                reconcile_wedge_detector_tick(&tick_state);
+            }));
+            if let Err(panic) = result {
+                let panic_message = panic_message(panic);
+                eprintln!(
+                    "control-plane '{}' wedge detector tick panicked: {}",
+                    state.inner.control_plane, panic_message
+                );
+            }
+        }
+    });
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        return (*message).to_string();
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.clone();
+    }
+    String::from("non-string panic payload")
+}
+
+/// Run a single wedge-detector tick across every cluster bound to this
+/// control plane. For each machine in such a cluster, derive the
+/// node-agent age from `node_receipt_instants` and pass it to the pure
+/// `run_wedge_detector_tick` along with the per-cluster detection
+/// thresholds.
+///
+/// Guest-side ages are intentionally `None` here. The node-agent's
+/// `guest_heartbeat_instants` sidecar lives on the node-agent process,
+/// not the control plane, and a separate plumbing story will publish it
+/// to the control plane (e.g. via the registration-refresh payload or a
+/// dedicated heartbeat push). Until that lands, this detector catches
+/// node-side wedges only — which is still meaningful: if Port's own
+/// node-agent has gone silent, no recovery action can reach the host.
+fn reconcile_wedge_detector_tick(state: &ControlPlaneState) {
+    let now_unix_s = match current_unix_timestamp_seconds() {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    let now_instant = Instant::now();
+    let node_receipt_instants = match state.inner.node_receipt_instants.read() {
+        Ok(map) => map,
+        Err(_) => return,
+    };
+
+    // Per-cluster ClusterDetectionConfig lives on the higher-level
+    // ClusterSpec (PortConfig.clusters) rather than K3sClusterSpec
+    // (PortConfig.k3s_clusters). The hosted control plane keys off
+    // k3s_clusters, so we use the default thresholds for now and wire
+    // per-cluster overrides in a follow-up that maps k3s_cluster name
+    // to its parent ClusterSpec. Defaults match the upstream contract
+    // (node 120s, guest 90s).
+    let detection = port_model::ClusterDetectionConfig::default();
+    for cluster_spec in state.inner.config.k3s_clusters.values() {
+        if cluster_spec.control_plane != state.inner.control_plane {
+            continue;
+        }
+        let mut ages: BTreeMap<String, (Option<u64>, Option<u64>)> = BTreeMap::new();
+        for machine_name in cluster_spec
+            .server_machines
+            .iter()
+            .chain(cluster_spec.worker_machines.iter())
+        {
+            let placed_node = resolve_placed_node_for_machine(state, machine_name);
+            let node_age = placed_node
+                .and_then(|node| node_receipt_instants.get(&node).copied())
+                .map(|instant| now_instant.saturating_duration_since(instant).as_secs());
+            ages.insert(machine_name.clone(), (node_age, None));
+        }
+        run_wedge_detector_tick(
+            state,
+            &ages,
+            detection.node_trigger_refresh_age_seconds,
+            detection.guest_trigger_refresh_age_seconds,
+            now_unix_s,
+        );
+    }
+}
+
+/// Resolve the live placement node for a machine from stored
+/// placements. Returns `None` when the machine has not been placed
+/// yet — the detector treats that as "no node-age signal" and skips
+/// observation for the tick.
+fn resolve_placed_node_for_machine(
+    state: &ControlPlaneState,
+    machine_name: &str,
+) -> Option<String> {
+    let placements = state.inner.machine_placements.read().ok()?;
+    placements
+        .get(machine_name)
+        .map(|record| record.node_name.clone())
 }
 
 fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<ControlPlaneState> {
@@ -7331,6 +7445,138 @@ mod tests {
         assert_eq!(placement_keys_before, placement_keys_after);
 
         cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn detector_loop_populates_wedge_state_from_live_node_receipt_instants() {
+        // The live wiring spawned from serve_control_plane reads
+        // node_receipt_instants and machine_placements off the
+        // ControlPlaneState; verify that calling
+        // reconcile_wedge_detector_tick on a state with a stale
+        // node_receipt_instant for the placed node populates wedge_state
+        // with wedge_class = Node.
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: port_model::HostedSchedulerPolicy::DeterministicFirstFit,
+                version: None,
+                server_args: Vec::new(),
+                worker_args: Vec::new(),
+            },
+        );
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        // Place cloud-aws on aws-linux-node and stamp a stale receipt
+        // instant 5 minutes in the past.
+        {
+            let mut placements = state
+                .inner
+                .machine_placements
+                .write()
+                .expect("machine_placements write");
+            placements.insert(
+                String::from("cloud-aws"),
+                super::HostedMachinePlacementRecord {
+                    node_name: String::from("aws-linux-node"),
+                    runtime_root: tempdir.path().join("hosted/aws-linux-node"),
+                    placed_at_unix_s: 0,
+                    placement_detail: None,
+                },
+            );
+        }
+        {
+            let mut instants = state
+                .inner
+                .node_receipt_instants
+                .write()
+                .expect("node_receipt_instants write");
+            instants.insert(
+                String::from("aws-linux-node"),
+                Instant::now() - Duration::from_secs(300),
+            );
+        }
+
+        super::reconcile_wedge_detector_tick(&state);
+
+        let wedge_state = state.inner.wedge_state.read().expect("wedge_state read");
+        let fact = wedge_state
+            .get("cloud-aws")
+            .expect("stale node-agent should produce a wedge fact");
+        assert_eq!(fact.wedge_class, super::WedgeClass::Node);
+        assert!(
+            fact.wedged_since_unix_s > 0,
+            "wedged_since_unix_s should be stamped at tick time"
+        );
+        drop(wedge_state);
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn detector_loop_does_not_block_serve_control_plane_on_spawn() {
+        // spawn_wedge_detector_loop must hand off to a background thread
+        // immediately so axum::serve can take over the foreground.
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        let started = Instant::now();
+        super::spawn_wedge_detector_loop(state);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "spawn_wedge_detector_loop blocked caller for {elapsed:?}"
+        );
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn detector_loop_panic_payload_decoder_handles_str_string_and_other() {
+        // The detector loop wraps each tick in catch_unwind and renders
+        // the panic payload via panic_message before logging. The helper
+        // must handle the three payload shapes Rust panics commonly
+        // produce so a panic on one tick is observable in the next log
+        // line and never silently empty.
+        let payload: Box<dyn std::any::Any + Send> = Box::new("static-str panic");
+        assert_eq!(super::panic_message(payload), "static-str panic");
+
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("string panic"));
+        assert_eq!(super::panic_message(payload), "string panic");
+
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42_u64);
+        assert_eq!(super::panic_message(payload), "non-string panic payload");
     }
 
     #[test]
