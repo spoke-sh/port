@@ -26,6 +26,6 @@ mission: VGzwzdKvB
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Tier-1 Guest Restart And Attempt Accounting](voyages/VGzxmpqrI/) | in-progress | 1/3 |
-| [Tier-2 Overlay Recreate And Tier-3 Host Recycle](voyages/VGzxnR97R/) | draft | 0/3 |
-| [Recovery Exhaustion Reset And End-To-End Proof](voyages/VGzxoN8WF/) | draft | 0/3 |
+| [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](voyages/VGzxnR97R/) | draft | 0/3 |
+| [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](voyages/VGzxoN8WF/) | draft | 0/3 |
 <!-- END GENERATED -->

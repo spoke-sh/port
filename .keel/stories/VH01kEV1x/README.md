@@ -5,21 +5,20 @@ status: icebox
 created_at: 2026-04-16T16:26:17
 updated_at: 2026-04-16T16:26:17
 # authored
-title: Add Sticky Recovery Exhausted State Across Window Rollovers
+title: Persist Recovery State Across Control-Plane Restarts
 type: feat
 operator-signal:
 scope: VGzxMc4G4/VGzxoN8WF
 index: 1
 ---
 
-# Add Sticky Recovery Exhausted State Across Window Rollovers
+# Persist Recovery State Across Control-Plane Restarts
 
 ## Summary
 
-Introduce `recovery_state = "exhausted"` as the ladder's terminal state. Persist it to `runtime/recovery/<machine>.json` alongside the existing registered-node state so it survives control-plane restarts. Transition into `exhausted` when tier-3 has fired without convergence, or when tier-3 has been suppressed and no further tiers remain. Once set, the recovery runner stops acting on the machine, even as the attempt-counter window rolls over.
+Make `recovery_state` and `recovery_attempts` durable so a control-plane restart mid-escalation does not silently re-arm the ladder against a machine that is already in `awaiting_tier_3_host_recycle`. Write each machine's record to `runtime/recovery/<machine>.json` alongside the existing registered-node state; load on startup into the in-memory recovery map. Once the machine is in `awaiting_tier_3_host_recycle`, the runner does not attempt further tier actions — it only observes heartbeats for auto-clear.
 
 ## Acceptance Criteria
 
-- [ ] [SRS-01/AC-01] An integration test drives the full ladder without convergence and asserts `recovery_state` transitions to `"exhausted"`, no further tier actions fire, and the state persists to `runtime/recovery/<machine>.json`. <!-- [SRS-01/AC-01] verify: cargo test -p port-runtime -- recovery_exhausted_is_terminal, proof: ac-1.log -->
-- [ ] [SRS-02/AC-01] With `recovery_state = "exhausted"`, rolling the attempt-counter window (via injectable clock) does not re-arm the ladder; a test asserts `recovery_attempts.*` can reset to zero without triggering any tier-1 action on the exhausted machine. <!-- [SRS-02/AC-01] verify: cargo test -p port-runtime -- recovery_exhausted_survives_window_rollover, proof: ac-2.log -->
-- [ ] [SRS-NFR-01/AC-01] A test restarts the control plane while a machine is `exhausted` and asserts the state reloads from disk with no change to `recovery_attempts`, `last_recovery_action`, or the exhaustion flag. <!-- [SRS-NFR-01/AC-01] verify: cargo test -p port-runtime -- recovery_exhausted_persists_across_control_plane_restart, proof: ac-3.log -->
+<!-- verify: manual, SRS-01:start:end -->
+- [ ] [SRS-01/AC-01] An integration test seeds `recovery_state = "awaiting_tier_3_host_recycle"` with non-zero `recovery_attempts`, restarts the control plane (fresh process), and asserts the state and counters reload from disk unchanged. The ladder takes no tier-1/2 action against the machine after reload. <!-- [SRS-01/AC-01] verify: cargo test -p port-runtime -- recovery_state_persists_across_restart, proof: ac-1.log -->

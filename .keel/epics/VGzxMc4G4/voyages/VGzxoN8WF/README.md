@@ -5,13 +5,13 @@ status: draft
 epic: VGzxMc4G4
 created_at: 2026-04-16T16:10:39
 # authored
-title: Recovery Exhaustion Reset And End-To-End Proof
+title: Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof
 index: 3
 ---
 
-# Recovery Exhaustion Reset And End-To-End Proof
+# Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof
 
-> Deliver the sticky recovery_exhausted terminal state, the port machine unfence reset path, and auto-clear on a successful operator-driven launch that produces a Live guest-agent heartbeat. Cover the end-to-end ladder with an integration test that converges a simulated wedge under tier-1 and another under tier-3.
+> Persist `awaiting_tier_3_host_recycle` across control-plane restarts, land `port machine unfence` as the manual reset path, auto-clear on a successful operator-driven launch that produces a Live guest-agent heartbeat, and prove the full ladder end-to-end. The tier-3 test observes the emitted signal — no cloud fakes.
 
 ## Documents
 
@@ -29,7 +29,7 @@ index: 3
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Add Sticky Recovery Exhausted State Across Window Rollovers](../../../../stories/VH01kEV1x/README.md) | feat | icebox |
+| [Persist Recovery State Across Control-Plane Restarts](../../../../stories/VH01kEV1x/README.md) | feat | icebox |
 | [Add Port Machine Unfence Command And Auto-Clear On Successful Launch](../../../../stories/VH01kQnAB/README.md) | feat | icebox |
 | [Prove Recovery Ladder End-To-End With Simulated Wedges](../../../../stories/VH01kf6IY/README.md) | feat | icebox |
 <!-- END GENERATED -->

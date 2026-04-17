@@ -5,21 +5,24 @@ status: icebox
 created_at: 2026-04-16T16:24:20
 updated_at: 2026-04-16T16:24:20
 # authored
-title: Implement Host Reboot Client For AWS And SSH Providers
+title: Emit Tier-3 Escalation Signal With Structured Event
 type: feat
 operator-signal:
 scope: VGzxMc4G4/VGzxnR97R
 index: 2
 ---
 
-# Implement Host Reboot Client For AWS And SSH Providers
+# Emit Tier-3 Escalation Signal With Structured Event
 
 ## Summary
 
-Introduce the `HostRebootClient` trait and land its two first implementations. `AwsEc2RebootClient` wraps the AWS SDK's `RebootInstances`, identifying the host via `host.provider_instance_id`. `SshSystemdRestartClient` reuses the existing SSH host credential path to run `systemctl restart port-node-agent`. Both return a structured `RebootOutcome` enum so the recovery runner can distinguish success from partial failures (unreachable, insufficient permissions, reboot completed but re-registration timed out). Extend `port doctor` to validate the relevant provider prerequisite for every host that would be eligible for tier-3.
+When tier-1 and tier-2 both exhaust without convergence, Port does not attempt to reboot the host. Instead, the recovery runner sets `recovery_state = "awaiting_tier_3_host_recycle"` on the wedged machine and emits a structured `tier_3_escalation` event carrying the machine name, the host name, a unix timestamp, and the last failed tier outcome. That event is the handoff point: an external consumer (spoke-sh/infra, an operator on call, a systemd watcher tailing the event log) reads the signal and decides whether and how to recycle the host.
+
+A companion boundary test scans the `port-runtime` recovery code path for cloud-provider SDK imports and remote-shell invocations and fails the build if any appear — the machine-checkable form of the "no cloud logic inside Port" rule.
 
 ## Acceptance Criteria
 
-- [ ] [SRS-04/AC-01] `HostRebootClient` trait exists with `AwsEc2RebootClient` and `SshSystemdRestartClient` implementations returning a structured `RebootOutcome`; unit tests cover success, unreachable, and permission-denied paths per implementation using fakes. <!-- [SRS-04/AC-01] verify: cargo test -p port-runtime -- host_reboot_client_aws_and_ssh, proof: ac-1.log -->
-- [ ] [SRS-04/AC-02] `port doctor` validates per-host reboot prerequisites (AWS: credentials reachable + `ec2:RebootInstances` action present; SSH: existing host credential check succeeds) and reports actionable failures per host. <!-- [SRS-04/AC-02] verify: cargo test -p port-runtime -- doctor_validates_host_reboot_prerequisites, proof: ac-2.log -->
-- [ ] [SRS-NFR-02/AC-01] If a reboot returns `RebootOutcome::Succeeded` but the node-agent has not yet re-registered, the runner does not re-invoke reboot within a documented cooldown; a test covers the "reboot succeeded, registration pending" window. <!-- [SRS-NFR-02/AC-01] verify: cargo test -p port-runtime -- host_reboot_cooldown_on_pending_registration, proof: ac-3.log -->
+<!-- verify: manual, SRS-04:start:end -->
+- [ ] [SRS-04/AC-01] When cumulative attempts reach `tier_3_after_attempts` within `window_seconds`, the recovery runner sets `recovery_state = "awaiting_tier_3_host_recycle"` on the wedged machine, emits a `tier_3_escalation` event with `machine`, `host`, `timestamp_unix_s`, and `last_tier_outcome`, and takes no further host- or machine-level action. <!-- [SRS-04/AC-01] verify: cargo test -p port-runtime -- tier_3_escalation_emits_signal_and_stops_acting, proof: ac-1.log -->
+<!-- verify: manual, SRS-05:start:end -->
+- [ ] [SRS-05/AC-01] A static boundary test scans the recovery code path in `port-runtime` and asserts that no `aws-sdk-*` or cloud-provider HTTP call appears, and no remote shell invocation (`Command::new("ssh")`, `openssh`, `russh`) is introduced. <!-- [SRS-05/AC-01] verify: cargo test -p port-runtime -- recovery_code_path_has_no_cloud_or_ssh_dependencies, proof: ac-2.log -->

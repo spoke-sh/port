@@ -1,36 +1,35 @@
-# Recovery Exhaustion Reset And End-To-End Proof - SRS
+# Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof - SRS
 
 ## Summary
 
 Epic: VGzxMc4G4
-Goal: Deliver the sticky recovery_exhausted terminal state, the port machine unfence reset path, and auto-clear on a successful operator-driven launch that produces a Live guest-agent heartbeat. Cover the end-to-end ladder with an integration test that converges a simulated wedge under tier-1 and another under tier-3.
+Goal: Deliver the durability and operator-reset half of the recovery ladder — persist `awaiting_tier_3_host_recycle` across control-plane restarts, land `port machine unfence` as the manual clear path, auto-clear on a successful operator-driven launch, and cover the full ladder with deterministic end-to-end tests.
 
 ## Scope
 
 ### In Scope
 
-- [SCOPE-06] Introduce `recovery_state = "exhausted"` as a terminal, sticky state: once set, it survives `window_seconds` rollovers and the ladder stops attempting further actions on the affected machine.
-- [SCOPE-06] Add `port machine unfence --machine X` CLI command that clears `recovery_exhausted`, resets `recovery_attempts.*` to zero, and emits a `recovery_unfenced` event. Requires no other machine state change; explicitly not an alias for `launch`.
-- [SCOPE-06] Auto-clear `recovery_exhausted` when a successful operator-driven `port machine launch` produces a Live guest-agent heartbeat — this avoids forcing a second manual step when the operator already rebooted the machine.
-- [SCOPE-09] End-to-end integration tests covering the full ladder: (a) simulated guest-side wedge converges under tier-1 alone; (b) simulated node-side wedge on a single-tenant host converges under tier-3; (c) ladder exhausts without convergence, `recovery_state = "exhausted"` is set and persists across a window rollover, and `port machine unfence` resets cleanly.
+- [SCOPE-06] Persist `recovery_state` and `recovery_attempts` on disk so a control-plane restart mid-escalation does not re-arm the ladder against a machine that is already awaiting consumer handoff.
+- [SCOPE-06] `port machine unfence --machine X` CLI command that resets any non-`ok` recovery state (`awaiting_tier_3_host_recycle`, `in_progress`) and `recovery_attempts.*` back to zero, emitting a `recovery_unfenced` event. The command makes no runtime changes — it is explicitly not an alias for `launch`.
+- [SCOPE-06] Auto-clear on a successful operator-driven `port machine launch`: if the machine was in `awaiting_tier_3_host_recycle` and the launch produces a Live guest-agent heartbeat within a documented window, Port transitions `recovery_state` back to `ok` and emits `recovery_unfenced_via_launch`. Unsuccessful launches do not clear the state.
+- [SCOPE-08] End-to-end integration tests covering the full ladder: (a) simulated guest-side wedge converges under tier-1 alone; (b) simulated node-side wedge escalates to `awaiting_tier_3_host_recycle` with the `tier_3_escalation` event emitted, and returns to `ok` once simulated host return (re-register + fresh guest heartbeat) is observed; (c) `port machine unfence` on a persisted escalation cleanly resets to `ok`.
 
 ### Out of Scope
 
-- [SCOPE-10] Cross-cell rebalancing after exhaustion.
-- [SCOPE-13] Alerting, dashboards, UI for exhaustion.
+- [SCOPE-11] Cross-cell rebalancing after escalation.
+- [SCOPE-13] Alerting, dashboards, UI for recovery events.
 
 ## Functional Requirements
 
 <!-- BEGIN FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Scope | Source | Verification |
 |----|-------------|-------|--------|--------------|
-| SRS-01 | When a machine's ladder reaches tier-3 without convergence (or tier-3 is suppressed and no further tiers remain), the runner sets `recovery_state = "exhausted"`, stops attempting further actions, and persists the state across control-plane restarts. | SCOPE-06 | FR-01 | integration |
-| SRS-02 | `recovery_state = "exhausted"` survives `window_seconds` rollovers: attempt counters decaying does not re-arm the ladder; a test rolls the window and asserts no tier-1 fires on the exhausted machine. | SCOPE-06 | FR-01 | unit |
-| SRS-03 | `port machine unfence --machine X` is a new CLI command that clears `recovery_exhausted`, resets `recovery_attempts.tier_1/2/3` to zero, and emits a `recovery_unfenced` event; subsequent detector ticks re-arm the ladder normally. | SCOPE-06 | FR-01 | integration |
-| SRS-04 | A successful operator-driven `port machine launch` that produces a Live guest-agent heartbeat within a documented convergence window auto-clears `recovery_exhausted`, resets counters, and emits a `recovery_unfenced_via_launch` event. Unsuccessful launches do not clear the state. | SCOPE-06 | FR-01 | integration |
-| SRS-05 | An end-to-end test simulates a guest-side wedge on a local Firecracker machine and asserts tier-1 converges it without operator intervention; the test is deterministic (no `sleep`-based waits). | SCOPE-09 | FR-01 | integration |
-| SRS-06 | An end-to-end test simulates a node-side wedge on a single-tenant host, asserts tier-3 fires through the fake `HostRebootClient`, and confirms `recovery_state` returns to `"ok"` on re-registration + heartbeat recovery. | SCOPE-09 | FR-01 | integration |
-| SRS-07 | An end-to-end test drives the ladder through exhaustion, asserts sticky `recovery_exhausted` across a window rollover, then invokes `port machine unfence` and confirms the ladder re-arms cleanly. | SCOPE-09 | FR-01 | integration |
+| SRS-01 | `recovery_state` and `recovery_attempts` are persisted under the runtime-root (e.g. `runtime/recovery/<machine>.json`) alongside existing registered-node state; a control-plane restart with a machine in `awaiting_tier_3_host_recycle` reloads the state unchanged and does not re-arm tier-1/2. | SCOPE-06 | FR-01 | integration |
+| SRS-02 | `port machine unfence --machine X` is a new CLI command routed through a new control-plane endpoint `POST /v1/machines/{machine}/recovery:unfence`. It clears any non-`ok` `recovery_state`, zeros `recovery_attempts.*`, emits a `recovery_unfenced` event, and makes no other runtime change. On a machine with `recovery_state = "ok"` it is a no-op that returns success. | SCOPE-06 | FR-01 | integration |
+| SRS-03 | A successful operator-driven `port machine launch` on a machine in `awaiting_tier_3_host_recycle` auto-clears the state when a Live guest-agent heartbeat arrives within a documented convergence window; the transition emits `recovery_unfenced_via_launch`. A launch that does not produce a heartbeat within the window leaves the state unchanged. | SCOPE-06 | FR-01 | integration |
+| SRS-04 | An end-to-end test simulates a guest-side wedge on a local Firecracker machine and asserts tier-1 converges it without operator intervention; captures the runner event stream via a channel-based hook and verifies every transition. | SCOPE-08 | FR-01 | integration |
+| SRS-05 | An end-to-end test simulates a node-side wedge, drives the ladder until `recovery_state = "awaiting_tier_3_host_recycle"` and a `tier_3_escalation` event is captured; then simulates host return (node-agent re-registration + fresh guest heartbeat) and asserts auto-clear back to `ok` with a `tier_3_host_returned` event. The test uses no fake cloud clients — observation only. | SCOPE-08 | FR-01 | integration |
+| SRS-06 | An end-to-end test drives the ladder into `awaiting_tier_3_host_recycle`, crashes and restarts the control plane, asserts the state reloads, invokes `port machine unfence` via the CLI, and confirms the ladder re-arms and a subsequent wedge fires tier-1 again. | SCOPE-08 | FR-01 | integration |
 <!-- END FUNCTIONAL_REQUIREMENTS -->
 
 ## Non-Functional Requirements
@@ -38,6 +37,6 @@ Goal: Deliver the sticky recovery_exhausted terminal state, the port machine unf
 <!-- BEGIN NON_FUNCTIONAL_REQUIREMENTS -->
 | ID | Requirement | Scope | Source | Verification |
 |----|-------------|-------|--------|--------------|
-| SRS-NFR-01 | `recovery_exhausted` persistence survives a control-plane restart (on-disk, same directory as registered-node state); a test crashes and restarts the control plane mid-exhaustion and asserts the state is still set. | SCOPE-06 | NFR-01 | integration |
-| SRS-NFR-02 | End-to-end tests must not use wall-clock `sleep` for convergence; they drive time via injectable clocks or event hooks so CI is stable. | SCOPE-09 | NFR-01 | unit |
+| SRS-NFR-01 | End-to-end tests use injectable clocks and channel-based event hooks rather than wall-clock `sleep` for convergence, so CI is stable. A grep-based guard in the test file rejects `thread::sleep` / `tokio::time::sleep` outside explicit `#[allow]` annotations. | SCOPE-08 | NFR-01 | unit |
+| SRS-NFR-02 | The unfence command does not interact with any cloud-provider API or remote shell. Unfence is a local state mutation with a local event emission — no network calls beyond the existing control-plane HTTP path. | SCOPE-06 | NFR-01 | unit |
 <!-- END NON_FUNCTIONAL_REQUIREMENTS -->

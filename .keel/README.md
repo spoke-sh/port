@@ -227,8 +227,8 @@
 | Voyage | Status |
 |--------|--------|
 | [Tier-1 Guest Restart And Attempt Accounting](epics/VGzxMc4G4/voyages/VGzxmpqrI/) | in-progress |
-| [Tier-2 Overlay Recreate And Tier-3 Host Recycle](epics/VGzxMc4G4/voyages/VGzxnR97R/) | draft |
-| [Recovery Exhaustion Reset And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | draft |
+| [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](epics/VGzxMc4G4/voyages/VGzxnR97R/) | draft |
+| [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | draft |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
