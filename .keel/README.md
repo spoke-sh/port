@@ -230,11 +230,11 @@
 | [Tier-2 Overlay Recreate And Tier-3 Escalation Signal](epics/VGzxMc4G4/voyages/VGzxnR97R/) | done |
 | [Tier-3 Signal Persistence, Unfence Reset, And End-To-End Proof](epics/VGzxMc4G4/voyages/VGzxoN8WF/) | done |
 
-### [Wire Wedge Detection And Recovery Into Live Control Plane](epics/VH0mU3DbK/) (draft)
+### [Wire Wedge Detection And Recovery Into Live Control Plane](epics/VH0mU3DbK/) (active)
 
 | Voyage | Status |
 |--------|--------|
-| [Cluster Aggregate Wedge Field Threading](epics/VH0mU3DbK/voyages/VH0mjMP8p/) | draft |
+| [Cluster Aggregate Wedge Field Threading](epics/VH0mU3DbK/voyages/VH0mjMP8p/) | done |
 | [Live Detector And Recovery Runner Wiring](epics/VH0mU3DbK/voyages/VH0mlnCSq/) | draft |
 
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)

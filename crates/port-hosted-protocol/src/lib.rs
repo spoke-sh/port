@@ -113,11 +113,28 @@ pub enum HostedGuestVerb {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostedMachineRoute {
     List,
-    Launch { machine_name: String },
-    Status { machine_name: String },
-    Monitor { machine_name: String },
-    Top { machine_name: String },
-    Stop { machine_name: String },
+    Launch {
+        machine_name: String,
+    },
+    Status {
+        machine_name: String,
+    },
+    Monitor {
+        machine_name: String,
+    },
+    Top {
+        machine_name: String,
+    },
+    Stop {
+        machine_name: String,
+    },
+    /// Read-only wedge and recovery state for a machine. Served
+    /// directly by the control plane from its in-memory `wedge_state`
+    /// map and on-disk recovery records — does not proxy to the node
+    /// agent and does not issue any guest operation.
+    Wedge {
+        machine_name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -511,6 +528,9 @@ fn machine_route_path(route: &HostedMachineRoute) -> String {
         HostedMachineRoute::Stop { machine_name } => {
             format!("/v1/machines/{machine_name}:stop")
         }
+        HostedMachineRoute::Wedge { machine_name } => {
+            format!("/v1/machines/{machine_name}/wedge")
+        }
     }
 }
 
@@ -608,6 +628,9 @@ fn machine_node_route_suffix(route: &HostedMachineRoute) -> String {
         }
         HostedMachineRoute::Stop { machine_name } => {
             format!("/machines/{machine_name}:stop")
+        }
+        HostedMachineRoute::Wedge { machine_name } => {
+            format!("/machines/{machine_name}/wedge")
         }
     }
 }

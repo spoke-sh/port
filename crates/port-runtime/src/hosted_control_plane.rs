@@ -1263,6 +1263,7 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
         )
         .route("/v1/machines/{machine}/monitor", get(machine_monitor))
         .route("/v1/machines/{machine}/top", get(machine_top))
+        .route("/v1/machines/{machine}/wedge", get(machine_wedge))
         .route("/v1/machines/{machine}/guest:exec", post(guest_exec))
         .route("/v1/machines/{machine}/guest:copy", post(guest_copy))
         .route(
@@ -2012,6 +2013,58 @@ async fn machine_top(
         ),
         Err(message) => error_response(StatusCode::BAD_GATEWAY, message, None),
     }
+}
+
+async fn machine_wedge(
+    State(state): State<ControlPlaneState>,
+    Path(machine): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+
+    let summary = match resolve_summary(&state, &machine) {
+        Ok(summary) => summary,
+        Err(response) => return response,
+    };
+
+    let mut wedge_status = crate::MachineWedgeStatus {
+        machine_name: machine.clone(),
+        wedged_since_unix_s: None,
+        wedge_class: None,
+        recovery_attempts: crate::RecoveryAttemptCounters::default(),
+        last_recovery_action: None,
+        recovery_state: crate::RecoveryState::default(),
+    };
+
+    if let Ok(wedge_state) = state.inner.wedge_state.read() {
+        if let Some(fact) = wedge_state.get(&machine) {
+            wedge_status.wedged_since_unix_s = Some(fact.wedged_since_unix_s);
+            wedge_status.wedge_class = Some(fact.wedge_class.to_string());
+        }
+    }
+
+    let route = match resolve_machine_binding(&state, &summary) {
+        Ok((_, route, _)) => route,
+        Err(_) => HostedRouteContext::from_machine_summary(&summary),
+    };
+
+    if let Some(runtime_root) = route.runtime_root.as_ref() {
+        if let Ok(Some(record)) = load_recovery_record(runtime_root, &machine) {
+            wedge_status.recovery_attempts = record.recovery_attempts;
+            wedge_status.last_recovery_action = record.last_recovery_action;
+            wedge_status.recovery_state = record.recovery_state;
+        }
+    }
+
+    json_response(
+        StatusCode::OK,
+        &HostedSuccess {
+            route,
+            result: wedge_status,
+        },
+    )
 }
 
 async fn machine_command(

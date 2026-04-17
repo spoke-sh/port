@@ -487,6 +487,20 @@ impl<'a> MachineClient<'a> {
             None,
         )
     }
+
+    /// Read-only wedge and recovery state served directly by the
+    /// control plane. Does not proxy to the node agent and does not
+    /// trigger any guest operation.
+    #[must_use]
+    pub fn wedge(&self, machine_name: &str) -> HostedApiRequest {
+        self.client.request(
+            HttpMethod::Get,
+            HostedControlPlaneRoute::Machine(HostedMachineRoute::Wedge {
+                machine_name: machine_name.to_string(),
+            }),
+            None,
+        )
+    }
 }
 
 impl<'a> InventoryClient<'a> {

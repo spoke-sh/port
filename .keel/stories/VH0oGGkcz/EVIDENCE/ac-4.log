@@ -1,0 +1,16 @@
+---
+recorded_at: 2026-04-16T20:32:28.659266008-07:00
+command: cargo test -p port --test machine_commands cli_cluster_status
+---
+
+running 2 tests
+test cli_cluster_status_json_surfaces_legacy_detached_runtime_drift ... ok
+test cli_cluster_status_surfaces_hosted_real_ha_truth ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.23s
+
+
+--- stderr ---
+   Compiling port v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.64s
+     Running tests/machine_commands.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/machine_commands-17b892b92daffb2c)

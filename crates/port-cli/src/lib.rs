@@ -1682,12 +1682,7 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
     );
     println!("api endpoint: {}", report.api_endpoint);
     for machine in &report.machines {
-        println!(
-            "machine truth: role={} machine={} node={}",
-            machine.role,
-            machine.machine_name,
-            machine.node_name.as_deref().unwrap_or("(unresolved)")
-        );
+        print!("{}", format_hosted_k3s_machine_truth(machine));
     }
     for service in &report.managed_services {
         println!(
@@ -2209,6 +2204,41 @@ fn output_runtime_class(runtime_class: &Option<MachineRuntimeClassSpec>) {
         return;
     }
     print!("{rendered}");
+}
+
+fn format_hosted_k3s_machine_truth(machine: &port_runtime::HostedK3sMachineTruth) -> String {
+    let mut output = String::new();
+    writeln!(
+        &mut output,
+        "machine truth: role={} machine={} node={}",
+        machine.role,
+        machine.machine_name,
+        machine.node_name.as_deref().unwrap_or("(unresolved)")
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "  guest refresh age seconds: {}",
+        machine
+            .guest_refresh_age_seconds
+            .map_or_else(|| String::from("(none)"), |value| value.to_string())
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "  wedged since: {}",
+        machine
+            .wedged_since_unix_s
+            .map_or_else(|| String::from("(none)"), |value| value.to_string())
+    )
+    .expect("write should succeed");
+    writeln!(
+        &mut output,
+        "  wedge class: {}",
+        machine.wedge_class.as_deref().unwrap_or("(none)")
+    )
+    .expect("write should succeed");
+    output
 }
 
 fn format_machine_status(status: &port_runtime::MachineStatus) -> String {
@@ -3669,7 +3699,8 @@ mod tests {
         CopyDirectionArg, GuestCommand, HostedNodeBindingArg, MachineCommand, NodeAgentCommand,
         ProtectionModeArg, ServiceCommand, ServiceHealthPolicyArg, ServiceKindArg,
         ServiceRestartPolicyArg, ServiceSecretCommand, SubstrateArg, format_hosted_fleet_nodes,
-        format_machine_status, render_help, render_nested_subcommand_help, render_subcommand_help,
+        format_hosted_k3s_machine_truth, format_machine_status, render_help,
+        render_nested_subcommand_help, render_subcommand_help,
     };
 
     fn sample_hosted_status(
@@ -4552,6 +4583,85 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    fn sample_machine_truth_with_wedge() -> port_runtime::HostedK3sMachineTruth {
+        port_runtime::HostedK3sMachineTruth {
+            role: String::from("worker"),
+            machine_name: String::from("cloud-aws-worker-2"),
+            node_name: Some(String::from("aws-linux-cell-1")),
+            runtime_root: Some(PathBuf::from("/var/lib/port/aws-hosted/runtime")),
+            detail: String::from("worker placed on aws-linux-cell-1"),
+            guest_refresh_age_seconds: Some(248),
+            wedged_since_unix_s: Some(1_745_000_000),
+            wedge_class: Some(String::from("guest")),
+            recovery_attempts: port_runtime::RecoveryAttemptCounters {
+                tier_1: 1,
+                tier_2: 0,
+                tier_3: 0,
+            },
+            last_recovery_action: Some(port_runtime::RecoveryActionRecord {
+                tier: 1,
+                timestamp_unix_s: 1_745_000_060,
+                outcome: String::from("restart-issued"),
+            }),
+            recovery_state: port_runtime::RecoveryState::InProgress,
+        }
+    }
+
+    fn sample_machine_truth_clean() -> port_runtime::HostedK3sMachineTruth {
+        port_runtime::HostedK3sMachineTruth {
+            role: String::from("control-plane"),
+            machine_name: String::from("cloud-aws"),
+            node_name: Some(String::from("aws-linux-cell-0")),
+            runtime_root: Some(PathBuf::from("/var/lib/port/aws-hosted/runtime")),
+            detail: String::from("control-plane placed on aws-linux-cell-0"),
+            guest_refresh_age_seconds: None,
+            wedged_since_unix_s: None,
+            wedge_class: None,
+            recovery_attempts: port_runtime::RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+            recovery_state: port_runtime::RecoveryState::default(),
+        }
+    }
+
+    #[test]
+    fn print_cluster_status_report_renders_wedge_fields() {
+        let wedged = sample_machine_truth_with_wedge();
+        let rendered = format_hosted_k3s_machine_truth(&wedged);
+        assert!(
+            rendered.contains(
+                "machine truth: role=worker machine=cloud-aws-worker-2 node=aws-linux-cell-1"
+            ),
+            "expected machine truth header line; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("guest refresh age seconds: 248"),
+            "expected populated guest refresh age line; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("wedged since: 1745000000"),
+            "expected populated wedged since line; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("wedge class: guest"),
+            "expected populated wedge class line; got: {rendered}"
+        );
+
+        let clean = sample_machine_truth_clean();
+        let rendered = format_hosted_k3s_machine_truth(&clean);
+        assert!(
+            rendered.contains("guest refresh age seconds: (none)"),
+            "expected (none) for absent guest refresh age; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("wedged since: (none)"),
+            "expected (none) for absent wedged since; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("wedge class: (none)"),
+            "expected (none) for absent wedge class; got: {rendered}"
+        );
     }
 }
 

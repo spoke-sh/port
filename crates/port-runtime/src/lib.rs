@@ -270,6 +270,18 @@ pub struct HostedK3sMachineTruth {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_root: Option<PathBuf>,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_refresh_age_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedged_since_unix_s: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedge_class: Option<String>,
+    #[serde(default, skip_serializing_if = "RecoveryAttemptCounters::is_empty")]
+    pub recovery_attempts: RecoveryAttemptCounters,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery_action: Option<RecoveryActionRecord>,
+    #[serde(default, skip_serializing_if = "RecoveryState::is_default")]
+    pub recovery_state: RecoveryState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -492,6 +504,27 @@ impl RecoveryAttemptCounters {
     pub fn is_empty(&self) -> bool {
         self.tier_1 == 0 && self.tier_2 == 0 && self.tier_3 == 0
     }
+}
+
+/// Wedge and recovery state served directly by the control plane on
+/// the dedicated `machines/<name>/wedge` route. Populated from the
+/// in-memory `wedge_state` map and on-disk recovery records — no
+/// node-agent proxy and no guest operation. Designed for consumers
+/// that poll cluster status frequently and do not want to incur a
+/// full `MachineStatus` round trip per machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineWedgeStatus {
+    pub machine_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedged_since_unix_s: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedge_class: Option<String>,
+    #[serde(default, skip_serializing_if = "RecoveryAttemptCounters::is_empty")]
+    pub recovery_attempts: RecoveryAttemptCounters,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_recovery_action: Option<RecoveryActionRecord>,
+    #[serde(default, skip_serializing_if = "RecoveryState::is_default")]
+    pub recovery_state: RecoveryState,
 }
 
 /// Most recent recovery-ladder transition.
@@ -2746,20 +2779,45 @@ fn hosted_k3s_control_plane_placements(
 }
 
 fn hosted_k3s_machine_truth(
+    config: &PortConfig,
     machine_access: &[HostedK3sMachineAccess],
 ) -> Vec<HostedK3sMachineTruth> {
     let mut machines = machine_access
         .iter()
-        .map(|machine| HostedK3sMachineTruth {
-            role: machine.role.clone(),
-            machine_name: machine
+        .map(|machine| {
+            let machine_name = machine
                 .route
                 .machine_name
                 .clone()
-                .unwrap_or_else(|| String::from("(unknown)")),
-            node_name: machine.route.node_name.clone(),
-            runtime_root: machine.route.runtime_root.clone(),
-            detail: machine.detail.clone(),
+                .unwrap_or_else(|| String::from("(unknown)"));
+            // Best-effort wedge enrichment: the dedicated control-plane
+            // route is read-only and never proxies to the node agent,
+            // so a failure here means the cluster cannot reach the
+            // hosted control plane at all — leave wedge fields at
+            // serde defaults and let the existing managed_services row
+            // carry the unreachable signal.
+            let wedge = hosted_control_plane_machine_wedge(config, &machine_name).ok();
+            HostedK3sMachineTruth {
+                role: machine.role.clone(),
+                machine_name,
+                node_name: machine.route.node_name.clone(),
+                runtime_root: machine.route.runtime_root.clone(),
+                detail: machine.detail.clone(),
+                // guest_refresh_age_seconds lives on the node-agent,
+                // not the control plane, so the wedge route does not
+                // surface it. A future enrichment story can publish
+                // it via the heartbeat path if a consumer needs it on
+                // the cluster aggregate.
+                guest_refresh_age_seconds: None,
+                wedged_since_unix_s: wedge.as_ref().and_then(|w| w.wedged_since_unix_s),
+                wedge_class: wedge.as_ref().and_then(|w| w.wedge_class.clone()),
+                recovery_attempts: wedge
+                    .as_ref()
+                    .map(|w| w.recovery_attempts)
+                    .unwrap_or_default(),
+                last_recovery_action: wedge.as_ref().and_then(|w| w.last_recovery_action.clone()),
+                recovery_state: wedge.as_ref().map(|w| w.recovery_state).unwrap_or_default(),
+            }
         })
         .collect::<Vec<_>>();
     machines.sort_by(|left, right| {
@@ -3326,7 +3384,7 @@ pub fn hosted_k3s_cluster_access(
             hosted_k3s_boundary_summary()
         );
     }
-    let machines = hosted_k3s_machine_truth(&machine_access);
+    let machines = hosted_k3s_machine_truth(config, &machine_access);
     let managed_services = hosted_k3s_managed_service_truth(config, runtime_root, &machine_access);
     let boundary_notes = hosted_k3s_report_boundary_notes(&cluster, &machine_access);
     let control_plane_placements = hosted_k3s_control_plane_placements(&machine_access);
@@ -8383,6 +8441,22 @@ fn hosted_control_plane_machine_top(
         .map_err(|error| {
             anyhow!(
                 "failed to inspect top data for machine '{}' through the live hosted control-plane route: {error}",
+                machine_name
+            )
+        })?;
+    Ok(response.result)
+}
+
+fn hosted_control_plane_machine_wedge(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<MachineWedgeStatus> {
+    let client = hosted_client_for_machine(config, machine_name)?;
+    let response: HostedSuccess<MachineWedgeStatus> = client
+        .execute_json(client.machines().wedge(machine_name))
+        .map_err(|error| {
+            anyhow!(
+                "failed to inspect wedge state for machine '{}' through the live hosted control-plane route: {error}",
                 machine_name
             )
         })?;
@@ -23388,5 +23462,174 @@ exec sleep 30
             stopped.detail
         );
         assert_eq!(stopped.desired_state, ServiceDesiredState::Active);
+    }
+
+    #[test]
+    fn hosted_k3s_machine_truth_serde_round_trips_with_wedge_fields() {
+        let populated = super::HostedK3sMachineTruth {
+            role: String::from("worker"),
+            machine_name: String::from("cloud-aws-worker-2"),
+            node_name: Some(String::from("aws-linux-cell-1")),
+            runtime_root: Some(PathBuf::from("/var/lib/port/aws-hosted/runtime")),
+            detail: String::from("worker placed on aws-linux-cell-1"),
+            guest_refresh_age_seconds: Some(248),
+            wedged_since_unix_s: Some(1_745_000_000),
+            wedge_class: Some(String::from("guest")),
+            recovery_attempts: super::RecoveryAttemptCounters {
+                tier_1: 1,
+                tier_2: 0,
+                tier_3: 0,
+            },
+            last_recovery_action: Some(super::RecoveryActionRecord {
+                tier: 1,
+                timestamp_unix_s: 1_745_000_060,
+                outcome: String::from("restart-issued"),
+            }),
+            recovery_state: super::RecoveryState::InProgress,
+        };
+        let rendered = serde_json::to_value(&populated).expect("populated truth should serialize");
+        assert_eq!(
+            rendered["wedged_since_unix_s"],
+            serde_json::json!(1_745_000_000)
+        );
+        assert_eq!(rendered["wedge_class"], serde_json::json!("guest"));
+        assert_eq!(rendered["recovery_state"], serde_json::json!("in-progress"));
+        assert_eq!(
+            rendered["recovery_attempts"]["tier_1"],
+            serde_json::json!(1)
+        );
+        let decoded: super::HostedK3sMachineTruth =
+            serde_json::from_value(rendered).expect("populated truth should round-trip");
+        assert_eq!(decoded, populated);
+
+        let bare = super::HostedK3sMachineTruth {
+            role: String::from("control-plane"),
+            machine_name: String::from("cloud-aws"),
+            node_name: Some(String::from("aws-linux-cell-0")),
+            runtime_root: None,
+            detail: String::from("control-plane placed on aws-linux-cell-0"),
+            guest_refresh_age_seconds: None,
+            wedged_since_unix_s: None,
+            wedge_class: None,
+            recovery_attempts: super::RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+            recovery_state: super::RecoveryState::default(),
+        };
+        let rendered = serde_json::to_value(&bare).expect("bare truth should serialize");
+        let object = rendered
+            .as_object()
+            .expect("payload should be a JSON object");
+        for absent in [
+            "guest_refresh_age_seconds",
+            "wedged_since_unix_s",
+            "wedge_class",
+            "recovery_attempts",
+            "last_recovery_action",
+            "recovery_state",
+        ] {
+            assert!(
+                !object.contains_key(absent),
+                "{absent} should be omitted from the wire when default; got: {rendered}"
+            );
+        }
+        let decoded: super::HostedK3sMachineTruth =
+            serde_json::from_value(rendered).expect("bare truth should round-trip");
+        assert_eq!(decoded, bare);
+    }
+
+    #[test]
+    fn hosted_k3s_machine_truth_leaves_wedge_fields_default_when_wedge_route_unreachable() {
+        let temp = tempdir().expect("temp dir should create");
+        let runtime_root = temp.path().join("runtime");
+        let config = PortConfig::sample();
+        let access = vec![super::HostedK3sMachineAccess {
+            role: String::from("worker"),
+            route: HostedRouteContext {
+                machine_name: Some(String::from("nonexistent-machine")),
+                node_name: Some(String::from("aws-linux-cell-1")),
+                runtime_root: Some(runtime_root.clone()),
+                ..HostedRouteContext::default()
+            },
+            detail: String::from("worker placement detail"),
+        }];
+
+        // No live control plane in scope: hosted_control_plane_machine_wedge
+        // returns Err and the row builds with wedge defaults — same shape
+        // we expect when the dedicated wedge route has nothing to report
+        // for that machine.
+        let truth = super::hosted_k3s_machine_truth(&config, &access);
+
+        assert_eq!(truth.len(), 1);
+        let row = &truth[0];
+        assert_eq!(row.role, "worker");
+        assert_eq!(row.machine_name, "nonexistent-machine");
+        assert_eq!(row.detail, "worker placement detail");
+        assert_eq!(row.guest_refresh_age_seconds, None);
+        assert_eq!(row.wedged_since_unix_s, None);
+        assert_eq!(row.wedge_class, None);
+        assert_eq!(
+            row.recovery_attempts,
+            super::RecoveryAttemptCounters::default()
+        );
+        assert_eq!(row.last_recovery_action, None);
+        assert_eq!(row.recovery_state, super::RecoveryState::default());
+    }
+
+    #[test]
+    fn machine_wedge_status_serde_round_trips_with_defaults_skipped_on_wire() {
+        let bare = super::MachineWedgeStatus {
+            machine_name: String::from("cloud-aws"),
+            wedged_since_unix_s: None,
+            wedge_class: None,
+            recovery_attempts: super::RecoveryAttemptCounters::default(),
+            last_recovery_action: None,
+            recovery_state: super::RecoveryState::default(),
+        };
+        let rendered = serde_json::to_value(&bare).expect("bare wedge status should serialize");
+        let object = rendered
+            .as_object()
+            .expect("wedge status should serialize as object");
+        for absent in [
+            "wedged_since_unix_s",
+            "wedge_class",
+            "recovery_attempts",
+            "last_recovery_action",
+            "recovery_state",
+        ] {
+            assert!(
+                !object.contains_key(absent),
+                "{absent} should be omitted on the wire when default; got: {rendered}"
+            );
+        }
+        let decoded: super::MachineWedgeStatus =
+            serde_json::from_value(rendered).expect("bare wedge status should round-trip");
+        assert_eq!(decoded, bare);
+
+        let populated = super::MachineWedgeStatus {
+            machine_name: String::from("cloud-aws-worker-2"),
+            wedged_since_unix_s: Some(1_745_000_000),
+            wedge_class: Some(String::from("guest")),
+            recovery_attempts: super::RecoveryAttemptCounters {
+                tier_1: 1,
+                tier_2: 0,
+                tier_3: 0,
+            },
+            last_recovery_action: Some(super::RecoveryActionRecord {
+                tier: 1,
+                timestamp_unix_s: 1_745_000_060,
+                outcome: String::from("restart-issued"),
+            }),
+            recovery_state: super::RecoveryState::InProgress,
+        };
+        let rendered =
+            serde_json::to_value(&populated).expect("populated wedge status should serialize");
+        assert_eq!(
+            rendered["wedged_since_unix_s"],
+            serde_json::json!(1_745_000_000)
+        );
+        assert_eq!(rendered["recovery_state"], serde_json::json!("in-progress"));
+        let decoded: super::MachineWedgeStatus =
+            serde_json::from_value(rendered).expect("populated wedge status should round-trip");
+        assert_eq!(decoded, populated);
     }
 }

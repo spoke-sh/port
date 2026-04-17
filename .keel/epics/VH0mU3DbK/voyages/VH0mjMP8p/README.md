@@ -1,12 +1,15 @@
 ---
 # system-managed
 id: VH0mjMP8p
-status: draft
+status: done
 epic: VH0mU3DbK
 created_at: 2026-04-16T19:32:55
 # authored
 title: Cluster Aggregate Wedge Field Threading
 index: 1
+updated_at: 2026-04-16T19:56:21
+started_at: 2026-04-16T19:56:25
+completed_at: 2026-04-16T20:33:19
 ---
 
 # Cluster Aggregate Wedge Field Threading
@@ -20,14 +23,16 @@ index: 1
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 stories complete
+**Progress:** 1/1 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
-| [Thread Wedge Fields Onto HostedK3sMachineTruth](../../../../stories/VH0oGGkcz/README.md) | feat | icebox |
+| [Thread Wedge Fields Onto HostedK3sMachineTruth](../../../../stories/VH0oGGkcz/README.md) | feat | done |
 <!-- END GENERATED -->
