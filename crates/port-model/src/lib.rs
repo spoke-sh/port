@@ -2515,12 +2515,18 @@ impl std::fmt::Display for ServiceHealthState {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ServiceHealthcheck {
     #[serde(default)]
     pub policy: ServiceHealthPolicy,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub restart_on_unhealthy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -5424,6 +5430,7 @@ api_forward_target = "127.0.0.1:6443"
         assert_eq!(policy.restart, ServiceRestartPolicy::Never);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::None);
         assert!(policy.healthcheck.command.is_empty());
+        assert!(!policy.healthcheck.restart_on_unhealthy);
         policy
             .validate_for_kind(ServiceKind::Service)
             .expect("default policy should be valid");
@@ -5448,6 +5455,7 @@ api_forward_target = "127.0.0.1:6443"
             healthcheck: ServiceHealthcheck {
                 policy: ServiceHealthPolicy::Command,
                 command: Vec::new(),
+                restart_on_unhealthy: false,
             },
         }
         .validate_for_kind(ServiceKind::Service)
@@ -5462,6 +5470,7 @@ api_forward_target = "127.0.0.1:6443"
             healthcheck: ServiceHealthcheck {
                 policy: ServiceHealthPolicy::None,
                 command: vec![String::from("/bin/true")],
+                restart_on_unhealthy: false,
             },
         }
         .validate_for_kind(ServiceKind::Service)

@@ -899,6 +899,7 @@ fn should_restart_managed_service(
 
 fn should_restart_unhealthy_managed_service(handle: &ManagedProcessHandle) -> bool {
     matches!(handle.policy.restart, ServiceRestartPolicy::Always)
+        && handle.policy.healthcheck.restart_on_unhealthy
         && matches!(handle.record.health_state, ServiceHealthState::Unhealthy)
         && handle.started_at.elapsed() >= MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD
         && handle.consecutive_unhealthy_checks >= MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD
@@ -2588,6 +2589,7 @@ mod tests {
                                 String::from("-lc"),
                                 String::from("test -f healthy"),
                             ],
+                            restart_on_unhealthy: false,
                         },
                     },
                 },
@@ -2642,7 +2644,7 @@ mod tests {
     }
 
     #[test]
-    fn background_supervisor_restarts_always_service_after_sustained_health_check_failure() {
+    fn background_supervisor_marks_always_service_unhealthy_without_restart_by_default() {
         let temp = tempdir().expect("tempdir should exist");
         let guest_root = temp.path().join("guest");
         fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
@@ -2672,6 +2674,95 @@ mod tests {
                                 String::from("-lc"),
                                 String::from("test -f healthy"),
                             ],
+                            restart_on_unhealthy: false,
+                        },
+                    },
+                },
+            }),
+        });
+        assert!(matches!(
+            start,
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(_)),
+                ..
+            }
+        ));
+
+        let runtime_record = guest_root.join("run/port/services/runtime/healthbox.json");
+        wait_for_background_for(
+            MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD + Duration::from_secs(2),
+            || {
+                let record = read_to_string(&runtime_record);
+                record.contains("\"health_state\": \"unhealthy\"")
+                    && record.contains("\"restart_count\": 0")
+            },
+        );
+
+        let status = service.handle(RequestEnvelope {
+            id: 19,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("healthbox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected health status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(status.restart_count, 0);
+        assert_eq!(status.health_state, ServiceHealthState::Unhealthy);
+        assert!(
+            status.health_detail.as_deref() == Some("health command exited with code 1"),
+            "{:?}",
+            status.health_detail
+        );
+        assert!(
+            !guest_root
+                .join("run/port/service-evidence/healthbox")
+                .exists(),
+            "health observation should not capture restart evidence without an unhealthy-restart policy"
+        );
+    }
+
+    #[test]
+    fn background_supervisor_can_opt_in_to_restart_after_sustained_health_check_failure() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let service = AgentService::new(guest_root.clone());
+
+        let start = service.handle(RequestEnvelope {
+            id: 20,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("healthbox"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "count_file=health-restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; trap 'exit 0' TERM; while :; do sleep 1; done",
+                        ),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::Always,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![
+                                String::from("/bin/sh"),
+                                String::from("-lc"),
+                                String::from("test -f healthy"),
+                            ],
+                            restart_on_unhealthy: true,
                         },
                     },
                 },
@@ -2696,7 +2787,7 @@ mod tests {
         );
 
         let status = service.handle(RequestEnvelope {
-            id: 19,
+            id: 21,
             operation: GuestOperation::ManagedService(ManagedServiceRequest {
                 operation: ManagedServiceOperation::Status {
                     name: String::from("healthbox"),

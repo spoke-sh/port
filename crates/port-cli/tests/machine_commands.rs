@@ -1701,6 +1701,9 @@ fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
+            HostedGuestExpectedOperation::ManagedServiceList {
+                statuses: vec![running_managed_service_status("k3s-server")],
+            },
             HostedGuestExpectedOperation::Exec {
                 command: hosted_k3s_legacy_runtime_drift_command(),
                 stdout: String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),

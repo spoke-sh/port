@@ -3875,6 +3875,7 @@ fn hosted_k3s_service_policy(role: &str, machine_name: &str) -> ServicePolicy {
         healthcheck: ServiceHealthcheck {
             policy: ServiceHealthPolicy::Command,
             command: hosted_k3s_service_healthcheck_command(role, machine_name),
+            restart_on_unhealthy: false,
         },
     }
 }
@@ -7180,6 +7181,18 @@ fn resolve_service_runtime_context(
     machine_name: &str,
     host_group: Option<&str>,
 ) -> Result<ResolvedMachineRuntime> {
+    if host_group.is_none()
+        && let Some(context) =
+            resolve_localized_hosted_service_runtime_context(config, runtime_root, machine_name)?
+    {
+        return Ok(context);
+    }
+    if host_group.is_none()
+        && let Some(context) =
+            resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
+    {
+        return Ok(context);
+    }
     let context = resolve_machine_runtime(config, runtime_root, machine_name, host_group)?;
     if context.status.state == MachineRuntimeState::Malformed {
         bail!(
@@ -7196,6 +7209,124 @@ fn resolve_service_runtime_context(
         );
     }
     Ok(context)
+}
+
+fn resolve_localized_hosted_service_runtime_context(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<Option<ResolvedMachineRuntime>> {
+    if !machine_is_hosted(config, machine_name)? {
+        return Ok(None);
+    }
+
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let hosted_identity = effective_config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
+    let Some(summary) = effective_config.hosted_machine_summary_contract(machine_name)? else {
+        return Ok(None);
+    };
+    let inventory = effective_config.hosted_inventory_contract()?;
+    let Some((node_name, _node)) = inventory
+        .nodes
+        .iter()
+        .find(|(_, node)| node.runtime_root == runtime_root)
+    else {
+        return Ok(None);
+    };
+
+    let mut status =
+        local_machine_status_for_runtime_root(&effective_config, runtime_root, machine_name)?;
+    status.control = MachineControlContract::hosted_control_plane();
+    status.detail = format!(
+        "{} Routed through control plane '{}' and node '{}'. {}",
+        status.detail, hosted_identity.control_plane, node_name, summary.placement_detail
+    );
+
+    Ok(Some(ResolvedMachineRuntime {
+        status,
+        control_plane: Some(hosted_identity.control_plane),
+        node_name: Some(node_name.clone()),
+        host_groups: summary.host_groups.clone(),
+        host_group_policies: summary.host_group_policies.clone(),
+        target_host_group: None,
+        scheduler: None,
+    }))
+}
+
+fn resolve_stored_local_hosted_service_runtime_context(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Option<ResolvedMachineRuntime>> {
+    if !machine_is_hosted(config, machine_name)? {
+        return Ok(None);
+    }
+
+    let effective_config = effective_config_with_hosted_imported_inventory(config)?;
+    let hosted_identity = effective_config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
+    let Some(summary) = effective_config.hosted_machine_summary_contract(machine_name)? else {
+        return Ok(None);
+    };
+    let Some(placement) = hosted_stored_machine_placement(config, machine_name)? else {
+        return Ok(None);
+    };
+    let paths = RuntimePaths::for_machine(&placement.runtime_root, machine_name);
+    if !paths.runtime_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut status = local_machine_status_for_runtime_root(
+        &effective_config,
+        &placement.runtime_root,
+        machine_name,
+    )?;
+    status.control = MachineControlContract::hosted_control_plane();
+    status.detail = format!(
+        "{} Routed through control plane '{}' and stored node '{}'. {}",
+        status.detail,
+        hosted_identity.control_plane,
+        placement.node_name,
+        placement
+            .placement_detail
+            .unwrap_or_else(|| summary.placement_detail.clone())
+    );
+
+    Ok(Some(ResolvedMachineRuntime {
+        status,
+        control_plane: Some(hosted_identity.control_plane),
+        node_name: Some(placement.node_name),
+        host_groups: summary.host_groups.clone(),
+        host_group_policies: summary.host_group_policies.clone(),
+        target_host_group: None,
+        scheduler: None,
+    }))
+}
+
+fn local_machine_status_for_runtime_root(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+) -> Result<MachineStatus> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{}'", machine_name))?;
+    match machine.substrate {
+        ExecutionSubstrate::Firecracker => {
+            firecracker_local_machine_status(runtime_root, machine_name)
+        }
+        ExecutionSubstrate::CloudHypervisor => {
+            cloud_hypervisor_local_machine_status(runtime_root, machine_name)
+        }
+        ExecutionSubstrate::Avf => avf_local_machine_status(runtime_root, machine_name),
+    }
 }
 
 fn validate_identifier(value: &str, label: &str) -> Result<()> {
@@ -7956,15 +8087,6 @@ fn hosted_pvm_lane_check_from_imported_record(
     }
 }
 
-fn status_priority(state: MachineRuntimeState) -> u8 {
-    match state {
-        MachineRuntimeState::Running => 4,
-        MachineRuntimeState::Malformed => 3,
-        MachineRuntimeState::Stale => 2,
-        MachineRuntimeState::Stopped => 1,
-    }
-}
-
 fn hosted_machine_resolution(
     config: &PortConfig,
     machine_name: &str,
@@ -8042,29 +8164,67 @@ fn hosted_machine_resolution(
     }
 
     let inventory = effective_config.hosted_inventory_contract()?;
-    if let Some(placement) = hosted_stored_machine_placement(config, machine_name)? {
+    let stored_placement = hosted_stored_machine_placement(config, machine_name)?;
+    if let Ok(response) = hosted_control_plane_machine_status_response(config, machine_name) {
+        let mut status = response.result;
+        let node_name = response.route.node_name.clone().or_else(|| {
+            stored_placement
+                .as_ref()
+                .map(|placement| placement.node_name.clone())
+        });
+        let runtime_root = response
+            .route
+            .runtime_root
+            .clone()
+            .or_else(|| {
+                stored_placement
+                    .as_ref()
+                    .map(|placement| placement.runtime_root.clone())
+            })
+            .or_else(|| runtime_root_from_machine_status(&status))
+            .unwrap_or_else(|| placeholder_root.clone());
+        let placement_detail = stored_placement
+            .as_ref()
+            .and_then(|placement| placement.placement_detail.clone())
+            .unwrap_or_else(|| summary.placement_detail.clone());
+        status.detail = match node_name.as_deref() {
+            Some(node_name) => format!(
+                "{} Routed through control plane '{}' and node '{}'. {}",
+                status.detail, summary.control_plane, node_name, placement_detail
+            ),
+            None => format!(
+                "{} Routed through control plane '{}'. {}",
+                status.detail, summary.control_plane, placement_detail
+            ),
+        };
+
+        return Ok(HostedMachineResolution {
+            control_plane: summary.control_plane.clone(),
+            node_name,
+            host_groups: summary.host_groups.clone(),
+            host_group_policies: summary.host_group_policies.clone(),
+            runtime_root,
+            status,
+        });
+    }
+
+    if let Some(placement) = stored_placement {
         let paths = RuntimePaths::for_machine(&placement.runtime_root, machine_name);
         let placement_detail = placement
             .placement_detail
             .clone()
             .unwrap_or_else(|| summary.placement_detail.clone());
         let mut status = if inventory.nodes.contains_key(&placement.node_name) {
-            if paths.runtime_dir.exists() {
-                inspect_machine(&placement.runtime_root, machine_name, control.clone())?
-            } else {
-                synthetic_machine_status(
-                    machine_name,
-                    &paths,
-                    control.clone(),
-                    MachineRuntimeState::Stopped,
-                    format!(
-                        "control plane '{}' resolved stored placement on node '{}' but the node-agent runtime root '{}' does not contain machine state",
-                        summary.control_plane,
-                        placement.node_name,
-                        placement.runtime_root.display()
-                    ),
-                )
-            }
+            synthetic_machine_status(
+                machine_name,
+                &paths,
+                control.clone(),
+                MachineRuntimeState::Malformed,
+                format!(
+                    "control plane '{}' could not inspect stored placement on node '{}' through the live node-agent route",
+                    summary.control_plane, placement.node_name
+                ),
+            )
         } else {
             synthetic_machine_status(
                 machine_name,
@@ -8092,51 +8252,35 @@ fn hosted_machine_resolution(
         });
     }
 
-    let mut selected = None::<HostedMachineResolution>;
-    for node_name in &summary.candidate_nodes {
-        let Some(node) = inventory.nodes.get(node_name) else {
-            continue;
-        };
-
-        let paths = RuntimePaths::for_machine(&node.runtime_root, machine_name);
-        let mut status = if paths.runtime_dir.exists() {
-            inspect_machine(&node.runtime_root, machine_name, control.clone())?
-        } else {
-            synthetic_machine_status(
-                machine_name,
-                &paths,
-                control.clone(),
-                MachineRuntimeState::Stopped,
-                format!(
-                    "control plane '{}' resolved node '{}' but the node-agent runtime root '{}' does not contain machine state",
-                    summary.control_plane,
-                    node_name,
-                    node.runtime_root.display()
-                ),
-            )
-        };
-        status.detail = format!(
-            "{} Routed through control plane '{}' and node '{}'.",
-            status.detail, summary.control_plane, node_name
+    if let Some(node_name) = summary.candidate_nodes.first()
+        && let Some(node) = inventory.nodes.get(node_name)
+    {
+        let runtime_root = node.runtime_root.clone();
+        let mut status = synthetic_machine_status(
+            machine_name,
+            &RuntimePaths::for_machine(&runtime_root, machine_name),
+            control,
+            MachineRuntimeState::Malformed,
+            format!(
+                "control plane '{}' could not inspect node '{}' through a live node-agent route",
+                summary.control_plane, node_name
+            ),
         );
-
-        let candidate = HostedMachineResolution {
+        status.detail = format!(
+            "{} Routed through control plane '{}' and node '{}'. {}",
+            status.detail, summary.control_plane, node_name, summary.placement_detail
+        );
+        return Ok(HostedMachineResolution {
             control_plane: summary.control_plane.clone(),
             node_name: Some(node_name.clone()),
             host_groups: summary.host_groups.clone(),
             host_group_policies: summary.host_group_policies.clone(),
-            runtime_root: node.runtime_root.clone(),
+            runtime_root,
             status,
-        };
-
-        if selected.as_ref().is_none_or(|current| {
-            status_priority(candidate.status.state) > status_priority(current.status.state)
-        }) {
-            selected = Some(candidate);
-        }
+        });
     }
 
-    Ok(selected.unwrap_or(HostedMachineResolution {
+    Ok(HostedMachineResolution {
         control_plane: summary.control_plane.clone(),
         node_name: None,
         host_groups: summary.host_groups.clone(),
@@ -8148,11 +8292,11 @@ fn hosted_machine_resolution(
             control,
             MachineRuntimeState::Malformed,
             format!(
-                "control plane '{}' resolved machine '{}' but no candidate node runtime bindings were available. {}",
+                "control plane '{}' could not inspect machine '{}' through a live node-agent route. {}",
                 summary.control_plane, machine_name, summary.placement_detail
             ),
         ),
-    }))
+    })
 }
 
 fn resolve_targeted_hosted_service_runtime(
@@ -8403,16 +8547,26 @@ fn hosted_control_plane_machine_status(
     config: &PortConfig,
     machine_name: &str,
 ) -> Result<MachineStatus> {
+    Ok(hosted_control_plane_machine_status_response(config, machine_name)?.result)
+}
+
+fn hosted_control_plane_machine_status_response(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<HostedSuccess<MachineStatus>> {
     let client = hosted_client_for_machine(config, machine_name)?;
-    let response: HostedSuccess<MachineStatus> = client
+    client
         .execute_json(client.machines().status(machine_name))
         .map_err(|error| {
             anyhow!(
                 "failed to load machine '{}' through the live hosted control-plane route: {error}",
                 machine_name
             )
-        })?;
-    Ok(response.result)
+        })
+}
+
+fn runtime_root_from_machine_status(status: &MachineStatus) -> Option<PathBuf> {
+    status.runtime_dir.parent().map(Path::to_path_buf)
 }
 
 fn hosted_control_plane_machine_monitor(
@@ -13568,7 +13722,7 @@ mod tests {
 
     use axum::extract::Path as AxumPath;
     use axum::http::StatusCode;
-    use axum::routing::post;
+    use axum::routing::{get, post};
     use axum::{Json, Router};
     use serde::Serialize;
     use serde_json::json;
@@ -13580,9 +13734,10 @@ mod tests {
         ClusterStageRequest, ClusterStatusRequest, ClusterUpRequest, ControlPlaneServeRequest,
         DoctorCheck, DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest,
         HostedNodeBinding, LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
-        NodeAgentServeRequest, RuntimePaths, ServiceApplyRequest, ServiceDefinitionRecord,
-        ServiceDesiredState, ServiceKind, ServicePolicy, ServiceRuntimeState, ServiceSecretBinding,
-        StopResult, apply_machine_service, artifact_pipeline_workdir, artifact_script,
+        MachineStatus, NodeAgentServeRequest, RecoveryAttemptCounters, RecoveryState, RuntimePaths,
+        ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
+        ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
+        apply_machine_service, artifact_pipeline_workdir, artifact_script,
         avf_local_launch_machine_with_host_os, bootstrap_hosted_k3s_cluster,
         build_firecracker_config, cache_path_for, chown_recursive, chown_runtime_to_sudo_caller,
         cloud_hypervisor_api_socket_path, cloud_hypervisor_config_path,
@@ -13591,12 +13746,12 @@ mod tests {
         down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
         hosted_k3s_cluster_access, hosted_k3s_join_token_command, hosted_k3s_kubeconfig_command,
         hosted_k3s_machine_access, hosted_k3s_service_policy, hosted_k3s_visibility_command,
-        hosted_placeholder_runtime_root, k3s_bootstrap_command, launch_local_machine,
-        list_artifacts, list_machine_secrets, list_machine_services, list_machines,
-        local_cluster_kubeconfig, local_cluster_status, machine_monitor, machine_service_status,
-        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
-        pull_artifact, push_artifact, put_machine_secret, read_json_file, read_pid_file,
-        render_hosted_route_context, repo_root, resolve_artifact_metadata,
+        hosted_machine_resolution, hosted_placeholder_runtime_root, k3s_bootstrap_command,
+        launch_local_machine, list_artifacts, list_machine_secrets, list_machine_services,
+        list_machines, local_cluster_kubeconfig, local_cluster_status, machine_monitor,
+        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
+        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
+        read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
         resolve_artifact_script_path, resolve_artifact_store_contract,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
@@ -17640,6 +17795,126 @@ exec sleep 30
     }
 
     #[test]
+    fn hosted_machine_resolution_uses_live_control_plane_status_for_remote_runtime_roots() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+        let remote_runtime_root = PathBuf::from("/remote/hosted/aws-linux-node-b");
+        config
+            .nodes
+            .get_mut("aws-linux-node-b")
+            .expect("aws-linux-node-b should exist")
+            .runtime_root = remote_runtime_root.clone();
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        write_machine_placement_state(
+            "demo",
+            "cloud-aws",
+            "aws-linux-node-b",
+            &remote_runtime_root,
+            "Stored on alternate AWS node.",
+        );
+
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should become nonblocking");
+        let runtime_root_for_route = remote_runtime_root.clone();
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            runtime.block_on(async move {
+                let listener =
+                    TcpListener::from_std(listener).expect("listener should convert to tokio");
+                let router = Router::new().route(
+                    "/v1/machines/{machine}",
+                    get(move |AxumPath(machine): AxumPath<String>| {
+                        let runtime_root = runtime_root_for_route.clone();
+                        async move {
+                            Json(HostedSuccess {
+                                route: HostedRouteContext {
+                                    control_plane: Some(String::from("demo")),
+                                    machine_name: Some(machine.clone()),
+                                    node_name: Some(String::from("aws-linux-node-b")),
+                                    runtime_root: Some(runtime_root.clone()),
+                                    ..HostedRouteContext::default()
+                                },
+                                result: MachineStatus {
+                                    machine_name: machine.clone(),
+                                    state: MachineRuntimeState::Running,
+                                    pid: Some(4321),
+                                    control:
+                                        port_model::MachineControlContract::hosted_control_plane(),
+                                    runtime_dir: runtime_root.join(&machine),
+                                    config_path: runtime_root.join(&machine).join("config.json"),
+                                    manifest_path: runtime_root
+                                        .join(&machine)
+                                        .join("manifest.json"),
+                                    pid_path: runtime_root.join(&machine).join("machine.pid"),
+                                    firecracker_log: runtime_root
+                                        .join(&machine)
+                                        .join("firecracker.log"),
+                                    stdout_log: runtime_root.join(&machine).join("stdout.log"),
+                                    stderr_log: runtime_root.join(&machine).join("stderr.log"),
+                                    runtime_class: None,
+                                    attached_volumes: Vec::new(),
+                                    hosted_fleet_nodes: Vec::new(),
+                                    guest_refresh_age_seconds: None,
+                                    wedged_since_unix_s: None,
+                                    wedge_class: None,
+                                    recovery_attempts: RecoveryAttemptCounters::default(),
+                                    last_recovery_action: None,
+                                    recovery_state: RecoveryState::default(),
+                                    detail: String::from("mock remote machine status"),
+                                },
+                            })
+                        }
+                    }),
+                );
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{addr}");
+
+        let resolution =
+            hosted_machine_resolution(&config, "cloud-aws").expect("hosted resolution should load");
+        assert_eq!(resolution.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(resolution.runtime_root, remote_runtime_root);
+        assert_eq!(resolution.status.state, MachineRuntimeState::Running);
+        assert!(
+            !resolution
+                .status
+                .detail
+                .contains("does not contain machine state"),
+            "{}",
+            resolution.status.detail
+        );
+        assert!(
+            resolution
+                .status
+                .detail
+                .contains("Stored on alternate AWS node."),
+            "{}",
+            resolution.status.detail
+        );
+
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
     fn hosted_machine_list_monitor_and_stop_prefer_stored_placement_over_live_candidate_selection()
     {
         let _guard = hosted_server_lock().lock().expect("lock should work");
@@ -18343,6 +18618,7 @@ exec sleep 30
         let policy = hosted_k3s_service_policy("server", "cloud-aws");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
+        assert!(!policy.healthcheck.restart_on_unhealthy);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
         assert_eq!(policy.healthcheck.command[1], "-lc");
         let shell = &policy.healthcheck.command[2];
@@ -18357,6 +18633,7 @@ exec sleep 30
         let policy = hosted_k3s_service_policy("agent", "cloud-aws-worker");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
+        assert!(!policy.healthcheck.restart_on_unhealthy);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
         assert_eq!(policy.healthcheck.command[1], "-lc");
         let shell = &policy.healthcheck.command[2];
@@ -22722,6 +22999,7 @@ exec sleep 30
                     String::from("-lc"),
                     String::from("test -f workspace/healthy"),
                 ],
+                restart_on_unhealthy: false,
             },
         };
 

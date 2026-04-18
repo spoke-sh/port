@@ -2541,6 +2541,7 @@ fn run_service(command: ServiceCommand, config: &PortConfig) -> Result<()> {
                         healthcheck: ServiceHealthcheck {
                             policy: health.into(),
                             command: health_command,
+                            restart_on_unhealthy: false,
                         },
                     },
                 },

@@ -981,6 +981,7 @@ mod tests {
                         healthcheck: ServiceHealthcheck {
                             policy: ServiceHealthPolicy::Command,
                             command: vec![String::from("/bin/true")],
+                            restart_on_unhealthy: false,
                         },
                     },
                 },
@@ -1049,6 +1050,7 @@ mod tests {
                                 String::from("-lc"),
                                 String::from("test -f workspace/healthy"),
                             ],
+                            restart_on_unhealthy: false,
                         },
                     },
                 },

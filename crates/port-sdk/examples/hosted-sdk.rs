@@ -39,6 +39,7 @@ fn main() -> anyhow::Result<()> {
                 healthcheck: ServiceHealthcheck {
                     policy: ServiceHealthPolicy::None,
                     command: Vec::new(),
+                    restart_on_unhealthy: false,
                 },
             },
         },
