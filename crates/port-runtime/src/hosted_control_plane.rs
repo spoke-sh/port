@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, BufWriter, Cursor};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -29,7 +29,7 @@ use port_model::{
     HostedAuthTokenSource, HostedImportedNodeRecord, HostedMachineSummaryContract,
     HostedNodeRegistration, HostedPvmHostKitPackageAttachment, HostedRegisteredNodeContract,
     MachineArchitecture, PortConfig, ProtectionMode, PvmCapabilityState, PvmHostKit,
-    PvmHostKitPackage, hosted_artifact_store_path,
+    PvmHostKitPackage, ServiceHealthState, hosted_artifact_store_path,
 };
 use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
@@ -42,12 +42,13 @@ use crate::{
     HostedFleetFreshnessState, HostedFleetNodeStatus, HostedFleetRoutingEligibility,
     HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
     MachineStatus, RecoveryAttemptCounters, RecoveryState, RuntimePaths,
-    ServiceApplyRequest as RuntimeServiceApplyRequest, ServiceSecretBinding, StopResult,
-    apply_machine_service_live, architecture_dir, copy_guest_file, copy_guest_via_endpoint,
-    delete_machine_secret_local, execute_guest_operation, hosted_placeholder_runtime_root,
+    ServiceApplyRequest as RuntimeServiceApplyRequest, ServiceRuntimeObservation,
+    ServiceRuntimeState, ServiceSecretBinding, StopResult, apply_machine_service_live,
+    architecture_dir, copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local,
+    execute_guest_operation, hosted_placeholder_runtime_root,
     hosted_placeholder_runtime_root_for_config, hosted_stored_service_placements,
     launch_local_machine, list_detached_forwards, list_machine_secrets_local,
-    machine_monitor as runtime_machine_monitor, machine_monitor_report,
+    machine_monitor as runtime_machine_monitor, machine_monitor_report, machine_service_status,
     machine_status as runtime_machine_status, machine_top as runtime_machine_top,
     machine_top_report, prepare_guest_forward, put_machine_secret_local,
     refresh_machine_service_list, refresh_machine_service_runtime, start_detached_forward,
@@ -1331,7 +1332,7 @@ fn reconcile_recovery_runner_tick(state: &ControlPlaneState) {
         Err(_) => return,
     };
 
-    let machine_targets: Vec<(String, String)> = state
+    let machine_targets: Vec<(String, String, String)> = state
         .inner
         .config
         .k3s_clusters
@@ -1341,17 +1342,40 @@ fn reconcile_recovery_runner_tick(state: &ControlPlaneState) {
             cluster_spec
                 .server_machines
                 .iter()
-                .chain(cluster_spec.worker_machines.iter())
-                .map(move |machine_name| (cluster_name.clone(), machine_name.clone()))
+                .map(move |machine_name| {
+                    (
+                        cluster_name.clone(),
+                        machine_name.clone(),
+                        String::from("k3s-server"),
+                    )
+                })
+                .chain(
+                    cluster_spec
+                        .worker_machines
+                        .iter()
+                        .map(move |machine_name| {
+                            (
+                                cluster_name.clone(),
+                                machine_name.clone(),
+                                String::from("k3s-agent"),
+                            )
+                        }),
+                )
         })
         .collect();
 
-    for (cluster_name, machine_name) in machine_targets {
+    for (cluster_name, machine_name, k3s_service_name) in machine_targets {
         let recovery_config = resolve_recovery_config_for_cluster(state, &cluster_name);
         if !recovery_config.enabled {
             continue;
         }
-        reconcile_machine_recovery(state, &machine_name, &recovery_config, now_unix_s);
+        reconcile_machine_recovery(
+            state,
+            &machine_name,
+            &k3s_service_name,
+            &recovery_config,
+            now_unix_s,
+        );
     }
 }
 
@@ -1362,6 +1386,7 @@ fn reconcile_recovery_runner_tick(state: &ControlPlaneState) {
 fn reconcile_machine_recovery(
     state: &ControlPlaneState,
     machine_name: &str,
+    k3s_service_name: &str,
     recovery_config: &port_model::ClusterRecoveryConfig,
     now_unix_s: u64,
 ) {
@@ -1387,11 +1412,19 @@ fn reconcile_machine_recovery(
         },
     };
 
-    let wedge = state.inner.wedge_state.read().ok().and_then(|wedge_state| {
+    let observed_wedge = state.inner.wedge_state.read().ok().and_then(|wedge_state| {
         wedge_state
             .get(machine_name)
             .map(|fact| (fact.wedge_class, fact.wedged_since_unix_s))
     });
+    let wedge = effective_recovery_wedge(
+        state,
+        &runtime_root,
+        machine_name,
+        k3s_service_name,
+        observed_wedge,
+        now_unix_s,
+    );
     let heartbeats_fresh = wedge.is_none();
 
     let action = decide_recovery_action(RecoveryDecisionInput {
@@ -1464,6 +1497,55 @@ fn reconcile_machine_recovery(
             let _ = save_recovery_record(&runtime_root, machine_name, &record);
         }
     }
+}
+
+fn effective_recovery_wedge(
+    state: &ControlPlaneState,
+    runtime_root: &FsPath,
+    machine_name: &str,
+    k3s_service_name: &str,
+    observed_wedge: Option<(WedgeClass, u64)>,
+    now_unix_s: u64,
+) -> Option<(WedgeClass, u64)> {
+    let runtime = match machine_service_status(
+        &state.inner.config,
+        runtime_root,
+        machine_name,
+        k3s_service_name,
+    ) {
+        Ok(status) => status.runtime,
+        Err(_) => return observed_wedge,
+    };
+
+    if k3s_service_runtime_indicates_recoverable_guest_wedge(&runtime) {
+        return Some((
+            WedgeClass::Guest,
+            observed_wedge.map(|(_, since)| since).unwrap_or(now_unix_s),
+        ));
+    }
+
+    observed_wedge
+}
+
+fn k3s_service_runtime_indicates_recoverable_guest_wedge(
+    runtime: &ServiceRuntimeObservation,
+) -> bool {
+    if matches!(
+        runtime.state,
+        ServiceRuntimeState::Failed | ServiceRuntimeState::Exited | ServiceRuntimeState::Stopped
+    ) {
+        return true;
+    }
+    if runtime.health_state == ServiceHealthState::Unhealthy {
+        return true;
+    }
+    if matches!(runtime.state, ServiceRuntimeState::Running) && runtime.pid.is_none() {
+        return true;
+    }
+    runtime
+        .last_exit_detail
+        .as_deref()
+        .is_some_and(|detail| detail.contains("no longer live") || detail.contains("zombie"))
 }
 
 fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<ControlPlaneState> {
@@ -7623,6 +7705,56 @@ mod tests {
     }
 
     #[test]
+    fn k3s_service_runtime_identifies_recoverable_guest_wedge_states() {
+        let healthy = ServiceRuntimeObservation {
+            state: ServiceRuntimeState::Running,
+            record_path: PathBuf::from("/tmp/k3s-agent.json"),
+            restart_count: 0,
+            pid: Some(42),
+            exit_code: None,
+            last_exit_code: None,
+            last_exit_detail: None,
+            health_state: ServiceHealthState::Healthy,
+            health_detail: None,
+            stdout_path: None,
+            stderr_path: None,
+        };
+        assert!(!k3s_service_runtime_indicates_recoverable_guest_wedge(
+            &healthy
+        ));
+
+        let failed = ServiceRuntimeObservation {
+            state: ServiceRuntimeState::Failed,
+            pid: None,
+            last_exit_detail: Some(String::from("managed process exited on signal SIGSEGV")),
+            ..healthy.clone()
+        };
+        assert!(k3s_service_runtime_indicates_recoverable_guest_wedge(
+            &failed
+        ));
+
+        let zombie = ServiceRuntimeObservation {
+            pid: None,
+            last_exit_detail: Some(String::from(
+                "recorded managed process pid 16581 is no longer live",
+            )),
+            ..healthy.clone()
+        };
+        assert!(k3s_service_runtime_indicates_recoverable_guest_wedge(
+            &zombie
+        ));
+
+        let unhealthy = ServiceRuntimeObservation {
+            health_state: ServiceHealthState::Unhealthy,
+            health_detail: Some(String::from("health command timed out")),
+            ..healthy
+        };
+        assert!(k3s_service_runtime_indicates_recoverable_guest_wedge(
+            &unhealthy
+        ));
+    }
+
+    #[test]
     fn wedge_detector_tick_has_no_machine_lifecycle_side_effects() {
         // Seed state with multiple wedged machines; tick; assert only
         // wedge_state was mutated. Other state maps (registered_nodes,
@@ -7871,7 +8003,13 @@ mod tests {
         place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
         seed_guest_wedge(&state, "cloud-aws", 1_000);
 
-        super::reconcile_machine_recovery(&state, "cloud-aws", &enabled_recovery_config(), 2_000);
+        super::reconcile_machine_recovery(
+            &state,
+            "cloud-aws",
+            "k3s-server",
+            &enabled_recovery_config(),
+            2_000,
+        );
 
         let record = super::load_recovery_record(&runtime_root, "cloud-aws")
             .expect("load_recovery_record")
@@ -7920,7 +8058,13 @@ mod tests {
         let guard = super::try_acquire_recovery_lock(&state, "cloud-aws")
             .expect("first lock acquire should succeed");
 
-        super::reconcile_machine_recovery(&state, "cloud-aws", &enabled_recovery_config(), 2_000);
+        super::reconcile_machine_recovery(
+            &state,
+            "cloud-aws",
+            "k3s-server",
+            &enabled_recovery_config(),
+            2_000,
+        );
 
         assert!(
             super::load_recovery_record(&runtime_root, "cloud-aws")
@@ -7931,7 +8075,13 @@ mod tests {
 
         // Release the lock; the next tick should now act.
         drop(guard);
-        super::reconcile_machine_recovery(&state, "cloud-aws", &enabled_recovery_config(), 3_000);
+        super::reconcile_machine_recovery(
+            &state,
+            "cloud-aws",
+            "k3s-server",
+            &enabled_recovery_config(),
+            3_000,
+        );
         assert!(
             super::load_recovery_record(&runtime_root, "cloud-aws")
                 .expect("load_recovery_record")
@@ -7968,7 +8118,7 @@ mod tests {
         // must persist no record and emit no event.
         let disabled = port_model::ClusterRecoveryConfig::default();
         assert!(!disabled.enabled);
-        super::reconcile_machine_recovery(&state, "cloud-aws", &disabled, 2_000);
+        super::reconcile_machine_recovery(&state, "cloud-aws", "k3s-server", &disabled, 2_000);
 
         assert!(
             super::load_recovery_record(&runtime_root, "cloud-aws")

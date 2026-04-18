@@ -3,8 +3,10 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -33,6 +35,14 @@ const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_sec
 const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
 const MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD: u32 = 3;
+#[cfg(not(test))]
+const MANAGED_PROCESS_HEALTH_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const MANAGED_PROCESS_HEALTH_COMMAND_TIMEOUT: Duration = Duration::from_millis(500);
+#[cfg(not(test))]
+const MANAGED_PROCESS_HEALTH_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(test)]
+const MANAGED_PROCESS_HEALTH_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Upper bound on the time a healthy guest-agent takes to answer a
 /// `GuestOperation::Ping` request on its main dispatch path. Node-agent probes
@@ -60,6 +70,12 @@ struct ManagedProcessHandle {
     child: Child,
     started_at: Instant,
     consecutive_unhealthy_checks: u32,
+}
+
+#[derive(Debug)]
+enum ManagedServiceHealthEvaluation {
+    State(ServiceHealthState, Option<String>),
+    ManagedProcessExited(ExitStatus),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -774,85 +790,95 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
         .try_wait()
         .context("failed to inspect managed process state")?
     {
-        handle.record.pid = None;
-        handle.record.exit_code = status.code();
-        handle.record.state = if status.success() {
-            ManagedServiceRuntimeState::Exited
-        } else {
-            ManagedServiceRuntimeState::Failed
-        };
-        let mut exit_detail = format!(
-            "managed process exited with code {}",
-            handle.record.exit_code.unwrap_or(1)
-        );
-        let mut restart_detail = format!(
-            "managed process restarted after exit code {}",
-            handle.record.exit_code.unwrap_or(1)
-        );
-        handle.record.last_exit_code = handle.record.exit_code;
-        handle.record.health_state = ServiceHealthState::Unknown;
-        handle.record.health_detail = None;
-        handle.record.detail = exit_detail.clone();
-        if should_restart_managed_service(handle.policy.restart, handle.record.state) {
-            settle_managed_process_logs_after_exit();
-            if let Some(evidence_path) = capture_managed_process_evidence_best_effort(
-                root,
-                &handle.record,
-                &exit_detail,
-                handle.record.restart_count.saturating_add(1),
-            ) {
-                exit_detail = append_evidence_detail(&exit_detail, &evidence_path);
-                restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
-            }
-            handle.record.last_exit_detail = Some(exit_detail.clone());
-            handle.record.detail = exit_detail;
-            restart_managed_process(root, handle, restart_detail)?;
-        } else {
-            handle.record.last_exit_detail = Some(exit_detail.clone());
-            handle.record.detail = exit_detail;
-        }
+        handle_managed_process_exit(root, handle, status)?;
     }
 
     if handle.record.state == ManagedServiceRuntimeState::Running {
-        let (health_state, health_detail) = evaluate_managed_service_health(handle)?;
-        handle.record.health_state = health_state;
-        handle.record.health_detail = health_detail;
-        match health_state {
-            ServiceHealthState::Healthy | ServiceHealthState::Unknown => {
-                handle.consecutive_unhealthy_checks = 0;
+        match evaluate_managed_service_health(handle)? {
+            ManagedServiceHealthEvaluation::State(health_state, health_detail) => {
+                handle.record.health_state = health_state;
+                handle.record.health_detail = health_detail;
+                match health_state {
+                    ServiceHealthState::Healthy | ServiceHealthState::Unknown => {
+                        handle.consecutive_unhealthy_checks = 0;
+                    }
+                    ServiceHealthState::Unhealthy => {
+                        handle.consecutive_unhealthy_checks =
+                            handle.consecutive_unhealthy_checks.saturating_add(1);
+                    }
+                }
+                if should_restart_unhealthy_managed_service(handle) {
+                    let health_detail = handle
+                        .record
+                        .health_detail
+                        .clone()
+                        .unwrap_or_else(|| String::from("health check reported unhealthy"));
+                    terminate_child(&mut handle.child)?;
+                    let exit_status = wait_for_child_exit(&mut handle.child)?;
+                    handle.record.pid = None;
+                    handle.record.exit_code = exit_status.code();
+                    handle.record.last_exit_code = exit_status.code();
+                    let mut restart_detail = format!(
+                        "managed process restarted after health check failure: {health_detail}"
+                    );
+                    settle_managed_process_logs_after_exit();
+                    if let Some(evidence_path) = capture_managed_process_evidence_best_effort(
+                        root,
+                        &handle.record,
+                        &restart_detail,
+                        handle.record.restart_count.saturating_add(1),
+                    ) {
+                        restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
+                    }
+                    handle.record.last_exit_detail = Some(restart_detail.clone());
+                    restart_managed_process(root, handle, restart_detail)?;
+                }
             }
-            ServiceHealthState::Unhealthy => {
-                handle.consecutive_unhealthy_checks =
-                    handle.consecutive_unhealthy_checks.saturating_add(1);
+            ManagedServiceHealthEvaluation::ManagedProcessExited(status) => {
+                handle_managed_process_exit(root, handle, status)?;
             }
-        }
-        if should_restart_unhealthy_managed_service(handle) {
-            let health_detail = handle
-                .record
-                .health_detail
-                .clone()
-                .unwrap_or_else(|| String::from("health check reported unhealthy"));
-            terminate_child(&mut handle.child)?;
-            let exit_status = wait_for_child_exit(&mut handle.child)?;
-            handle.record.pid = None;
-            handle.record.exit_code = exit_status.code();
-            handle.record.last_exit_code = exit_status.code();
-            let mut restart_detail =
-                format!("managed process restarted after health check failure: {health_detail}");
-            settle_managed_process_logs_after_exit();
-            if let Some(evidence_path) = capture_managed_process_evidence_best_effort(
-                root,
-                &handle.record,
-                &restart_detail,
-                handle.record.restart_count.saturating_add(1),
-            ) {
-                restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
-            }
-            handle.record.last_exit_detail = Some(restart_detail.clone());
-            restart_managed_process(root, handle, restart_detail)?;
         }
     }
     write_managed_process_record(root, &handle.record)
+}
+
+fn handle_managed_process_exit(
+    root: &Path,
+    handle: &mut ManagedProcessHandle,
+    status: ExitStatus,
+) -> Result<()> {
+    handle.record.pid = None;
+    handle.record.exit_code = status.code();
+    handle.record.state = if status.success() {
+        ManagedServiceRuntimeState::Exited
+    } else {
+        ManagedServiceRuntimeState::Failed
+    };
+    let mut exit_detail = managed_process_exit_detail(&status);
+    let mut restart_detail = managed_process_restart_detail(&status);
+    handle.record.last_exit_code = handle.record.exit_code;
+    handle.record.health_state = ServiceHealthState::Unknown;
+    handle.record.health_detail = None;
+    handle.record.detail = exit_detail.clone();
+    if should_restart_managed_service(handle.policy.restart, handle.record.state) {
+        settle_managed_process_logs_after_exit();
+        if let Some(evidence_path) = capture_managed_process_evidence_best_effort(
+            root,
+            &handle.record,
+            &exit_detail,
+            handle.record.restart_count.saturating_add(1),
+        ) {
+            exit_detail = append_evidence_detail(&exit_detail, &evidence_path);
+            restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
+        }
+        handle.record.last_exit_detail = Some(exit_detail.clone());
+        handle.record.detail = exit_detail;
+        restart_managed_process(root, handle, restart_detail)?;
+    } else {
+        handle.record.last_exit_detail = Some(exit_detail.clone());
+        handle.record.detail = exit_detail;
+    }
+    Ok(())
 }
 
 fn should_restart_managed_service(
@@ -937,10 +963,13 @@ fn restart_managed_process(
 }
 
 fn evaluate_managed_service_health(
-    handle: &ManagedProcessHandle,
-) -> Result<(ServiceHealthState, Option<String>)> {
+    handle: &mut ManagedProcessHandle,
+) -> Result<ManagedServiceHealthEvaluation> {
     match handle.policy.healthcheck.policy {
-        ServiceHealthPolicy::None => Ok((ServiceHealthState::Unknown, None)),
+        ServiceHealthPolicy::None => Ok(ManagedServiceHealthEvaluation::State(
+            ServiceHealthState::Unknown,
+            None,
+        )),
         ServiceHealthPolicy::Command => {
             let (program, args) = handle
                 .policy
@@ -948,29 +977,126 @@ fn evaluate_managed_service_health(
                 .command
                 .split_first()
                 .ok_or_else(|| anyhow!("managed service health check requires a command"))?;
-            let status = Command::new(program)
+            let mut child = Command::new(program)
                 .args(args)
                 .current_dir(&handle.cwd)
                 .envs(&handle.env)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status();
-            match status {
-                Ok(status) if status.success() => Ok((ServiceHealthState::Healthy, None)),
-                Ok(status) => Ok((
-                    ServiceHealthState::Unhealthy,
-                    Some(format!(
-                        "health command exited with code {}",
-                        status.code().unwrap_or(1)
-                    )),
-                )),
-                Err(error) => Ok((
+                .spawn();
+            match child {
+                Ok(ref mut child) => {
+                    let started = Instant::now();
+                    loop {
+                        if let Some(status) = handle.child.try_wait().context(
+                            "failed to inspect managed process state during health check",
+                        )? {
+                            reap_health_command_best_effort(child);
+                            return Ok(ManagedServiceHealthEvaluation::ManagedProcessExited(
+                                status,
+                            ));
+                        }
+                        if let Some(status) = child
+                            .try_wait()
+                            .context("failed to inspect managed service health command state")?
+                        {
+                            return if status.success() {
+                                Ok(ManagedServiceHealthEvaluation::State(
+                                    ServiceHealthState::Healthy,
+                                    None,
+                                ))
+                            } else {
+                                Ok(ManagedServiceHealthEvaluation::State(
+                                    ServiceHealthState::Unhealthy,
+                                    Some(format!(
+                                        "health command exited with code {}",
+                                        status.code().unwrap_or(1)
+                                    )),
+                                ))
+                            };
+                        }
+                        if started.elapsed() >= MANAGED_PROCESS_HEALTH_COMMAND_TIMEOUT {
+                            reap_health_command_best_effort(child);
+                            return Ok(ManagedServiceHealthEvaluation::State(
+                                ServiceHealthState::Unhealthy,
+                                Some(format!(
+                                    "health command timed out after {:?}",
+                                    MANAGED_PROCESS_HEALTH_COMMAND_TIMEOUT
+                                )),
+                            ));
+                        }
+                        thread::sleep(MANAGED_PROCESS_HEALTH_COMMAND_POLL_INTERVAL);
+                    }
+                }
+                Err(error) => Ok(ManagedServiceHealthEvaluation::State(
                     ServiceHealthState::Unhealthy,
                     Some(format!("health command failed: {error}")),
                 )),
             }
         }
+    }
+}
+
+fn reap_health_command_best_effort(child: &mut Child) {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn managed_process_exit_detail(status: &ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("managed process exited with code {code}");
+    }
+    managed_process_signal_detail(status, "managed process terminated")
+        .unwrap_or_else(|| String::from("managed process terminated without an exit code"))
+}
+
+fn managed_process_restart_detail(status: &ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("managed process restarted after exit code {code}");
+    }
+    managed_process_signal_detail(status, "managed process restarted after termination")
+        .unwrap_or_else(|| String::from("managed process restarted after abnormal termination"))
+}
+
+#[cfg(unix)]
+fn managed_process_signal_detail(status: &ExitStatus, prefix: &str) -> Option<String> {
+    let signal = status.signal()?;
+    let mut detail = format!("{prefix} by signal {signal}");
+    if let Some(name) = managed_process_signal_name(signal) {
+        detail.push_str(&format!(" ({name})"));
+    }
+    if status.core_dumped() {
+        detail.push_str(" (core dumped)");
+    }
+    Some(detail)
+}
+
+#[cfg(not(unix))]
+fn managed_process_signal_detail(_status: &ExitStatus, _prefix: &str) -> Option<String> {
+    None
+}
+
+#[cfg(unix)]
+fn managed_process_signal_name(signal: i32) -> Option<&'static str> {
+    match signal {
+        libc::SIGABRT => Some("SIGABRT"),
+        libc::SIGALRM => Some("SIGALRM"),
+        libc::SIGBUS => Some("SIGBUS"),
+        libc::SIGFPE => Some("SIGFPE"),
+        libc::SIGHUP => Some("SIGHUP"),
+        libc::SIGILL => Some("SIGILL"),
+        libc::SIGINT => Some("SIGINT"),
+        libc::SIGKILL => Some("SIGKILL"),
+        libc::SIGPIPE => Some("SIGPIPE"),
+        libc::SIGQUIT => Some("SIGQUIT"),
+        libc::SIGSEGV => Some("SIGSEGV"),
+        libc::SIGTERM => Some("SIGTERM"),
+        libc::SIGTRAP => Some("SIGTRAP"),
+        _ => None,
     }
 }
 
@@ -2634,6 +2760,23 @@ mod tests {
             found_evidence,
             "expected healthbox restart evidence with metadata, runtime record, and stderr snapshot"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_process_exit_detail_reports_signal_name_for_crash() {
+        let mut child = Command::new("bash")
+            .args(["-lc", "kill -SEGV $$"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("managed process should start");
+        let status = child.wait().expect("managed process should exit");
+        let exit_detail = super::managed_process_exit_detail(&status);
+        let restart_detail = super::managed_process_restart_detail(&status);
+        assert!(exit_detail.contains("SIGSEGV"), "{exit_detail}");
+        assert!(restart_detail.contains("SIGSEGV"), "{restart_detail}");
     }
 
     #[cfg(target_os = "linux")]
