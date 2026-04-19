@@ -341,6 +341,8 @@ const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
 
 const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
+const RECOVERY_MACHINE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
+const RECOVERY_MACHINE_BOOT_WAIT: Duration = Duration::from_secs(5);
 
 trait HostedMachineProjection {
     fn apply_hosted_route(self, route: &HostedRouteContext) -> Self;
@@ -1197,9 +1199,11 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 /// `guest_heartbeat_instants` sidecar lives on the node-agent process,
 /// not the control plane, and a separate plumbing story will publish it
 /// to the control plane (e.g. via the registration-refresh payload or a
-/// dedicated heartbeat push). Until that lands, this detector catches
-/// node-side wedges only — which is still meaningful: if Port's own
-/// node-agent has gone silent, no recovery action can reach the host.
+/// dedicated heartbeat push). Until that lands, this detector combines
+/// node-agent freshness with live hosted machine-status reads, using the
+/// node-agent's guest-heartbeat sidecar when available and falling back to the
+/// machine placement age when a live running machine has not reported any guest
+/// heartbeat since its current placement.
 fn reconcile_wedge_detector_tick(state: &ControlPlaneState) {
     let now_unix_s = match current_unix_timestamp_seconds() {
         Ok(value) => value,
@@ -1211,29 +1215,32 @@ fn reconcile_wedge_detector_tick(state: &ControlPlaneState) {
         Err(_) => return,
     };
 
-    // Per-cluster ClusterDetectionConfig lives on the higher-level
-    // ClusterSpec (PortConfig.clusters) rather than K3sClusterSpec
-    // (PortConfig.k3s_clusters). The hosted control plane keys off
-    // k3s_clusters, so we use the default thresholds for now and wire
-    // per-cluster overrides in a follow-up that maps k3s_cluster name
-    // to its parent ClusterSpec. Defaults match the upstream contract
-    // (node 120s, guest 90s).
-    let detection = port_model::ClusterDetectionConfig::default();
-    for cluster_spec in state.inner.config.k3s_clusters.values() {
+    for (cluster_name, cluster_spec) in &state.inner.config.k3s_clusters {
         if cluster_spec.control_plane != state.inner.control_plane {
             continue;
         }
+        let detection = resolve_detection_config_for_cluster(state, cluster_name);
         let mut ages: BTreeMap<String, (Option<u64>, Option<u64>)> = BTreeMap::new();
         for machine_name in cluster_spec
             .server_machines
             .iter()
             .chain(cluster_spec.worker_machines.iter())
         {
+            let runtime_root = resolve_runtime_root_for_machine(state, machine_name);
             let placed_node = resolve_placed_node_for_machine(state, machine_name);
             let node_age = placed_node
                 .and_then(|node| node_receipt_instants.get(&node).copied())
                 .map(|instant| now_instant.saturating_duration_since(instant).as_secs());
-            ages.insert(machine_name.clone(), (node_age, None));
+            let guest_age = runtime_root.as_deref().and_then(|runtime_root| {
+                resolve_guest_refresh_age_seconds_for_machine(
+                    state,
+                    machine_name,
+                    runtime_root,
+                    node_age,
+                    now_unix_s,
+                )
+            });
+            ages.insert(machine_name.clone(), (node_age, guest_age));
         }
         run_wedge_detector_tick(
             state,
@@ -1270,6 +1277,47 @@ fn resolve_runtime_root_for_machine(
         .map(|record| record.runtime_root.clone())
 }
 
+fn resolve_machine_placement_record(
+    state: &ControlPlaneState,
+    machine_name: &str,
+) -> Option<HostedMachinePlacementRecord> {
+    let placements = state.inner.machine_placements.read().ok()?;
+    placements.get(machine_name).cloned()
+}
+
+fn resolve_machine_placement_age_seconds(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    now_unix_s: u64,
+) -> Option<u64> {
+    resolve_machine_placement_record(state, machine_name)
+        .map(|record| now_unix_s.saturating_sub(record.placed_at_unix_s))
+}
+
+fn resolve_guest_refresh_age_seconds_for_machine(
+    state: &ControlPlaneState,
+    machine_name: &str,
+    runtime_root: &FsPath,
+    node_age_seconds: Option<u64>,
+    now_unix_s: u64,
+) -> Option<u64> {
+    match runtime_machine_status(&state.inner.config, runtime_root, machine_name) {
+        Ok(status) => {
+            if let Some(age_seconds) = status.guest_refresh_age_seconds {
+                return Some(age_seconds);
+            }
+            if matches!(status.state, MachineRuntimeState::Running) && node_age_seconds.is_some() {
+                return resolve_machine_placement_age_seconds(state, machine_name, now_unix_s);
+            }
+            None
+        }
+        Err(_) if node_age_seconds.is_some() => {
+            resolve_machine_placement_age_seconds(state, machine_name, now_unix_s)
+        }
+        Err(_) => None,
+    }
+}
+
 /// Resolve the per-cluster recovery config for a k3s cluster by
 /// matching its name against `PortConfig.clusters` (the higher-level
 /// ClusterSpec, where `recovery` lives). Returns the default config
@@ -1286,6 +1334,19 @@ fn resolve_recovery_config_for_cluster(
         .clusters
         .get(cluster_name)
         .map(|spec| spec.recovery)
+        .unwrap_or_default()
+}
+
+fn resolve_detection_config_for_cluster(
+    state: &ControlPlaneState,
+    cluster_name: &str,
+) -> port_model::ClusterDetectionConfig {
+    state
+        .inner
+        .config
+        .clusters
+        .get(cluster_name)
+        .map(|spec| spec.detection)
         .unwrap_or_default()
 }
 
@@ -1365,6 +1426,7 @@ fn reconcile_recovery_runner_tick(state: &ControlPlaneState) {
         .collect();
 
     for (cluster_name, machine_name, k3s_service_name) in machine_targets {
+        let detection_config = resolve_detection_config_for_cluster(state, &cluster_name);
         let recovery_config = resolve_recovery_config_for_cluster(state, &cluster_name);
         if !recovery_config.enabled {
             continue;
@@ -1373,6 +1435,7 @@ fn reconcile_recovery_runner_tick(state: &ControlPlaneState) {
             state,
             &machine_name,
             &k3s_service_name,
+            &detection_config,
             &recovery_config,
             now_unix_s,
         );
@@ -1387,6 +1450,7 @@ fn reconcile_machine_recovery(
     state: &ControlPlaneState,
     machine_name: &str,
     k3s_service_name: &str,
+    detection_config: &port_model::ClusterDetectionConfig,
     recovery_config: &port_model::ClusterRecoveryConfig,
     now_unix_s: u64,
 ) {
@@ -1422,6 +1486,7 @@ fn reconcile_machine_recovery(
         &runtime_root,
         machine_name,
         k3s_service_name,
+        detection_config,
         observed_wedge,
         now_unix_s,
     );
@@ -1445,35 +1510,69 @@ fn reconcile_machine_recovery(
 
     match action {
         RecoveryAction::Tier1Restart => {
-            // Action effect (machine stop+launch) is intentionally deferred
-            // to a follow-up wiring story. The runner advances the ladder
-            // state, persists the attempt, and emits a Started event so
-            // operators see the transition in the events log.
             record.recovery_attempts.tier_1 = record.recovery_attempts.tier_1.saturating_add(1);
-            record.last_recovery_action = Some(crate::RecoveryActionRecord {
-                tier: 1,
-                timestamp_unix_s: now_unix_s,
-                outcome: String::from("tier-1-restart-requested"),
-            });
             record.recovery_state = crate::RecoveryState::InProgress;
-            let _ = save_recovery_record(&runtime_root, machine_name, &record);
             let _ = sink.emit(machine_name, 1, RecoveryEventOutcome::Started, now_unix_s);
+            match restart_machine_for_recovery(state, &runtime_root, machine_name, false) {
+                Ok(outcome) => {
+                    record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                        tier: 1,
+                        timestamp_unix_s: now_unix_s,
+                        outcome,
+                    });
+                    let _ = save_recovery_record(&runtime_root, machine_name, &record);
+                    let _ = sink.emit(machine_name, 1, RecoveryEventOutcome::Succeeded, now_unix_s);
+                }
+                Err(error) => {
+                    record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                        tier: 1,
+                        timestamp_unix_s: now_unix_s,
+                        outcome: format!("tier-1-restart-failed: {error:#}"),
+                    });
+                    let _ = save_recovery_record(&runtime_root, machine_name, &record);
+                    let _ = sink.emit(machine_name, 1, RecoveryEventOutcome::Failed, now_unix_s);
+                }
+            }
         }
         RecoveryAction::Tier2Recreate => {
-            // Tier-2: drop the rootfs overlay (idempotent, in-process disk
-            // I/O — no node-agent round-trip needed). The relaunch is
-            // deferred along with tier-1's restart; the next detector tick
-            // will see whether the wedge has cleared.
-            let _ = drop_machine_rootfs_overlay(&runtime_root, machine_name);
             record.recovery_attempts.tier_2 = record.recovery_attempts.tier_2.saturating_add(1);
-            record.last_recovery_action = Some(crate::RecoveryActionRecord {
-                tier: 2,
-                timestamp_unix_s: now_unix_s,
-                outcome: String::from("tier-2-overlay-dropped"),
-            });
             record.recovery_state = crate::RecoveryState::InProgress;
-            let _ = save_recovery_record(&runtime_root, machine_name, &record);
             let _ = sink.emit(machine_name, 2, RecoveryEventOutcome::Started, now_unix_s);
+            if !machine_has_rootfs_overlay(&state.inner.config, machine_name) {
+                record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                    tier: 2,
+                    timestamp_unix_s: now_unix_s,
+                    outcome: String::from("tier-2-skipped-no-overlay"),
+                });
+                let _ = save_recovery_record(&runtime_root, machine_name, &record);
+                let _ = sink.emit(
+                    machine_name,
+                    2,
+                    RecoveryEventOutcome::SkippedNoOverlay,
+                    now_unix_s,
+                );
+                return;
+            }
+            match restart_machine_for_recovery(state, &runtime_root, machine_name, true) {
+                Ok(outcome) => {
+                    record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                        tier: 2,
+                        timestamp_unix_s: now_unix_s,
+                        outcome,
+                    });
+                    let _ = save_recovery_record(&runtime_root, machine_name, &record);
+                    let _ = sink.emit(machine_name, 2, RecoveryEventOutcome::Succeeded, now_unix_s);
+                }
+                Err(error) => {
+                    record.last_recovery_action = Some(crate::RecoveryActionRecord {
+                        tier: 2,
+                        timestamp_unix_s: now_unix_s,
+                        outcome: format!("tier-2-recreate-failed: {error:#}"),
+                    });
+                    let _ = save_recovery_record(&runtime_root, machine_name, &record);
+                    let _ = sink.emit(machine_name, 2, RecoveryEventOutcome::Failed, now_unix_s);
+                }
+            }
         }
         RecoveryAction::Tier3Escalate => {
             let _ = emit_tier_3_escalation(&sink, machine_name, now_unix_s);
@@ -1504,9 +1603,25 @@ fn effective_recovery_wedge(
     runtime_root: &FsPath,
     machine_name: &str,
     k3s_service_name: &str,
+    detection_config: &port_model::ClusterDetectionConfig,
     observed_wedge: Option<(WedgeClass, u64)>,
     now_unix_s: u64,
 ) -> Option<(WedgeClass, u64)> {
+    if let Some(guest_age_seconds) = resolve_guest_refresh_age_seconds_for_machine(
+        state,
+        machine_name,
+        runtime_root,
+        resolve_placed_node_for_machine(state, machine_name).map(|_| 0),
+        now_unix_s,
+    ) {
+        if guest_age_seconds > detection_config.guest_trigger_refresh_age_seconds {
+            let wedged_since_unix_s = observed_wedge
+                .map(|(_, since)| since)
+                .unwrap_or_else(|| now_unix_s.saturating_sub(guest_age_seconds));
+            return Some((WedgeClass::Guest, wedged_since_unix_s));
+        }
+    }
+
     let runtime = match machine_service_status(
         &state.inner.config,
         runtime_root,
@@ -1525,6 +1640,36 @@ fn effective_recovery_wedge(
     }
 
     observed_wedge
+}
+
+fn restart_machine_for_recovery(
+    state: &ControlPlaneState,
+    runtime_root: &FsPath,
+    machine_name: &str,
+    drop_overlay: bool,
+) -> Result<String> {
+    let _ = runtime_stop_machine(
+        &state.inner.config,
+        runtime_root,
+        machine_name,
+        RECOVERY_MACHINE_STOP_TIMEOUT,
+    )?;
+    if drop_overlay {
+        drop_machine_rootfs_overlay(runtime_root, machine_name)?;
+    }
+    let launch = launch_local_machine(
+        &state.inner.config,
+        &LaunchRequest {
+            machine_name,
+            runtime_root,
+            boot_wait: RECOVERY_MACHINE_BOOT_WAIT,
+        },
+    )?;
+    Ok(if drop_overlay {
+        format!("tier-2-machine-recreated-at-{}", launch.launched_at_unix_s)
+    } else {
+        format!("tier-1-machine-restarted-at-{}", launch.launched_at_unix_s)
+    })
 }
 
 fn k3s_service_runtime_indicates_recoverable_guest_wedge(
@@ -6817,6 +6962,15 @@ mod tests {
         bodies: Arc<Mutex<Vec<String>>>,
     }
 
+    #[derive(Clone)]
+    struct RecoveryMockNodeState {
+        node_name: String,
+        runtime_root: PathBuf,
+        pid: u32,
+        commands: Arc<Mutex<Vec<String>>>,
+        guest_refresh_age_seconds: Option<u64>,
+    }
+
     fn sample_artifact_transfer_request(
         config: &PortConfig,
         control_plane: &str,
@@ -8007,6 +8161,7 @@ mod tests {
             &state,
             "cloud-aws",
             "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
             &enabled_recovery_config(),
             2_000,
         );
@@ -8029,6 +8184,149 @@ mod tests {
         );
 
         cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn effective_recovery_wedge_marks_missing_guest_heartbeat_since_placement_as_guest_wedge() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+        let wedge = super::effective_recovery_wedge(
+            &state,
+            &runtime_root,
+            "cloud-aws",
+            "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
+            None,
+            2_000,
+        )
+        .expect("cloud-aws should be marked wedged");
+        assert_eq!(wedge.0, super::WedgeClass::Guest);
+
+        cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn recovery_runner_restarts_machine_through_live_hosted_route() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let control_plane = unique_test_control_plane("recovery-restart");
+        let token_var = unique_test_env("PORT_RECOVERY_RESTART_TOKEN");
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut config = sample_control_plane_config(tempdir.path());
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let node_addr = serve_recovery_mock_node_agent(RecoveryMockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: runtime_root.clone(),
+            pid: 4321,
+            commands: commands.clone(),
+            guest_refresh_age_seconds: None,
+        });
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should be non-blocking");
+        let control_addr = listener.local_addr().expect("addr should exist");
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .endpoint = format!("http://{control_addr}");
+
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: control_addr.to_string(),
+                node_bindings: vec![HostedNodeBinding {
+                    node_name: String::from("aws-linux-node"),
+                    endpoint: format!("http://{node_addr}"),
+                    token: String::from("node-token"),
+                }],
+            },
+        )
+        .expect("control-plane state should build");
+        let serve_state = state.clone();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+            runtime.block_on(async move {
+                let listener = TcpListener::from_std(listener)
+                    .expect("tokio listener should wrap std listener");
+                let _ = axum::serve(listener, control_plane_router(serve_state)).await;
+            });
+        });
+        wait_for(Duration::from_secs(5), Duration::from_millis(25), || {
+            std::net::TcpStream::connect(control_addr).is_ok()
+        });
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+        seed_guest_wedge(&state, "cloud-aws", 1_000);
+
+        super::reconcile_machine_recovery(
+            &state,
+            "cloud-aws",
+            "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
+            &enabled_recovery_config(),
+            2_000,
+        );
+
+        let commands = commands.lock().expect("commands lock").clone();
+        assert_eq!(
+            commands,
+            vec![
+                String::from("cloud-aws:stop"),
+                String::from("cloud-aws:launch")
+            ]
+        );
+
+        let record = super::load_recovery_record(&runtime_root, "cloud-aws")
+            .expect("recovery record should load")
+            .expect("recovery record should exist");
+        assert_eq!(record.recovery_attempts.tier_1, 1);
+        assert_eq!(
+            record
+                .last_recovery_action
+                .as_ref()
+                .map(|action| action.outcome.as_str()),
+            Some("tier-1-machine-restarted-at-1")
+        );
+
+        let events: Vec<super::RecoveryEvent> =
+            std::fs::read_to_string(runtime_root.join("recovery").join("events.log"))
+                .expect("events log should read")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("event should decode"))
+                .collect();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].outcome, super::RecoveryEventOutcome::Started);
+        assert_eq!(events[1].outcome, super::RecoveryEventOutcome::Succeeded);
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[test]
@@ -8062,6 +8360,7 @@ mod tests {
             &state,
             "cloud-aws",
             "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
             &enabled_recovery_config(),
             2_000,
         );
@@ -8079,6 +8378,7 @@ mod tests {
             &state,
             "cloud-aws",
             "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
             &enabled_recovery_config(),
             3_000,
         );
@@ -8118,7 +8418,14 @@ mod tests {
         // must persist no record and emit no event.
         let disabled = port_model::ClusterRecoveryConfig::default();
         assert!(!disabled.enabled);
-        super::reconcile_machine_recovery(&state, "cloud-aws", "k3s-server", &disabled, 2_000);
+        super::reconcile_machine_recovery(
+            &state,
+            "cloud-aws",
+            "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
+            &disabled,
+            2_000,
+        );
 
         assert!(
             super::load_recovery_record(&runtime_root, "cloud-aws")
@@ -11467,6 +11774,162 @@ mod tests {
             let _ = axum::serve(listener, router).await;
         });
         wait_for_http_ready(addr, "/__ready", &[], true).await;
+        addr
+    }
+
+    fn serve_recovery_mock_node_agent(state: RecoveryMockNodeState) -> SocketAddr {
+        async fn ready_handler() -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn status_handler(
+            State(state): State<RecoveryMockNodeState>,
+            Path(machine): Path<String>,
+        ) -> Json<HostedSuccess<MachineStatus>> {
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(String::from("demo")),
+                    machine_name: Some(machine.clone()),
+                    node_name: Some(state.node_name.clone()),
+                    ..HostedRouteContext::default()
+                },
+                result: MachineStatus {
+                    guest_refresh_age_seconds: state.guest_refresh_age_seconds,
+                    wedged_since_unix_s: None,
+                    wedge_class: None,
+                    recovery_attempts: RecoveryAttemptCounters::default(),
+                    last_recovery_action: None,
+                    recovery_state: RecoveryState::default(),
+                    machine_name: machine,
+                    state: MachineRuntimeState::Running,
+                    pid: Some(state.pid),
+                    control: port_model::MachineControlContract::hosted_control_plane(),
+                    runtime_dir: state.runtime_root.join("cloud-aws"),
+                    config_path: state.runtime_root.join("cloud-aws/firecracker-config.json"),
+                    manifest_path: state.runtime_root.join("cloud-aws/manifest.json"),
+                    pid_path: state.runtime_root.join("cloud-aws/firecracker.pid"),
+                    firecracker_log: state.runtime_root.join("cloud-aws/firecracker.log"),
+                    stdout_log: state.runtime_root.join("cloud-aws/console.stdout.log"),
+                    stderr_log: state.runtime_root.join("cloud-aws/console.stderr.log"),
+                    runtime_class: None,
+                    attached_volumes: Vec::new(),
+                    hosted_fleet_nodes: Vec::new(),
+                    detail: String::from("mock status"),
+                },
+            })
+        }
+
+        async fn command_handler(
+            State(state): State<RecoveryMockNodeState>,
+            Path(machine): Path<String>,
+        ) -> Response {
+            if let Some(machine_name) = machine.strip_suffix(":stop") {
+                state
+                    .commands
+                    .lock()
+                    .expect("commands lock")
+                    .push(format!("{machine_name}:stop"));
+                return super::json_response(
+                    StatusCode::OK,
+                    &HostedSuccess {
+                        route: HostedRouteContext {
+                            control_plane: Some(String::from("demo")),
+                            machine_name: Some(machine_name.to_string()),
+                            node_name: Some(state.node_name.clone()),
+                            ..HostedRouteContext::default()
+                        },
+                        result: StopResult {
+                            machine_name: machine_name.to_string(),
+                            previous_state: MachineRuntimeState::Running,
+                            current_state: MachineRuntimeState::Stopped,
+                            pid: Some(state.pid),
+                            control: port_model::MachineControlContract::hosted_control_plane(),
+                            runtime_dir: state.runtime_root.join(machine_name),
+                            runtime_class: None,
+                            attached_volumes: Vec::new(),
+                            detail: String::from("mock stop"),
+                        },
+                    },
+                );
+            }
+            if let Some(machine_name) = machine.strip_suffix(":launch") {
+                state
+                    .commands
+                    .lock()
+                    .expect("commands lock")
+                    .push(format!("{machine_name}:launch"));
+                return super::json_response(
+                    StatusCode::OK,
+                    &HostedSuccess {
+                        route: HostedRouteContext {
+                            control_plane: Some(String::from("demo")),
+                            machine_name: Some(machine_name.to_string()),
+                            node_name: Some(state.node_name.clone()),
+                            ..HostedRouteContext::default()
+                        },
+                        result: LaunchMetadata {
+                            machine_name: machine_name.to_string(),
+                            pid: state.pid,
+                            launched_at_unix_s: 1,
+                            runtime_dir: state.runtime_root.join(machine_name),
+                            firecracker_binary: PathBuf::from("/usr/bin/firecracker-pvm"),
+                            config_path: state
+                                .runtime_root
+                                .join(machine_name)
+                                .join("firecracker-config.json"),
+                            log_path: state
+                                .runtime_root
+                                .join(machine_name)
+                                .join("firecracker.log"),
+                            stdout_path: state
+                                .runtime_root
+                                .join(machine_name)
+                                .join("console.stdout.log"),
+                            stderr_path: state
+                                .runtime_root
+                                .join(machine_name)
+                                .join("console.stderr.log"),
+                            manifest_path: state
+                                .runtime_root
+                                .join(machine_name)
+                                .join("manifest.json"),
+                            runtime_class: None,
+                            attached_volumes: Vec::new(),
+                        },
+                    },
+                );
+            }
+
+            super::error_response(
+                StatusCode::NOT_FOUND,
+                format!("unexpected machine command path '{machine}'"),
+                None,
+            )
+        }
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should be non-blocking");
+        let addr = listener.local_addr().expect("addr should exist");
+        let router = Router::new()
+            .route("/__ready", get(ready_handler))
+            .route(
+                "/v1/node/machines/{machine}",
+                get(status_handler).post(command_handler),
+            )
+            .with_state(state);
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+            runtime.block_on(async move {
+                let listener = TcpListener::from_std(listener)
+                    .expect("tokio listener should wrap std listener");
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+        wait_for(Duration::from_secs(5), Duration::from_millis(25), || {
+            std::net::TcpStream::connect(addr).is_ok()
+        });
         addr
     }
 
