@@ -21,8 +21,10 @@
 .heroCopy h1 {
   max-width: 12ch;
   margin: 0;
-  font-size: clamp(3.1rem, 6vw, 5.4rem);
-  line-height: 0.94;
+  font-family: var(--ifm-font-family-base);
+  font-size: clamp(3.8rem, 7.6vw, 6.7rem);
+  font-weight: 720;
+  line-height: 0.9;
   letter-spacing: -0.055em;
   text-wrap: pretty;
 }

@@ -147,8 +147,10 @@ body {
 }
 
 .navbar {
-  padding-block: 0;
-  padding-inline: 0;
+  --ifm-navbar-link-color: #fffdf8;
+  --ifm-navbar-link-hover-color: #fffdf8;
+  --ifm-navbar-link-active-color: #fffdf8;
+  padding: 0 !important;
   display: flex;
   flex-direction: column;
   height: auto;
@@ -168,6 +170,7 @@ body {
   padding-inline: var(--ifm-navbar-padding-horizontal);
   backdrop-filter: blur(16px);
   background: rgba(47, 128, 123, 0.96);
+  color: #fffdf8;
   box-shadow: var(--port-shadow-shell);
 }
 
@@ -230,6 +233,16 @@ body {
   color: #fffdf8;
 }
 
+.navbar__surface .navbar__brand,
+.navbar__surface .navbar__brand:hover,
+.navbar__surface .navbar__link,
+.navbar__surface .navbar__link:hover,
+.navbar__surface .navbar__link--active,
+.navbar__surface .navbar__title,
+.navbar__surface .navbar__toggle {
+  color: #fffdf8 !important;
+}
+
 .navbar-sidebar {
   z-index: 3;
   color: #fffdf8;
@@ -284,9 +297,10 @@ body {
 .theme-doc-markdown h1 {
   max-width: none;
   margin-bottom: var(--port-space-5);
-  font-size: clamp(2.7rem, 4.4vw, 4rem);
-  line-height: 1.02;
-  font-weight: 690;
+  font-family: var(--ifm-font-family-base);
+  font-size: clamp(3.3rem, 5.8vw, 5.35rem);
+  line-height: 0.94;
+  font-weight: 720;
 }
 
 .theme-doc-markdown h2 {
@@ -604,7 +618,7 @@ body {
   }
 
   .theme-doc-markdown h1 {
-    font-size: clamp(2.35rem, 8vw, 3.45rem);
+    font-size: clamp(2.85rem, 9vw, 4.1rem);
   }
 
   .theme-doc-markdown h2 {
