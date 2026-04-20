@@ -7215,18 +7215,19 @@ fn resolve_service_runtime_context(
     host_group: Option<&str>,
 ) -> Result<ResolvedMachineRuntime> {
     let machine_is_hosted = machine_is_hosted(config, machine_name)?;
-    if host_group.is_none() {
-        if !machine_is_hosted {
-            if let Some(context) = resolve_localized_hosted_service_runtime_context(
+    if !machine_is_hosted {
+        if host_group.is_none()
+            && let Some(context) = resolve_localized_hosted_service_runtime_context(
                 config,
                 runtime_root,
                 machine_name,
-            )? {
-                return Ok(context);
-            }
+            )?
+        {
+            return Ok(context);
         }
-        if let Some(context) =
-            resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
+        if host_group.is_none()
+            && let Some(context) =
+                resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
         {
             return Ok(context);
         }
