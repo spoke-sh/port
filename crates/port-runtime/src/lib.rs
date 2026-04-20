@@ -2366,6 +2366,23 @@ fn execute_cluster_exec(
     command: Vec<String>,
     action: &str,
 ) -> Result<ExecResult> {
+    if driver_for_machine(config, machine_name)?.kind() == MachineDriverKind::HostedControlPlane {
+        return execute_hosted_k3s_exec(
+            config,
+            runtime_root,
+            machine_name,
+            command,
+            action,
+            cluster_name,
+        )
+        .with_context(|| {
+            format!(
+                "failed to {} on machine '{}' for cluster '{}'",
+                action, machine_name, cluster_name
+            )
+        });
+    }
+
     let operation = execute_guest_operation(
         config,
         GuestRequest {
