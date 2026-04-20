@@ -3772,7 +3772,7 @@ fn hosted_service_status_matches_apply_request(
         && status.name == request.name
         && status.kind == request.kind
         && status.command == request.command
-        && status.desired_state == ServiceDesiredState::Running
+        && status.desired_state == ServiceDesiredState::Active
 }
 
 fn managed_service_status_from_service_definition_status(
