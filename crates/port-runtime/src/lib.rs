@@ -60,6 +60,8 @@ const PORT_IPTABLES_BINARY_ENV: &str = "PORT_IPTABLES_BINARY";
 // turns green, especially when the control plane is forming containerd/CNI for
 // the first time after a relaunch.
 const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(300);
+const HOSTED_MACHINE_LIST_TIMEOUT: Duration = Duration::from_secs(30);
+const HOSTED_MACHINE_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
 const GUEST_TRANSPORT_IO_TIMEOUT: Duration = Duration::from_secs(300);
 const GUEST_TRANSPORT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -8651,7 +8653,7 @@ fn hosted_control_plane_list_machines(config: &PortConfig) -> Result<Vec<Machine
             Err(error) => return Err(error),
         };
         let response: HostedSuccess<Vec<MachineStatus>> = client
-            .execute_json(client.machines().list())
+            .execute_json_with_timeout(client.machines().list(), HOSTED_MACHINE_LIST_TIMEOUT)
             .map_err(|error| {
                 anyhow!(
                     "failed to list machines through hosted control plane '{}': {error}",
@@ -8721,7 +8723,10 @@ fn hosted_control_plane_machine_status_response(
 ) -> Result<HostedSuccess<MachineStatus>> {
     let client = hosted_client_for_machine(config, machine_name)?;
     client
-        .execute_json(client.machines().status(machine_name))
+        .execute_json_with_timeout(
+            client.machines().status(machine_name),
+            HOSTED_MACHINE_STATUS_TIMEOUT,
+        )
         .map_err(|error| {
             anyhow!(
                 "failed to load machine '{}' through the live hosted control-plane route: {error}",
