@@ -7288,25 +7288,55 @@ fn resolve_stored_local_hosted_service_runtime_context(
     let Some(placement) = hosted_stored_machine_placement(config, machine_name)? else {
         return Ok(None);
     };
-    let paths = RuntimePaths::for_machine(&placement.runtime_root, machine_name);
-    if !paths.runtime_dir.exists() {
-        return Ok(None);
-    }
-
-    let mut status = local_machine_status_for_runtime_root(
+    let placement_detail = placement
+        .placement_detail
+        .clone()
+        .unwrap_or_else(|| summary.placement_detail.clone());
+    let mut status = match local_machine_status_for_runtime_root(
         &effective_config,
         &placement.runtime_root,
         machine_name,
-    )?;
+    ) {
+        Ok(status) => status,
+        Err(_) => {
+            let response = match hosted_control_plane_machine_status_response(config, machine_name)
+            {
+                Ok(response) => response,
+                Err(_) => return Ok(None),
+            };
+            let mut status = response.result;
+            status.control = MachineControlContract::hosted_control_plane();
+            status.detail = match response.route.node_name.as_deref() {
+                Some(node_name) => format!(
+                    "{} Routed through control plane '{}' and stored node '{}'. {}",
+                    status.detail, hosted_identity.control_plane, node_name, placement_detail
+                ),
+                None => format!(
+                    "{} Routed through control plane '{}' and stored node '{}'. {}",
+                    status.detail,
+                    hosted_identity.control_plane,
+                    placement.node_name,
+                    placement_detail
+                ),
+            };
+            return Ok(Some(ResolvedMachineRuntime {
+                status,
+                control_plane: Some(hosted_identity.control_plane),
+                node_name: response
+                    .route
+                    .node_name
+                    .or_else(|| Some(placement.node_name.clone())),
+                host_groups: summary.host_groups.clone(),
+                host_group_policies: summary.host_group_policies.clone(),
+                target_host_group: None,
+                scheduler: None,
+            }));
+        }
+    };
     status.control = MachineControlContract::hosted_control_plane();
     status.detail = format!(
         "{} Routed through control plane '{}' and stored node '{}'. {}",
-        status.detail,
-        hosted_identity.control_plane,
-        placement.node_name,
-        placement
-            .placement_detail
-            .unwrap_or_else(|| summary.placement_detail.clone())
+        status.detail, hosted_identity.control_plane, placement.node_name, placement_detail
     );
 
     Ok(Some(ResolvedMachineRuntime {
