@@ -46,7 +46,7 @@ const config: Config = {
     ],
   ],
   themeConfig: {
-    image: 'img/port-social-card.svg',
+    image: 'img/port-social.webp',
     metadata: [
       {
         property: 'og:site_name',
