@@ -3848,6 +3848,7 @@ fn hosted_k3s_service_command(
 }
 
 const HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS: u64 = 120;
+const HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS: u64 = 300;
 
 fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec<String> {
     let k3s = "/usr/bin/k3s";
@@ -3857,16 +3858,35 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
             "{k3s} crictl info >/dev/null 2>&1 && {k3s} kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml --request-timeout=10s get --raw=/readyz >/dev/null 2>&1"
         ),
         "agent" => format!(
-            "{k3s} crictl info >/dev/null 2>&1 && \
-            {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1 && \
-            lease_renew_time=$({k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s -n kube-node-lease get lease {} -o jsonpath='{{.spec.renewTime}}' 2>/dev/null); \
-            if [ -n \"$lease_renew_time\" ]; then \
-                lease_epoch=$({busybox} date -u -D '%Y-%m-%dT%H:%M:%S' -d \"$lease_renew_time\" +%s 2>/dev/null); \
-                if [ -n \"$lease_epoch\" ]; then \
-                    now_epoch=$({busybox} date -u +%s); \
-                    test $((now_epoch - lease_epoch)) -le {HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS}; \
+            "state_dir=/run/port/health; \
+            last_ok_file=\"$state_dir/k3s-agent-cluster-ok\"; \
+            mkdir -p \"$state_dir\"; \
+            {k3s} crictl info >/dev/null 2>&1 || exit 1; \
+            cluster_ok=0; \
+            if {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1; then \
+                lease_renew_time=$({k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s -n kube-node-lease get lease {} -o jsonpath='{{.spec.renewTime}}' 2>/dev/null); \
+                if [ -n \"$lease_renew_time\" ]; then \
+                    lease_epoch=$({busybox} date -u -D '%Y-%m-%dT%H:%M:%S' -d \"$lease_renew_time\" +%s 2>/dev/null); \
+                    if [ -n \"$lease_epoch\" ]; then \
+                        now_epoch=$({busybox} date -u +%s); \
+                        if test $((now_epoch - lease_epoch)) -le {HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS}; then \
+                            cluster_ok=1; \
+                        fi; \
+                    fi; \
                 fi; \
-            fi",
+            fi; \
+            if [ \"$cluster_ok\" -eq 1 ]; then \
+                {busybox} date -u +%s > \"$last_ok_file\"; \
+                exit 0; \
+            fi; \
+            if [ -f \"$last_ok_file\" ]; then \
+                last_ok_epoch=$(cat \"$last_ok_file\" 2>/dev/null); \
+                if [ -n \"$last_ok_epoch\" ]; then \
+                    now_epoch=$({busybox} date -u +%s); \
+                    test $((now_epoch - last_ok_epoch)) -le {HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS}; \
+                fi; \
+            fi; \
+            exit 1",
             shell_single_quote(machine_name)
         ),
         _ => String::from("/usr/bin/k3s crictl info >/dev/null 2>&1"),
@@ -18770,7 +18790,7 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_k3s_agent_healthcheck_requires_runtime_and_kubelet_api_with_optional_lease_window() {
+    fn hosted_k3s_agent_healthcheck_uses_lease_grace_window_for_transient_failures() {
         let policy = hosted_k3s_service_policy("agent", "cloud-aws-worker");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
@@ -18782,14 +18802,17 @@ exec sleep 30
         assert!(shell.contains(
             "/usr/bin/k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz"
         ));
+        assert!(shell.contains("last_ok_file=\"$state_dir/k3s-agent-cluster-ok\""));
+        assert!(shell.contains("cluster_ok=0"));
         assert!(shell.contains("lease_renew_time="));
         assert!(shell.contains("-n kube-node-lease get lease 'cloud-aws-worker'"));
         assert!(shell.contains(".spec.renewTime"));
-        assert!(shell.contains("if [ -n \"$lease_renew_time\" ]"));
+        assert!(shell.contains("if [ \"$cluster_ok\" -eq 1 ]"));
+        assert!(shell.contains("if [ -f \"$last_ok_file\" ]"));
         assert!(shell.contains("/bin/busybox date -u -D '%Y-%m-%dT%H:%M:%S'"));
         assert!(shell.contains("now_epoch=$(/bin/busybox date -u +%s)"));
         assert!(shell.contains("test $((now_epoch - lease_epoch)) -le 120"));
-        assert!(shell.contains("fi;"));
+        assert!(shell.contains("test $((now_epoch - last_ok_epoch)) -le 300"));
     }
 
     #[test]
