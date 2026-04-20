@@ -3956,6 +3956,93 @@ fn refresh_machine_placements(
     Ok(placements)
 }
 
+fn clear_machine_placement(state: &ControlPlaneState, machine_name: &str) -> Result<bool, String> {
+    let current_state = state
+        .inner
+        .machine_placement_state
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect machine placement state",
+                state.inner.control_plane
+            )
+        })?
+        .clone();
+    if !current_state.machines.contains_key(machine_name) {
+        return Ok(false);
+    }
+
+    let mut next_state = current_state;
+    next_state.machines.remove(machine_name);
+    let next_placements = next_state.machines.clone();
+    persist_machine_placement_state(&state.inner.machine_placement_state_path, &next_state)
+        .map_err(|error| {
+            format!(
+                "control plane '{}' could not persist purged placement for machine '{}': {error}",
+                state.inner.control_plane, machine_name
+            )
+        })?;
+    *state.inner.machine_placement_state.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update machine placement state",
+            state.inner.control_plane
+        )
+    })? = next_state;
+    *state.inner.machine_placements.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not update machine placement records",
+            state.inner.control_plane
+        )
+    })? = next_placements;
+    Ok(true)
+}
+
+fn node_error_indicates_missing_machine_runtime(
+    route_context: &HostedRouteContext,
+    machine_name: &str,
+    message: &str,
+) -> bool {
+    if message.contains(&format!(
+        "runtime state for machine '{}' does not exist",
+        machine_name
+    )) {
+        return true;
+    }
+
+    let Some(runtime_root) = route_context.runtime_root.as_ref() else {
+        return false;
+    };
+    let paths = RuntimePaths::for_machine(runtime_root, machine_name);
+    message.contains("guest agent socket")
+        && message.contains(paths.guest_agent_socket.to_string_lossy().as_ref())
+        && message.contains("does not exist")
+}
+
+fn purge_machine_placement_if_runtime_missing(
+    state: &ControlPlaneState,
+    route_context: &HostedRouteContext,
+    message: &str,
+) {
+    let Some(machine_name) = route_context.machine_name.as_deref() else {
+        return;
+    };
+    if !node_error_indicates_missing_machine_runtime(route_context, machine_name, message) {
+        return;
+    }
+
+    match clear_machine_placement(state, machine_name) {
+        Ok(true) => eprintln!(
+            "control plane '{}' purged stale placement for machine '{}' after node-agent reported missing hosted runtime: {}",
+            state.inner.control_plane, machine_name, message
+        ),
+        Ok(false) => {}
+        Err(error) => eprintln!(
+            "control plane '{}' failed to purge stale placement for machine '{}': {}",
+            state.inner.control_plane, machine_name, error
+        ),
+    }
+}
+
 fn stored_machine_route_context(
     summary: &HostedMachineSummaryContract,
     placement: &HostedMachinePlacementRecord,
@@ -4804,6 +4891,11 @@ async fn proxy_bytes_with_timeout(
                 state.inner.control_plane, binding.node_name
             )
         })?;
+    if !status.is_success()
+        && let Ok(error) = serde_json::from_slice::<HostedError>(&bytes)
+    {
+        purge_machine_placement_if_runtime_missing(state, &route_context, &error.message);
+    }
     Ok((status, bytes))
 }
 
@@ -8104,12 +8196,14 @@ mod tests {
         machine_name: &str,
         runtime_root: &std::path::Path,
     ) {
-        let mut placements = state
+        let mut placement_state = state
             .inner
-            .machine_placements
-            .write()
-            .expect("machine_placements write");
-        placements.insert(
+            .machine_placement_state
+            .read()
+            .expect("machine_placement_state read")
+            .clone();
+        placement_state.control_plane = state.inner.control_plane.clone();
+        placement_state.machines.insert(
             String::from(machine_name),
             super::HostedMachinePlacementRecord {
                 node_name: String::from("aws-linux-node"),
@@ -8118,6 +8212,21 @@ mod tests {
                 placement_detail: None,
             },
         );
+        super::persist_machine_placement_state(
+            &state.inner.machine_placement_state_path,
+            &placement_state,
+        )
+        .expect("machine placement state should persist");
+        *state
+            .inner
+            .machine_placement_state
+            .write()
+            .expect("machine_placement_state write") = placement_state.clone();
+        *state
+            .inner
+            .machine_placements
+            .write()
+            .expect("machine_placements write") = placement_state.machines;
     }
 
     fn seed_guest_wedge(
@@ -9997,6 +10106,206 @@ mod tests {
 
         assert!(error.contains("timed out after 50ms"), "{error}");
         assert!(error.contains("node 'aws-linux-node'"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn proxy_bytes_purges_stale_machine_placement_when_node_reports_missing_runtime() {
+        async fn ready_handler() -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn missing_runtime_handler(
+            Path(machine): Path<String>,
+        ) -> (StatusCode, Json<HostedError>) {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(HostedError {
+                    route: None,
+                    message: format!(
+                        "node 'aws-linux-node' failed to serve machine '{}': runtime state for machine '{}' does not exist under '/var/lib/port/aws-hosted/runtime/hosted/aws-linux-node'",
+                        machine, machine
+                    ),
+                }),
+            )
+        }
+
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("purge-missing-runtime");
+        let token_var = unique_test_env("PORT_TEST_PURGE_MISSING_RUNTIME_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let router = Router::new()
+            .route("/__ready", get(ready_handler))
+            .route("/v1/node/machines/{machine}", get(missing_runtime_handler));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        wait_for_http_ready(addr, "/__ready", &[], true).await;
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+        place_machine_for_recovery(
+            &state,
+            "cloud-aws",
+            &config.nodes["aws-linux-node"].runtime_root,
+        );
+
+        let binding = HostedNodeBinding {
+            node_name: String::from("aws-linux-node"),
+            endpoint: format!("http://{addr}"),
+            token: String::from("node-secret"),
+        };
+        let (status, _) = proxy_bytes_with_timeout(
+            &state,
+            &binding,
+            HostedNodeRoute::Machine(HostedMachineRoute::Status {
+                machine_name: String::from("cloud-aws"),
+            }),
+            Method::GET,
+            None,
+            None,
+            HostedRouteContext {
+                control_plane: Some(control_plane.clone()),
+                machine_name: Some(String::from("cloud-aws")),
+                node_name: Some(String::from("aws-linux-node")),
+                runtime_root: Some(config.nodes["aws-linux-node"].runtime_root.clone()),
+                ..HostedRouteContext::default()
+            },
+            Duration::from_millis(250),
+        )
+        .await
+        .expect("proxy should return the node error payload");
+
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        let placements = super::refresh_machine_placements(&state)
+            .expect("machine placements should refresh after purge");
+        assert!(!placements.contains_key("cloud-aws"));
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn proxy_bytes_purges_stale_machine_placement_when_guest_socket_is_missing() {
+        async fn ready_handler() -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn missing_guest_handler(
+            Path(machine): Path<String>,
+        ) -> (StatusCode, Json<HostedError>) {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(HostedError {
+                    route: None,
+                    message: format!(
+                        "node 'aws-linux-node' failed to serve guest operation for machine '{}': guest agent socket '/var/lib/port/aws-hosted/runtime/hosted/aws-linux-node/{}/guest-agent.sock' does not exist for machine '{}'",
+                        machine, machine, machine
+                    ),
+                }),
+            )
+        }
+
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let runtime_root = PathBuf::from("/var/lib/port/aws-hosted/runtime/hosted/aws-linux-node");
+        config
+            .nodes
+            .get_mut("aws-linux-node")
+            .expect("aws-linux-node should exist")
+            .runtime_root = runtime_root.clone();
+        let control_plane = unique_test_control_plane("purge-missing-guest-socket");
+        let token_var = unique_test_env("PORT_TEST_PURGE_GUEST_SOCKET_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        let router = Router::new().route("/__ready", get(ready_handler)).route(
+            "/v1/node/machines/{machine}/guest:exec",
+            post(missing_guest_handler),
+        );
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        wait_for_http_ready(addr, "/__ready", &[], true).await;
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+
+        let binding = HostedNodeBinding {
+            node_name: String::from("aws-linux-node"),
+            endpoint: format!("http://{addr}"),
+            token: String::from("node-secret"),
+        };
+        let payload = serde_json::to_vec(&GuestOperation::Exec(ExecRequest {
+            command: vec![String::from("/bin/true")],
+            cwd: None,
+            env: BTreeMap::new(),
+        }))
+        .expect("guest request should encode");
+        let (status, _) = proxy_bytes_with_timeout(
+            &state,
+            &binding,
+            HostedNodeRoute::Guest(HostedGuestRoute {
+                machine_name: String::from("cloud-aws"),
+                verb: HostedGuestVerb::Exec,
+            }),
+            Method::POST,
+            Some(Bytes::from(payload)),
+            Some("application/json"),
+            HostedRouteContext {
+                control_plane: Some(control_plane.clone()),
+                machine_name: Some(String::from("cloud-aws")),
+                node_name: Some(String::from("aws-linux-node")),
+                runtime_root: Some(runtime_root.clone()),
+                ..HostedRouteContext::default()
+            },
+            Duration::from_millis(250),
+        )
+        .await
+        .expect("proxy should return the node error payload");
+
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        let placements = super::refresh_machine_placements(&state)
+            .expect("machine placements should refresh after purge");
+        assert!(!placements.contains_key("cloud-aws"));
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[tokio::test]
