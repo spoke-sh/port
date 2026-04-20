@@ -79,12 +79,12 @@
           };
         };
         portRuntimeDeps = [
-          pkgs.k3s
           pkgs.oras
           pkgs.gnutar
           pkgs.gzip
           pkgs.curl
         ] ++ pkgs.lib.optionals isLinux [
+          pkgs.k3s
           awsPvmHostKitPkg
           pkgs.firecracker
           pkgs.iproute2
@@ -191,7 +191,6 @@
           rust
           portPkg
           pkgs.nodejs_24
-          pkgs.k3s
           pkgs.kubernetes-helm
           pkgs.fluxcd
           pkgs.just
@@ -208,6 +207,8 @@
           paddlesPkg
           keelPkg
           pkgs.curl
+        ] ++ pkgs.lib.optionals isLinux [
+          pkgs.k3s
         ];
         linuxRuntimeInputs = pkgs.lib.optionals isLinux [
           pkgs.firecracker
