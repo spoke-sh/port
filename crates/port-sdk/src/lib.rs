@@ -168,7 +168,7 @@ impl HostedClient {
         self.execute_json_with_timeout(request, HOSTED_HTTP_TIMEOUT)
     }
 
-    fn execute_json_with_timeout<T>(
+    pub fn execute_json_with_timeout<T>(
         &self,
         request: HostedApiRequest,
         timeout: Duration,

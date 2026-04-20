@@ -3668,9 +3668,43 @@ fn execute_hosted_k3s_managed_service_start(
     action: &str,
     cluster_name: &str,
 ) -> Result<ManagedServiceStatus> {
-    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
-    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+    execute_hosted_k3s_managed_service_start_with_retry(
+        config,
+        runtime_root,
+        machine_name,
+        host_group,
+        role,
+        args,
+        bootstrap_flag,
+        server_url,
+        join_token,
+        action,
+        cluster_name,
+        Duration::from_secs(15),
+        Duration::from_secs(5),
+        Duration::from_secs(60),
+        Duration::from_millis(100),
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn execute_hosted_k3s_managed_service_start_with_retry(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    host_group: &str,
+    role: &str,
+    args: &[String],
+    bootstrap_flag: Option<&str>,
+    server_url: Option<&str>,
+    join_token: Option<&str>,
+    action: &str,
+    cluster_name: &str,
+    apply_timeout: Duration,
+    status_timeout: Duration,
+    retry_timeout: Duration,
+    retry_interval: Duration,
+) -> Result<ManagedServiceStatus> {
     let request = ServiceApplyRequest {
         machine_name,
         runtime_root,
@@ -3683,45 +3717,41 @@ fn execute_hosted_k3s_managed_service_start(
     };
     let started = Instant::now();
     let last_error = loop {
-        match apply_machine_service(config, request.clone()) {
+        match hosted_control_plane_apply_machine_service_with_timeout(
+            config,
+            request.clone(),
+            apply_timeout,
+        ) {
             Ok(status) => {
-                return Ok(ManagedServiceStatus {
-                    name: status.name,
-                    kind: match status.kind {
-                        ServiceKind::Service => port_agent_protocol::ManagedServiceKind::Service,
-                        ServiceKind::Sandbox => port_agent_protocol::ManagedServiceKind::Sandbox,
-                    },
-                    state: match status.runtime.state {
-                        ServiceRuntimeState::Stored => ManagedServiceRuntimeState::Stored,
-                        ServiceRuntimeState::Starting => ManagedServiceRuntimeState::Starting,
-                        ServiceRuntimeState::Running => ManagedServiceRuntimeState::Running,
-                        ServiceRuntimeState::Exited => ManagedServiceRuntimeState::Exited,
-                        ServiceRuntimeState::Stopped => ManagedServiceRuntimeState::Stopped,
-                        ServiceRuntimeState::Failed => ManagedServiceRuntimeState::Failed,
-                    },
-                    restart_count: status.runtime.restart_count,
-                    pid: status.runtime.pid,
-                    exit_code: status.runtime.exit_code,
-                    last_exit_code: status.runtime.last_exit_code,
-                    last_exit_detail: status.runtime.last_exit_detail,
-                    health_state: status.runtime.health_state,
-                    health_detail: status.runtime.health_detail,
-                    stdout_path: status
-                        .runtime
-                        .stdout_path
-                        .map(|path| path.display().to_string()),
-                    stderr_path: status
-                        .runtime
-                        .stderr_path
-                        .map(|path| path.display().to_string()),
-                    detail: status.detail,
-                });
+                return Ok(managed_service_status_from_service_definition_status(status));
             }
             Err(error) => {
-                if started.elapsed() >= GUEST_RETRY_TIMEOUT {
-                    break error;
+                match hosted_control_plane_machine_service_status_with_timeout(
+                    config,
+                    machine_name,
+                    request.name,
+                    status_timeout,
+                ) {
+                    Ok(status) if hosted_service_status_matches_apply_request(&status, &request) => {
+                        return Ok(managed_service_status_from_service_definition_status(status));
+                    }
+                    Ok(_) if started.elapsed() >= retry_timeout => {
+                        break anyhow!(
+                            "{error}; follow-up status for service '{}' on machine '{}' returned a different live command than the requested hosted k3s bootstrap command",
+                            request.name,
+                            machine_name
+                        );
+                    }
+                    Err(status_error) if started.elapsed() >= retry_timeout => {
+                        break anyhow!(
+                            "{error}; follow-up status for service '{}' on machine '{}' also failed: {status_error}",
+                            request.name,
+                            machine_name
+                        );
+                    }
+                    Ok(_) | Err(_) => {}
                 }
-                thread::sleep(GUEST_RETRY_INTERVAL);
+                thread::sleep(retry_interval);
             }
         }
     };
@@ -3732,6 +3762,53 @@ fn execute_hosted_k3s_managed_service_start(
             action, machine_name, cluster_name
         )
     })
+}
+
+fn hosted_service_status_matches_apply_request(
+    status: &ServiceDefinitionStatus,
+    request: &ServiceApplyRequest<'_>,
+) -> bool {
+    status.machine_name == request.machine_name
+        && status.name == request.name
+        && status.kind == request.kind
+        && status.command == request.command
+        && status.desired_state == ServiceDesiredState::Running
+}
+
+fn managed_service_status_from_service_definition_status(
+    status: ServiceDefinitionStatus,
+) -> ManagedServiceStatus {
+    ManagedServiceStatus {
+        name: status.name,
+        kind: match status.kind {
+            ServiceKind::Service => port_agent_protocol::ManagedServiceKind::Service,
+            ServiceKind::Sandbox => port_agent_protocol::ManagedServiceKind::Sandbox,
+        },
+        state: match status.runtime.state {
+            ServiceRuntimeState::Stored => ManagedServiceRuntimeState::Stored,
+            ServiceRuntimeState::Starting => ManagedServiceRuntimeState::Starting,
+            ServiceRuntimeState::Running => ManagedServiceRuntimeState::Running,
+            ServiceRuntimeState::Exited => ManagedServiceRuntimeState::Exited,
+            ServiceRuntimeState::Stopped => ManagedServiceRuntimeState::Stopped,
+            ServiceRuntimeState::Failed => ManagedServiceRuntimeState::Failed,
+        },
+        restart_count: status.runtime.restart_count,
+        pid: status.runtime.pid,
+        exit_code: status.runtime.exit_code,
+        last_exit_code: status.runtime.last_exit_code,
+        last_exit_detail: status.runtime.last_exit_detail,
+        health_state: status.runtime.health_state,
+        health_detail: status.runtime.health_detail,
+        stdout_path: status
+            .runtime
+            .stdout_path
+            .map(|path| path.display().to_string()),
+        stderr_path: status
+            .runtime
+            .stderr_path
+            .map(|path| path.display().to_string()),
+        detail: status.detail,
+    }
 }
 
 fn hosted_k3s_join_token_command() -> Vec<String> {
@@ -8780,9 +8857,17 @@ fn hosted_control_plane_apply_machine_service(
     config: &PortConfig,
     request: ServiceApplyRequest<'_>,
 ) -> Result<ServiceDefinitionStatus> {
+    hosted_control_plane_apply_machine_service_with_timeout(config, request, HOSTED_HTTP_TIMEOUT)
+}
+
+fn hosted_control_plane_apply_machine_service_with_timeout(
+    config: &PortConfig,
+    request: ServiceApplyRequest<'_>,
+    timeout: Duration,
+) -> Result<ServiceDefinitionStatus> {
     let client = hosted_client_for_machine(config, request.machine_name)?;
     let response: HostedSuccess<ServiceDefinitionStatus> = client
-        .execute_json(
+        .execute_json_with_timeout(
             client
                 .services()
                 .apply(
@@ -8797,6 +8882,7 @@ fn hosted_control_plane_apply_machine_service(
                     },
                 )
                 .context("failed to encode hosted service apply request")?,
+            timeout,
         )
         .map_err(|error| {
             anyhow!(
@@ -8829,9 +8915,23 @@ fn hosted_control_plane_machine_service_status(
     machine_name: &str,
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
+    hosted_control_plane_machine_service_status_with_timeout(
+        config,
+        machine_name,
+        service_name,
+        HOSTED_HTTP_TIMEOUT,
+    )
+}
+
+fn hosted_control_plane_machine_service_status_with_timeout(
+    config: &PortConfig,
+    machine_name: &str,
+    service_name: &str,
+    timeout: Duration,
+) -> Result<ServiceDefinitionStatus> {
     let client = hosted_client_for_machine(config, machine_name)?;
     let response: HostedSuccess<ServiceDefinitionStatus> = client
-        .execute_json(client.services().status(machine_name, service_name))
+        .execute_json_with_timeout(client.services().status(machine_name, service_name), timeout)
         .map_err(|error| {
             anyhow!(
                 "failed to load service '{}' for machine '{}' through the live hosted control-plane route: {error}",
@@ -13789,7 +13889,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use axum::extract::Path as AxumPath;
+    use axum::extract::{Path as AxumPath, State};
     use axum::http::StatusCode;
     use axum::routing::{get, post};
     use axum::{Json, Router};
@@ -18780,6 +18880,170 @@ exec sleep 30
         for metadata in result.worker_launches {
             let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
         }
+    }
+
+    #[tokio::test]
+    async fn hosted_k3s_service_start_accepts_matching_status_after_apply_timeout() {
+        #[derive(Clone)]
+        struct MockHostedServiceState {
+            control_plane: String,
+            status: ServiceDefinitionStatus,
+        }
+
+        async fn ready_handler() -> StatusCode {
+            StatusCode::OK
+        }
+
+        async fn apply_handler(
+            State(state): State<MockHostedServiceState>,
+            AxumPath(machine): AxumPath<String>,
+        ) -> (StatusCode, Json<HostedSuccess<ServiceDefinitionStatus>>) {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            (
+                StatusCode::OK,
+                Json(HostedSuccess {
+                    route: HostedRouteContext {
+                        control_plane: Some(state.control_plane.clone()),
+                        machine_name: Some(machine),
+                        service_name: Some(String::from("k3s-agent")),
+                        ..HostedRouteContext::default()
+                    },
+                    result: state.status,
+                }),
+            )
+        }
+
+        async fn status_handler(
+            State(state): State<MockHostedServiceState>,
+            AxumPath((machine, service)): AxumPath<(String, String)>,
+        ) -> Json<HostedSuccess<ServiceDefinitionStatus>> {
+            Json(HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(state.control_plane.clone()),
+                    machine_name: Some(machine),
+                    service_name: Some(service),
+                    ..HostedRouteContext::default()
+                },
+                result: state.status,
+            })
+        }
+
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        let token_var = format!("PORT_TEST_HOSTED_K3S_APPLY_TIMEOUT_{}", std::process::id());
+        let control_plane = String::from("demo");
+        let args = vec![
+            String::from("--node-label=role=worker"),
+            String::from("--node-name"),
+            String::from("cloud-aws-worker"),
+        ];
+        let command = super::hosted_k3s_service_command(
+            "agent",
+            &args,
+            None,
+            Some("https://demo-k3s.internal:6443"),
+            Some("demo-join-token"),
+        );
+        let status = ServiceDefinitionStatus {
+            machine_name: String::from("cloud-aws-worker"),
+            name: String::from("k3s-agent"),
+            kind: ServiceKind::Service,
+            desired_state: ServiceDesiredState::Running,
+            runtime: super::ServiceRuntimeObservation {
+                state: ServiceRuntimeState::Running,
+                record_path: tempdir.path().join("runtime/k3s-agent.json"),
+                restart_count: 0,
+                pid: Some(96),
+                exit_code: None,
+                last_exit_code: None,
+                last_exit_detail: None,
+                health_state: ServiceHealthState::Healthy,
+                health_detail: Some(String::from("mock healthy")),
+                stdout_path: None,
+                stderr_path: None,
+            },
+            command: command.clone(),
+            secret_bindings: Vec::new(),
+            secret_sources: Vec::new(),
+            policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
+            control: port_model::MachineControlContract::hosted_control_plane(),
+            control_plane: Some(control_plane.clone()),
+            node_name: Some(String::from("aws-linux-node")),
+            host_groups: vec![String::from("aws-builders")],
+            host_group_policies: BTreeMap::new(),
+            target_host_group: Some(String::from("aws-builders")),
+            scheduler: Some(HostedSchedulerPolicy::DeterministicFirstFit),
+            manifest_path: tempdir.path().join("runtime/k3s-agent.manifest.json"),
+            detail: String::from("mock service status"),
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .endpoint = format!("http://{addr}");
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .auth
+            .source = port_model::HostedAuthTokenSource::Env {
+            variable: token_var.clone(),
+        };
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let router = Router::new()
+            .route("/__ready", get(ready_handler))
+            .route("/v1/machines/{machine}/services", post(apply_handler))
+            .route(
+                "/v1/machines/{machine}/services/{service}",
+                get(status_handler),
+            )
+            .with_state(MockHostedServiceState {
+                control_plane: control_plane.clone(),
+                status: status.clone(),
+            });
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let result = execute_hosted_k3s_managed_service_start_with_retry(
+            &config,
+            tempdir.path(),
+            "cloud-aws-worker",
+            "aws-builders",
+            "agent",
+            &args,
+            None,
+            Some("https://demo-k3s.internal:6443"),
+            Some("demo-join-token"),
+            "join the K3s worker",
+            &control_plane,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+            Duration::from_millis(250),
+            Duration::from_millis(10),
+        )
+        .expect("matching follow-up status should satisfy hosted service start");
+
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+
+        assert_eq!(result.name, "k3s-agent");
+        assert_eq!(result.pid, Some(96));
+        assert_eq!(result.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(result.health_state, ServiceHealthState::Healthy);
     }
 
     #[test]
