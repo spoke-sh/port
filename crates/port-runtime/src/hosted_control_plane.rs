@@ -6392,6 +6392,7 @@ async fn node_service_apply(
     let runtime_root = state.inner.runtime_root.clone();
     let node_name = state.inner.node_name.clone();
     let machine_name = machine.clone();
+    let machine_name_for_error = machine_name.clone();
     let route_for_result = route.clone();
     let service_name = request.name.clone();
     let host_group = request.host_group.clone();
@@ -6429,7 +6430,7 @@ async fn node_service_apply(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to apply service for machine '{}': {error}",
-                node_name, machine_name
+                node_name, machine_name_for_error
             ),
             Some(route_for_result),
         ),
@@ -6452,6 +6453,7 @@ async fn node_service_list(
     let runtime_root = state.inner.runtime_root.clone();
     let node_name = state.inner.node_name.clone();
     let machine_name = machine.clone();
+    let machine_name_for_error = machine_name.clone();
     let route_for_result = route.clone();
     match run_node_blocking_operation(move || {
         refresh_machine_service_list(
@@ -6468,7 +6470,7 @@ async fn node_service_list(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to list services for machine '{}': {error}",
-                node_name, machine_name
+                node_name, machine_name_for_error
             ),
             Some(route_for_result),
         ),
@@ -6491,8 +6493,10 @@ async fn node_service_status(
     let runtime_root = state.inner.runtime_root.clone();
     let node_name = state.inner.node_name.clone();
     let machine_name = machine.clone();
+    let machine_name_for_error = machine_name.clone();
     let route_for_result = route.clone();
     let service_name = service.clone();
+    let service_name_for_error = service_name.clone();
     match run_node_blocking_operation(move || {
         refresh_machine_service_runtime(
             &metadata_config,
@@ -6509,7 +6513,7 @@ async fn node_service_status(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to load service '{}' for machine '{}': {error}",
-                node_name, service_name, machine_name
+                node_name, service_name_for_error, machine_name_for_error
             ),
             Some(route_for_result),
         ),
@@ -6535,8 +6539,10 @@ async fn node_service_command(
         let runtime_root = state.inner.runtime_root.clone();
         let node_name = state.inner.node_name.clone();
         let machine_name = machine.clone();
+        let machine_name_for_error = machine_name.clone();
         let route_for_result = route.clone();
         let service_name = service_name.to_string();
+        let service_name_for_error = service_name.clone();
         return match run_node_blocking_operation(move || {
             stop_machine_service_live(
                 &metadata_config,
@@ -6553,7 +6559,7 @@ async fn node_service_command(
                 StatusCode::BAD_GATEWAY,
                 format!(
                     "node '{}' failed to stop service '{}' for machine '{}': {error}",
-                    node_name, service_name, machine_name
+                    node_name, service_name_for_error, machine_name_for_error
                 ),
                 Some(route_for_result),
             ),
