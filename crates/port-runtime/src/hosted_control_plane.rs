@@ -3063,7 +3063,13 @@ async fn service_list(
 
     let mut services = Vec::new();
     for placement in placements {
-        services.push(refresh_or_stored_service_status(&state, &machine, placement).await);
+        if let Some(message) = live_proxy_error.as_ref() {
+            let mut status = placement.status;
+            status.detail = format!("{detail} {message}", detail = status.detail);
+            services.push(status);
+        } else {
+            services.push(refresh_or_stored_service_status(&state, &machine, placement).await);
+        }
     }
     if services.is_empty() {
         if let Some(message) = live_proxy_error {
@@ -3165,7 +3171,13 @@ async fn service_status(
                 .into_iter()
                 .next()
                 .expect("single placement must exist");
-            let response = refresh_or_stored_service_status(&state, &machine, placement).await;
+            let response = if let Some(message) = live_proxy_error {
+                let mut status = placement.status;
+                status.detail = format!("{detail} {message}", detail = status.detail);
+                status
+            } else {
+                refresh_or_stored_service_status(&state, &machine, placement).await
+            };
             json_response(
                 StatusCode::OK,
                 &HostedSuccess {
