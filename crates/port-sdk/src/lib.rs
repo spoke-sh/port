@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
+const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub use port_hosted_protocol::{
     HostedGuestSessionContract, HostedGuestSessionScope, HostedShellDriverContract,

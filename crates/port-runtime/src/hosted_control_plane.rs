@@ -340,7 +340,9 @@ const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 #[cfg(not(test))]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
 
-const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
+// Hosted K3s service apply can legitimately run for several minutes while a
+// freshly relaunched control plane settles.
+const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(300);
 const RECOVERY_MACHINE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_MACHINE_BOOT_WAIT: Duration = Duration::from_secs(5);
 

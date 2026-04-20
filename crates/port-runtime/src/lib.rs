@@ -56,8 +56,11 @@ pub use hosted_control_plane::{
 };
 
 const PORT_IPTABLES_BINARY_ENV: &str = "PORT_IPTABLES_BINARY";
-const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(120);
-const GUEST_TRANSPORT_IO_TIMEOUT: Duration = Duration::from_secs(120);
+// Hosted K3s cold boot can take longer than two minutes before service health
+// turns green, especially when the control plane is forming containerd/CNI for
+// the first time after a relaunch.
+const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(300);
+const GUEST_TRANSPORT_IO_TIMEOUT: Duration = Duration::from_secs(300);
 const GUEST_TRANSPORT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
