@@ -7,7 +7,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -300,7 +300,7 @@ impl AgentService {
             .lock()
             .map_err(|_| anyhow!("managed process supervisor lock was poisoned"))?;
         if let Some(existing) = supervisor.processes.get_mut(&name) {
-            refresh_managed_process_handle(&self.root, existing)?;
+            refresh_managed_process_handle_liveness(&self.root, existing)?;
             if existing.record.state == ManagedServiceRuntimeState::Running {
                 bail!("managed service '{}' is already running", name);
             }
@@ -316,18 +316,21 @@ impl AgentService {
                 started_at: Instant::now(),
                 consecutive_unhealthy_checks: 0,
             };
-            refresh_managed_process_handle(&self.root, &mut handle)?;
+            refresh_managed_process_handle_liveness(&self.root, &mut handle)?;
+            let status = managed_service_status(&handle.record);
             supervisor.processes.insert(name.clone(), handle);
+            Ok((
+                0,
+                OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+            ))
         } else {
+            let status = managed_service_status(&record);
             supervisor.processes.remove(&name);
+            Ok((
+                0,
+                OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+            ))
         }
-        drop(supervisor);
-
-        let status = self.managed_service_status_by_name(&name)?;
-        Ok((
-            0,
-            OperationResult::ManagedService(ManagedServiceResult::Status(status)),
-        ))
     }
 
     fn list_managed_services(&self) -> Result<(i32, OperationResult)> {
@@ -362,7 +365,7 @@ impl AgentService {
             ));
         };
 
-        refresh_managed_process_handle(&self.root, handle)?;
+        refresh_managed_process_handle_liveness(&self.root, handle)?;
         if handle.record.state != ManagedServiceRuntimeState::Running {
             let status = managed_service_status(&handle.record);
             return Ok((
@@ -427,13 +430,16 @@ impl AgentService {
     }
 
     fn managed_service_statuses(&self) -> Result<Vec<ManagedServiceStatus>> {
-        let mut supervisor = self
-            .supervisor
-            .lock()
-            .map_err(|_| anyhow!("managed process supervisor lock was poisoned"))?;
+        let mut supervisor = match self.supervisor.try_lock() {
+            Ok(supervisor) => supervisor,
+            Err(TryLockError::WouldBlock) => return self.load_managed_process_records(),
+            Err(TryLockError::Poisoned(_)) => {
+                bail!("managed process supervisor lock was poisoned")
+            }
+        };
         let mut live = BTreeMap::new();
         for (name, handle) in &mut supervisor.processes {
-            refresh_managed_process_handle(&self.root, handle)?;
+            refresh_managed_process_handle_liveness(&self.root, handle)?;
             live.insert(name.clone(), managed_service_status(&handle.record));
         }
         supervisor
@@ -779,7 +785,10 @@ fn spawn_managed_process_reconciler(
     });
 }
 
-fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle) -> Result<()> {
+fn refresh_managed_process_handle_liveness(
+    root: &Path,
+    handle: &mut ManagedProcessHandle,
+) -> Result<()> {
     if handle.record.state != ManagedServiceRuntimeState::Running {
         write_managed_process_record(root, &handle.record)?;
         return Ok(());
@@ -792,6 +801,12 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
     {
         handle_managed_process_exit(root, handle, status)?;
     }
+
+    write_managed_process_record(root, &handle.record)
+}
+
+fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle) -> Result<()> {
+    refresh_managed_process_handle_liveness(root, handle)?;
 
     if handle.record.state == ManagedServiceRuntimeState::Running {
         match evaluate_managed_service_health(handle)? {
