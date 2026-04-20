@@ -7184,17 +7184,23 @@ fn resolve_service_runtime_context(
     machine_name: &str,
     host_group: Option<&str>,
 ) -> Result<ResolvedMachineRuntime> {
-    if host_group.is_none()
-        && let Some(context) =
-            resolve_localized_hosted_service_runtime_context(config, runtime_root, machine_name)?
-    {
-        return Ok(context);
-    }
-    if host_group.is_none()
-        && let Some(context) =
-            resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
-    {
-        return Ok(context);
+    let machine_is_hosted = machine_is_hosted(config, machine_name)?;
+    if !machine_is_hosted {
+        if host_group.is_none()
+            && let Some(context) = resolve_localized_hosted_service_runtime_context(
+                config,
+                runtime_root,
+                machine_name,
+            )?
+        {
+            return Ok(context);
+        }
+        if host_group.is_none()
+            && let Some(context) =
+                resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
+        {
+            return Ok(context);
+        }
     }
     let context = resolve_machine_runtime(config, runtime_root, machine_name, host_group)?;
     if context.status.state == MachineRuntimeState::Malformed {
@@ -7204,7 +7210,7 @@ fn resolve_service_runtime_context(
             context.status.detail
         );
     }
-    if !context.status.runtime_dir.exists() {
+    if !machine_is_hosted && !context.status.runtime_dir.exists() {
         bail!(
             "service operations require an existing Port runtime for machine '{}': {}",
             machine_name,
@@ -17915,6 +17921,106 @@ exec sleep 30
         );
 
         let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
+    fn resolve_service_runtime_context_skips_local_fs_gates_for_remote_hosted_runtime() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let local_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+        let remote_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let remote_paths = RuntimePaths::for_machine(&remote_runtime_root, "cloud-aws");
+
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should become nonblocking");
+        let runtime_root_for_route = remote_runtime_root.clone();
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            runtime.block_on(async move {
+                let listener =
+                    TcpListener::from_std(listener).expect("listener should convert to tokio");
+                let router = Router::new().route(
+                    "/v1/machines/{machine}",
+                    get(move |AxumPath(machine): AxumPath<String>| {
+                        let runtime_root = runtime_root_for_route.clone();
+                        async move {
+                            Json(HostedSuccess {
+                                route: HostedRouteContext {
+                                    control_plane: Some(String::from("demo")),
+                                    machine_name: Some(machine.clone()),
+                                    node_name: Some(String::from("aws-linux-node-b")),
+                                    runtime_root: Some(runtime_root.clone()),
+                                    ..HostedRouteContext::default()
+                                },
+                                result: MachineStatus {
+                                    machine_name: machine.clone(),
+                                    state: MachineRuntimeState::Running,
+                                    pid: Some(4321),
+                                    control:
+                                        port_model::MachineControlContract::hosted_control_plane(),
+                                    runtime_dir: runtime_root.join(&machine),
+                                    config_path: runtime_root.join(&machine).join("config.json"),
+                                    manifest_path: runtime_root
+                                        .join(&machine)
+                                        .join("manifest.json"),
+                                    pid_path: runtime_root.join(&machine).join("machine.pid"),
+                                    firecracker_log: runtime_root
+                                        .join(&machine)
+                                        .join("firecracker.log"),
+                                    stdout_log: runtime_root.join(&machine).join("stdout.log"),
+                                    stderr_log: runtime_root.join(&machine).join("stderr.log"),
+                                    runtime_class: None,
+                                    attached_volumes: Vec::new(),
+                                    hosted_fleet_nodes: Vec::new(),
+                                    guest_refresh_age_seconds: None,
+                                    wedged_since_unix_s: None,
+                                    wedge_class: None,
+                                    recovery_attempts: RecoveryAttemptCounters::default(),
+                                    last_recovery_action: None,
+                                    recovery_state: RecoveryState::default(),
+                                    detail: String::from("mock remote hosted status"),
+                                },
+                            })
+                        }
+                    }),
+                );
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{addr}");
+
+        let context =
+            super::resolve_service_runtime_context(&config, &local_runtime_root, "cloud-aws", None)
+                .expect("service runtime context should resolve to remote control-plane truth");
+
+        assert_eq!(context.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(context.control_plane.as_deref(), Some("demo"));
+        assert_eq!(context.status.runtime_dir, remote_paths.runtime_dir);
+        assert_eq!(context.status.state, MachineRuntimeState::Running);
+        assert!(
+            !context.status.runtime_dir.exists(),
+            "remote hosted runtime dir should be accepted as a valid control-plane routed contract"
+        );
     }
 
     #[test]
