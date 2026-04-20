@@ -4020,6 +4020,8 @@ fn node_error_indicates_missing_machine_runtime(
         && message.contains("does not exist")
 }
 
+const HOSTED_PLACEMENT_PURGE_GRACE_SECONDS: u64 = 60;
+
 fn purge_machine_placement_if_runtime_missing(
     state: &ControlPlaneState,
     route_context: &HostedRouteContext,
@@ -4029,6 +4031,12 @@ fn purge_machine_placement_if_runtime_missing(
         return;
     };
     if !node_error_indicates_missing_machine_runtime(route_context, machine_name, message) {
+        return;
+    }
+    if let Ok(now_unix_s) = current_unix_timestamp_seconds()
+        && resolve_machine_placement_age_seconds(state, machine_name, now_unix_s)
+            .is_some_and(|age| age < HOSTED_PLACEMENT_PURGE_GRACE_SECONDS)
+    {
         return;
     }
 

@@ -3610,8 +3610,8 @@ fn execute_hosted_k3s_exec(
     action: &str,
     cluster_name: &str,
 ) -> Result<ExecResult> {
-    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(2);
-    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
+    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     let request = ExecRequest {
         command,
@@ -3668,8 +3668,8 @@ fn execute_hosted_k3s_managed_service_start(
     action: &str,
     cluster_name: &str,
 ) -> Result<ManagedServiceStatus> {
-    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(2);
-    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(20);
+    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
+    const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     let request = ServiceApplyRequest {
         machine_name,
