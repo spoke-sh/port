@@ -343,6 +343,7 @@ const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
 // Hosted K3s service apply can legitimately run for several minutes while a
 // freshly relaunched control plane settles.
 const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(300);
+const HOSTED_MACHINE_STATUS_PROXY_TIMEOUT: Duration = Duration::from_secs(15);
 const RECOVERY_MACHINE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_MACHINE_BOOT_WAIT: Duration = Duration::from_secs(5);
 
@@ -2223,13 +2224,14 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
                 let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
                     machine_name: machine_name.clone(),
                 });
-                match proxy_json::<HostedSuccess<MachineStatus>>(
+                match proxy_json_with_timeout::<HostedSuccess<MachineStatus>>(
                     &state,
                     &binding,
                     status_route,
                     Method::GET,
                     None,
                     route.clone(),
+                    HOSTED_MACHINE_STATUS_PROXY_TIMEOUT,
                 )
                 .await
                 {
@@ -2430,13 +2432,14 @@ async fn machine_status(
             let status_route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
                 machine_name: machine.clone(),
             });
-            match proxy_json::<HostedSuccess<MachineStatus>>(
+            match proxy_json_with_timeout::<HostedSuccess<MachineStatus>>(
                 &state,
                 &binding,
                 status_route,
                 Method::GET,
                 None,
                 route.clone(),
+                HOSTED_MACHINE_STATUS_PROXY_TIMEOUT,
             )
             .await
             {
@@ -4797,7 +4800,28 @@ async fn proxy_json<T: DeserializeOwned>(
     body: Option<Bytes>,
     route_context: HostedRouteContext,
 ) -> Result<T, String> {
-    let (status, bytes) = proxy_bytes(
+    proxy_json_with_timeout(
+        state,
+        binding,
+        route,
+        method,
+        body,
+        route_context,
+        HOSTED_NODE_PROXY_TIMEOUT,
+    )
+    .await
+}
+
+async fn proxy_json_with_timeout<T: DeserializeOwned>(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    route: HostedNodeRoute,
+    method: Method,
+    body: Option<Bytes>,
+    route_context: HostedRouteContext,
+    timeout: Duration,
+) -> Result<T, String> {
+    let (status, bytes) = proxy_bytes_with_timeout(
         state,
         binding,
         route,
@@ -4805,6 +4829,7 @@ async fn proxy_json<T: DeserializeOwned>(
         body,
         Some("application/json"),
         route_context,
+        timeout,
     )
     .await?;
     if !status.is_success() {
