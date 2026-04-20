@@ -3610,6 +3610,7 @@ fn execute_hosted_k3s_exec(
     action: &str,
     cluster_name: &str,
 ) -> Result<ExecResult> {
+    const GUEST_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
     const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
     const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -3620,13 +3621,14 @@ fn execute_hosted_k3s_exec(
     };
     let started = Instant::now();
     let last_error = loop {
-        match execute_guest_operation(
+        match hosted_control_plane_guest_operation_with_timeout(
             config,
             GuestRequest {
                 machine_name,
                 runtime_root,
                 operation: GuestOperation::Exec(request.clone()),
             },
+            GUEST_ATTEMPT_TIMEOUT,
         ) {
             Ok(OperationResult::Exec(result)) => return Ok(result),
             Ok(other) => {
@@ -11843,31 +11845,43 @@ fn hosted_control_plane_guest_operation(
     config: &PortConfig,
     request: GuestRequest<'_>,
 ) -> Result<OperationResult> {
+    hosted_control_plane_guest_operation_with_timeout(config, request, HOSTED_HTTP_TIMEOUT)
+}
+
+fn hosted_control_plane_guest_operation_with_timeout(
+    config: &PortConfig,
+    request: GuestRequest<'_>,
+    timeout: Duration,
+) -> Result<OperationResult> {
     let client = hosted_client_for_machine(config, request.machine_name)?;
     let response: HostedSuccess<OperationResult> = match request.operation {
-        GuestOperation::Exec(exec) => client.execute_json(
+        GuestOperation::Exec(exec) => client.execute_json_with_timeout(
             client
                 .guest()
                 .exec(request.machine_name, exec)
                 .context("failed to encode hosted guest exec request")?,
+            timeout,
         ),
-        GuestOperation::Pty(pty) => client.execute_json(
+        GuestOperation::Pty(pty) => client.execute_json_with_timeout(
             client
                 .guest()
                 .pty(request.machine_name, pty)
                 .context("failed to encode hosted guest pty request")?,
+            timeout,
         ),
-        GuestOperation::Logs(logs) => client.execute_json(
+        GuestOperation::Logs(logs) => client.execute_json_with_timeout(
             client
                 .guest()
                 .logs(request.machine_name, logs)
                 .context("failed to encode hosted guest logs request")?,
+            timeout,
         ),
-        GuestOperation::Forward(forward) => client.execute_json(
+        GuestOperation::Forward(forward) => client.execute_json_with_timeout(
             client
                 .guest()
                 .forward(request.machine_name, forward)
                 .context("failed to encode hosted guest forward request")?,
+            timeout,
         ),
         GuestOperation::ManagedService(_) => {
             bail!("managed service uses the canonical service control path")
