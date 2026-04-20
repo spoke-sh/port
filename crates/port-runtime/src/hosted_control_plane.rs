@@ -6388,33 +6388,50 @@ async fn node_service_apply(
         Ok((localized, route)) => (localized, route.with_service_name(request.name.clone())),
         Err(response) => return response,
     };
+    let metadata_config = state.inner.config.clone();
+    let runtime_root = state.inner.runtime_root.clone();
+    let node_name = state.inner.node_name.clone();
+    let machine_name = machine.clone();
+    let route_for_result = route.clone();
+    let service_name = request.name.clone();
     let host_group = request.host_group.clone();
-    let runtime_request = RuntimeServiceApplyRequest {
-        machine_name: &machine,
-        runtime_root: &state.inner.runtime_root,
-        name: &request.name,
-        kind: request.kind,
-        host_group: host_group.as_deref(),
-        command: request.command,
-        secret_bindings: request
-            .secret_bindings
-            .into_iter()
-            .map(|binding| ServiceSecretBinding {
-                env: binding.env,
-                secret: binding.secret,
-            })
-            .collect(),
-        policy: request.policy,
-    };
-    match apply_machine_service_live(&state.inner.config, &localized, runtime_request) {
+    let kind = request.kind;
+    let command = request.command;
+    let secret_bindings = request
+        .secret_bindings
+        .into_iter()
+        .map(|binding| ServiceSecretBinding {
+            env: binding.env,
+            secret: binding.secret,
+        })
+        .collect();
+    let policy = request.policy;
+    match run_node_blocking_operation(move || {
+        apply_machine_service_live(
+            &metadata_config,
+            &localized,
+            RuntimeServiceApplyRequest {
+                machine_name: &machine_name,
+                runtime_root: &runtime_root,
+                name: &service_name,
+                kind,
+                host_group: host_group.as_deref(),
+                command,
+                secret_bindings,
+                policy,
+            },
+        )
+    })
+    .await
+    {
         Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to apply service for machine '{}': {error}",
-                state.inner.node_name, machine
+                node_name, machine_name
             ),
-            Some(route),
+            Some(route_for_result),
         ),
     }
 }
@@ -6431,20 +6448,29 @@ async fn node_service_list(
         Ok(value) => value,
         Err(response) => return response,
     };
-    match refresh_machine_service_list(
-        &state.inner.config,
-        &localized,
-        &state.inner.runtime_root,
-        &machine,
-    ) {
+    let metadata_config = state.inner.config.clone();
+    let runtime_root = state.inner.runtime_root.clone();
+    let node_name = state.inner.node_name.clone();
+    let machine_name = machine.clone();
+    let route_for_result = route.clone();
+    match run_node_blocking_operation(move || {
+        refresh_machine_service_list(
+            &metadata_config,
+            &localized,
+            &runtime_root,
+            &machine_name,
+        )
+    })
+    .await
+    {
         Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to list services for machine '{}': {error}",
-                state.inner.node_name, machine
+                node_name, machine_name
             ),
-            Some(route),
+            Some(route_for_result),
         ),
     }
 }
@@ -6461,21 +6487,31 @@ async fn node_service_status(
         Ok((localized, route)) => (localized, route.with_service_name(service.clone())),
         Err(response) => return response,
     };
-    match refresh_machine_service_runtime(
-        &state.inner.config,
-        &localized,
-        &state.inner.runtime_root,
-        &machine,
-        &service,
-    ) {
+    let metadata_config = state.inner.config.clone();
+    let runtime_root = state.inner.runtime_root.clone();
+    let node_name = state.inner.node_name.clone();
+    let machine_name = machine.clone();
+    let route_for_result = route.clone();
+    let service_name = service.clone();
+    match run_node_blocking_operation(move || {
+        refresh_machine_service_runtime(
+            &metadata_config,
+            &localized,
+            &runtime_root,
+            &machine_name,
+            &service_name,
+        )
+    })
+    .await
+    {
         Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
         Err(error) => error_response(
             StatusCode::BAD_GATEWAY,
             format!(
                 "node '{}' failed to load service '{}' for machine '{}': {error}",
-                state.inner.node_name, service, machine
+                node_name, service_name, machine_name
             ),
-            Some(route),
+            Some(route_for_result),
         ),
     }
 }
@@ -6495,21 +6531,31 @@ async fn node_service_command(
             }
             Err(response) => return response,
         };
-        return match stop_machine_service_live(
-            &state.inner.config,
-            &localized,
-            &state.inner.runtime_root,
-            &machine,
-            service_name,
-        ) {
+        let metadata_config = state.inner.config.clone();
+        let runtime_root = state.inner.runtime_root.clone();
+        let node_name = state.inner.node_name.clone();
+        let machine_name = machine.clone();
+        let route_for_result = route.clone();
+        let service_name = service_name.to_string();
+        return match run_node_blocking_operation(move || {
+            stop_machine_service_live(
+                &metadata_config,
+                &localized,
+                &runtime_root,
+                &machine_name,
+                &service_name,
+            )
+        })
+        .await
+        {
             Ok(result) => json_response(StatusCode::OK, &HostedSuccess { route, result }),
             Err(error) => error_response(
                 StatusCode::BAD_GATEWAY,
                 format!(
                     "node '{}' failed to stop service '{}' for machine '{}': {error}",
-                    state.inner.node_name, service_name, machine
+                    node_name, service_name, machine_name
                 ),
-                Some(route),
+                Some(route_for_result),
             ),
         };
     }
