@@ -3849,6 +3849,7 @@ fn hosted_k3s_service_command(
 
 const HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS: u64 = 120;
 const HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS: u64 = 300;
+const HOSTED_K3S_AGENT_BOOTSTRAP_GRACE_SECONDS: u64 = 600;
 
 fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec<String> {
     let k3s = "/usr/bin/k3s";
@@ -3860,7 +3861,13 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
         "agent" => format!(
             "state_dir=/run/port/health; \
             last_ok_file=\"$state_dir/k3s-agent-cluster-ok\"; \
+            bootstrap_start_file=\"$state_dir/k3s-agent-bootstrap-start\"; \
             mkdir -p \"$state_dir\"; \
+            now_epoch=$({busybox} date -u +%s); \
+            if [ ! -f \"$bootstrap_start_file\" ]; then \
+                printf '%s\n' \"$now_epoch\" > \"$bootstrap_start_file\"; \
+            fi; \
+            bootstrap_epoch=$(cat \"$bootstrap_start_file\" 2>/dev/null); \
             {k3s} crictl info >/dev/null 2>&1 || exit 1; \
             cluster_ok=0; \
             if {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1; then \
@@ -3868,7 +3875,6 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
                 if [ -n \"$lease_renew_time\" ]; then \
                     lease_epoch=$({busybox} date -u -D '%Y-%m-%dT%H:%M:%S' -d \"$lease_renew_time\" +%s 2>/dev/null); \
                     if [ -n \"$lease_epoch\" ]; then \
-                        now_epoch=$({busybox} date -u +%s); \
                         if test $((now_epoch - lease_epoch)) -le {HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS}; then \
                             cluster_ok=1; \
                         fi; \
@@ -3882,9 +3888,11 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
             if [ -f \"$last_ok_file\" ]; then \
                 last_ok_epoch=$(cat \"$last_ok_file\" 2>/dev/null); \
                 if [ -n \"$last_ok_epoch\" ]; then \
-                    now_epoch=$({busybox} date -u +%s); \
                     test $((now_epoch - last_ok_epoch)) -le {HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS}; \
                 fi; \
+            fi; \
+            if [ ! -f \"$last_ok_file\" ] && [ -n \"$bootstrap_epoch\" ]; then \
+                test $((now_epoch - bootstrap_epoch)) -le {HOSTED_K3S_AGENT_BOOTSTRAP_GRACE_SECONDS} && exit 0; \
             fi; \
             exit 1",
             shell_single_quote(machine_name)
@@ -18803,16 +18811,20 @@ exec sleep 30
             "/usr/bin/k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz"
         ));
         assert!(shell.contains("last_ok_file=\"$state_dir/k3s-agent-cluster-ok\""));
+        assert!(shell.contains("bootstrap_start_file=\"$state_dir/k3s-agent-bootstrap-start\""));
         assert!(shell.contains("cluster_ok=0"));
         assert!(shell.contains("lease_renew_time="));
         assert!(shell.contains("-n kube-node-lease get lease 'cloud-aws-worker'"));
         assert!(shell.contains(".spec.renewTime"));
         assert!(shell.contains("if [ \"$cluster_ok\" -eq 1 ]"));
         assert!(shell.contains("if [ -f \"$last_ok_file\" ]"));
+        assert!(shell.contains("bootstrap_epoch=$(cat \"$bootstrap_start_file\" 2>/dev/null)"));
         assert!(shell.contains("/bin/busybox date -u -D '%Y-%m-%dT%H:%M:%S'"));
         assert!(shell.contains("now_epoch=$(/bin/busybox date -u +%s)"));
         assert!(shell.contains("test $((now_epoch - lease_epoch)) -le 120"));
         assert!(shell.contains("test $((now_epoch - last_ok_epoch)) -le 300"));
+        assert!(shell.contains("if [ ! -f \"$last_ok_file\" ] && [ -n \"$bootstrap_epoch\" ]"));
+        assert!(shell.contains("test $((now_epoch - bootstrap_epoch)) -le 600"));
     }
 
     #[test]
