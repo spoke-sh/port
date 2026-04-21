@@ -338,8 +338,8 @@ const WEDGE_DETECTOR_INTERVAL: Duration = Duration::from_secs(10);
 #[cfg(test)]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 #[cfg(not(test))]
-const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
-const NODE_AGENT_REGISTRATION_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 45;
+const NODE_AGENT_REGISTRATION_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 // Hosted K3s service apply can legitimately run for several minutes while a
 // freshly relaunched control plane settles.
