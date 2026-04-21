@@ -339,6 +339,7 @@ const WEDGE_DETECTOR_INTERVAL: Duration = Duration::from_secs(10);
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 #[cfg(not(test))]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 15;
+const NODE_AGENT_REGISTRATION_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Hosted K3s service apply can legitimately run for several minutes while a
 // freshly relaunched control plane settles.
@@ -5898,9 +5899,17 @@ async fn register_node_agent_once(
     }
     let response = request
         .header(CONTENT_TYPE.as_str(), "application/json")
-        .body(serde_json::to_vec(&request_body).context("failed to encode registration request")?)
-        .send()
+        .body(serde_json::to_vec(&request_body).context("failed to encode registration request")?);
+    let response = tokio::time::timeout(NODE_AGENT_REGISTRATION_HTTP_TIMEOUT, response.send())
         .await
+        .map_err(|_| {
+            anyhow!(
+                "timed out after {:?} while reaching control plane '{}' at '{}'",
+                NODE_AGENT_REGISTRATION_HTTP_TIMEOUT,
+                target.control_plane,
+                target.endpoint
+            )
+        })?
         .with_context(|| {
             format!(
                 "could not reach control plane '{}' at '{}'",
@@ -5909,9 +5918,9 @@ async fn register_node_agent_once(
         })?;
     let status =
         StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-    let bytes = response
-        .bytes()
+    let bytes = tokio::time::timeout(NODE_AGENT_REGISTRATION_HTTP_TIMEOUT, response.bytes())
         .await
+        .map_err(|_| anyhow!("timed out while reading control-plane registration response"))?
         .context("failed to read control-plane registration response")?;
     if !status.is_success() {
         if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
