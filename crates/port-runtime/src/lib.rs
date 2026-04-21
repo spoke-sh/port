@@ -3471,7 +3471,7 @@ pub fn bootstrap_hosted_k3s_cluster(
         )
     })?;
     let primary_server_args =
-        hosted_k3s_effective_args(config, &primary_server, &cluster.server_args)?;
+        hosted_k3s_effective_args(config, "server", &primary_server, &cluster.server_args)?;
 
     execute_hosted_k3s_managed_service_start(
         config,
@@ -3506,7 +3506,8 @@ pub fn bootstrap_hosted_k3s_cluster(
                 server_machine, cluster_name
             )
         })?;
-        let server_args = hosted_k3s_effective_args(config, server_machine, &cluster.server_args)?;
+        let server_args =
+            hosted_k3s_effective_args(config, "server", server_machine, &cluster.server_args)?;
         execute_hosted_k3s_managed_service_start(
             config,
             runtime_root,
@@ -3539,7 +3540,8 @@ pub fn bootstrap_hosted_k3s_cluster(
                 worker_machine, cluster_name
             )
         })?;
-        let worker_args = hosted_k3s_effective_args(config, worker_machine, &cluster.worker_args)?;
+        let worker_args =
+            hosted_k3s_effective_args(config, "agent", worker_machine, &cluster.worker_args)?;
         execute_hosted_k3s_managed_service_start(
             config,
             runtime_root,
@@ -3896,6 +3898,7 @@ fn wait_for_hosted_k3s_join_token(
 
 fn hosted_k3s_effective_args(
     config: &PortConfig,
+    role: &str,
     machine_name: &str,
     args: &[String],
 ) -> Result<Vec<String>> {
@@ -3928,7 +3931,7 @@ fn hosted_k3s_effective_args(
             effective.push(String::from("--node-external-ip"));
             effective.push(node_external_ip.to_string());
         }
-        if !flannel_external_ip_configured {
+        if role == "server" && !flannel_external_ip_configured {
             effective.push(String::from("--flannel-external-ip"));
         }
     }
@@ -4040,7 +4043,14 @@ fn hosted_k3s_service_command(
         command.push(String::from("--token"));
         command.push(join_token.to_string());
     }
-    command.extend(args.iter().cloned());
+    for arg in args {
+        if role == "agent"
+            && (arg == "--flannel-external-ip" || arg.starts_with("--flannel-external-ip="))
+        {
+            continue;
+        }
+        command.push(arg.clone());
+    }
     command
 }
 
@@ -15413,6 +15423,7 @@ exit 23
 
         let args = super::hosted_k3s_effective_args(
             &config,
+            "agent",
             "cloud-aws-worker",
             &[String::from("--node-label=role=worker")],
         )
@@ -15423,7 +15434,7 @@ exit 23
             "{args:?}"
         );
         assert!(
-            args.iter().any(|arg| arg == "--flannel-external-ip"),
+            !args.iter().any(|arg| arg == "--flannel-external-ip"),
             "{args:?}"
         );
     }
@@ -15468,6 +15479,7 @@ exit 23
 
         let args = super::hosted_k3s_effective_args(
             &config,
+            "agent",
             "cloud-aws-worker",
             &[String::from("--node-label=role=worker")],
         )
@@ -15493,7 +15505,10 @@ exit 23
             args.windows(2)
                 .any(|window| { window[0] == "--node-external-ip" && window[1] == "10.0.1.24" })
         );
-        assert!(args.iter().any(|arg| arg == "--flannel-external-ip"));
+        assert!(
+            !args.iter().any(|arg| arg == "--flannel-external-ip"),
+            "{args:?}"
+        );
     }
 
     fn launch_sample_avf_machine(
