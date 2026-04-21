@@ -3947,21 +3947,53 @@ fn hosted_k3s_registered_node_external_ip(
         .ok_or_else(|| {
             anyhow!("machine '{machine_name}' does not target a hosted control plane")
         })?;
-    let Some(state) = read_hosted_registered_node_state(config, &hosted_identity.control_plane)?
-    else {
+    if let Some(state) = read_hosted_registered_node_state(config, &hosted_identity.control_plane)?
+        && let Some(registration) = state.nodes.get(&placement.node_name)
+    {
+        return hosted_endpoint_ip(&registration.endpoint)
+            .with_context(|| {
+                format!(
+                    "failed to derive hosted K3s node external IP for machine '{}' from registered node '{}' endpoint '{}'",
+                    machine_name, placement.node_name, registration.endpoint
+                )
+            })
+            .map(Some);
+    }
+    hosted_imported_node_external_ip(config, &hosted_identity.control_plane, &placement.node_name)
+}
+
+fn hosted_imported_node_external_ip(
+    config: &PortConfig,
+    control_plane: &str,
+    node_name: &str,
+) -> Result<Option<IpAddr>> {
+    let Some(state) = read_hosted_imported_inventory_state(config, control_plane)? else {
         return Ok(None);
     };
-    let Some(registration) = state.nodes.get(&placement.node_name) else {
+    let Some(node) = state.nodes.get(node_name) else {
         return Ok(None);
     };
-    hosted_endpoint_ip(&registration.endpoint)
-        .with_context(|| {
-            format!(
-                "failed to derive hosted K3s node external IP for machine '{}' from registered node '{}' endpoint '{}'",
-                machine_name, placement.node_name, registration.endpoint
-            )
-        })
-        .map(Some)
+    hosted_provenance_ip(&node.provenance)
+}
+
+fn hosted_provenance_ip(provenance: &str) -> Result<Option<IpAddr>> {
+    let trimmed = provenance.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        return Ok(Some(ip));
+    }
+    let Ok(url) = Url::parse(trimmed) else {
+        return Ok(None);
+    };
+    let Some(host) = url.host_str() else {
+        return Ok(None);
+    };
+    match host.parse::<IpAddr>() {
+        Ok(ip) => Ok(Some(ip)),
+        Err(_) => Ok(None),
+    }
 }
 
 fn hosted_endpoint_ip(endpoint: &str) -> Result<IpAddr> {
@@ -5841,7 +5873,7 @@ pub(crate) fn refresh_machine_service_runtime(
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
     let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
-    match managed_service_result_status(execute_guest_operation(
+    match execute_guest_operation(
         guest_config,
         GuestRequest {
             machine_name,
@@ -5852,7 +5884,9 @@ pub(crate) fn refresh_machine_service_runtime(
                 },
             }),
         },
-    )?) {
+    )
+    .and_then(managed_service_result_status)
+    {
         Ok(status) => {
             write_service_runtime_record(
                 &runtime_dir,
@@ -5861,7 +5895,19 @@ pub(crate) fn refresh_machine_service_runtime(
             )?;
         }
         Err(error) if error.to_string().contains("does not exist") => {}
-        Err(error) => return Err(error),
+        Err(error) => {
+            let mut stored = machine_service_status_stored_local(
+                metadata_config,
+                runtime_root,
+                machine_name,
+                service_name,
+            )?;
+            stored.detail = format!(
+                "{} Stored runtime record returned because live refresh failed: {}",
+                stored.detail, error
+            );
+            return Ok(stored);
+        }
     }
     machine_service_status_stored_local(metadata_config, runtime_root, machine_name, service_name)
 }
@@ -5873,7 +5919,7 @@ pub(crate) fn refresh_machine_service_list(
     machine_name: &str,
 ) -> Result<Vec<ServiceDefinitionStatus>> {
     let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
-    let statuses = managed_service_result_list(execute_guest_operation(
+    match execute_guest_operation(
         guest_config,
         GuestRequest {
             machine_name,
@@ -5882,13 +5928,32 @@ pub(crate) fn refresh_machine_service_list(
                 operation: ManagedServiceOperation::List,
             }),
         },
-    )?)?;
-    for status in statuses {
-        write_service_runtime_record(
-            &runtime_dir,
-            &status.name,
-            &service_runtime_record_from_managed_status(&status),
-        )?;
+    )
+    .and_then(managed_service_result_list)
+    {
+        Ok(statuses) => {
+            for status in statuses {
+                write_service_runtime_record(
+                    &runtime_dir,
+                    &status.name,
+                    &service_runtime_record_from_managed_status(&status),
+                )?;
+            }
+        }
+        Err(error) => {
+            let mut stored =
+                list_machine_services_stored_local(metadata_config, runtime_root, machine_name)?;
+            if stored.is_empty() {
+                return Err(error);
+            }
+            for status in &mut stored {
+                status.detail = format!(
+                    "{} Stored runtime record returned because live refresh failed: {}",
+                    status.detail, error
+                );
+            }
+            return Ok(stored);
+        }
     }
     list_machine_services_stored_local(metadata_config, runtime_root, machine_name)
 }
@@ -15279,6 +15344,7 @@ exit 23
 
     fn sample_hosted_k3s_config(root: &Path) -> PortConfig {
         let mut config = sample_config_with_hosted_runtime_roots(root);
+        config.set_state_root(root);
         let mut worker = config
             .machines
             .get("cloud-aws")
@@ -15351,6 +15417,77 @@ exit 23
             &[String::from("--node-label=role=worker")],
         )
         .expect("effective args should resolve");
+        assert!(
+            args.windows(2)
+                .any(|window| { window[0] == "--node-external-ip" && window[1] == "10.0.1.24" }),
+            "{args:?}"
+        );
+        assert!(
+            args.iter().any(|arg| arg == "--flannel-external-ip"),
+            "{args:?}"
+        );
+    }
+
+    #[test]
+    fn hosted_k3s_effective_args_fall_back_to_imported_node_provenance_for_external_identity() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let config = sample_hosted_k3s_config(tempdir.path());
+        let state_root = super::hosted_placeholder_runtime_root_for_config(&config, "demo");
+        fs::create_dir_all(&state_root).expect("state root should exist");
+        super::persist_local_hosted_machine_placement_from_route(
+            &config,
+            "cloud-aws-worker",
+            &super::HostedRouteContext {
+                control_plane: Some(String::from("demo")),
+                node_name: Some(String::from("aws-linux-node")),
+                runtime_root: Some(PathBuf::from("/tmp/aws-linux-node")),
+                placement_detail: Some(String::from("placed on aws-linux-node")),
+                ..super::HostedRouteContext::default()
+            },
+            1,
+        )
+        .expect("placement state should sync");
+        fs::write(
+            state_root.join("imported-inventory.json"),
+            serde_json::to_vec_pretty(&ImportedInventoryStateFile {
+                control_plane: String::from("demo"),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node"),
+                    port_model::HostedImportedNodeRecord {
+                        provider: port_model::HostProvider::Aws,
+                        provenance: String::from("10.0.1.24"),
+                        imported_at: 1,
+                        capability_summary: config.nodes["aws-linux-node"].capabilities.clone(),
+                        pvm_host_kit_packages: Vec::new(),
+                    },
+                )]),
+            })
+            .expect("imported inventory state should encode"),
+        )
+        .expect("imported inventory state should write");
+
+        let args = super::hosted_k3s_effective_args(
+            &config,
+            "cloud-aws-worker",
+            &[String::from("--node-label=role=worker")],
+        )
+        .expect("effective args should resolve");
+        let imported_ip =
+            super::hosted_imported_node_external_ip(&config, "demo", "aws-linux-node")
+                .expect("imported node ip should resolve");
+        assert_eq!(
+            imported_ip,
+            Some("10.0.1.24".parse().expect("ip should parse"))
+        );
+        let placement = super::hosted_stored_machine_placement(&config, "cloud-aws-worker")
+            .expect("placement lookup should succeed");
+        assert!(placement.is_some(), "stored placement should exist");
+        let machine_ip = super::hosted_k3s_registered_node_external_ip(&config, "cloud-aws-worker")
+            .expect("machine ip lookup should succeed");
+        assert_eq!(
+            machine_ip,
+            Some("10.0.1.24".parse().expect("ip should parse"))
+        );
 
         assert!(
             args.windows(2)
@@ -18838,7 +18975,9 @@ exec sleep 30
         unsafe {
             std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
         }
-        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let _ = fs::remove_dir_all(super::hosted_placeholder_runtime_root_for_config(
+            &config, "demo",
+        ));
         write_imported_inventory_state(
             "demo",
             BTreeMap::from([
@@ -19695,7 +19834,8 @@ exec sleep 30
             .expect("hosted k3s bootstrap should succeed");
 
         let placement_state_path =
-            hosted_placeholder_runtime_root("demo").join("machine-placements.json");
+            super::hosted_placeholder_runtime_root_for_config(&config, "demo")
+                .join("machine-placements.json");
         let placement_state: serde_json::Value = serde_json::from_slice(
             &fs::read(&placement_state_path).expect("machine placement state should exist"),
         )
@@ -19873,7 +20013,7 @@ exec sleep 30
         assert!(
             server_status
                 .detail
-                .contains("no live registered node-agent endpoint for it"),
+                .contains("Stored runtime record returned because live refresh failed"),
             "{}",
             server_status.detail
         );
@@ -19895,7 +20035,7 @@ exec sleep 30
         assert!(
             worker_status
                 .detail
-                .contains("no live registered node-agent endpoint for it"),
+                .contains("Stored runtime record returned because live refresh failed"),
             "{}",
             worker_status.detail
         );
