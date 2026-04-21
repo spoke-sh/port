@@ -329,6 +329,29 @@ fn install_fake_oras_script(root: &Path, body: &str) -> PathBuf {
     script_path
 }
 
+fn install_fake_pvm_kernel_flake(root: &Path) -> PathBuf {
+    let flake_root = root.join("pvm-builds");
+    let kernel_root = flake_root.join("kernel");
+    fs::create_dir_all(&kernel_root).expect("fake pvm kernel fixture should exist");
+    fs::write(kernel_root.join("vmlinux"), "demo-pvm-kernel-bytes")
+        .expect("fake pvm kernel should write");
+    fs::write(
+        flake_root.join("flake.nix"),
+        r#"{
+  description = "Port CLI PVM kernel fixture";
+  outputs = { self }: {
+    packages.x86_64-linux.linux-port-pvm-guest = builtins.path {
+      path = ./kernel;
+      name = "linux-port-pvm-guest-fixture";
+    };
+  };
+}
+"#,
+    )
+    .expect("fake pvm kernel flake should write");
+    flake_root
+}
+
 #[test]
 fn cli_artifact_list_reports_local_and_cached_variants() {
     let temp = tempdir().expect("tempdir should exist");
@@ -928,6 +951,7 @@ fn cli_artifact_build_and_validate_selected_pvm_kernel_variant() {
     let local_root = temp.path().join("local-artifacts");
     let store_root = temp.path().join("artifact-store");
     let cache_root = temp.path().join("artifact-cache");
+    let pvm_build_flake_ref = install_fake_pvm_kernel_flake(temp.path());
 
     let mut config = PortConfig::sample();
     let (kernel_path, _, _) = configure_kernel_paths(
@@ -952,6 +976,7 @@ fn cli_artifact_build_and_validate_selected_pvm_kernel_variant() {
         .arg("firecracker")
         .arg("--protection-mode")
         .arg("pvm")
+        .env("PORT_PVM_BUILD_FLAKE_REF", &pvm_build_flake_ref)
         .output()
         .expect("build command");
     assert!(
@@ -988,6 +1013,7 @@ fn cli_artifact_build_and_validate_selected_pvm_kernel_variant() {
         .arg("firecracker")
         .arg("--protection-mode")
         .arg("pvm")
+        .env("PORT_PVM_BUILD_FLAKE_REF", &pvm_build_flake_ref)
         .output()
         .expect("validate command");
     assert!(
