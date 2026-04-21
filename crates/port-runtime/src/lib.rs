@@ -19598,6 +19598,29 @@ exec sleep 30
         let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
             .expect("hosted k3s bootstrap should succeed");
 
+        for (machine_name, service_name) in [
+            ("cloud-aws", "k3s-server"),
+            ("cloud-aws-worker", "k3s-agent"),
+        ] {
+            let running = (0..100).any(|attempt| {
+                let status =
+                    machine_service_status(&config, tempdir.path(), machine_name, service_name)
+                        .expect("live hosted service status should succeed");
+                if status.runtime.state == ServiceRuntimeState::Running {
+                    true
+                } else {
+                    if attempt < 99 {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    false
+                }
+            });
+            assert!(
+                running,
+                "hosted service runtime record should converge to running before stale fallback"
+            );
+        }
+
         server_guest
             .join()
             .expect("server guest thread should complete");
