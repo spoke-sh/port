@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{IpAddr, Shutdown, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
@@ -40,6 +40,7 @@ use port_sdk::{
     HostedApiRequest, HostedApiStreamRequest, HostedClient, HttpMethod,
     SecretPutRequest as HostedSecretPutRequest, ServiceApplyRequest as HostedServiceApplyRequest,
 };
+use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -3455,9 +3456,6 @@ pub fn bootstrap_hosted_k3s_cluster(
 
     let cluster = load_hosted_k3s_cluster(config, cluster_name)?;
     let primary_server = hosted_k3s_primary_server_machine(cluster_name, &cluster)?.to_string();
-    let primary_server_args =
-        hosted_k3s_effective_args(config, &primary_server, &cluster.server_args)?;
-
     let primary_server_launch = launch_local_machine(
         config,
         &LaunchRequest {
@@ -3472,6 +3470,8 @@ pub fn bootstrap_hosted_k3s_cluster(
             primary_server, cluster_name
         )
     })?;
+    let primary_server_args =
+        hosted_k3s_effective_args(config, &primary_server, &cluster.server_args)?;
 
     execute_hosted_k3s_managed_service_start(
         config,
@@ -3492,7 +3492,6 @@ pub fn bootstrap_hosted_k3s_cluster(
 
     let mut server_launches = vec![primary_server_launch];
     for server_machine in cluster.server_machines.iter().skip(1) {
-        let server_args = hosted_k3s_effective_args(config, server_machine, &cluster.server_args)?;
         let launch = launch_local_machine(
             config,
             &LaunchRequest {
@@ -3507,6 +3506,7 @@ pub fn bootstrap_hosted_k3s_cluster(
                 server_machine, cluster_name
             )
         })?;
+        let server_args = hosted_k3s_effective_args(config, server_machine, &cluster.server_args)?;
         execute_hosted_k3s_managed_service_start(
             config,
             runtime_root,
@@ -3525,7 +3525,6 @@ pub fn bootstrap_hosted_k3s_cluster(
 
     let mut worker_launches = Vec::with_capacity(cluster.worker_machines.len());
     for worker_machine in &cluster.worker_machines {
-        let worker_args = hosted_k3s_effective_args(config, worker_machine, &cluster.worker_args)?;
         let launch = launch_local_machine(
             config,
             &LaunchRequest {
@@ -3540,6 +3539,7 @@ pub fn bootstrap_hosted_k3s_cluster(
                 worker_machine, cluster_name
             )
         })?;
+        let worker_args = hosted_k3s_effective_args(config, worker_machine, &cluster.worker_args)?;
         execute_hosted_k3s_managed_service_start(
             config,
             runtime_root,
@@ -3917,7 +3917,68 @@ fn hosted_k3s_effective_args(
         effective.push(String::from("--node-name"));
         effective.push(machine_name.to_string());
     }
+    let node_external_ip_configured = effective
+        .iter()
+        .any(|arg| arg == "--node-external-ip" || arg.starts_with("--node-external-ip="));
+    let flannel_external_ip_configured = effective
+        .iter()
+        .any(|arg| arg == "--flannel-external-ip" || arg.starts_with("--flannel-external-ip="));
+    if let Some(node_external_ip) = hosted_k3s_registered_node_external_ip(config, machine_name)? {
+        if !node_external_ip_configured {
+            effective.push(String::from("--node-external-ip"));
+            effective.push(node_external_ip.to_string());
+        }
+        if !flannel_external_ip_configured {
+            effective.push(String::from("--flannel-external-ip"));
+        }
+    }
     Ok(effective)
+}
+
+fn hosted_k3s_registered_node_external_ip(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Option<IpAddr>> {
+    let Some(placement) = hosted_stored_machine_placement(config, machine_name)? else {
+        return Ok(None);
+    };
+    let hosted_identity = config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
+    let Some(state) = read_hosted_registered_node_state(config, &hosted_identity.control_plane)?
+    else {
+        return Ok(None);
+    };
+    let Some(registration) = state.nodes.get(&placement.node_name) else {
+        return Ok(None);
+    };
+    hosted_endpoint_ip(&registration.endpoint)
+        .with_context(|| {
+            format!(
+                "failed to derive hosted K3s node external IP for machine '{}' from registered node '{}' endpoint '{}'",
+                machine_name, placement.node_name, registration.endpoint
+            )
+        })
+        .map(Some)
+}
+
+fn hosted_endpoint_ip(endpoint: &str) -> Result<IpAddr> {
+    let parsed = Url::parse(endpoint)
+        .with_context(|| format!("failed to parse hosted node endpoint '{}'", endpoint))?;
+    let host = parsed.host_str().with_context(|| {
+        format!(
+            "hosted node endpoint '{}' does not declare a host",
+            endpoint
+        )
+    })?;
+    host.parse::<IpAddr>().with_context(|| {
+        format!(
+            "hosted node endpoint '{}' host '{}' is not an IP literal",
+            endpoint, host
+        )
+    })
 }
 
 fn hosted_k3s_service_name(role: &str) -> &'static str {
@@ -7899,6 +7960,12 @@ struct HostedImportedInventoryStateFile {
     nodes: BTreeMap<String, HostedImportedNodeRecord>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RegisteredNodeStateFile {
+    control_plane: String,
+    nodes: BTreeMap<String, port_model::HostedNodeRegistration>,
+}
+
 pub(crate) fn hosted_placeholder_runtime_root_for_config(
     config: &PortConfig,
     control_plane: &str,
@@ -7932,6 +7999,29 @@ fn read_hosted_imported_inventory_state(
     if state.control_plane != control_plane {
         bail!(
             "imported inventory state '{}' belongs to control plane '{}', not '{}'",
+            path.display(),
+            state.control_plane,
+            control_plane
+        );
+    }
+
+    Ok(Some(state))
+}
+
+fn read_hosted_registered_node_state(
+    config: &PortConfig,
+    control_plane: &str,
+) -> Result<Option<RegisteredNodeStateFile>> {
+    let path = hosted_placeholder_runtime_root_for_config(config, control_plane)
+        .join("registered-nodes.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let state: RegisteredNodeStateFile = read_json_file(&path)?;
+    if state.control_plane != control_plane {
+        bail!(
+            "registered node state '{}' belongs to control plane '{}', not '{}'",
             path.display(),
             state.control_plane,
             control_plane
@@ -15155,6 +15245,64 @@ exit 23
         config
     }
 
+    #[test]
+    fn hosted_k3s_effective_args_use_registered_node_endpoint_for_external_identity() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let config = sample_hosted_k3s_config(tempdir.path());
+        let state_root = super::hosted_placeholder_runtime_root_for_config(&config, "demo");
+        fs::create_dir_all(&state_root).expect("state root should exist");
+        fs::write(
+            state_root.join("machine-placements.json"),
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "control_plane": "demo",
+                    "machines": {
+                        "cloud-aws-worker": {
+                            "node_name": "aws-linux-node-1",
+                            "runtime_root": "/tmp/aws-linux-node-1",
+                            "placed_at_unix_s": 1,
+                            "placement_detail": "placed on aws-linux-node-1"
+                        }
+                    }
+                }))
+                .expect("placement state should encode")
+            ),
+        )
+        .expect("placement state should write");
+        fs::write(
+            state_root.join("registered-nodes.json"),
+            serde_json::to_vec_pretty(&RegisteredNodeStateFile {
+                control_plane: String::from("demo"),
+                nodes: BTreeMap::from([(
+                    String::from("aws-linux-node-1"),
+                    port_model::HostedNodeRegistration {
+                        endpoint: String::from("http://10.0.1.24:9234"),
+                        token: String::from("demo-token"),
+                        registered_at: 1,
+                        refreshed_at: 1,
+                        ttl_seconds: 60,
+                    },
+                )]),
+            })
+            .expect("registered node state should encode"),
+        )
+        .expect("registered node state should write");
+
+        let args = super::hosted_k3s_effective_args(
+            &config,
+            "cloud-aws-worker",
+            &[String::from("--node-label=role=worker")],
+        )
+        .expect("effective args should resolve");
+
+        assert!(
+            args.windows(2)
+                .any(|window| { window[0] == "--node-external-ip" && window[1] == "10.0.1.24" })
+        );
+        assert!(args.iter().any(|arg| arg == "--flannel-external-ip"));
+    }
+
     fn launch_sample_avf_machine(
         runtime_root: &Path,
     ) -> (PortConfig, RuntimePaths, LaunchMetadata) {
@@ -19091,6 +19239,9 @@ exec sleep 30
                     String::from("--disable=traefik"),
                     String::from("--node-name"),
                     String::from("cloud-aws"),
+                    String::from("--node-external-ip"),
+                    String::from("127.0.0.1"),
+                    String::from("--flannel-external-ip"),
                 ],
                 Some("--cluster-init"),
                 None,
@@ -19201,6 +19352,9 @@ exec sleep 30
             String::from("--node-label=role=worker"),
             String::from("--node-name"),
             String::from("cloud-aws-worker"),
+            String::from("--node-external-ip"),
+            String::from("127.0.0.1"),
+            String::from("--flannel-external-ip"),
         ];
         let command = super::hosted_k3s_service_command(
             "agent",
@@ -19410,6 +19564,9 @@ exec sleep 30
                     String::from("--snapshotter=native"),
                     String::from("--node-name"),
                     String::from("cloud-aws"),
+                    String::from("--node-external-ip"),
+                    String::from("127.0.0.1"),
+                    String::from("--flannel-external-ip"),
                 ],
                 Some("--cluster-init"),
                 None,
@@ -19464,6 +19621,9 @@ exec sleep 30
                     String::from("--disable=traefik"),
                     String::from("--node-name"),
                     String::from("cloud-aws"),
+                    String::from("--node-external-ip"),
+                    String::from("127.0.0.1"),
+                    String::from("--flannel-external-ip"),
                 ],
                 Some("--cluster-init"),
                 None,
@@ -19561,6 +19721,9 @@ exec sleep 30
                             String::from("--disable=traefik"),
                             String::from("--node-name"),
                             String::from("cloud-aws"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         Some("--cluster-init"),
                         None,
@@ -19584,6 +19747,9 @@ exec sleep 30
                         String::from("--node-label=role=worker"),
                         String::from("--node-name"),
                         String::from("cloud-aws-worker"),
+                        String::from("--node-external-ip"),
+                        String::from("127.0.0.1"),
+                        String::from("--flannel-external-ip"),
                     ],
                     None,
                     Some("https://demo-k3s.internal:6443"),
@@ -19777,6 +19943,9 @@ exec sleep 30
                             String::from("--disable=traefik"),
                             String::from("--node-name"),
                             String::from("cloud-aws"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         Some("--cluster-init"),
                         None,
@@ -19820,6 +19989,9 @@ exec sleep 30
                             String::from("--node-label=role=worker"),
                             String::from("--node-name"),
                             String::from("cloud-aws-worker"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         None,
                         Some("https://demo-k3s.internal:6443"),
@@ -20009,6 +20181,9 @@ exec sleep 30
                             String::from("--disable=traefik"),
                             String::from("--node-name"),
                             String::from("cloud-aws"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         Some("--cluster-init"),
                         None,
@@ -20052,6 +20227,9 @@ exec sleep 30
                             String::from("--node-label=role=worker"),
                             String::from("--node-name"),
                             String::from("cloud-aws-worker"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         None,
                         Some("https://demo-k3s.internal:6443"),
@@ -20301,6 +20479,9 @@ exec sleep 30
                             String::from("--disable=traefik"),
                             String::from("--node-name"),
                             String::from("cloud-aws"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         Some("--cluster-init"),
                         None,
@@ -20344,6 +20525,9 @@ exec sleep 30
                             String::from("--node-label=role=worker"),
                             String::from("--node-name"),
                             String::from("cloud-aws-worker"),
+                            String::from("--node-external-ip"),
+                            String::from("127.0.0.1"),
+                            String::from("--flannel-external-ip"),
                         ],
                         None,
                         Some("https://demo-k3s.internal:6443"),

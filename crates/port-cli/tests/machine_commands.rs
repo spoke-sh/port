@@ -1343,6 +1343,9 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                     String::from("--disable=traefik"),
                     String::from("--node-name"),
                     String::from("cloud-aws"),
+                    String::from("--node-external-ip"),
+                    String::from("127.0.0.1"),
+                    String::from("--flannel-external-ip"),
                 ],
             },
             HostedGuestExpectedOperation::Exec {
