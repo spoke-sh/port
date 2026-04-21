@@ -7925,6 +7925,62 @@ fn hosted_stored_machine_placement(
     Ok(placements.machines.get(machine_name).cloned())
 }
 
+fn persist_local_hosted_machine_placement_from_route(
+    config: &PortConfig,
+    machine_name: &str,
+    route: &HostedRouteContext,
+    launched_at_unix_s: u64,
+) -> Result<()> {
+    let hosted_identity = config
+        .hosted_api_identity_contract(machine_name)?
+        .ok_or_else(|| {
+            anyhow!("machine '{machine_name}' does not target a hosted control plane")
+        })?;
+    let node_name = route.node_name.as_ref().with_context(|| {
+        format!(
+            "hosted launch for machine '{}' did not include a selected node",
+            machine_name
+        )
+    })?;
+    let runtime_root = route.runtime_root.as_ref().with_context(|| {
+        format!(
+            "hosted launch for machine '{}' did not include a selected runtime root",
+            machine_name
+        )
+    })?;
+    let state_path =
+        hosted_placeholder_runtime_root_for_config(config, &hosted_identity.control_plane)
+            .join("machine-placements.json");
+    let mut placements: HostedMachinePlacementStateFile = if state_path.exists() {
+        read_json_file(&state_path)?
+    } else {
+        HostedMachinePlacementStateFile::default()
+    };
+    placements.control_plane = hosted_identity.control_plane;
+    placements.machines.insert(
+        machine_name.to_string(),
+        HostedMachinePlacementRecord {
+            node_name: node_name.clone(),
+            runtime_root: runtime_root.clone(),
+            placed_at_unix_s: launched_at_unix_s,
+            placement_detail: route.placement_detail.clone(),
+        },
+    );
+    let parent = state_path.parent().with_context(|| {
+        format!(
+            "machine placement state path '{}' has no parent directory",
+            state_path.display()
+        )
+    })?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create hosted placement state directory '{}'",
+            parent.display()
+        )
+    })?;
+    write_json_file(&state_path, &placements)
+}
+
 fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value)
         .with_context(|| format!("failed to encode '{}'", path.display()))?;
@@ -8804,6 +8860,12 @@ fn hosted_control_plane_launch_machine(
                 request.machine_name
             )
         })?;
+    persist_local_hosted_machine_placement_from_route(
+        config,
+        request.machine_name,
+        &response.route,
+        response.result.launched_at_unix_s,
+    )?;
     Ok(response.result)
 }
 
@@ -15251,25 +15313,19 @@ exit 23
         let config = sample_hosted_k3s_config(tempdir.path());
         let state_root = super::hosted_placeholder_runtime_root_for_config(&config, "demo");
         fs::create_dir_all(&state_root).expect("state root should exist");
-        fs::write(
-            state_root.join("machine-placements.json"),
-            format!(
-                "{}\n",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "control_plane": "demo",
-                    "machines": {
-                        "cloud-aws-worker": {
-                            "node_name": "aws-linux-node-1",
-                            "runtime_root": "/tmp/aws-linux-node-1",
-                            "placed_at_unix_s": 1,
-                            "placement_detail": "placed on aws-linux-node-1"
-                        }
-                    }
-                }))
-                .expect("placement state should encode")
-            ),
+        super::persist_local_hosted_machine_placement_from_route(
+            &config,
+            "cloud-aws-worker",
+            &super::HostedRouteContext {
+                control_plane: Some(String::from("demo")),
+                node_name: Some(String::from("aws-linux-node-1")),
+                runtime_root: Some(PathBuf::from("/tmp/aws-linux-node-1")),
+                placement_detail: Some(String::from("placed on aws-linux-node-1")),
+                ..super::HostedRouteContext::default()
+            },
+            1,
         )
-        .expect("placement state should write");
+        .expect("placement state should sync");
         fs::write(
             state_root.join("registered-nodes.json"),
             serde_json::to_vec_pretty(&RegisteredNodeStateFile {
