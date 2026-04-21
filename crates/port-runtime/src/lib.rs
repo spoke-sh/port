@@ -3630,7 +3630,7 @@ fn execute_hosted_k3s_exec(
     cluster_name: &str,
 ) -> Result<ExecResult> {
     const GUEST_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
-    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
+    const GUEST_RETRY_TIMEOUT: Duration = Duration::from_secs(15);
     const GUEST_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     let request = ExecRequest {
