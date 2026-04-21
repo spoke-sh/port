@@ -1744,6 +1744,26 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
             machine.role, machine_name, node_name
         );
         println!("route detail: {}", machine.detail);
+        println!(
+            "network identity: {} endpoint={} scope={}",
+            machine.network_identity.identity,
+            machine
+                .network_identity
+                .endpoint_ip
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| String::from("(unresolved)")),
+            machine.network_identity.endpoint_scope
+        );
+        if !machine.network_identity.shared_with_machines.is_empty() {
+            println!(
+                "network identity shared-with: {}",
+                machine.network_identity.shared_with_machines.join(", ")
+            );
+        }
+        println!(
+            "network identity detail: {}",
+            machine.network_identity.detail
+        );
     }
     print_boundary_notes(&report.boundary_notes);
 }
@@ -4592,6 +4612,15 @@ mod tests {
             machine_name: String::from("cloud-aws-worker-2"),
             node_name: Some(String::from("aws-linux-cell-1")),
             runtime_root: Some(PathBuf::from("/var/lib/port/aws-hosted/runtime")),
+            network_identity: port_runtime::HostedK3sGuestNetworkIdentity {
+                identity: String::from(
+                    "port-hosted://prod/nodes/aws-linux-cell-1/machines/cloud-aws-worker-2",
+                ),
+                endpoint_ip: Some(std::net::IpAddr::from([3, 238, 162, 153])),
+                endpoint_scope: port_runtime::HostedK3sGuestNetworkEndpointScope::UniquePerGuest,
+                shared_with_machines: Vec::new(),
+                detail: String::from("worker-2 has a unique execution-host endpoint"),
+            },
             detail: String::from("worker placed on aws-linux-cell-1"),
             guest_refresh_age_seconds: Some(248),
             wedged_since_unix_s: Some(1_745_000_000),
@@ -4616,6 +4645,15 @@ mod tests {
             machine_name: String::from("cloud-aws"),
             node_name: Some(String::from("aws-linux-cell-0")),
             runtime_root: Some(PathBuf::from("/var/lib/port/aws-hosted/runtime")),
+            network_identity: port_runtime::HostedK3sGuestNetworkIdentity {
+                identity: String::from(
+                    "port-hosted://prod/nodes/aws-linux-cell-0/machines/cloud-aws",
+                ),
+                endpoint_ip: None,
+                endpoint_scope: port_runtime::HostedK3sGuestNetworkEndpointScope::Unresolved,
+                shared_with_machines: Vec::new(),
+                detail: String::from("control-plane endpoint is unresolved"),
+            },
             detail: String::from("control-plane placed on aws-linux-cell-0"),
             guest_refresh_age_seconds: None,
             wedged_since_unix_s: None,

@@ -264,6 +264,36 @@ pub struct HostedK3sBootstrapResult {
 pub struct HostedK3sMachineAccess {
     pub role: String,
     pub route: HostedRouteContext,
+    pub network_identity: HostedK3sGuestNetworkIdentity,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostedK3sGuestNetworkEndpointScope {
+    UniquePerGuest,
+    SharedPerExecutionHost,
+    Unresolved,
+}
+
+impl std::fmt::Display for HostedK3sGuestNetworkEndpointScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UniquePerGuest => f.write_str("unique-per-guest"),
+            Self::SharedPerExecutionHost => f.write_str("shared-per-execution-host"),
+            Self::Unresolved => f.write_str("unresolved"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sGuestNetworkIdentity {
+    pub identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_ip: Option<IpAddr>,
+    pub endpoint_scope: HostedK3sGuestNetworkEndpointScope,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_with_machines: Vec<String>,
     pub detail: String,
 }
 
@@ -275,6 +305,7 @@ pub struct HostedK3sMachineTruth {
     pub node_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_root: Option<PathBuf>,
+    pub network_identity: HostedK3sGuestNetworkIdentity,
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_refresh_age_seconds: Option<u64>,
@@ -2805,6 +2836,7 @@ fn hosted_k3s_machine_truth(
     config: &PortConfig,
     machine_access: &[HostedK3sMachineAccess],
 ) -> Vec<HostedK3sMachineTruth> {
+    let network_identities = hosted_k3s_machine_network_identities(config, machine_access);
     let mut machines = machine_access
         .iter()
         .map(|machine| {
@@ -2822,9 +2854,13 @@ fn hosted_k3s_machine_truth(
             let wedge = hosted_control_plane_machine_wedge(config, &machine_name).ok();
             HostedK3sMachineTruth {
                 role: machine.role.clone(),
-                machine_name,
+                machine_name: machine_name.clone(),
                 node_name: machine.route.node_name.clone(),
                 runtime_root: machine.route.runtime_root.clone(),
+                network_identity: network_identities
+                    .get(&machine_name)
+                    .cloned()
+                    .unwrap_or_else(|| machine.network_identity.clone()),
                 detail: machine.detail.clone(),
                 // guest_refresh_age_seconds lives on the node-agent,
                 // not the control plane, so the wedge route does not
@@ -3215,8 +3251,136 @@ fn hosted_k3s_machine_access(
     Ok(HostedK3sMachineAccess {
         role: role.to_string(),
         route,
+        network_identity: hosted_k3s_default_guest_network_identity(
+            &summary.control_plane,
+            &resolution,
+        ),
         detail,
     })
+}
+
+fn hosted_k3s_guest_network_identity_uri(
+    control_plane: &str,
+    node_name: Option<&str>,
+    machine_name: &str,
+) -> String {
+    match node_name.filter(|value| !value.trim().is_empty()) {
+        Some(node_name) => {
+            format!("port-hosted://{control_plane}/nodes/{node_name}/machines/{machine_name}")
+        }
+        None => format!("port-hosted://{control_plane}/machines/{machine_name}"),
+    }
+}
+
+fn hosted_k3s_default_guest_network_identity(
+    control_plane: &str,
+    resolution: &HostedMachineResolution,
+) -> HostedK3sGuestNetworkIdentity {
+    let machine_name = resolution.status.machine_name.as_str();
+    let identity = hosted_k3s_guest_network_identity_uri(
+        control_plane,
+        resolution.node_name.as_deref(),
+        machine_name,
+    );
+    HostedK3sGuestNetworkIdentity {
+        identity: identity.clone(),
+        endpoint_ip: None,
+        endpoint_scope: HostedK3sGuestNetworkEndpointScope::Unresolved,
+        shared_with_machines: Vec::new(),
+        detail: format!(
+            "Hosted guest network identity '{identity}' is unresolved because Port has not derived a current execution-host endpoint for machine '{machine_name}' yet."
+        ),
+    }
+}
+
+fn hosted_k3s_machine_network_identities(
+    config: &PortConfig,
+    machine_access: &[HostedK3sMachineAccess],
+) -> BTreeMap<String, HostedK3sGuestNetworkIdentity> {
+    let mut endpoint_ips = BTreeMap::new();
+    let mut endpoint_aliases: BTreeMap<IpAddr, Vec<String>> = BTreeMap::new();
+    for machine in machine_access {
+        let Some(machine_name) = machine.route.machine_name.as_ref() else {
+            continue;
+        };
+        let endpoint_ip =
+            hosted_k3s_registered_node_external_ip(config, machine_name).unwrap_or_default();
+        if let Some(endpoint_ip) = endpoint_ip {
+            endpoint_aliases
+                .entry(endpoint_ip)
+                .or_default()
+                .push(machine_name.clone());
+        }
+        endpoint_ips.insert(machine_name.clone(), endpoint_ip);
+    }
+
+    let mut identities = BTreeMap::new();
+    for machine in machine_access {
+        let machine_name = machine
+            .route
+            .machine_name
+            .clone()
+            .unwrap_or_else(|| String::from("(unknown)"));
+        let control_plane = machine
+            .route
+            .control_plane
+            .as_deref()
+            .unwrap_or("(unknown)");
+        let identity = hosted_k3s_guest_network_identity_uri(
+            control_plane,
+            machine.route.node_name.as_deref(),
+            &machine_name,
+        );
+        let endpoint_ip = endpoint_ips.get(&machine_name).copied().flatten();
+        let (endpoint_scope, shared_with_machines, detail) = match endpoint_ip {
+            Some(endpoint_ip) => {
+                let shared_with_machines = endpoint_aliases
+                    .get(&endpoint_ip)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|peer| peer != &machine_name)
+                    .collect::<Vec<_>>();
+                if shared_with_machines.is_empty() {
+                    (
+                        HostedK3sGuestNetworkEndpointScope::UniquePerGuest,
+                        shared_with_machines,
+                        format!(
+                            "Hosted guest network identity '{identity}' currently resolves to unique execution-host endpoint '{endpoint_ip}' for machine '{machine_name}'."
+                        ),
+                    )
+                } else {
+                    let peers = shared_with_machines.join(", ");
+                    (
+                        HostedK3sGuestNetworkEndpointScope::SharedPerExecutionHost,
+                        shared_with_machines,
+                        format!(
+                            "Hosted guest network identity '{identity}' currently shares execution-host endpoint '{endpoint_ip}' with machine(s) {peers}. Safe multi-guest networking on one execution host requires explicit host-side demultiplexing instead of endpoint-only identity."
+                        ),
+                    )
+                }
+            }
+            None => (
+                HostedK3sGuestNetworkEndpointScope::Unresolved,
+                Vec::new(),
+                format!(
+                    "Hosted guest network identity '{identity}' is unresolved because Port could not derive a current execution-host endpoint for machine '{machine_name}'."
+                ),
+            ),
+        };
+        identities.insert(
+            machine_name,
+            HostedK3sGuestNetworkIdentity {
+                identity,
+                endpoint_ip,
+                endpoint_scope,
+                shared_with_machines,
+                detail,
+            },
+        );
+    }
+
+    identities
 }
 
 pub fn hosted_k3s_kubeconfig_command() -> Vec<String> {
@@ -3420,6 +3584,17 @@ pub fn hosted_k3s_cluster_access(
     let legacy_runtime_drift = hosted_k3s_legacy_runtime_drift_state(&legacy_runtime_artifacts);
     let legacy_runtime_drift_detail =
         hosted_k3s_legacy_runtime_drift_detail(&legacy_runtime_artifacts);
+    let network_identities = hosted_k3s_machine_network_identities(config, &machine_access);
+    for machine in &mut machine_access {
+        let machine_name = machine
+            .route
+            .machine_name
+            .clone()
+            .unwrap_or_else(|| String::from("(unknown)"));
+        if let Some(identity) = network_identities.get(&machine_name) {
+            machine.network_identity = identity.clone();
+        }
+    }
 
     Ok(HostedK3sClusterAccessReport {
         cluster_name: cluster_name.to_string(),
@@ -20346,6 +20521,40 @@ exec sleep 30
             vec![String::from("aws-linux-node")]
         );
         assert!(server.detail.contains("host group 'aws-builders'"));
+        assert_eq!(
+            server.network_identity.identity,
+            "port-hosted://demo/nodes/aws-linux-node/machines/cloud-aws"
+        );
+        assert_eq!(
+            server.network_identity.endpoint_ip,
+            Some(std::net::IpAddr::from([127, 0, 0, 1]))
+        );
+        assert_eq!(
+            server.network_identity.endpoint_scope,
+            super::HostedK3sGuestNetworkEndpointScope::SharedPerExecutionHost
+        );
+        assert_eq!(
+            server.network_identity.shared_with_machines,
+            vec![String::from("cloud-aws-worker")]
+        );
+
+        let worker = report
+            .machine_access
+            .iter()
+            .find(|machine| machine.role == "worker")
+            .expect("worker route should exist");
+        assert_eq!(
+            worker.network_identity.identity,
+            "port-hosted://demo/nodes/aws-linux-node/machines/cloud-aws-worker"
+        );
+        assert_eq!(
+            worker.network_identity.endpoint_scope,
+            super::HostedK3sGuestNetworkEndpointScope::SharedPerExecutionHost
+        );
+        assert_eq!(
+            worker.network_identity.shared_with_machines,
+            vec![String::from("cloud-aws")]
+        );
 
         server_guest
             .join()
@@ -24814,6 +25023,15 @@ exec sleep 30
             machine_name: String::from("cloud-aws-worker-2"),
             node_name: Some(String::from("aws-linux-cell-1")),
             runtime_root: Some(PathBuf::from("/var/lib/port/aws-hosted/runtime")),
+            network_identity: super::HostedK3sGuestNetworkIdentity {
+                identity: String::from(
+                    "port-hosted://prod/nodes/aws-linux-cell-1/machines/cloud-aws-worker-2",
+                ),
+                endpoint_ip: Some(std::net::IpAddr::from([3, 238, 162, 153])),
+                endpoint_scope: super::HostedK3sGuestNetworkEndpointScope::UniquePerGuest,
+                shared_with_machines: Vec::new(),
+                detail: String::from("worker-2 has a unique execution-host endpoint"),
+            },
             detail: String::from("worker placed on aws-linux-cell-1"),
             guest_refresh_age_seconds: Some(248),
             wedged_since_unix_s: Some(1_745_000_000),
@@ -24831,6 +25049,12 @@ exec sleep 30
             recovery_state: super::RecoveryState::InProgress,
         };
         let rendered = serde_json::to_value(&populated).expect("populated truth should serialize");
+        assert_eq!(
+            rendered["network_identity"]["identity"],
+            serde_json::json!(
+                "port-hosted://prod/nodes/aws-linux-cell-1/machines/cloud-aws-worker-2"
+            )
+        );
         assert_eq!(
             rendered["wedged_since_unix_s"],
             serde_json::json!(1_745_000_000)
@@ -24850,6 +25074,15 @@ exec sleep 30
             machine_name: String::from("cloud-aws"),
             node_name: Some(String::from("aws-linux-cell-0")),
             runtime_root: None,
+            network_identity: super::HostedK3sGuestNetworkIdentity {
+                identity: String::from(
+                    "port-hosted://prod/nodes/aws-linux-cell-0/machines/cloud-aws",
+                ),
+                endpoint_ip: None,
+                endpoint_scope: super::HostedK3sGuestNetworkEndpointScope::Unresolved,
+                shared_with_machines: Vec::new(),
+                detail: String::from("control-plane endpoint is unresolved"),
+            },
             detail: String::from("control-plane placed on aws-linux-cell-0"),
             guest_refresh_age_seconds: None,
             wedged_since_unix_s: None,
@@ -24888,10 +25121,20 @@ exec sleep 30
         let access = vec![super::HostedK3sMachineAccess {
             role: String::from("worker"),
             route: HostedRouteContext {
+                control_plane: Some(String::from("prod")),
                 machine_name: Some(String::from("nonexistent-machine")),
                 node_name: Some(String::from("aws-linux-cell-1")),
                 runtime_root: Some(runtime_root.clone()),
                 ..HostedRouteContext::default()
+            },
+            network_identity: super::HostedK3sGuestNetworkIdentity {
+                identity: String::from(
+                    "port-hosted://prod/nodes/aws-linux-cell-1/machines/nonexistent-machine",
+                ),
+                endpoint_ip: None,
+                endpoint_scope: super::HostedK3sGuestNetworkEndpointScope::Unresolved,
+                shared_with_machines: Vec::new(),
+                detail: String::from("placeholder unresolved identity"),
             },
             detail: String::from("worker placement detail"),
         }];
@@ -24906,6 +25149,14 @@ exec sleep 30
         let row = &truth[0];
         assert_eq!(row.role, "worker");
         assert_eq!(row.machine_name, "nonexistent-machine");
+        assert_eq!(
+            row.network_identity.identity,
+            "port-hosted://prod/nodes/aws-linux-cell-1/machines/nonexistent-machine"
+        );
+        assert_eq!(
+            row.network_identity.endpoint_scope,
+            super::HostedK3sGuestNetworkEndpointScope::Unresolved
+        );
         assert_eq!(row.detail, "worker placement detail");
         assert_eq!(row.guest_refresh_age_seconds, None);
         assert_eq!(row.wedged_since_unix_s, None);
