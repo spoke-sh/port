@@ -1669,6 +1669,28 @@ pub struct HostedNodeFreshnessContract {
     pub fresh_until: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+pub struct HostedGuestUnderlayForwardingPlan {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_guest_cidrs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_routes: Vec<HostedGuestUnderlayForwardingRoute>,
+}
+
+impl HostedGuestUnderlayForwardingPlan {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.local_guest_cidrs.is_empty() && self.remote_routes.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct HostedGuestUnderlayForwardingRoute {
+    pub cidr: String,
+    pub via_host: String,
+    pub node_name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedRegisteredNodeContract {
     pub node_name: String,
@@ -1677,6 +1699,11 @@ pub struct HostedRegisteredNodeContract {
     pub node: HostedNodeContract,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_groups: Vec<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "HostedGuestUnderlayForwardingPlan::is_empty"
+    )]
+    pub guest_underlay_forwarding: HostedGuestUnderlayForwardingPlan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1746,6 +1773,7 @@ impl HostedInventoryContract {
             freshness,
             node: node.clone(),
             host_groups,
+            guest_underlay_forwarding: HostedGuestUnderlayForwardingPlan::default(),
         })
     }
 }

@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, BufWriter, Cursor};
 use std::os::unix::net::UnixStream;
 use std::path::{Path as FsPath, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -26,10 +27,11 @@ use port_hosted_protocol::{
 };
 use port_model::{
     ExecutionSubstrate, FirecrackerPvmLaneContract, HostConnection, HostProvider,
-    HostedAuthTokenSource, HostedImportedNodeRecord, HostedMachineSummaryContract,
-    HostedNodeRegistration, HostedPvmHostKitPackageAttachment, HostedRegisteredNodeContract,
-    MachineArchitecture, PortConfig, ProtectionMode, PvmCapabilityState, PvmHostKit,
-    PvmHostKitPackage, ServiceHealthState, hosted_artifact_store_path,
+    HostedAuthTokenSource, HostedGuestUnderlayForwardingPlan, HostedGuestUnderlayForwardingRoute,
+    HostedImportedNodeRecord, HostedMachineSummaryContract, HostedNodeRegistration,
+    HostedPvmHostKitPackageAttachment, HostedRegisteredNodeContract, MachineArchitecture,
+    PortConfig, ProtectionMode, PvmCapabilityState, PvmHostKit, PvmHostKitPackage,
+    ServiceHealthState, hosted_artifact_store_path,
 };
 use port_sdk::{SecretPutRequest, ServiceApplyRequest};
 use reqwest::Client;
@@ -46,13 +48,14 @@ use crate::{
     ServiceRuntimeState, ServiceSecretBinding, StopResult, apply_machine_service_live,
     architecture_dir, copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local,
     execute_guest_operation, hosted_placeholder_runtime_root,
-    hosted_placeholder_runtime_root_for_config, hosted_stored_service_placements,
-    launch_local_machine, list_detached_forwards, list_machine_secrets_local,
+    hosted_placeholder_runtime_root_for_config, hosted_stored_service_placements, iproute_binary,
+    iptables_binary, launch_local_machine, list_detached_forwards, list_machine_secrets_local,
     machine_monitor as runtime_machine_monitor, machine_monitor_report, machine_service_status,
     machine_status as runtime_machine_status, machine_top as runtime_machine_top,
     machine_top_report, prepare_guest_forward, put_machine_secret_local,
-    refresh_machine_service_list, refresh_machine_service_runtime, start_detached_forward,
-    stop_detached_forward, stop_machine as runtime_stop_machine, stop_machine_service_live,
+    refresh_machine_service_list, refresh_machine_service_runtime, run_network_command,
+    start_detached_forward, stop_detached_forward, stop_machine as runtime_stop_machine,
+    stop_machine_service_live,
 };
 use port_agent_protocol::{
     CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
@@ -728,13 +731,24 @@ fn validate_registered_node_state(
 fn registered_node_records(
     config: &PortConfig,
     state: &RegisteredNodeStateFile,
+    machine_placements: &BTreeMap<String, HostedMachinePlacementRecord>,
 ) -> Result<BTreeMap<String, RegisteredNodeRecord>> {
     let contracts = validate_registered_node_state(config, state)?;
+    let forwarding_plans = hosted_guest_underlay_forwarding_plans(
+        config,
+        &state.control_plane,
+        &state.nodes,
+        machine_placements,
+    )?;
     let mut records = BTreeMap::new();
-    for (node_name, contract) in contracts {
+    for (node_name, mut contract) in contracts {
         let registration = state.nodes.get(&node_name).with_context(|| {
             format!("registered node '{}' is missing persisted state", node_name)
         })?;
+        contract.guest_underlay_forwarding = forwarding_plans
+            .get(&node_name)
+            .cloned()
+            .unwrap_or_default();
         records.insert(
             node_name.clone(),
             RegisteredNodeRecord {
@@ -748,6 +762,121 @@ fn registered_node_records(
         );
     }
     Ok(records)
+}
+
+fn hosted_guest_underlay_forwarding_plans(
+    config: &PortConfig,
+    control_plane: &str,
+    registrations: &BTreeMap<String, HostedNodeRegistration>,
+    machine_placements: &BTreeMap<String, HostedMachinePlacementRecord>,
+) -> Result<BTreeMap<String, HostedGuestUnderlayForwardingPlan>> {
+    let mut local_guest_cidrs_by_node: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (machine_name, placement) in machine_placements {
+        if crate::hosted_control_plane_for_node(config, &placement.node_name) != Some(control_plane)
+        {
+            continue;
+        }
+        if let Some(cidr) = hosted_machine_guest_underlay_cidr(config, machine_name)? {
+            local_guest_cidrs_by_node
+                .entry(placement.node_name.clone())
+                .or_default()
+                .insert(cidr);
+        }
+    }
+
+    let mut remote_endpoint_by_node = BTreeMap::new();
+    for (node_name, registration) in registrations {
+        if let Ok(ip) = crate::hosted_endpoint_ip(&registration.endpoint) {
+            remote_endpoint_by_node.insert(node_name.clone(), ip.to_string());
+        }
+    }
+
+    let mut plans = BTreeMap::new();
+    for node_name in registrations.keys() {
+        let local_guest_cidrs = local_guest_cidrs_by_node
+            .get(node_name)
+            .cloned()
+            .unwrap_or_default();
+        let mut remote_routes = BTreeSet::new();
+        if !local_guest_cidrs.is_empty() {
+            for (peer_node_name, peer_guest_cidrs) in &local_guest_cidrs_by_node {
+                if peer_node_name == node_name {
+                    continue;
+                }
+                let Some(via_host) = remote_endpoint_by_node.get(peer_node_name) else {
+                    continue;
+                };
+                for cidr in peer_guest_cidrs {
+                    if local_guest_cidrs.contains(cidr) {
+                        continue;
+                    }
+                    remote_routes.insert(HostedGuestUnderlayForwardingRoute {
+                        cidr: cidr.clone(),
+                        via_host: via_host.clone(),
+                        node_name: peer_node_name.clone(),
+                    });
+                }
+            }
+        }
+        plans.insert(
+            node_name.clone(),
+            HostedGuestUnderlayForwardingPlan {
+                local_guest_cidrs: local_guest_cidrs.into_iter().collect(),
+                remote_routes: remote_routes.into_iter().collect(),
+            },
+        );
+    }
+
+    Ok(plans)
+}
+
+fn hosted_machine_guest_underlay_cidr(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Option<String>> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{}'", machine_name))?;
+    let Some(network) = machine.network.as_ref() else {
+        return Ok(None);
+    };
+    if !network.enabled {
+        return Ok(None);
+    }
+    guest_underlay_cidr(network.guest_ip.as_str(), network.prefix_len).map(Some)
+}
+
+fn guest_underlay_cidr(ip: &str, prefix_len: u8) -> Result<String> {
+    let ip_addr: std::net::IpAddr = ip
+        .parse()
+        .with_context(|| format!("failed to parse guest underlay IP '{ip}'"))?;
+    match ip_addr {
+        std::net::IpAddr::V4(ipv4) => {
+            if prefix_len > 32 {
+                bail!("IPv4 guest underlay prefix '{}' exceeds 32", prefix_len);
+            }
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u32::MAX << (32 - u32::from(prefix_len))
+            };
+            let network = std::net::Ipv4Addr::from(u32::from(ipv4) & mask);
+            Ok(format!("{network}/{prefix_len}"))
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            if prefix_len > 128 {
+                bail!("IPv6 guest underlay prefix '{}' exceeds 128", prefix_len);
+            }
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u128::MAX << (128 - u32::from(prefix_len))
+            };
+            let network = std::net::Ipv6Addr::from(u128::from(ipv6) & mask);
+            Ok(format!("{network}/{prefix_len}"))
+        }
+    }
 }
 
 fn imported_provider_label(provider: HostProvider) -> String {
@@ -1735,8 +1864,19 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
                 )
             },
         )?;
-    let registered_nodes =
-        registered_node_records(&config, &registered_state).with_context(|| {
+    let machine_placement_state_path =
+        machine_placement_state_path_for_config(&config, &request.control_plane);
+    let machine_placement_state =
+        load_machine_placement_state(&machine_placement_state_path, &request.control_plane)
+            .with_context(|| {
+                format!(
+                    "control plane '{}' could not load machine placement state",
+                    request.control_plane
+                )
+            })?;
+    let machine_placements = machine_placement_state.machines.clone();
+    let registered_nodes = registered_node_records(&config, &registered_state, &machine_placements)
+        .with_context(|| {
             format!(
                 "control plane '{}' could not validate registered node state",
                 request.control_plane
@@ -1760,17 +1900,6 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
                     request.control_plane
                 )
             })?;
-    let machine_placement_state_path =
-        machine_placement_state_path_for_config(&config, &request.control_plane);
-    let machine_placement_state =
-        load_machine_placement_state(&machine_placement_state_path, &request.control_plane)
-            .with_context(|| {
-                format!(
-                    "control plane '{}' could not load machine placement state",
-                    request.control_plane
-                )
-            })?;
-    let machine_placements = machine_placement_state.machines.clone();
 
     let auth_header = control_plane.auth.header.clone();
 
@@ -3650,8 +3779,20 @@ fn store_registered_node_refresh(
     let mut next_state = current_state;
     next_state.control_plane = state.inner.control_plane.clone();
     next_state.nodes.insert(node_name.to_string(), registration);
-    let next_records = registered_node_records(&state.inner.config, &next_state)
-        .map_err(|error| error.to_string())?;
+    let machine_placements = state
+        .inner
+        .machine_placements
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect machine placement state",
+                state.inner.control_plane
+            )
+        })?
+        .clone();
+    let next_records =
+        registered_node_records(&state.inner.config, &next_state, &machine_placements)
+            .map_err(|error| error.to_string())?;
     let record = next_records.get(node_name).cloned().ok_or_else(|| {
         format!(
             "control plane '{}' could not derive a registered-node record for '{}'",
@@ -5933,9 +6074,232 @@ async fn register_node_agent_once(
             status
         );
     }
-    let _: HostedSuccess<HostedRegisteredNodeContract> = serde_json::from_slice(&bytes)
+    let success: HostedSuccess<HostedRegisteredNodeContract> = serde_json::from_slice(&bytes)
         .context("control plane returned invalid registration JSON")?;
+    reconcile_hosted_guest_underlay_forwarding(state, &success.result.guest_underlay_forwarding)
+        .with_context(|| {
+            format!(
+                "failed to reconcile guest underlay forwarding on node '{}' for control plane '{}'",
+                state.inner.node_name, target.control_plane
+            )
+        })?;
     Ok(registered_at)
+}
+
+fn hosted_guest_underlay_forwarding_state_path(runtime_root: &FsPath) -> PathBuf {
+    runtime_root.join("guest-underlay-forwarding-state.json")
+}
+
+fn read_hosted_guest_underlay_forwarding_state(
+    path: &FsPath,
+) -> Result<HostedGuestUnderlayForwardingPlan> {
+    if !path.exists() {
+        return Ok(HostedGuestUnderlayForwardingPlan::default());
+    }
+    let bytes = std::fs::read(path).with_context(|| {
+        format!(
+            "failed to read guest underlay forwarding state '{}'",
+            path.display()
+        )
+    })?;
+    serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "failed to decode guest underlay forwarding state '{}'",
+            path.display()
+        )
+    })
+}
+
+fn write_hosted_guest_underlay_forwarding_state(
+    path: &FsPath,
+    plan: &HostedGuestUnderlayForwardingPlan,
+) -> Result<()> {
+    let parent = path.parent().with_context(|| {
+        format!(
+            "guest underlay forwarding state path '{}' has no parent directory",
+            path.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create guest underlay forwarding state directory '{}'",
+            parent.display()
+        )
+    })?;
+    let bytes = serde_json::to_vec_pretty(plan)
+        .context("failed to encode guest underlay forwarding state")?;
+    std::fs::write(path, format!("{}\n", String::from_utf8_lossy(&bytes))).with_context(|| {
+        format!(
+            "failed to write guest underlay forwarding state '{}'",
+            path.display()
+        )
+    })
+}
+
+fn hosted_guest_underlay_chain_suffix(control_plane: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    control_plane.hash(&mut hasher);
+    format!("{:08x}", hasher.finish() as u32)
+}
+
+fn hosted_guest_underlay_nat_chain(control_plane: &str) -> String {
+    format!(
+        "PORT-HGU-NAT-{}",
+        hosted_guest_underlay_chain_suffix(control_plane)
+    )
+}
+
+fn hosted_guest_underlay_forward_chain(control_plane: &str) -> String {
+    format!(
+        "PORT-HGU-FWD-{}",
+        hosted_guest_underlay_chain_suffix(control_plane)
+    )
+}
+
+fn network_command_succeeds(program: &str, args: &[&str]) -> Result<bool> {
+    let output = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .with_context(|| format!("failed to run '{program}' with args {args:?}"))?;
+    Ok(output.status.success())
+}
+
+fn ensure_iptables_chain(program: &str, table: &str, chain: &str) -> Result<()> {
+    if !network_command_succeeds(program, &["-t", table, "-S", chain])? {
+        run_network_command(program, &["-t", table, "-N", chain])?;
+    }
+    run_network_command(program, &["-t", table, "-F", chain])
+}
+
+fn ensure_iptables_jump(program: &str, table: &str, parent: &str, chain: &str) -> Result<()> {
+    if !network_command_succeeds(program, &["-t", table, "-C", parent, "-j", chain])? {
+        run_network_command(program, &["-t", table, "-I", parent, "1", "-j", chain])?;
+    }
+    Ok(())
+}
+
+fn remove_iptables_chain(program: &str, table: &str, parent: &str, chain: &str) -> Result<()> {
+    if network_command_succeeds(program, &["-t", table, "-C", parent, "-j", chain])? {
+        run_network_command(program, &["-t", table, "-D", parent, "-j", chain])?;
+    }
+    if network_command_succeeds(program, &["-t", table, "-S", chain])? {
+        run_network_command(program, &["-t", table, "-F", chain])?;
+        run_network_command(program, &["-t", table, "-X", chain])?;
+    }
+    Ok(())
+}
+
+fn reconcile_hosted_guest_underlay_forwarding(
+    state: &NodeAgentState,
+    plan: &HostedGuestUnderlayForwardingPlan,
+) -> Result<()> {
+    let state_path = hosted_guest_underlay_forwarding_state_path(&state.inner.runtime_root);
+    let previous = read_hosted_guest_underlay_forwarding_state(&state_path)?;
+    let iproute = iproute_binary();
+    let iptables = iptables_binary();
+    let nat_chain = hosted_guest_underlay_nat_chain(&state.inner.control_plane);
+    let forward_chain = hosted_guest_underlay_forward_chain(&state.inner.control_plane);
+
+    std::fs::write("/proc/sys/net/ipv4/ip_forward", "1")
+        .context("failed to enable ip_forward for hosted guest underlay forwarding")?;
+
+    let previous_routes = previous
+        .remote_routes
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let desired_routes = plan.remote_routes.iter().cloned().collect::<BTreeSet<_>>();
+
+    for route in previous_routes.difference(&desired_routes) {
+        let _ = run_network_command(
+            &iproute,
+            &[
+                "route",
+                "del",
+                route.cidr.as_str(),
+                "via",
+                route.via_host.as_str(),
+            ],
+        );
+    }
+    for route in &plan.remote_routes {
+        run_network_command(
+            &iproute,
+            &[
+                "route",
+                "replace",
+                route.cidr.as_str(),
+                "via",
+                route.via_host.as_str(),
+            ],
+        )?;
+    }
+
+    if plan.is_empty() {
+        remove_iptables_chain(&iptables, "nat", "POSTROUTING", &nat_chain)?;
+        remove_iptables_chain(&iptables, "filter", "FORWARD", &forward_chain)?;
+        let _ = std::fs::remove_file(&state_path);
+        return Ok(());
+    }
+
+    ensure_iptables_chain(&iptables, "nat", &nat_chain)?;
+    ensure_iptables_jump(&iptables, "nat", "POSTROUTING", &nat_chain)?;
+    ensure_iptables_chain(&iptables, "filter", &forward_chain)?;
+    ensure_iptables_jump(&iptables, "filter", "FORWARD", &forward_chain)?;
+
+    for local_cidr in &plan.local_guest_cidrs {
+        for route in &plan.remote_routes {
+            run_network_command(
+                &iptables,
+                &[
+                    "-t",
+                    "nat",
+                    "-A",
+                    &nat_chain,
+                    "-s",
+                    local_cidr.as_str(),
+                    "-d",
+                    route.cidr.as_str(),
+                    "-j",
+                    "ACCEPT",
+                ],
+            )?;
+            run_network_command(
+                &iptables,
+                &[
+                    "-A",
+                    &forward_chain,
+                    "-s",
+                    local_cidr.as_str(),
+                    "-d",
+                    route.cidr.as_str(),
+                    "-j",
+                    "ACCEPT",
+                ],
+            )?;
+            run_network_command(
+                &iptables,
+                &[
+                    "-A",
+                    &forward_chain,
+                    "-s",
+                    route.cidr.as_str(),
+                    "-d",
+                    local_cidr.as_str(),
+                    "-j",
+                    "ACCEPT",
+                ],
+            )?;
+        }
+    }
+
+    write_hosted_guest_underlay_forwarding_state(&state_path, plan)
 }
 
 fn node_agent_router(state: NodeAgentState) -> Router {

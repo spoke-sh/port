@@ -3288,7 +3288,7 @@ fn hosted_k3s_default_guest_network_identity(
         endpoint_scope: HostedK3sGuestNetworkEndpointScope::Unresolved,
         shared_with_machines: Vec::new(),
         detail: format!(
-            "Hosted guest network identity '{identity}' is unresolved because Port has not derived a current execution-host endpoint for machine '{machine_name}' yet."
+            "Hosted guest network identity '{identity}' is unresolved because Port has not derived a current guest-underlay IP for machine '{machine_name}' yet."
         ),
     }
 }
@@ -3303,8 +3303,7 @@ fn hosted_k3s_machine_network_identities(
         let Some(machine_name) = machine.route.machine_name.as_ref() else {
             continue;
         };
-        let endpoint_ip =
-            hosted_k3s_registered_node_external_ip(config, machine_name).unwrap_or_default();
+        let endpoint_ip = hosted_k3s_machine_external_ip(config, machine_name).unwrap_or_default();
         if let Some(endpoint_ip) = endpoint_ip {
             endpoint_aliases
                 .entry(endpoint_ip)
@@ -3346,7 +3345,7 @@ fn hosted_k3s_machine_network_identities(
                         HostedK3sGuestNetworkEndpointScope::UniquePerGuest,
                         shared_with_machines,
                         format!(
-                            "Hosted guest network identity '{identity}' currently resolves to unique execution-host endpoint '{endpoint_ip}' for machine '{machine_name}'."
+                            "Hosted guest network identity '{identity}' currently resolves to unique guest-underlay IP '{endpoint_ip}' for machine '{machine_name}'."
                         ),
                     )
                 } else {
@@ -3355,7 +3354,7 @@ fn hosted_k3s_machine_network_identities(
                         HostedK3sGuestNetworkEndpointScope::SharedPerExecutionHost,
                         shared_with_machines,
                         format!(
-                            "Hosted guest network identity '{identity}' currently shares execution-host endpoint '{endpoint_ip}' with machine(s) {peers}. Safe multi-guest networking on one execution host requires explicit host-side demultiplexing instead of endpoint-only identity."
+                            "Hosted guest network identity '{identity}' currently shares guest-underlay IP '{endpoint_ip}' with machine(s) {peers}. Safe hosted multi-guest networking requires explicit host-side demultiplexing and unique per-guest underlay identity."
                         ),
                     )
                 }
@@ -3364,7 +3363,7 @@ fn hosted_k3s_machine_network_identities(
                 HostedK3sGuestNetworkEndpointScope::Unresolved,
                 Vec::new(),
                 format!(
-                    "Hosted guest network identity '{identity}' is unresolved because Port could not derive a current execution-host endpoint for machine '{machine_name}'."
+                    "Hosted guest network identity '{identity}' is unresolved because Port could not derive a current guest-underlay IP for machine '{machine_name}'."
                 ),
             ),
         };
@@ -4101,7 +4100,7 @@ fn hosted_k3s_effective_args(
     let flannel_external_ip_configured = effective
         .iter()
         .any(|arg| arg == "--flannel-external-ip" || arg.starts_with("--flannel-external-ip="));
-    if let Some(node_external_ip) = hosted_k3s_registered_node_external_ip(config, machine_name)? {
+    if let Some(node_external_ip) = hosted_k3s_machine_external_ip(config, machine_name)? {
         if !node_external_ip_configured {
             effective.push(String::from("--node-external-ip"));
             effective.push(node_external_ip.to_string());
@@ -4111,6 +4110,31 @@ fn hosted_k3s_effective_args(
         }
     }
     Ok(effective)
+}
+
+fn hosted_k3s_machine_external_ip(
+    config: &PortConfig,
+    machine_name: &str,
+) -> Result<Option<IpAddr>> {
+    let machine = config
+        .machines
+        .get(machine_name)
+        .with_context(|| format!("unknown machine '{}'", machine_name))?;
+    if let Some(network) = machine.network.as_ref()
+        && network.enabled
+    {
+        return network
+            .guest_ip
+            .parse()
+            .with_context(|| {
+                format!(
+                    "failed to parse guest underlay IP '{}' for machine '{}'",
+                    network.guest_ip, machine_name
+                )
+            })
+            .map(Some);
+    }
+    hosted_k3s_registered_node_external_ip(config, machine_name)
 }
 
 fn hosted_k3s_registered_node_external_ip(
@@ -13911,7 +13935,7 @@ fn network_state_path(paths: &RuntimePaths) -> PathBuf {
     paths.runtime_dir.join("network-state.json")
 }
 
-fn run_network_command(program: &str, args: &[&str]) -> Result<()> {
+pub(crate) fn run_network_command(program: &str, args: &[&str]) -> Result<()> {
     let output = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -13930,21 +13954,21 @@ fn run_network_command(program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-fn iptables_binary() -> String {
+pub(crate) fn iptables_binary() -> String {
     env::var(PORT_IPTABLES_BINARY_ENV)
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| String::from("iptables"))
 }
 
-fn iproute_binary() -> String {
+pub(crate) fn iproute_binary() -> String {
     find_versioned_binary("ip", &["-V"], "iproute2")
         .unwrap_or_else(|| PathBuf::from("ip"))
         .to_string_lossy()
         .into_owned()
 }
 
-fn default_outbound_interface() -> Result<String> {
+pub(crate) fn default_outbound_interface() -> Result<String> {
     let output = Command::new(iproute_binary())
         .args(["route", "show", "default"])
         .output()
@@ -15559,43 +15583,9 @@ exit 23
     }
 
     #[test]
-    fn hosted_k3s_effective_args_use_registered_node_endpoint_for_external_identity() {
+    fn hosted_k3s_effective_args_use_guest_underlay_ip_for_external_identity() {
         let tempdir = tempdir().expect("tempdir should exist");
         let config = sample_hosted_k3s_config(tempdir.path());
-        let state_root = super::hosted_placeholder_runtime_root_for_config(&config, "demo");
-        fs::create_dir_all(&state_root).expect("state root should exist");
-        super::persist_local_hosted_machine_placement_from_route(
-            &config,
-            "cloud-aws-worker",
-            &super::HostedRouteContext {
-                control_plane: Some(String::from("demo")),
-                node_name: Some(String::from("aws-linux-node-1")),
-                runtime_root: Some(PathBuf::from("/tmp/aws-linux-node-1")),
-                placement_detail: Some(String::from("placed on aws-linux-node-1")),
-                ..super::HostedRouteContext::default()
-            },
-            1,
-        )
-        .expect("placement state should sync");
-        fs::write(
-            state_root.join("registered-nodes.json"),
-            serde_json::to_vec_pretty(&RegisteredNodeStateFile {
-                control_plane: String::from("demo"),
-                nodes: BTreeMap::from([(
-                    String::from("aws-linux-node-1"),
-                    port_model::HostedNodeRegistration {
-                        endpoint: String::from("http://10.0.1.24:9234"),
-                        token: String::from("demo-token"),
-                        registered_at: 1,
-                        refreshed_at: 1,
-                        ttl_seconds: 60,
-                    },
-                )]),
-            })
-            .expect("registered node state should encode"),
-        )
-        .expect("registered node state should write");
-
         let args = super::hosted_k3s_effective_args(
             &config,
             "agent",
@@ -15603,9 +15593,16 @@ exit 23
             &[String::from("--node-label=role=worker")],
         )
         .expect("effective args should resolve");
+        let worker_guest_ip = config
+            .machines
+            .get("cloud-aws-worker")
+            .and_then(|machine| machine.network.as_ref())
+            .map(|network| network.guest_ip.clone())
+            .expect("worker guest IP should exist");
         assert!(
-            args.windows(2)
-                .any(|window| { window[0] == "--node-external-ip" && window[1] == "10.0.1.24" }),
+            args.windows(2).any(|window| {
+                window[0] == "--node-external-ip" && window[1] == worker_guest_ip
+            }),
             "{args:?}"
         );
         assert!(
@@ -15615,9 +15612,15 @@ exit 23
     }
 
     #[test]
-    fn hosted_k3s_effective_args_fall_back_to_imported_node_provenance_for_external_identity() {
+    fn hosted_k3s_machine_external_ip_falls_back_to_imported_node_provenance_when_guest_network_is_missing()
+     {
         let tempdir = tempdir().expect("tempdir should exist");
-        let config = sample_hosted_k3s_config(tempdir.path());
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        config
+            .machines
+            .get_mut("cloud-aws-worker")
+            .expect("worker should exist")
+            .network = None;
         let state_root = super::hosted_placeholder_runtime_root_for_config(&config, "demo");
         fs::create_dir_all(&state_root).expect("state root should exist");
         super::persist_local_hosted_machine_placement_from_route(
@@ -15652,13 +15655,6 @@ exit 23
         )
         .expect("imported inventory state should write");
 
-        let args = super::hosted_k3s_effective_args(
-            &config,
-            "agent",
-            "cloud-aws-worker",
-            &[String::from("--node-label=role=worker")],
-        )
-        .expect("effective args should resolve");
         let imported_ip =
             super::hosted_imported_node_external_ip(&config, "demo", "aws-linux-node")
                 .expect("imported node ip should resolve");
@@ -15669,20 +15665,11 @@ exit 23
         let placement = super::hosted_stored_machine_placement(&config, "cloud-aws-worker")
             .expect("placement lookup should succeed");
         assert!(placement.is_some(), "stored placement should exist");
-        let machine_ip = super::hosted_k3s_registered_node_external_ip(&config, "cloud-aws-worker")
+        let machine_ip = super::hosted_k3s_machine_external_ip(&config, "cloud-aws-worker")
             .expect("machine ip lookup should succeed");
         assert_eq!(
             machine_ip,
             Some("10.0.1.24".parse().expect("ip should parse"))
-        );
-
-        assert!(
-            args.windows(2)
-                .any(|window| { window[0] == "--node-external-ip" && window[1] == "10.0.1.24" })
-        );
-        assert!(
-            !args.iter().any(|arg| arg == "--flannel-external-ip"),
-            "{args:?}"
         );
     }
 
