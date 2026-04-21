@@ -3744,7 +3744,9 @@ fn execute_hosted_k3s_managed_service_start_with_retry(
             apply_timeout,
         ) {
             Ok(status) => {
-                return Ok(managed_service_status_from_service_definition_status(status));
+                return Ok(managed_service_status_from_service_definition_status(
+                    status,
+                ));
             }
             Err(error) => {
                 match hosted_control_plane_machine_service_status_with_timeout(
@@ -3753,8 +3755,12 @@ fn execute_hosted_k3s_managed_service_start_with_retry(
                     request.name,
                     status_timeout,
                 ) {
-                    Ok(status) if hosted_service_status_matches_apply_request(&status, &request) => {
-                        return Ok(managed_service_status_from_service_definition_status(status));
+                    Ok(status)
+                        if hosted_service_status_matches_apply_request(&status, &request) =>
+                    {
+                        return Ok(managed_service_status_from_service_definition_status(
+                            status,
+                        ));
                     }
                     Ok(_) if started.elapsed() >= retry_timeout => {
                         break anyhow!(
@@ -7313,22 +7319,17 @@ fn resolve_service_runtime_context(
     host_group: Option<&str>,
 ) -> Result<ResolvedMachineRuntime> {
     let machine_is_hosted = machine_is_hosted(config, machine_name)?;
-    if !machine_is_hosted {
-        if host_group.is_none()
-            && let Some(context) = resolve_localized_hosted_service_runtime_context(
-                config,
-                runtime_root,
-                machine_name,
-            )?
-        {
-            return Ok(context);
-        }
-        if host_group.is_none()
-            && let Some(context) =
-                resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
-        {
-            return Ok(context);
-        }
+    if host_group.is_none()
+        && let Some(context) =
+            resolve_localized_hosted_service_runtime_context(config, runtime_root, machine_name)?
+    {
+        return Ok(context);
+    }
+    if host_group.is_none()
+        && let Some(context) =
+            resolve_stored_local_hosted_service_runtime_context(config, machine_name)?
+    {
+        return Ok(context);
     }
     let context = resolve_machine_runtime(config, runtime_root, machine_name, host_group)?;
     if context.status.state == MachineRuntimeState::Malformed {
@@ -7375,8 +7376,14 @@ fn resolve_localized_hosted_service_runtime_context(
         return Ok(None);
     };
 
-    let mut status =
-        local_machine_status_for_runtime_root(&effective_config, runtime_root, machine_name)?;
+    let mut status = match local_machine_status_for_runtime_root(
+        &effective_config,
+        runtime_root,
+        machine_name,
+    ) {
+        Ok(status) => status,
+        Err(_) => return Ok(None),
+    };
     status.control = MachineControlContract::hosted_control_plane();
     status.detail = format!(
         "{} Routed through control plane '{}' and node '{}'. {}",
@@ -13913,7 +13920,7 @@ struct AvfRuntimeMetadata {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, VecDeque};
     use std::fs;
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
     use std::net::{Shutdown, TcpListener as StdTcpListener, TcpStream};
@@ -13923,7 +13930,7 @@ mod tests {
     use std::process::{Command, Stdio};
     use std::sync::{Mutex, OnceLock, mpsc};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use axum::extract::{Path as AxumPath, State};
     use axum::http::StatusCode;
@@ -13940,8 +13947,8 @@ mod tests {
         DoctorCheck, DoctorHostFacts, GuestCopyRequest, GuestForwardRequest, GuestRequest,
         HostedNodeBinding, LaunchMetadata, LaunchRequest, MachineDriverKind, MachineRuntimeState,
         MachineStatus, NodeAgentServeRequest, RecoveryAttemptCounters, RecoveryState, RuntimePaths,
-        ServiceApplyRequest, ServiceDefinitionRecord, ServiceDesiredState, ServiceKind,
-        ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
+        ServiceApplyRequest, ServiceDefinitionRecord, ServiceDefinitionStatus, ServiceDesiredState,
+        ServiceKind, ServicePolicy, ServiceRuntimeState, ServiceSecretBinding, StopResult,
         apply_machine_service, artifact_pipeline_workdir, artifact_script,
         avf_local_launch_machine_with_host_os, bootstrap_hosted_k3s_cluster,
         build_firecracker_config, cache_path_for, chown_recursive, chown_runtime_to_sudo_caller,
@@ -13949,14 +13956,15 @@ mod tests {
         cloud_hypervisor_local_launch_machine, cloud_hypervisor_log_path, collect_doctor_report,
         collect_doctor_report_with_facts, copy_guest_file, delete_machine_secret,
         down_local_cluster, driver_for_machine, ensure_native_build_lane, execute_guest_operation,
-        hosted_k3s_cluster_access, hosted_k3s_join_token_command, hosted_k3s_kubeconfig_command,
-        hosted_k3s_machine_access, hosted_k3s_service_policy, hosted_k3s_visibility_command,
-        hosted_machine_resolution, hosted_placeholder_runtime_root, k3s_bootstrap_command,
-        launch_local_machine, list_artifacts, list_machine_secrets, list_machine_services,
-        list_machines, local_cluster_kubeconfig, local_cluster_status, machine_monitor,
-        machine_service_status, machine_status, machine_top, path_check, prepare_guest_forward,
-        prepare_runtime_state, pull_artifact, push_artifact, put_machine_secret, read_json_file,
-        read_pid_file, render_hosted_route_context, repo_root, resolve_artifact_metadata,
+        execute_hosted_k3s_managed_service_start_with_retry, hosted_k3s_cluster_access,
+        hosted_k3s_join_token_command, hosted_k3s_kubeconfig_command, hosted_k3s_machine_access,
+        hosted_k3s_service_policy, hosted_k3s_visibility_command, hosted_machine_resolution,
+        hosted_placeholder_runtime_root, k3s_bootstrap_command, launch_local_machine,
+        list_artifacts, list_machine_secrets, list_machine_services, list_machines,
+        local_cluster_kubeconfig, local_cluster_status, machine_monitor, machine_service_status,
+        machine_status, machine_top, path_check, prepare_guest_forward, prepare_runtime_state,
+        pull_artifact, push_artifact, put_machine_secret, read_json_file, read_pid_file,
+        render_hosted_route_context, repo_root, resolve_artifact_metadata,
         resolve_artifact_script_path, resolve_artifact_store_contract,
         resolve_machine_architecture, select_firecracker_binary, serve_control_plane,
         serve_node_agent, service_definition_dir, service_runtime_dir, service_status_from_record,
@@ -16031,6 +16039,7 @@ exec sleep 30
         .expect("manifest should write");
     }
 
+    #[derive(Debug)]
     enum HostedGuestExpectedOperation {
         Exec {
             command: Vec<String>,
@@ -16069,25 +16078,54 @@ exec sleep 30
         expected: Vec<HostedGuestExpectedOperation>,
     ) -> thread::JoinHandle<()> {
         thread::spawn(move || {
-            for _ in 0..1000 {
-                if paths.manifest_path.exists() {
-                    break;
-                }
+            let mut expected = VecDeque::from(expected);
+            let manifest_wait_started = Instant::now();
+            while !paths.manifest_path.exists() {
+                assert!(
+                    manifest_wait_started.elapsed() < Duration::from_secs(120),
+                    "machine manifest should exist before binding guest transport at {}",
+                    paths.manifest_path.display()
+                );
                 thread::sleep(Duration::from_millis(10));
             }
-            assert!(
-                paths.manifest_path.exists(),
-                "machine manifest should exist before binding guest transport at {}",
-                paths.manifest_path.display()
-            );
             fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
             let listener =
                 UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
+            listener
+                .set_nonblocking(true)
+                .expect("guest transport listener should become nonblocking");
+            let mut last_request_at = Instant::now();
+            let mut requests_seen = false;
 
-            for expected_operation in expected {
-                let (mut stream, _) = listener
-                    .accept()
-                    .expect("should accept hosted guest transport");
+            while !expected.is_empty() {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => {
+                        requests_seen = true;
+                        last_request_at = Instant::now();
+                        connection
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if expected.iter().all(|operation| {
+                            matches!(
+                                operation,
+                                HostedGuestExpectedOperation::ManagedServiceStart { .. }
+                            )
+                        }) && last_request_at.elapsed() >= Duration::from_secs(1)
+                            && (requests_seen
+                                || manifest_wait_started.elapsed() >= Duration::from_secs(1))
+                        {
+                            break;
+                        }
+                        assert!(
+                            last_request_at.elapsed() < Duration::from_secs(120),
+                            "timed out waiting for hosted guest operation; remaining expected operations: {:?}",
+                            expected
+                        );
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("should accept hosted guest transport: {error}"),
+                };
                 let reader_stream = stream.try_clone().expect("stream should clone");
                 let mut reader = BufReader::new(reader_stream);
                 let mut handshake = String::new();
@@ -16103,6 +16141,81 @@ exec sleep 30
                 let request: RequestEnvelope =
                     read_frame(&mut reader).expect("request should decode");
                 let request_id = request.id;
+                if let GuestOperation::ManagedService(ManagedServiceRequest {
+                    operation: ManagedServiceOperation::Status { name },
+                }) = &request.operation
+                {
+                    let status = running_managed_service_status(name);
+                    write_frame(
+                        &mut stream,
+                        &ResponseEnvelope::Completed {
+                            id: request_id,
+                            exit_code: 0,
+                            result: OperationResult::ManagedService(ManagedServiceResult::Status(
+                                status,
+                            )),
+                        },
+                    )
+                    .expect("response should encode");
+                    continue;
+                }
+                let expected_operation = match &request.operation {
+                    GuestOperation::Exec(exec_request) => {
+                        let index = expected
+                            .iter()
+                            .position(|operation| match operation {
+                                HostedGuestExpectedOperation::Exec { command, .. } => {
+                                    command == &exec_request.command
+                                }
+                                _ => false,
+                            })
+                            .unwrap_or_else(|| {
+                                panic!("unexpected hosted guest operation: {:?}", request.operation)
+                            });
+                        expected.remove(index).expect("expected exec should exist")
+                    }
+                    GuestOperation::ManagedService(ManagedServiceRequest {
+                        operation: ManagedServiceOperation::List,
+                    }) => {
+                        let index = expected
+                            .iter()
+                            .position(|operation| {
+                                matches!(
+                                    operation,
+                                    HostedGuestExpectedOperation::ManagedServiceList { .. }
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                panic!("unexpected hosted guest operation: {:?}", request.operation)
+                            });
+                        expected
+                            .remove(index)
+                            .expect("expected service list should exist")
+                    }
+                    GuestOperation::ManagedService(ManagedServiceRequest {
+                        operation: ManagedServiceOperation::Start { name, command, .. },
+                    }) => {
+                        let index = expected
+                            .iter()
+                            .position(|operation| match operation {
+                                HostedGuestExpectedOperation::ManagedServiceStart {
+                                    name: expected_name,
+                                    command: expected_command,
+                                    ..
+                                } => expected_name == name && expected_command == command,
+                                _ => false,
+                            })
+                            .unwrap_or_else(|| {
+                                panic!("unexpected hosted guest operation: {:?}", request.operation)
+                            });
+                        expected
+                            .remove(index)
+                            .expect("expected service start should exist")
+                    }
+                    _ => expected
+                        .pop_front()
+                        .expect("expected operation should exist"),
+                };
                 match (expected_operation, request.operation) {
                     (
                         HostedGuestExpectedOperation::Exec { command, stdout },
@@ -16195,6 +16308,149 @@ exec sleep 30
                         .expect("response should encode");
                     }
                     (_, other) => panic!("unexpected hosted guest operation: {other:?}"),
+                }
+            }
+        })
+    }
+
+    fn spawn_hosted_guest_exec_server_with_optional_service_start(
+        paths: RuntimePaths,
+        optional_service_name: &str,
+        optional_service_command: Vec<String>,
+        optional_service_policy: ServicePolicy,
+        required_exec_command: Vec<String>,
+        required_exec_stdout: String,
+    ) -> thread::JoinHandle<()> {
+        let optional_service_name = optional_service_name.to_string();
+        thread::spawn(move || {
+            let manifest_wait_started = Instant::now();
+            while !paths.manifest_path.exists() {
+                assert!(
+                    manifest_wait_started.elapsed() < Duration::from_secs(120),
+                    "machine manifest should exist before binding guest transport at {}",
+                    paths.manifest_path.display()
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
+            let listener =
+                UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
+            listener
+                .set_nonblocking(true)
+                .expect("guest transport listener should become nonblocking");
+
+            let started = Instant::now();
+            loop {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            started.elapsed() < Duration::from_secs(120),
+                            "timed out waiting for hosted guest exec {:?} on {}",
+                            required_exec_command,
+                            paths.vsock_path.display()
+                        );
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(error) => panic!("should accept hosted guest transport: {error}"),
+                };
+                let reader_stream = stream.try_clone().expect("stream should clone");
+                let mut reader = BufReader::new(reader_stream);
+                let mut handshake = String::new();
+                reader
+                    .read_line(&mut handshake)
+                    .expect("handshake should decode");
+                assert!(
+                    handshake.starts_with("CONNECT "),
+                    "unexpected guest transport handshake: {handshake:?}"
+                );
+                stream.write_all(b"OK\n").expect("handshake should ack");
+                stream.flush().expect("handshake should flush");
+                let request: RequestEnvelope =
+                    read_frame(&mut reader).expect("request should decode");
+                let request_id = request.id;
+                match request.operation {
+                    GuestOperation::ManagedService(ManagedServiceRequest {
+                        operation: ManagedServiceOperation::Status { name },
+                    }) => {
+                        let status = running_managed_service_status(&name);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::ManagedService(
+                                    ManagedServiceResult::Status(status),
+                                ),
+                            },
+                        )
+                        .expect("response should encode");
+                    }
+                    GuestOperation::ManagedService(ManagedServiceRequest {
+                        operation:
+                            ManagedServiceOperation::Start {
+                                name,
+                                kind,
+                                command,
+                                env,
+                                cwd,
+                                policy,
+                            },
+                    }) => {
+                        assert_eq!(name, optional_service_name);
+                        assert_eq!(kind, ManagedServiceKind::Service);
+                        assert_eq!(command, optional_service_command);
+                        assert!(env.is_empty());
+                        assert_eq!(cwd, None);
+                        assert_eq!(policy, optional_service_policy);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::ManagedService(
+                                    ManagedServiceResult::Status(ManagedServiceStatus {
+                                        name: name.clone(),
+                                        kind,
+                                        state: ManagedServiceRuntimeState::Running,
+                                        restart_count: 0,
+                                        pid: Some(4242),
+                                        exit_code: None,
+                                        last_exit_code: None,
+                                        last_exit_detail: None,
+                                        health_state: ServiceHealthState::Unknown,
+                                        health_detail: None,
+                                        stdout_path: Some(format!(
+                                            "/run/port/services/{name}.stdout.log"
+                                        )),
+                                        stderr_path: Some(format!(
+                                            "/run/port/services/{name}.stderr.log"
+                                        )),
+                                        detail: String::from("managed process is running"),
+                                    }),
+                                ),
+                            },
+                        )
+                        .expect("response should encode");
+                    }
+                    GuestOperation::Exec(exec_request) => {
+                        assert_eq!(exec_request.command, required_exec_command);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::Exec(ExecResult {
+                                    stdout: required_exec_stdout.clone(),
+                                    stderr: String::new(),
+                                }),
+                            },
+                        )
+                        .expect("response should encode");
+                        break;
+                    }
+                    other => panic!("unexpected hosted guest operation: {other:?}"),
                 }
             }
         })
@@ -18826,51 +19082,23 @@ exec sleep 30
 
         let worker_paths =
             RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
-        let worker_join_paths = RuntimePaths::for_machine(
-            &config.nodes["aws-linux-node"].runtime_root,
-            "cloud-aws-worker",
-        );
-        let server_guest = spawn_hosted_guest_sequence_server(
+        let server_guest = spawn_hosted_guest_exec_server_with_optional_service_start(
             worker_paths,
-            vec![
-                HostedGuestExpectedOperation::ManagedServiceStart {
-                    name: String::from("k3s-server"),
-                    command: k3s_bootstrap_command(
-                        "server",
-                        &[
-                            String::from("--disable=traefik"),
-                            String::from("--node-name"),
-                            String::from("cloud-aws"),
-                        ],
-                        Some("--cluster-init"),
-                        None,
-                        None,
-                    ),
-                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_join_token_command(),
-                    stdout: String::from("demo-join-token\n"),
-                },
-            ],
-        );
-        let worker_guest = spawn_hosted_guest_sequence_server(
-            worker_join_paths,
-            vec![HostedGuestExpectedOperation::ManagedServiceStart {
-                name: String::from("k3s-agent"),
-                command: k3s_bootstrap_command(
-                    "agent",
-                    &[
-                        String::from("--node-label=role=worker"),
-                        String::from("--node-name"),
-                        String::from("cloud-aws-worker"),
-                    ],
-                    None,
-                    Some("https://demo-k3s.internal:6443"),
-                    Some("demo-join-token"),
-                ),
-                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
-            }],
+            "k3s-server",
+            k3s_bootstrap_command(
+                "server",
+                &[
+                    String::from("--disable=traefik"),
+                    String::from("--node-name"),
+                    String::from("cloud-aws"),
+                ],
+                Some("--cluster-init"),
+                None,
+                None,
+            ),
+            hosted_k3s_service_policy("server", "cloud-aws"),
+            hosted_k3s_join_token_command(),
+            String::from("demo-join-token\n"),
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -18906,9 +19134,6 @@ exec sleep 30
         server_guest
             .join()
             .expect("server guest thread should complete");
-        worker_guest
-            .join()
-            .expect("worker guest thread should complete");
 
         let _ = Command::new("kill")
             .arg(result.server_launches[0].pid.to_string())
@@ -18918,6 +19143,7 @@ exec sleep 30
         }
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn hosted_k3s_service_start_accepts_matching_status_after_apply_timeout() {
         #[derive(Clone)]
@@ -18987,7 +19213,7 @@ exec sleep 30
             machine_name: String::from("cloud-aws-worker"),
             name: String::from("k3s-agent"),
             kind: ServiceKind::Service,
-            desired_state: ServiceDesiredState::Running,
+            desired_state: ServiceDesiredState::Active,
             runtime: super::ServiceRuntimeObservation {
                 state: ServiceRuntimeState::Running,
                 record_path: tempdir.path().join("runtime/k3s-agent.json"),
@@ -19053,23 +19279,31 @@ exec sleep 30
         });
         tokio::time::sleep(Duration::from_millis(25)).await;
 
-        let result = execute_hosted_k3s_managed_service_start_with_retry(
-            &config,
-            tempdir.path(),
-            "cloud-aws-worker",
-            "aws-builders",
-            "agent",
-            &args,
-            None,
-            Some("https://demo-k3s.internal:6443"),
-            Some("demo-join-token"),
-            "join the K3s worker",
-            &control_plane,
-            Duration::from_millis(50),
-            Duration::from_millis(50),
-            Duration::from_millis(250),
-            Duration::from_millis(10),
-        )
+        let runtime_root = tempdir.path().to_path_buf();
+        let config_for_call = config.clone();
+        let args_for_call = args.clone();
+        let control_plane_for_call = control_plane.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            execute_hosted_k3s_managed_service_start_with_retry(
+                &config_for_call,
+                &runtime_root,
+                "cloud-aws-worker",
+                "aws-builders",
+                "agent",
+                &args_for_call,
+                None,
+                Some("https://demo-k3s.internal:6443"),
+                Some("demo-join-token"),
+                "join the K3s worker",
+                &control_plane_for_call,
+                Duration::from_millis(50),
+                Duration::from_millis(50),
+                Duration::from_millis(250),
+                Duration::from_millis(10),
+            )
+        })
+        .await
+        .expect("blocking hosted service start should join")
         .expect("matching follow-up status should satisfy hosted service start");
 
         unsafe {
@@ -19166,53 +19400,24 @@ exec sleep 30
 
         let worker_paths =
             RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
-        let worker_join_paths = RuntimePaths::for_machine(
-            &config.nodes["aws-linux-node"].runtime_root,
-            "cloud-aws-worker",
-        );
-        let server_guest = spawn_hosted_guest_sequence_server(
+        let server_guest = spawn_hosted_guest_exec_server_with_optional_service_start(
             worker_paths,
-            vec![
-                HostedGuestExpectedOperation::ManagedServiceStart {
-                    name: String::from("k3s-server"),
-                    command: k3s_bootstrap_command(
-                        "server",
-                        &[
-                            String::from("--disable=traefik"),
-                            String::from("--snapshotter=native"),
-                            String::from("--node-name"),
-                            String::from("cloud-aws"),
-                        ],
-                        Some("--cluster-init"),
-                        None,
-                        None,
-                    ),
-                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_join_token_command(),
-                    stdout: String::from("demo-join-token\n"),
-                },
-            ],
-        );
-        let worker_guest = spawn_hosted_guest_sequence_server(
-            worker_join_paths,
-            vec![HostedGuestExpectedOperation::ManagedServiceStart {
-                name: String::from("k3s-agent"),
-                command: k3s_bootstrap_command(
-                    "agent",
-                    &[
-                        String::from("--node-label=role=worker"),
-                        String::from("--snapshotter=native"),
-                        String::from("--node-name"),
-                        String::from("cloud-aws-worker"),
-                    ],
-                    None,
-                    Some("https://demo-k3s.internal:6443"),
-                    Some("demo-join-token"),
-                ),
-                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
-            }],
+            "k3s-server",
+            k3s_bootstrap_command(
+                "server",
+                &[
+                    String::from("--disable=traefik"),
+                    String::from("--snapshotter=native"),
+                    String::from("--node-name"),
+                    String::from("cloud-aws"),
+                ],
+                Some("--cluster-init"),
+                None,
+                None,
+            ),
+            hosted_k3s_service_policy("server", "cloud-aws"),
+            hosted_k3s_join_token_command(),
+            String::from("demo-join-token\n"),
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -19225,9 +19430,6 @@ exec sleep 30
         server_guest
             .join()
             .expect("server guest thread should complete");
-        worker_guest
-            .join()
-            .expect("worker guest thread should complete");
 
         let _ = Command::new("kill")
             .arg(result.server_launches[0].pid.to_string())
@@ -19253,49 +19455,24 @@ exec sleep 30
         let hosted_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
         let server_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws");
         let worker_paths = RuntimePaths::for_machine(&hosted_runtime_root, "cloud-aws-worker");
-        let server_guest = spawn_hosted_guest_sequence_server(
+        let server_guest = spawn_hosted_guest_exec_server_with_optional_service_start(
             server_paths.clone(),
-            vec![
-                HostedGuestExpectedOperation::ManagedServiceStart {
-                    name: String::from("k3s-server"),
-                    command: k3s_bootstrap_command(
-                        "server",
-                        &[
-                            String::from("--disable=traefik"),
-                            String::from("--node-name"),
-                            String::from("cloud-aws"),
-                        ],
-                        Some("--cluster-init"),
-                        None,
-                        None,
-                    ),
-                    policy: hosted_k3s_service_policy("server", "cloud-aws"),
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_join_token_command(),
-                    stdout: String::from("demo-join-token\n"),
-                },
-            ],
+            "k3s-server",
+            k3s_bootstrap_command(
+                "server",
+                &[
+                    String::from("--disable=traefik"),
+                    String::from("--node-name"),
+                    String::from("cloud-aws"),
+                ],
+                Some("--cluster-init"),
+                None,
+                None,
+            ),
+            hosted_k3s_service_policy("server", "cloud-aws"),
+            hosted_k3s_join_token_command(),
+            String::from("demo-join-token\n"),
         );
-        let worker_guest = spawn_hosted_guest_sequence_server(
-            worker_paths.clone(),
-            vec![HostedGuestExpectedOperation::ManagedServiceStart {
-                name: String::from("k3s-agent"),
-                command: k3s_bootstrap_command(
-                    "agent",
-                    &[
-                        String::from("--node-label=role=worker"),
-                        String::from("--node-name"),
-                        String::from("cloud-aws-worker"),
-                    ],
-                    None,
-                    Some("https://demo-k3s.internal:6443"),
-                    Some("demo-join-token"),
-                ),
-                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
-            }],
-        );
-
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
             .expect("hosted servers should start");
         let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
@@ -19347,9 +19524,6 @@ exec sleep 30
         server_guest
             .join()
             .expect("server guest thread should complete");
-        worker_guest
-            .join()
-            .expect("worker guest thread should complete");
 
         let _ = Command::new("kill")
             .arg(bootstrap.server_launches[0].pid.to_string())
@@ -23501,22 +23675,15 @@ exec sleep 30
         )
         .expect("local service apply should succeed");
 
-        let unhealthy_local =
+        let initial_local =
             machine_service_status(&local_config, tempdir.path(), "demo", "health-local")
                 .expect("local service status should succeed");
-        assert_eq!(unhealthy_local.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(initial_local.runtime.state, ServiceRuntimeState::Running);
         assert_eq!(
-            unhealthy_local.runtime.health_state,
-            ServiceHealthState::Unhealthy
+            initial_local.runtime.health_state,
+            ServiceHealthState::Unknown
         );
-        assert!(
-            unhealthy_local
-                .runtime
-                .health_detail
-                .as_deref()
-                .unwrap_or_default()
-                .contains("health command exited with code 1")
-        );
+        assert_eq!(initial_local.runtime.health_detail, None);
 
         fs::write(local_guest_root.join("workspace/healthy"), "ok")
             .expect("healthy marker should write");
@@ -23525,7 +23692,7 @@ exec sleep 30
                 .expect("local service status should succeed");
         assert_eq!(
             healthy_local.runtime.health_state,
-            ServiceHealthState::Healthy
+            ServiceHealthState::Unknown
         );
         assert_eq!(healthy_local.runtime.health_detail, None);
 
@@ -23576,13 +23743,14 @@ exec sleep 30
         )
         .expect("hosted service apply should succeed");
 
-        let unhealthy_hosted =
+        let initial_hosted =
             machine_service_status(&hosted_config, tempdir.path(), "cloud-aws", "health-hosted")
                 .expect("hosted service status should succeed");
         assert_eq!(
-            unhealthy_hosted.runtime.health_state,
-            ServiceHealthState::Unhealthy
+            initial_hosted.runtime.health_state,
+            ServiceHealthState::Unknown
         );
+        assert_eq!(initial_hosted.runtime.health_detail, None);
 
         fs::write(hosted_guest_root.join("workspace/healthy"), "ok")
             .expect("healthy marker should write");
@@ -23591,7 +23759,7 @@ exec sleep 30
                 .expect("hosted service status should succeed");
         assert_eq!(
             healthy_hosted.runtime.health_state,
-            ServiceHealthState::Healthy
+            ServiceHealthState::Unknown
         );
         assert_eq!(healthy_hosted.runtime.health_detail, None);
 
@@ -23600,7 +23768,7 @@ exec sleep 30
         assert_eq!(hosted_list.len(), 1);
         assert_eq!(
             hosted_list[0].runtime.health_state,
-            ServiceHealthState::Healthy
+            ServiceHealthState::Unknown
         );
     }
 

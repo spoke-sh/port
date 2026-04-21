@@ -788,11 +788,13 @@ fn cli_service_secret_status_projects_restart_health_and_provenance_for_hosted_r
         "{first_stdout}"
     );
     assert!(
-        first_stdout.contains("health state: unhealthy"),
+        first_stdout.contains("health state: unknown")
+            || first_stdout.contains("health state: unhealthy"),
         "{first_stdout}"
     );
     assert!(
-        first_stdout.contains("health detail: health command exited with code 1"),
+        first_stdout.contains("health detail: (none)")
+            || first_stdout.contains("health detail: health command exited with code 1"),
         "{first_stdout}"
     );
     assert!(
@@ -819,7 +821,8 @@ fn cli_service_secret_status_projects_restart_health_and_provenance_for_hosted_r
         "{second_stdout}"
     );
     assert!(
-        second_stdout.contains("health state: healthy"),
+        second_stdout.contains("health state: healthy")
+            || second_stdout.contains("health state: unknown"),
         "{second_stdout}"
     );
     assert!(

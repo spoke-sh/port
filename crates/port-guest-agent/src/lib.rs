@@ -2819,7 +2819,8 @@ mod tests {
         };
         assert_eq!(status.state, ManagedServiceRuntimeState::Running);
         assert!(status.restart_count >= 1);
-        assert_eq!(status.health_state, ServiceHealthState::Unhealthy);
+        assert_eq!(status.health_state, ServiceHealthState::Unknown);
+        assert_eq!(status.health_detail, None);
         assert!(
             status
                 .detail

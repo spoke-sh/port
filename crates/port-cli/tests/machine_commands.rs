@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use port_agent_protocol::{
     ExecResult, GuestOperation, ManagedServiceKind, ManagedServiceOperation, ManagedServiceRequest,
@@ -288,6 +288,7 @@ fn spawn_hosted_server_harness_with_cleanup(
         .stderr(Stdio::null());
     let control_plane = ChildGuard::spawn("control-plane", control_command);
     wait_for_tcp(control_plane_addr);
+    thread::sleep(Duration::from_millis(250));
 
     let mut node_command = Command::new(port_bin());
     node_command
@@ -310,6 +311,7 @@ fn spawn_hosted_server_harness_with_cleanup(
     }
     let node = ChildGuard::spawn("node-agent", node_command);
     wait_for_tcp(node_addr);
+    thread::sleep(Duration::from_millis(250));
 
     HostedServerHarness {
         _lock: lock,
@@ -635,6 +637,7 @@ fn write_registered_node_state_at(
     .expect("registered node state should write");
 }
 
+#[derive(Debug)]
 enum HostedGuestExpectedOperation {
     Exec {
         command: Vec<String>,
@@ -672,6 +675,7 @@ fn spawn_hosted_guest_sequence_server(
     expected: Vec<HostedGuestExpectedOperation>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        let mut expected = VecDeque::from(expected);
         for _ in 0..1000 {
             if paths.manifest_path.exists() {
                 break;
@@ -686,11 +690,28 @@ fn spawn_hosted_guest_sequence_server(
         fs::create_dir_all(&paths.runtime_dir).expect("runtime dir should exist");
         let listener =
             UnixListener::bind(&paths.vsock_path).expect("guest transport socket should bind");
+        listener
+            .set_nonblocking(true)
+            .expect("guest transport listener should become nonblocking");
+        let mut last_request_at = Instant::now();
 
-        for expected_operation in expected {
-            let (mut stream, _) = listener
-                .accept()
-                .expect("should accept hosted guest transport");
+        while !expected.is_empty() {
+            let (mut stream, _) = match listener.accept() {
+                Ok(connection) => {
+                    last_request_at = Instant::now();
+                    connection
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        last_request_at.elapsed() < Duration::from_secs(15),
+                        "timed out waiting for hosted guest operation; remaining expected operations: {:?}",
+                        expected
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => panic!("should accept hosted guest transport: {error}"),
+            };
             let reader_stream = stream.try_clone().expect("stream should clone");
             let mut reader = BufReader::new(reader_stream);
             let mut handshake = String::new();
@@ -705,6 +726,80 @@ fn spawn_hosted_guest_sequence_server(
             stream.flush().expect("handshake should flush");
             let request: RequestEnvelope = read_frame(&mut reader).expect("request should decode");
             let request_id = request.id;
+            if let GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status { name },
+            }) = &request.operation
+            {
+                let status = running_managed_service_status(name);
+                write_frame(
+                    &mut stream,
+                    &ResponseEnvelope::Completed {
+                        id: request_id,
+                        exit_code: 0,
+                        result: OperationResult::ManagedService(ManagedServiceResult::Status(
+                            status,
+                        )),
+                    },
+                )
+                .expect("response should encode");
+                continue;
+            }
+            let expected_operation = match &request.operation {
+                GuestOperation::Exec(exec_request) => {
+                    let index = expected
+                        .iter()
+                        .position(|operation| match operation {
+                            HostedGuestExpectedOperation::Exec { command, .. } => {
+                                command == &exec_request.command
+                            }
+                            _ => false,
+                        })
+                        .unwrap_or_else(|| {
+                            panic!("unexpected hosted guest operation: {:?}", request.operation)
+                        });
+                    expected.remove(index).expect("expected exec should exist")
+                }
+                GuestOperation::ManagedService(ManagedServiceRequest {
+                    operation: ManagedServiceOperation::List,
+                }) => {
+                    let index = expected
+                        .iter()
+                        .position(|operation| {
+                            matches!(
+                                operation,
+                                HostedGuestExpectedOperation::ManagedServiceList { .. }
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            panic!("unexpected hosted guest operation: {:?}", request.operation)
+                        });
+                    expected
+                        .remove(index)
+                        .expect("expected service list should exist")
+                }
+                GuestOperation::ManagedService(ManagedServiceRequest {
+                    operation: ManagedServiceOperation::Start { name, command, .. },
+                }) => {
+                    let index = expected
+                        .iter()
+                        .position(|operation| match operation {
+                            HostedGuestExpectedOperation::ManagedServiceStart {
+                                name: expected_name,
+                                command: expected_command,
+                            } => expected_name == name && expected_command == command,
+                            _ => false,
+                        })
+                        .unwrap_or_else(|| {
+                            panic!("unexpected hosted guest operation: {:?}", request.operation)
+                        });
+                    expected
+                        .remove(index)
+                        .expect("expected service start should exist")
+                }
+                _ => expected
+                    .pop_front()
+                    .expect("expected operation should exist"),
+            };
             match (expected_operation, request.operation) {
                 (
                     HostedGuestExpectedOperation::Exec { command, stdout },

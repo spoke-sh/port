@@ -6502,12 +6502,7 @@ async fn node_service_list(
     let machine_name_for_error = machine_name.clone();
     let route_for_result = route.clone();
     match run_node_blocking_operation(move || {
-        refresh_machine_service_list(
-            &metadata_config,
-            &localized,
-            &runtime_root,
-            &machine_name,
-        )
+        refresh_machine_service_list(&metadata_config, &localized, &runtime_root, &machine_name)
     })
     .await
     {
