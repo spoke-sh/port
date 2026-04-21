@@ -15585,7 +15585,17 @@ exit 23
     #[test]
     fn hosted_k3s_effective_args_use_guest_underlay_ip_for_external_identity() {
         let tempdir = tempdir().expect("tempdir should exist");
-        let config = sample_hosted_k3s_config(tempdir.path());
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        config
+            .machines
+            .get_mut("cloud-aws-worker")
+            .expect("worker should exist")
+            .network = Some(port_model::MachineNetworkSpec {
+            guest_ip: String::from("172.16.23.2"),
+            host_ip: String::from("172.16.23.1"),
+            prefix_len: 24,
+            ..port_model::MachineNetworkSpec::default()
+        });
         let args = super::hosted_k3s_effective_args(
             &config,
             "agent",

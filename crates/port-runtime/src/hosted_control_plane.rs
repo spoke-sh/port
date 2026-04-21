@@ -820,9 +820,13 @@ fn hosted_guest_underlay_forwarding_plans(
         }
         plans.insert(
             node_name.clone(),
-            HostedGuestUnderlayForwardingPlan {
-                local_guest_cidrs: local_guest_cidrs.into_iter().collect(),
-                remote_routes: remote_routes.into_iter().collect(),
+            if remote_routes.is_empty() {
+                HostedGuestUnderlayForwardingPlan::default()
+            } else {
+                HostedGuestUnderlayForwardingPlan {
+                    local_guest_cidrs: local_guest_cidrs.into_iter().collect(),
+                    remote_routes: remote_routes.into_iter().collect(),
+                }
             },
         );
     }
@@ -6201,6 +6205,10 @@ fn reconcile_hosted_guest_underlay_forwarding(
 ) -> Result<()> {
     let state_path = hosted_guest_underlay_forwarding_state_path(&state.inner.runtime_root);
     let previous = read_hosted_guest_underlay_forwarding_state(&state_path)?;
+    if plan.is_empty() && previous.is_empty() {
+        let _ = std::fs::remove_file(&state_path);
+        return Ok(());
+    }
     let iproute = iproute_binary();
     let iptables = iptables_binary();
     let nat_chain = hosted_guest_underlay_nat_chain(&state.inner.control_plane);
