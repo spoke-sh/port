@@ -1,0 +1,18 @@
+---
+recorded_at: 2026-04-22T11:21:19.365444570-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -p port-runtime startup_reconcile_canonicalizes_legacy_node_alias_to_configured_node_identity -- --nocapture'
+---
+
+running 1 test
+test hosted_control_plane::tests::startup_reconcile_canonicalizes_legacy_node_alias_to_configured_node_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 232 filtered out; finished in 0.03s
+
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)

@@ -8791,46 +8791,60 @@ fn hosted_machine_resolution(
     let inventory = effective_config.hosted_inventory_contract()?;
     let stored_placement = hosted_stored_machine_placement(config, machine_name)?;
     if let Ok(response) = hosted_control_plane_machine_status_response(config, machine_name) {
-        let mut status = response.result;
-        let node_name = response.route.node_name.clone().or_else(|| {
-            stored_placement
-                .as_ref()
-                .map(|placement| placement.node_name.clone())
-        });
-        let runtime_root = response
-            .route
-            .runtime_root
-            .clone()
-            .or_else(|| {
+        let route_conflicts_with_stored_placement =
+            stored_placement.as_ref().is_some_and(|placement| {
+                response.route.node_name.as_deref() != Some(placement.node_name.as_str())
+                    || response.route.runtime_root.as_ref() != Some(&placement.runtime_root)
+            });
+        if response.result.state == MachineRuntimeState::Malformed
+            && route_conflicts_with_stored_placement
+        {
+            // A fallback candidate can still return a synthetic malformed machine status
+            // when the real stored placement is currently unreachable. Keep the stored
+            // placement truth in that case instead of letting the fallback candidate
+            // rewrite cluster-status surfaces onto the wrong node.
+        } else {
+            let mut status = response.result;
+            let node_name = response.route.node_name.clone().or_else(|| {
                 stored_placement
                     .as_ref()
-                    .map(|placement| placement.runtime_root.clone())
-            })
-            .or_else(|| runtime_root_from_machine_status(&status))
-            .unwrap_or_else(|| placeholder_root.clone());
-        let placement_detail = stored_placement
-            .as_ref()
-            .and_then(|placement| placement.placement_detail.clone())
-            .unwrap_or_else(|| summary.placement_detail.clone());
-        status.detail = match node_name.as_deref() {
-            Some(node_name) => format!(
-                "{} Routed through control plane '{}' and node '{}'. {}",
-                status.detail, summary.control_plane, node_name, placement_detail
-            ),
-            None => format!(
-                "{} Routed through control plane '{}'. {}",
-                status.detail, summary.control_plane, placement_detail
-            ),
-        };
+                    .map(|placement| placement.node_name.clone())
+            });
+            let runtime_root = response
+                .route
+                .runtime_root
+                .clone()
+                .or_else(|| {
+                    stored_placement
+                        .as_ref()
+                        .map(|placement| placement.runtime_root.clone())
+                })
+                .or_else(|| runtime_root_from_machine_status(&status))
+                .unwrap_or_else(|| placeholder_root.clone());
+            let placement_detail = stored_placement
+                .as_ref()
+                .and_then(|placement| placement.placement_detail.clone())
+                .unwrap_or_else(|| summary.placement_detail.clone());
+            status.detail = match node_name.as_deref() {
+                Some(node_name) => format!(
+                    "{} Routed through control plane '{}' and node '{}'. {}",
+                    status.detail, summary.control_plane, node_name, placement_detail
+                ),
+                None => format!(
+                    "{} Routed through control plane '{}'. {}",
+                    status.detail, summary.control_plane, placement_detail
+                ),
+            };
 
-        return Ok(HostedMachineResolution {
-            control_plane: summary.control_plane.clone(),
-            node_name,
-            host_groups: summary.host_groups.clone(),
-            host_group_policies: summary.host_group_policies.clone(),
-            runtime_root,
-            status,
-        });
+            return Ok(HostedMachineResolution {
+                control_plane: summary.control_plane.clone(),
+                node_name,
+                host_groups: summary.host_groups.clone(),
+                host_group_policies: summary.host_group_policies.clone(),
+                runtime_root,
+                status,
+            });
+        }
     }
 
     if let Some(placement) = stored_placement {
@@ -18910,6 +18924,142 @@ exec sleep 30
                 .status
                 .detail
                 .contains("Stored on alternate AWS node."),
+            "{}",
+            resolution.status.detail
+        );
+
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
+    fn hosted_machine_resolution_keeps_stored_placement_when_live_status_is_fallback_malformed() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        config
+            .machines
+            .retain(|name, _| name == "demo" || name == "cloud-aws");
+
+        let stored_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
+        let fallback_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
+
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        write_machine_placement_state(
+            "demo",
+            "cloud-aws",
+            "aws-linux-node-b",
+            &stored_runtime_root,
+            "Stored on alternate AWS node.",
+        );
+
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should become nonblocking");
+        let fallback_runtime_root_for_route = fallback_runtime_root.clone();
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            runtime.block_on(async move {
+                let listener =
+                    TcpListener::from_std(listener).expect("listener should convert to tokio");
+                let router = Router::new().route(
+                    "/v1/machines/{machine}",
+                    get(move |AxumPath(machine): AxumPath<String>| {
+                        let fallback_runtime_root = fallback_runtime_root_for_route.clone();
+                        async move {
+                            Json(HostedSuccess {
+                                route: HostedRouteContext {
+                                    control_plane: Some(String::from("demo")),
+                                    machine_name: Some(machine.clone()),
+                                    node_name: Some(String::from("aws-linux-node")),
+                                    runtime_root: Some(fallback_runtime_root.clone()),
+                                    ..HostedRouteContext::default()
+                                },
+                                result: MachineStatus {
+                                    machine_name: machine.clone(),
+                                    state: MachineRuntimeState::Malformed,
+                                    pid: None,
+                                    control:
+                                        port_model::MachineControlContract::hosted_control_plane(),
+                                    runtime_dir: fallback_runtime_root.join(&machine),
+                                    config_path: fallback_runtime_root
+                                        .join(&machine)
+                                        .join("config.json"),
+                                    manifest_path: fallback_runtime_root
+                                        .join(&machine)
+                                        .join("manifest.json"),
+                                    pid_path: fallback_runtime_root
+                                        .join(&machine)
+                                        .join("machine.pid"),
+                                    firecracker_log: fallback_runtime_root
+                                        .join(&machine)
+                                        .join("firecracker.log"),
+                                    stdout_log: fallback_runtime_root
+                                        .join(&machine)
+                                        .join("stdout.log"),
+                                    stderr_log: fallback_runtime_root
+                                        .join(&machine)
+                                        .join("stderr.log"),
+                                    runtime_class: None,
+                                    attached_volumes: Vec::new(),
+                                    hosted_fleet_nodes: Vec::new(),
+                                    guest_refresh_age_seconds: None,
+                                    wedged_since_unix_s: None,
+                                    wedge_class: None,
+                                    recovery_attempts: RecoveryAttemptCounters::default(),
+                                    last_recovery_action: None,
+                                    recovery_state: RecoveryState::default(),
+                                    detail: String::from(
+                                        "fallback candidate produced malformed status",
+                                    ),
+                                },
+                            })
+                        }
+                    }),
+                );
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{addr}");
+
+        let resolution =
+            hosted_machine_resolution(&config, "cloud-aws").expect("hosted resolution should load");
+        assert_eq!(resolution.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert_eq!(resolution.runtime_root, stored_runtime_root);
+        assert_eq!(resolution.status.state, MachineRuntimeState::Malformed);
+        assert!(
+            resolution
+                .status
+                .detail
+                .contains("stored node 'aws-linux-node-b'"),
+            "{}",
+            resolution.status.detail
+        );
+        assert!(
+            resolution
+                .status
+                .detail
+                .contains("Stored on alternate AWS node."),
+            "{}",
+            resolution.status.detail
+        );
+        assert!(
+            !resolution
+                .status
+                .detail
+                .contains("node 'aws-linux-node'. Stored on alternate AWS node."),
             "{}",
             resolution.status.detail
         );

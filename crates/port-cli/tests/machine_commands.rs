@@ -3050,7 +3050,7 @@ fn cli_machine_status_surfaces_unprepared_aws_hosted_pvm_guidance() {
 }
 
 #[test]
-fn cli_machine_status_repairs_stale_hosted_placement_from_live_candidate() {
+fn cli_machine_status_surfaces_live_candidate_without_repairing_stale_placement() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let alternate_runtime_root = temp.path().join("hosted/aws-linux-node-b");
@@ -3127,11 +3127,11 @@ fn cli_machine_status_repairs_stale_hosted_placement_from_live_candidate() {
     .expect("placement state should decode");
     assert_eq!(
         placements["machines"]["cloud-aws"]["node_name"],
-        serde_json::Value::String(String::from("aws-linux-node"))
+        serde_json::Value::String(String::from("aws-linux-node-b"))
     );
     assert_eq!(
         placements["machines"]["cloud-aws"]["runtime_root"],
-        serde_json::Value::String(hosted_runtime_root.display().to_string())
+        serde_json::Value::String(alternate_runtime_root.display().to_string())
     );
 }
 

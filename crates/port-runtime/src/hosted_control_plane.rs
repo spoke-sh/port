@@ -5,6 +5,8 @@ use std::io::{BufReader, BufWriter, Cursor};
 use std::os::unix::net::UnixStream;
 use std::path::{Path as FsPath, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(not(test))]
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -102,6 +104,8 @@ struct ControlPlaneStateInner {
     machine_placement_state_path: PathBuf,
     machine_placement_state: RwLock<MachinePlacementStateFile>,
     machine_placements: RwLock<BTreeMap<String, HostedMachinePlacementRecord>>,
+    #[cfg(not(test))]
+    placement_reconcile_in_flight: AtomicBool,
     client: Client,
 }
 
@@ -119,6 +123,29 @@ struct EffectiveRecoveryWedgeSnapshot {
     guest_refresh_age_seconds: Option<u64>,
     wedge_signal: Option<MachineWedgeSignal>,
     hosted_k3s_service: Option<MachineWedgeServiceEvidence>,
+}
+
+#[derive(Debug, Clone)]
+enum PlacementReconcileTrigger {
+    Startup,
+    RegistrationRefresh { node_name: String },
+}
+
+impl PlacementReconcileTrigger {
+    fn detail(&self) -> String {
+        match self {
+            Self::Startup => String::from("startup"),
+            Self::RegistrationRefresh { node_name } => {
+                format!("registration refresh for node '{node_name}'")
+            }
+        }
+    }
+}
+
+enum PlacementReconcileDecision {
+    Keep,
+    Set(HostedMachinePlacementRecord),
+    Clear,
 }
 
 /// Recovery ladder action decided by the runner for a given machine.
@@ -366,6 +393,7 @@ const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(300);
 // service probe short and fall back to stored runtime if the live node route
 // is slow or unavailable.
 const HOSTED_WEDGE_SERVICE_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
+const HOSTED_PLACEMENT_RECONCILE_TIMEOUT: Duration = Duration::from_secs(3);
 const HOSTED_MACHINE_STATUS_PROXY_TIMEOUT: Duration = Duration::from_secs(15);
 const RECOVERY_MACHINE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_MACHINE_BOOT_WAIT: Duration = Duration::from_secs(5);
@@ -1440,23 +1468,6 @@ fn resolve_runtime_root_for_machine(
         .map(|record| record.runtime_root.clone())
 }
 
-fn resolve_machine_placement_record(
-    state: &ControlPlaneState,
-    machine_name: &str,
-) -> Option<HostedMachinePlacementRecord> {
-    let placements = state.inner.machine_placements.read().ok()?;
-    placements.get(machine_name).cloned()
-}
-
-fn resolve_machine_placement_age_seconds(
-    state: &ControlPlaneState,
-    machine_name: &str,
-    now_unix_s: u64,
-) -> Option<u64> {
-    resolve_machine_placement_record(state, machine_name)
-        .map(|record| now_unix_s.saturating_sub(record.placed_at_unix_s))
-}
-
 fn resolve_guest_refresh_age_seconds_for_machine(
     state: &ControlPlaneState,
     machine_name: &str,
@@ -1925,7 +1936,7 @@ fn hosted_k3s_service_runtime_for_wedge(
     // Never call `machine_service_status` from inside the hosted control-plane
     // server. That path routes back through the hosted client and can recurse
     // into this same server, starving the control-plane runtime.
-    let live_runtime = refresh_machine_placements(state)
+    let live_runtime = machine_placements_snapshot(state)
         .ok()
         .and_then(|placements| placements.get(machine_name).cloned())
         .and_then(|placement| {
@@ -2077,7 +2088,7 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
 
     let auth_header = control_plane.auth.header.clone();
 
-    Ok(ControlPlaneState {
+    let state = ControlPlaneState {
         inner: Arc::new(ControlPlaneStateInner {
             config,
             control_plane: request.control_plane,
@@ -2096,9 +2107,13 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             machine_placement_state_path,
             machine_placement_state: RwLock::new(machine_placement_state),
             machine_placements: RwLock::new(machine_placements),
+            #[cfg(not(test))]
+            placement_reconcile_in_flight: AtomicBool::new(false),
             client: Client::new(),
         }),
-    })
+    };
+    schedule_machine_placement_reconcile(&state, PlacementReconcileTrigger::Startup);
+    Ok(state)
 }
 
 fn control_plane_router(state: ControlPlaneState) -> Router {
@@ -2367,14 +2382,22 @@ async fn node_registration_refresh(
     }
 
     match store_registered_node_refresh(&state, &node_name, request.registration) {
-        Ok(record) => json_response(
-            StatusCode::OK,
-            &HostedSuccess {
-                route: route
-                    .with_selected_node(node_name, record.contract.node.runtime_root.clone()),
-                result: record.contract,
-            },
-        ),
+        Ok(record) => {
+            schedule_machine_placement_reconcile(
+                &state,
+                PlacementReconcileTrigger::RegistrationRefresh {
+                    node_name: node_name.clone(),
+                },
+            );
+            json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: route
+                        .with_selected_node(node_name, record.contract.node.runtime_root.clone()),
+                    result: record.contract,
+                },
+            )
+        }
         Err(error) => error_response(StatusCode::BAD_REQUEST, error, Some(route)),
     }
 }
@@ -2540,15 +2563,6 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
                 .await
                 {
                     Ok(status) => {
-                        if let Err(message) =
-                            persist_observed_machine_placement(&state, machine_name, &route)
-                        {
-                            return error_response(
-                                StatusCode::BAD_GATEWAY,
-                                message,
-                                Some(HostedRouteContext::from_machine_summary(&summary)),
-                            );
-                        }
                         match annotate_machine_status_with_fleet_state(
                             &state,
                             &summary,
@@ -2748,11 +2762,6 @@ async fn machine_status(
             .await
             {
                 Ok(status) => {
-                    if let Err(message) =
-                        persist_observed_machine_placement(&state, &machine, &route)
-                    {
-                        return error_response(StatusCode::BAD_GATEWAY, message, Some(route));
-                    }
                     match annotate_machine_status_with_fleet_state(
                         &state,
                         &summary,
@@ -4160,26 +4169,10 @@ fn store_registered_node_refresh(
     Ok(record)
 }
 
-fn store_machine_placement(
+fn machine_placement_state_snapshot(
     state: &ControlPlaneState,
-    machine_name: &str,
-    route_context: &HostedRouteContext,
-    launched_at_unix_s: u64,
-) -> Result<HostedMachinePlacementRecord, String> {
-    let node_name = route_context.node_name.clone().ok_or_else(|| {
-        format!(
-            "control plane '{}' resolved machine '{}' without a selected node",
-            state.inner.control_plane, machine_name
-        )
-    })?;
-    let runtime_root = route_context.runtime_root.clone().ok_or_else(|| {
-        format!(
-            "control plane '{}' resolved machine '{}' without a selected runtime root",
-            state.inner.control_plane, machine_name
-        )
-    })?;
-
-    let current_state = state
+) -> Result<MachinePlacementStateFile, String> {
+    state
         .inner
         .machine_placement_state
         .read()
@@ -4188,21 +4181,51 @@ fn store_machine_placement(
                 "control plane '{}' could not inspect machine placement state",
                 state.inner.control_plane
             )
+        })
+        .map(|state| state.clone())
+}
+
+fn machine_placements_snapshot(
+    state: &ControlPlaneState,
+) -> Result<BTreeMap<String, HostedMachinePlacementRecord>, String> {
+    state
+        .inner
+        .machine_placements
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect machine placement records",
+                state.inner.control_plane
+            )
+        })
+        .map(|placements| placements.clone())
+}
+
+fn refresh_machine_placements(
+    state: &ControlPlaneState,
+) -> Result<BTreeMap<String, HostedMachinePlacementRecord>, String> {
+    machine_placements_snapshot(state)
+}
+
+fn replace_machine_placement_state(
+    state: &ControlPlaneState,
+    next_state: MachinePlacementStateFile,
+) -> Result<(), String> {
+    let next_placements = next_state.machines.clone();
+    let registered_state = state
+        .inner
+        .registered_state
+        .read()
+        .map_err(|_| {
+            format!(
+                "control plane '{}' could not inspect registered node state",
+                state.inner.control_plane
+            )
         })?
         .clone();
-    let placement = HostedMachinePlacementRecord {
-        node_name,
-        runtime_root,
-        placed_at_unix_s: launched_at_unix_s,
-        placement_detail: route_context.placement_detail.clone(),
-    };
-
-    let mut next_state = current_state;
-    next_state.control_plane = state.inner.control_plane.clone();
-    next_state
-        .machines
-        .insert(machine_name.to_string(), placement.clone());
-    let next_placements = next_state.machines.clone();
+    let next_registered_nodes =
+        registered_node_records(&state.inner.config, &registered_state, &next_placements)
+            .map_err(|error| error.to_string())?;
     persist_machine_placement_state(&state.inner.machine_placement_state_path, &next_state)
         .map_err(|error| error.to_string())?;
 
@@ -4218,50 +4241,352 @@ fn store_machine_placement(
             state.inner.control_plane
         )
     })? = next_placements;
-    Ok(placement)
+    *state.inner.registered_nodes.write().map_err(|_| {
+        format!(
+            "control plane '{}' could not refresh registered node records after placement reconcile",
+            state.inner.control_plane
+        )
+    })? = next_registered_nodes;
+    Ok(())
 }
 
-fn persist_observed_machine_placement(
+fn canonical_machine_placement_record(
+    state: &ControlPlaneState,
+    placement: &HostedMachinePlacementRecord,
+) -> HostedMachinePlacementRecord {
+    let canonical = state
+        .inner
+        .config
+        .nodes
+        .iter()
+        .find(|(node_name, node)| {
+            node.runtime_root == placement.runtime_root
+                && crate::hosted_control_plane_for_node(&state.inner.config, node_name.as_str())
+                    == Some(state.inner.control_plane.as_str())
+        })
+        .map(|(node_name, node)| HostedMachinePlacementRecord {
+            node_name: node_name.clone(),
+            runtime_root: node.runtime_root.clone(),
+            placed_at_unix_s: placement.placed_at_unix_s,
+            placement_detail: placement.placement_detail.clone(),
+        });
+    canonical.unwrap_or_else(|| placement.clone())
+}
+
+fn hosted_machine_summaries_for_control_plane(
+    state: &ControlPlaneState,
+) -> Result<Vec<HostedMachineSummaryContract>, String> {
+    let imported_inventory = state.inner.imported_inventory.read().map_err(|_| {
+        format!(
+            "control plane '{}' could not read imported inventory cache for placement reconcile",
+            state.inner.control_plane
+        )
+    })?;
+    let effective_config =
+        effective_config_with_imported_inventory(&state.inner.config, &imported_inventory);
+    let mut summaries = Vec::new();
+    for machine_name in effective_config.machines.keys() {
+        let summary = match effective_config.hosted_machine_summary_contract(machine_name) {
+            Ok(summary) => summary,
+            Err(_) => continue,
+        };
+        if let Some(summary) = summary
+            && summary.control_plane == state.inner.control_plane
+        {
+            summaries.push(summary);
+        }
+    }
+    summaries.sort_by(|left, right| left.machine_name.cmp(&right.machine_name));
+    Ok(summaries)
+}
+
+fn placement_record_from_route(
+    summary: &HostedMachineSummaryContract,
+    existing: Option<&HostedMachinePlacementRecord>,
+    route_context: &HostedRouteContext,
+    placed_at_unix_s: u64,
+) -> Result<HostedMachinePlacementRecord, String> {
+    let node_name = route_context.node_name.clone().ok_or_else(|| {
+        format!(
+            "control plane '{}' resolved machine '{}' without a selected node",
+            summary.control_plane, summary.machine_name
+        )
+    })?;
+    let runtime_root = route_context.runtime_root.clone().ok_or_else(|| {
+        format!(
+            "control plane '{}' resolved machine '{}' without a selected runtime root",
+            summary.control_plane, summary.machine_name
+        )
+    })?;
+    Ok(HostedMachinePlacementRecord {
+        node_name,
+        runtime_root,
+        placed_at_unix_s: existing
+            .map(|placement| placement.placed_at_unix_s)
+            .unwrap_or(placed_at_unix_s),
+        placement_detail: existing
+            .and_then(|placement| placement.placement_detail.clone())
+            .or_else(|| route_context.placement_detail.clone()),
+    })
+}
+
+fn placement_probe_nodes(
+    summary: &HostedMachineSummaryContract,
+    existing: Option<&HostedMachinePlacementRecord>,
+) -> BTreeSet<String> {
+    let mut nodes: BTreeSet<String> = summary.candidate_nodes.iter().cloned().collect();
+    if let Some(existing) = existing {
+        nodes.insert(existing.node_name.clone());
+    }
+    nodes
+}
+
+fn blocking_hosted_node_machine_status(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    machine_name: &str,
+    timeout: Duration,
+) -> Result<MachineStatus, String> {
+    let route = HostedNodeRoute::Machine(HostedMachineRoute::Status {
+        machine_name: machine_name.to_string(),
+    });
+    let url = format!("{}{}", binding.endpoint.trim_end_matches('/'), route.path());
+    let client = reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|error| {
+            format!(
+                "control plane '{}' could not build a blocking machine-status client for node '{}': {error}",
+                state.inner.control_plane, binding.node_name
+            )
+        })?;
+    let mut request = client.get(url);
+    for (name, value) in HostedNodeAgentHeaders::new(binding.token.clone()).to_header_map() {
+        request = request.header(name, value);
+    }
+    let response = request.send().map_err(|error| {
+        format!(
+            "control plane '{}' could not reach node '{}' for hosted machine '{}': {error}",
+            state.inner.control_plane, binding.node_name, machine_name
+        )
+    })?;
+    let status = response.status();
+    let bytes = response.bytes().map_err(|error| {
+        format!(
+            "control plane '{}' could not read hosted machine '{}' from node '{}': {error}",
+            state.inner.control_plane, machine_name, binding.node_name
+        )
+    })?;
+    if !status.is_success() {
+        if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
+            return Err(error.message);
+        }
+        return Err(format!(
+            "node agent '{}' returned status {} for hosted machine '{}'",
+            binding.node_name, status, machine_name
+        ));
+    }
+
+    serde_json::from_slice::<HostedSuccess<MachineStatus>>(&bytes)
+        .map(|success| success.result)
+        .map_err(|error| {
+            format!(
+                "node agent '{}' returned invalid JSON for hosted machine '{}': {error}",
+                binding.node_name, machine_name
+            )
+        })
+}
+
+fn reconcile_machine_placement_for_summary(
+    state: &ControlPlaneState,
+    summary: &HostedMachineSummaryContract,
+    existing: Option<&HostedMachinePlacementRecord>,
+    placed_at_unix_s: u64,
+) -> Result<PlacementReconcileDecision, String> {
+    let existing = existing.map(|placement| canonical_machine_placement_record(state, placement));
+    let mut live_probe_nodes = Vec::new();
+    for node_name in placement_probe_nodes(summary, existing.as_ref()) {
+        let Some((binding, runtime_root)) = resolve_known_node_binding(state, &node_name)? else {
+            continue;
+        };
+        live_probe_nodes.push((node_name, binding, runtime_root));
+    }
+    if existing.is_none() && live_probe_nodes.len() != 1 {
+        return Ok(PlacementReconcileDecision::Keep);
+    }
+
+    let mut missing_runtime_on_existing_route = false;
+    for (node_name, binding, runtime_root) in live_probe_nodes {
+        let route = HostedRouteContext::from_machine_summary(summary)
+            .with_selected_node(node_name.clone(), runtime_root.clone());
+        match blocking_hosted_node_machine_status(
+            state,
+            &binding,
+            &summary.machine_name,
+            HOSTED_PLACEMENT_RECONCILE_TIMEOUT,
+        ) {
+            Ok(_) => {
+                let desired = placement_record_from_route(
+                    summary,
+                    existing.as_ref(),
+                    &route,
+                    placed_at_unix_s,
+                )?;
+                if existing.as_ref() != Some(&desired) {
+                    return Ok(PlacementReconcileDecision::Set(desired));
+                }
+                return Ok(PlacementReconcileDecision::Keep);
+            }
+            Err(message)
+                if existing
+                    .as_ref()
+                    .is_some_and(|placement| placement.node_name == node_name)
+                    && node_error_indicates_missing_machine_runtime(
+                        &route,
+                        &summary.machine_name,
+                        &message,
+                    ) =>
+            {
+                missing_runtime_on_existing_route = true;
+            }
+            Err(_) => {}
+        }
+    }
+
+    if let Some(existing) = existing {
+        if missing_runtime_on_existing_route {
+            return Ok(PlacementReconcileDecision::Clear);
+        }
+        return Ok(PlacementReconcileDecision::Set(existing));
+    }
+    Ok(PlacementReconcileDecision::Keep)
+}
+
+fn reconcile_machine_placements(
+    state: &ControlPlaneState,
+    trigger: &PlacementReconcileTrigger,
+) -> Result<(), String> {
+    let current_state = machine_placement_state_snapshot(state)?;
+    let summaries = hosted_machine_summaries_for_control_plane(state)?;
+    let placed_at_unix_s = current_unix_timestamp_seconds().map_err(|error| {
+        format!(
+            "control plane '{}' could not timestamp placement reconcile triggered by {}: {error}",
+            state.inner.control_plane,
+            trigger.detail()
+        )
+    })?;
+    let mut next_state = current_state.clone();
+    let mut changed = false;
+    for summary in summaries {
+        let existing = current_state.machines.get(&summary.machine_name);
+        match reconcile_machine_placement_for_summary(state, &summary, existing, placed_at_unix_s)?
+        {
+            PlacementReconcileDecision::Keep => {}
+            PlacementReconcileDecision::Set(record) => {
+                if next_state.machines.get(&summary.machine_name) != Some(&record) {
+                    next_state
+                        .machines
+                        .insert(summary.machine_name.clone(), record);
+                    changed = true;
+                }
+            }
+            PlacementReconcileDecision::Clear => {
+                if next_state.machines.remove(&summary.machine_name).is_some() {
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if changed {
+        next_state.control_plane = state.inner.control_plane.clone();
+        replace_machine_placement_state(state, next_state)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn schedule_machine_placement_reconcile(
+    state: &ControlPlaneState,
+    trigger: PlacementReconcileTrigger,
+) {
+    let state = state.clone();
+    let detail = trigger.detail();
+    thread::spawn(move || {
+        if let Err(error) = reconcile_machine_placements(&state, &trigger) {
+            eprintln!(
+                "control plane '{}' placement reconcile triggered by {} failed: {}",
+                state.inner.control_plane, detail, error
+            );
+        }
+    });
+}
+
+#[cfg(not(test))]
+fn schedule_machine_placement_reconcile(
+    state: &ControlPlaneState,
+    trigger: PlacementReconcileTrigger,
+) {
+    if state
+        .inner
+        .placement_reconcile_in_flight
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return;
+    }
+
+    let state = state.clone();
+    thread::spawn(move || {
+        if let Err(error) = reconcile_machine_placements(&state, &trigger) {
+            eprintln!(
+                "control plane '{}' placement reconcile triggered by {} failed: {}",
+                state.inner.control_plane,
+                trigger.detail(),
+                error
+            );
+        }
+        state
+            .inner
+            .placement_reconcile_in_flight
+            .store(false, std::sync::atomic::Ordering::Release);
+    });
+}
+
+fn store_machine_placement(
     state: &ControlPlaneState,
     machine_name: &str,
     route_context: &HostedRouteContext,
-) -> Result<(), String> {
-    let Some(node_name) = route_context.node_name.as_ref() else {
-        return Ok(());
-    };
-    let Some(runtime_root) = route_context.runtime_root.as_ref() else {
-        return Ok(());
-    };
-
-    let current_state = state
-        .inner
-        .machine_placement_state
-        .read()
-        .map_err(|_| {
-            format!(
-                "control plane '{}' could not inspect machine placement state",
-                state.inner.control_plane
-            )
-        })?
-        .clone();
-    if current_state
-        .machines
-        .get(machine_name)
-        .is_some_and(|placement| {
-            placement.node_name == *node_name && placement.runtime_root == *runtime_root
-        })
-    {
-        return Ok(());
-    }
-
-    let observed_at_unix_s = current_unix_timestamp_seconds().map_err(|error| {
+    launched_at_unix_s: u64,
+) -> Result<HostedMachinePlacementRecord, String> {
+    let summary = resolve_summary(state, machine_name).map_err(|response| {
         format!(
-            "control plane '{}' could not timestamp recovered placement for machine '{}': {error}",
-            state.inner.control_plane, machine_name
+            "control plane '{}' could not resolve hosted machine summary for '{}' while persisting placement: {}",
+            state.inner.control_plane,
+            machine_name,
+            response.status()
         )
     })?;
-    store_machine_placement(state, machine_name, route_context, observed_at_unix_s)?;
-    Ok(())
+    let current_state = machine_placement_state_snapshot(state)?;
+    let placement = placement_record_from_route(
+        &summary,
+        current_state.machines.get(machine_name),
+        route_context,
+        launched_at_unix_s,
+    )?;
+
+    let mut next_state = current_state;
+    next_state.control_plane = state.inner.control_plane.clone();
+    next_state
+        .machines
+        .insert(machine_name.to_string(), placement.clone());
+    replace_machine_placement_state(state, next_state)?;
+    Ok(placement)
 }
 
 fn resolve_known_node_binding(
@@ -4330,7 +4655,7 @@ fn resolve_machine_binding(
     ),
     String,
 > {
-    if let Some(placement) = refresh_machine_placements(state)?
+    if let Some(placement) = machine_placements_snapshot(state)?
         .get(&summary.machine_name)
         .cloned()
     {
@@ -4386,7 +4711,7 @@ fn resolve_stored_machine_binding(
     ),
     String,
 > {
-    let Some(placement) = refresh_machine_placements(state)?
+    let Some(placement) = machine_placements_snapshot(state)?
         .get(&summary.machine_name)
         .cloned()
     else {
@@ -4425,76 +4750,6 @@ fn resolve_stored_machine_binding(
     }
 }
 
-fn refresh_machine_placements(
-    state: &ControlPlaneState,
-) -> Result<BTreeMap<String, HostedMachinePlacementRecord>, String> {
-    let placement_state = load_machine_placement_state(
-        &state.inner.machine_placement_state_path,
-        &state.inner.control_plane,
-    )
-    .map_err(|error| {
-        format!(
-            "control plane '{}' could not refresh machine placement state: {error}",
-            state.inner.control_plane
-        )
-    })?;
-    let placements = placement_state.machines.clone();
-    *state.inner.machine_placement_state.write().map_err(|_| {
-        format!(
-            "control plane '{}' could not update machine placement state",
-            state.inner.control_plane
-        )
-    })? = placement_state;
-    *state.inner.machine_placements.write().map_err(|_| {
-        format!(
-            "control plane '{}' could not update machine placement records",
-            state.inner.control_plane
-        )
-    })? = placements.clone();
-    Ok(placements)
-}
-
-fn clear_machine_placement(state: &ControlPlaneState, machine_name: &str) -> Result<bool, String> {
-    let current_state = state
-        .inner
-        .machine_placement_state
-        .read()
-        .map_err(|_| {
-            format!(
-                "control plane '{}' could not inspect machine placement state",
-                state.inner.control_plane
-            )
-        })?
-        .clone();
-    if !current_state.machines.contains_key(machine_name) {
-        return Ok(false);
-    }
-
-    let mut next_state = current_state;
-    next_state.machines.remove(machine_name);
-    let next_placements = next_state.machines.clone();
-    persist_machine_placement_state(&state.inner.machine_placement_state_path, &next_state)
-        .map_err(|error| {
-            format!(
-                "control plane '{}' could not persist purged placement for machine '{}': {error}",
-                state.inner.control_plane, machine_name
-            )
-        })?;
-    *state.inner.machine_placement_state.write().map_err(|_| {
-        format!(
-            "control plane '{}' could not update machine placement state",
-            state.inner.control_plane
-        )
-    })? = next_state;
-    *state.inner.machine_placements.write().map_err(|_| {
-        format!(
-            "control plane '{}' could not update machine placement records",
-            state.inner.control_plane
-        )
-    })? = next_placements;
-    Ok(true)
-}
-
 fn node_error_indicates_missing_machine_runtime(
     route_context: &HostedRouteContext,
     machine_name: &str,
@@ -4514,39 +4769,6 @@ fn node_error_indicates_missing_machine_runtime(
     message.contains("guest agent socket")
         && message.contains(paths.guest_agent_socket.to_string_lossy().as_ref())
         && message.contains("does not exist")
-}
-
-const HOSTED_PLACEMENT_PURGE_GRACE_SECONDS: u64 = 60;
-
-fn purge_machine_placement_if_runtime_missing(
-    state: &ControlPlaneState,
-    route_context: &HostedRouteContext,
-    message: &str,
-) {
-    let Some(machine_name) = route_context.machine_name.as_deref() else {
-        return;
-    };
-    if !node_error_indicates_missing_machine_runtime(route_context, machine_name, message) {
-        return;
-    }
-    if let Ok(now_unix_s) = current_unix_timestamp_seconds()
-        && resolve_machine_placement_age_seconds(state, machine_name, now_unix_s)
-            .is_some_and(|age| age < HOSTED_PLACEMENT_PURGE_GRACE_SECONDS)
-    {
-        return;
-    }
-
-    match clear_machine_placement(state, machine_name) {
-        Ok(true) => eprintln!(
-            "control plane '{}' purged stale placement for machine '{}' after node-agent reported missing hosted runtime: {}",
-            state.inner.control_plane, machine_name, message
-        ),
-        Ok(false) => {}
-        Err(error) => eprintln!(
-            "control plane '{}' failed to purge stale placement for machine '{}': {}",
-            state.inner.control_plane, machine_name, error
-        ),
-    }
 }
 
 fn stored_machine_route_context(
@@ -5477,11 +5699,6 @@ async fn proxy_bytes_with_timeout(
                 state.inner.control_plane, binding.node_name
             )
         })?;
-    if !status.is_success()
-        && let Ok(error) = serde_json::from_slice::<HostedError>(&bytes)
-    {
-        purge_machine_placement_if_runtime_missing(state, &route_context, &error.message);
-    }
     Ok((status, bytes))
 }
 
@@ -11244,7 +11461,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proxy_bytes_purges_stale_machine_placement_when_node_reports_missing_runtime() {
+    async fn registration_reconcile_purges_stale_machine_placement_when_node_reports_missing_runtime()
+     {
         async fn ready_handler() -> StatusCode {
             StatusCode::OK
         }
@@ -11301,35 +11519,31 @@ mod tests {
             &config.nodes["aws-linux-node"].runtime_root,
         );
 
-        let binding = HostedNodeBinding {
-            node_name: String::from("aws-linux-node"),
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        let registration = HostedNodeRegistration {
             endpoint: format!("http://{addr}"),
             token: String::from("node-secret"),
+            registered_at: now,
+            refreshed_at: now,
+            ttl_seconds: 30,
         };
-        let (status, _) = proxy_bytes_with_timeout(
+        let _ = store_registered_node_refresh(&state, "aws-linux-node", registration)
+            .expect("registered node refresh should succeed");
+        super::schedule_machine_placement_reconcile(
             &state,
-            &binding,
-            HostedNodeRoute::Machine(HostedMachineRoute::Status {
-                machine_name: String::from("cloud-aws"),
-            }),
-            Method::GET,
-            None,
-            None,
-            HostedRouteContext {
-                control_plane: Some(control_plane.clone()),
-                machine_name: Some(String::from("cloud-aws")),
-                node_name: Some(String::from("aws-linux-node")),
-                runtime_root: Some(config.nodes["aws-linux-node"].runtime_root.clone()),
-                ..HostedRouteContext::default()
+            super::PlacementReconcileTrigger::RegistrationRefresh {
+                node_name: String::from("aws-linux-node"),
             },
-            Duration::from_millis(250),
-        )
-        .await
-        .expect("proxy should return the node error payload");
+        );
+        wait_for_async(Duration::from_secs(5), Duration::from_millis(25), || {
+            super::refresh_machine_placements(&state)
+                .ok()
+                .is_some_and(|placements| !placements.contains_key("cloud-aws"))
+        })
+        .await;
 
-        assert_eq!(status, StatusCode::BAD_GATEWAY);
         let placements = super::refresh_machine_placements(&state)
-            .expect("machine placements should refresh after purge");
+            .expect("machine placements should refresh after reconcile purge");
         assert!(!placements.contains_key("cloud-aws"));
 
         cleanup_registered_state(&control_plane);
@@ -11339,7 +11553,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proxy_bytes_purges_stale_machine_placement_when_guest_socket_is_missing() {
+    async fn proxy_bytes_does_not_purge_stale_machine_placement_when_guest_socket_is_missing() {
         async fn ready_handler() -> StatusCode {
             StatusCode::OK
         }
@@ -11434,8 +11648,8 @@ mod tests {
 
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         let placements = super::refresh_machine_placements(&state)
-            .expect("machine placements should refresh after purge");
-        assert!(!placements.contains_key("cloud-aws"));
+            .expect("machine placements should remain readable after proxy failure");
+        assert!(placements.contains_key("cloud-aws"));
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -11983,10 +12197,7 @@ mod tests {
             assert_eq!(body.result.pid, 1111);
         }
 
-        assert_eq!(
-            preferred_state.headers.lock().expect("headers lock").len(),
-            2
-        );
+        assert!(preferred_state.headers.lock().expect("headers lock").len() >= 2);
         assert!(
             fallback_state
                 .headers
@@ -12021,7 +12232,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn control_plane_machine_status_recovers_and_persists_placement_without_prior_launch() {
+    async fn registration_reconcile_persists_machine_placement_without_read_path() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
         let control_plane = unique_test_control_plane("status-placement");
@@ -12040,41 +12251,40 @@ mod tests {
             bodies: Arc::new(Mutex::new(Vec::new())),
         };
         let node_addr = serve_mock_node_agent_named(mock_state).await;
-        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
-        persist_registered_node_state(
-            &registered_node_state_path(&control_plane),
-            &RegisteredNodeStateFile {
+        let placement_path = machine_placement_state_path_for_config(&config, &control_plane);
+        assert!(!placement_path.exists());
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
                 control_plane: control_plane.clone(),
-                nodes: BTreeMap::from([(
-                    String::from("aws-linux-node"),
-                    HostedNodeRegistration {
-                        endpoint: format!("http://{node_addr}"),
-                        token: String::from("node-secret"),
-                        registered_at: now,
-                        refreshed_at: now,
-                        ttl_seconds: 30,
-                    },
-                )]),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
             },
         )
-        .expect("registered state should persist");
-
-        let placement_path = machine_placement_state_path(&control_plane);
-        assert!(!placement_path.exists());
-
-        let control_addr =
-            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
-        let status = Client::new()
-            .get(format!("http://{control_addr}/v1/machines/cloud-aws"))
-            .header("authorization", "Bearer demo-token")
-            .send()
-            .await
-            .expect("status request should complete");
-        assert_eq!(status.status(), StatusCode::OK);
-        let body: HostedSuccess<MachineStatus> =
-            status.json().await.expect("status body should decode");
-        assert_eq!(body.route.node_name.as_deref(), Some("aws-linux-node"));
-        assert!(placement_path.exists());
+        .expect("control-plane state should build");
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        let _ = store_registered_node_refresh(
+            &state,
+            "aws-linux-node",
+            HostedNodeRegistration {
+                endpoint: format!("http://{node_addr}"),
+                token: String::from("node-secret"),
+                registered_at: now,
+                refreshed_at: now,
+                ttl_seconds: 30,
+            },
+        )
+        .expect("registered node refresh should succeed");
+        super::schedule_machine_placement_reconcile(
+            &state,
+            super::PlacementReconcileTrigger::RegistrationRefresh {
+                node_name: String::from("aws-linux-node"),
+            },
+        );
+        wait_for_async(Duration::from_secs(5), Duration::from_millis(25), || {
+            placement_path.exists()
+        })
+        .await;
 
         let placements: MachinePlacementStateFile = serde_json::from_slice(
             &std::fs::read(&placement_path).expect("machine placement state should read"),
@@ -12097,7 +12307,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn control_plane_machine_status_falls_back_when_stored_placement_is_unusable() {
+    async fn registration_reconcile_repairs_stale_machine_placement_without_read_path() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
         let control_plane = unique_test_control_plane("status-fallback");
@@ -12128,23 +12338,6 @@ mod tests {
         let fallback_addr = serve_mock_node_agent_named(fallback_state).await;
         let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
         let placement_path = machine_placement_state_path_for_config(&config, &control_plane);
-        persist_registered_node_state(
-            &registered_node_state_path(&control_plane),
-            &RegisteredNodeStateFile {
-                control_plane: control_plane.clone(),
-                nodes: BTreeMap::from([(
-                    String::from("aaa-linux-node"),
-                    HostedNodeRegistration {
-                        endpoint: format!("http://{fallback_addr}"),
-                        token: String::from("node-secret"),
-                        registered_at: now,
-                        refreshed_at: now,
-                        ttl_seconds: 30,
-                    },
-                )]),
-            },
-        )
-        .expect("registered state should persist");
         persist_machine_placement_state(
             &placement_path,
             &MachinePlacementStateFile {
@@ -12162,19 +12355,41 @@ mod tests {
         )
         .expect("placement state should persist");
 
-        let control_addr =
-            serve_test_control_plane_named(&config, &control_plane, Vec::new()).await;
-        let status = Client::new()
-            .get(format!("http://{control_addr}/v1/machines/cloud-aws"))
-            .header("authorization", "Bearer demo-token")
-            .send()
-            .await
-            .expect("status request should complete");
-        assert_eq!(status.status(), StatusCode::OK);
-        let body: HostedSuccess<MachineStatus> =
-            status.json().await.expect("status body should decode");
-        assert_eq!(body.route.node_name.as_deref(), Some("aaa-linux-node"));
-        assert_eq!(body.result.state, MachineRuntimeState::Running);
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+        let _ = store_registered_node_refresh(
+            &state,
+            "aaa-linux-node",
+            HostedNodeRegistration {
+                endpoint: format!("http://{fallback_addr}"),
+                token: String::from("node-secret"),
+                registered_at: now,
+                refreshed_at: now,
+                ttl_seconds: 30,
+            },
+        )
+        .expect("registered node refresh should succeed");
+        super::schedule_machine_placement_reconcile(
+            &state,
+            super::PlacementReconcileTrigger::RegistrationRefresh {
+                node_name: String::from("aaa-linux-node"),
+            },
+        );
+        wait_for_async(Duration::from_secs(5), Duration::from_millis(25), || {
+            std::fs::read(&placement_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<MachinePlacementStateFile>(&bytes).ok())
+                .and_then(|placements| placements.machines.get("cloud-aws").cloned())
+                .is_some_and(|placement| placement.node_name == "aaa-linux-node")
+        })
+        .await;
 
         let placements: MachinePlacementStateFile = serde_json::from_slice(
             &std::fs::read(&placement_path).expect("machine placement state should read"),
@@ -12185,6 +12400,83 @@ mod tests {
             placements.machines["cloud-aws"].runtime_root,
             fallback_node.runtime_root
         );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn startup_reconcile_canonicalizes_legacy_node_alias_to_configured_node_identity() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("placement-alias");
+        let token_var = unique_test_env("PORT_TEST_PLACEMENT_ALIAS_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut canonical_node = config
+            .nodes
+            .remove("aws-linux-node")
+            .expect("aws node should exist");
+        canonical_node.runtime_root = tempdir.path().join("hosted/aws-linux-node-1");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-1"), canonical_node.clone());
+        for group in config.host_groups.values_mut() {
+            for node_name in &mut group.nodes {
+                if node_name == "aws-linux-node" {
+                    *node_name = String::from("aws-linux-node-1");
+                }
+            }
+        }
+
+        let placement_path = machine_placement_state_path_for_config(&config, &control_plane);
+        persist_machine_placement_state(
+            &placement_path,
+            &MachinePlacementStateFile {
+                control_plane: control_plane.clone(),
+                machines: BTreeMap::from([(
+                    String::from("cloud-aws"),
+                    HostedMachinePlacementRecord {
+                        node_name: String::from("aws-linux-node"),
+                        runtime_root: canonical_node.runtime_root.clone(),
+                        placed_at_unix_s: 7,
+                        placement_detail: Some(String::from("legacy node alias")),
+                    },
+                )]),
+            },
+        )
+        .expect("placement state should persist");
+
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+        wait_for(Duration::from_secs(5), Duration::from_millis(25), || {
+            super::refresh_machine_placements(&state)
+                .ok()
+                .and_then(|placements| placements.get("cloud-aws").cloned())
+                .is_some_and(|placement| placement.node_name == "aws-linux-node-1")
+        });
+
+        let placements =
+            super::refresh_machine_placements(&state).expect("placements should refresh");
+        let placement = placements
+            .get("cloud-aws")
+            .expect("cloud-aws placement should persist");
+        assert_eq!(placement.node_name, "aws-linux-node-1");
+        assert_eq!(placement.runtime_root, canonical_node.runtime_root);
+        assert_eq!(placement.placed_at_unix_s, 7);
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -14092,6 +14384,23 @@ mod tests {
             std::thread::sleep(poll);
         }
         panic!("timed out after {:?}", timeout);
+    }
+
+    async fn wait_for_async(
+        timeout: Duration,
+        poll: Duration,
+        mut predicate: impl FnMut() -> bool,
+    ) {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if predicate() {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("timed out after {:?}", timeout);
+            }
+            tokio::time::sleep(poll).await;
+        }
     }
 
     async fn wait_for_http_ready(

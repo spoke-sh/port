@@ -1,0 +1,31 @@
+---
+recorded_at: 2026-04-22T11:21:19.663929124-07:00
+command: bash -lc 'cd /home/alex/workspace/spoke-sh/port && cargo test -p port-runtime registration_reconcile_ -- --nocapture && cargo test -p port-runtime proxy_bytes_does_not_purge_stale_machine_placement_when_guest_socket_is_missing -- --nocapture'
+---
+
+running 3 tests
+test hosted_control_plane::tests::registration_reconcile_persists_machine_placement_without_read_path ... ok
+test hosted_control_plane::tests::registration_reconcile_purges_stale_machine_placement_when_node_reports_missing_runtime ... ok
+test hosted_control_plane::tests::registration_reconcile_repairs_stale_machine_placement_without_read_path ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 230 filtered out; finished in 0.11s
+
+
+running 1 test
+test hosted_control_plane::tests::proxy_bytes_does_not_purge_stale_machine_placement_when_guest_socket_is_missing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 232 filtered out; finished in 0.01s
+
+
+--- stderr ---
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
