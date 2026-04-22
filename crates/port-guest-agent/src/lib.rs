@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, TryLockError, mpsc};
@@ -993,14 +993,8 @@ fn evaluate_managed_service_health(
                 .command
                 .split_first()
                 .ok_or_else(|| anyhow!("managed service health check requires a command"))?;
-            let mut child = Command::new(program)
-                .args(args)
-                .current_dir(&handle.cwd)
-                .envs(&handle.env)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
+            let mut child =
+                spawn_managed_service_health_command(program, args, &handle.cwd, &handle.env);
             match child {
                 Ok(ref mut child) => {
                     let started = Instant::now();
@@ -1058,8 +1052,43 @@ fn reap_health_command_best_effort(child: &mut Child) {
     if matches!(child.try_wait(), Ok(Some(_))) {
         return;
     }
+    #[cfg(unix)]
+    {
+        if let Ok(pid) = i32::try_from(child.id()) {
+            // Health checks run in their own session so timeouts can reap
+            // the entire subprocess tree instead of leaving kubectl/crictl
+            // behind after the shell exits.
+            let _ = unsafe { libc::kill(-pid, libc::SIGKILL) };
+        }
+    }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+fn spawn_managed_service_health_command(
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+) -> std::io::Result<Child> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .envs(env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command.spawn()
 }
 
 fn managed_process_exit_detail(status: &ExitStatus) -> String {
@@ -2743,6 +2772,94 @@ mod tests {
                 .join("run/port/service-evidence/healthbox")
                 .exists(),
             "health observation should not capture restart evidence without an unhealthy-restart policy"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn timed_out_health_command_reaps_the_full_subprocess_tree() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let health_child_pid = guest_root.join("workspace/health-child.pid");
+        let service = AgentService::new(guest_root.clone());
+
+        let start = service.handle(RequestEnvelope {
+            id: 20,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("healthbox"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::Always,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![
+                                String::from("/bin/sh"),
+                                String::from("-lc"),
+                                format!(
+                                    "sleep 30 & child=$!; printf '%s' \"$child\" > {}; wait \"$child\"",
+                                    health_child_pid.display()
+                                ),
+                            ],
+                            restart_on_unhealthy: false,
+                        },
+                    },
+                },
+            }),
+        });
+        assert!(matches!(
+            start,
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(_)),
+                ..
+            }
+        ));
+
+        wait_for(|| health_child_pid.exists());
+        let runtime_record = guest_root.join("run/port/services/runtime/healthbox.json");
+        wait_for_background_for(Duration::from_secs(2), || {
+            read_to_string(&runtime_record).contains("health command timed out")
+        });
+
+        let child_pid: u32 = fs::read_to_string(&health_child_pid)
+            .expect("health child pid should write")
+            .trim()
+            .parse()
+            .expect("health child pid should parse");
+        wait_for_background(|| !matches!(super::managed_process_pid_is_live(child_pid), Ok(true)));
+        let timed_out_status = service.handle(RequestEnvelope {
+            id: 21,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("healthbox"),
+                },
+            }),
+        });
+        let timed_out_status = match timed_out_status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected health status response: {other:?}"),
+        };
+        assert_eq!(timed_out_status.health_state, ServiceHealthState::Unhealthy);
+        assert!(
+            timed_out_status
+                .health_detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("health command timed out")),
+            "{:?}",
+            timed_out_status.health_detail
         );
     }
 

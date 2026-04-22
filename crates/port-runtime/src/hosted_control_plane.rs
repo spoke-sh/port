@@ -16,7 +16,7 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::header::CONTENT_TYPE;
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post, put};
 use port_hosted_protocol::{
@@ -12741,7 +12741,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "authorization",
-            HeaderValue::from_static("Bearer demo-token"),
+            axum::http::HeaderValue::from_static("Bearer demo-token"),
         );
         let response = machine_status(
             State(state.clone()),

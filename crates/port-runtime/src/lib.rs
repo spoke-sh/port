@@ -6427,6 +6427,54 @@ fn managed_service_result_list(result: OperationResult) -> Result<Vec<ManagedSer
     Ok(services)
 }
 
+fn service_status_requires_live_replay(
+    stored: &ServiceDefinitionStatus,
+    live: &ManagedServiceStatus,
+) -> bool {
+    stored.desired_state == ServiceDesiredState::Active
+        && live.state != ManagedServiceRuntimeState::Running
+        && (live
+            .detail
+            .contains("guest-agent does not hold a supervisor handle")
+            || live.detail.contains("managed service does not exist"))
+}
+
+fn service_refresh_error_requires_live_replay(
+    stored: &ServiceDefinitionStatus,
+    error: &anyhow::Error,
+) -> bool {
+    stored.desired_state == ServiceDesiredState::Active
+        && error.to_string().contains("does not exist")
+}
+
+fn replay_active_machine_service(
+    metadata_config: &PortConfig,
+    guest_config: &PortConfig,
+    runtime_root: &Path,
+    stored: &ServiceDefinitionStatus,
+    reason: &str,
+) -> Result<ServiceDefinitionStatus> {
+    let mut replayed = apply_machine_service_live(
+        metadata_config,
+        guest_config,
+        ServiceApplyRequest {
+            machine_name: &stored.machine_name,
+            runtime_root,
+            name: &stored.name,
+            kind: stored.kind,
+            host_group: stored.target_host_group.as_deref(),
+            command: stored.command.clone(),
+            secret_bindings: stored.secret_bindings.clone(),
+            policy: stored.policy.clone(),
+        },
+    )?;
+    replayed.detail = format!(
+        "{} Active service replayed after the guest lost supervisor state: {reason}",
+        replayed.detail
+    );
+    Ok(replayed)
+}
+
 pub(crate) fn apply_machine_service_live(
     metadata_config: &PortConfig,
     guest_config: &PortConfig,
@@ -6477,6 +6525,12 @@ pub(crate) fn refresh_machine_service_runtime(
     service_name: &str,
 ) -> Result<ServiceDefinitionStatus> {
     let runtime_dir = RuntimePaths::for_machine(runtime_root, machine_name).runtime_dir;
+    let stored = machine_service_status_stored_local(
+        metadata_config,
+        runtime_root,
+        machine_name,
+        service_name,
+    )?;
     match execute_guest_operation(
         guest_config,
         GuestRequest {
@@ -6492,20 +6546,40 @@ pub(crate) fn refresh_machine_service_runtime(
     .and_then(managed_service_result_status)
     {
         Ok(status) => {
+            if service_status_requires_live_replay(&stored, &status) {
+                return replay_active_machine_service(
+                    metadata_config,
+                    guest_config,
+                    runtime_root,
+                    &stored,
+                    &status.detail,
+                );
+            }
             write_service_runtime_record(
                 &runtime_dir,
                 service_name,
                 &service_runtime_record_from_managed_status(&status),
             )?;
         }
-        Err(error) if error.to_string().contains("does not exist") => {}
-        Err(error) => {
-            let mut stored = machine_service_status_stored_local(
+        Err(error) if service_refresh_error_requires_live_replay(&stored, &error) => {
+            return replay_active_machine_service(
                 metadata_config,
+                guest_config,
                 runtime_root,
-                machine_name,
-                service_name,
-            )?;
+                &stored,
+                &error.to_string(),
+            )
+            .or_else(|replay_error| {
+                let mut stored = stored.clone();
+                stored.detail = format!(
+                    "{} Stored runtime record returned because live refresh failed and active service replay failed: {}; {}",
+                    stored.detail, error, replay_error
+                );
+                Ok(stored)
+            });
+        }
+        Err(error) => {
+            let mut stored = stored;
             stored.detail = format!(
                 "{} Stored runtime record returned because live refresh failed: {}",
                 stored.detail, error
@@ -17443,6 +17517,118 @@ exec sleep 30
         })
     }
 
+    #[derive(Debug)]
+    enum LocalGuestExpectedOperation {
+        StatusDetached {
+            name: String,
+            detail: String,
+        },
+        Start {
+            name: String,
+            command: Vec<String>,
+            policy: ServicePolicy,
+        },
+    }
+
+    fn spawn_local_guest_sequence_server(
+        socket_path: PathBuf,
+        expected: Vec<LocalGuestExpectedOperation>,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            if let Some(parent) = socket_path.parent() {
+                fs::create_dir_all(parent).expect("socket parent should exist");
+            }
+            let _ = fs::remove_file(&socket_path);
+            let listener = UnixListener::bind(&socket_path).expect("guest socket should bind");
+            for expected_operation in expected {
+                let (mut stream, _) = listener.accept().expect("guest socket should accept");
+                let reader_stream = stream.try_clone().expect("stream should clone");
+                let mut reader = BufReader::new(reader_stream);
+                let request: RequestEnvelope =
+                    read_frame(&mut reader).expect("request should decode");
+                let request_id = request.id;
+                match (expected_operation, request.operation) {
+                    (
+                        LocalGuestExpectedOperation::StatusDetached { name, detail },
+                        GuestOperation::ManagedService(ManagedServiceRequest {
+                            operation: ManagedServiceOperation::Status { name: request_name },
+                        }),
+                    ) => {
+                        assert_eq!(request_name, name);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::ManagedService(
+                                    ManagedServiceResult::Status(ManagedServiceStatus {
+                                        name: request_name,
+                                        kind: ManagedServiceKind::Service,
+                                        state: ManagedServiceRuntimeState::Failed,
+                                        restart_count: 22,
+                                        pid: None,
+                                        exit_code: None,
+                                        last_exit_code: None,
+                                        last_exit_detail: Some(detail.clone()),
+                                        health_state: ServiceHealthState::Unknown,
+                                        health_detail: None,
+                                        stdout_path: Some(String::from(
+                                            "/run/port/services/api.stdout.log",
+                                        )),
+                                        stderr_path: Some(String::from(
+                                            "/run/port/services/api.stderr.log",
+                                        )),
+                                        detail,
+                                    }),
+                                ),
+                            },
+                        )
+                        .expect("status response should encode");
+                    }
+                    (
+                        LocalGuestExpectedOperation::Start {
+                            name,
+                            command,
+                            policy,
+                        },
+                        GuestOperation::ManagedService(ManagedServiceRequest {
+                            operation:
+                                ManagedServiceOperation::Start {
+                                    name: request_name,
+                                    kind,
+                                    command: request_command,
+                                    env,
+                                    cwd,
+                                    policy: request_policy,
+                                },
+                        }),
+                    ) => {
+                        assert_eq!(request_name, name);
+                        assert_eq!(kind, ManagedServiceKind::Service);
+                        assert_eq!(request_command, command);
+                        assert!(env.is_empty());
+                        assert_eq!(cwd, None);
+                        assert_eq!(request_policy, policy);
+                        write_frame(
+                            &mut stream,
+                            &ResponseEnvelope::Completed {
+                                id: request_id,
+                                exit_code: 0,
+                                result: OperationResult::ManagedService(
+                                    ManagedServiceResult::Status(running_managed_service_status(
+                                        &request_name,
+                                    )),
+                                ),
+                            },
+                        )
+                        .expect("start response should encode");
+                    }
+                    (_, other) => panic!("unexpected local guest operation: {other:?}"),
+                }
+            }
+        })
+    }
+
     fn write_detached_forward_manifest(
         paths: &RuntimePaths,
         name: &str,
@@ -25185,6 +25371,78 @@ exec sleep 30
                 .expect("runtime record should read");
         assert!(runtime_record.contains("\"restart_count\": 1"));
         assert!(runtime_record.contains("\"last_exit_code\": 23"));
+    }
+
+    #[test]
+    fn refresh_machine_service_runtime_replays_active_service_after_detached_status() {
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = PortConfig::sample();
+        config.machines.retain(|name, _| name == "demo");
+
+        let paths = RuntimePaths::for_machine(tempdir.path(), "demo");
+        write_manifest(&paths, "demo", 1);
+
+        let command = vec![
+            String::from("/bin/sh"),
+            String::from("-lc"),
+            String::from("trap 'exit 0' TERM; while :; do sleep 1; done"),
+        ];
+        let policy = ServicePolicy {
+            restart: ServiceRestartPolicy::Always,
+            healthcheck: ServiceHealthcheck::default(),
+        };
+        super::apply_machine_service_local(
+            &config,
+            ServiceApplyRequest {
+                machine_name: "demo",
+                runtime_root: tempdir.path(),
+                name: "api",
+                kind: ServiceKind::Service,
+                host_group: None,
+                command: command.clone(),
+                secret_bindings: Vec::new(),
+                policy: policy.clone(),
+            },
+        )
+        .expect("service definition should persist locally");
+
+        let guest = spawn_local_guest_sequence_server(
+            paths.guest_agent_socket.clone(),
+            vec![
+                LocalGuestExpectedOperation::StatusDetached {
+                    name: String::from("api"),
+                    detail: String::from(
+                        "recorded managed process pid 6439 is no longer live and guest-agent does not hold a supervisor handle",
+                    ),
+                },
+                LocalGuestExpectedOperation::Start {
+                    name: String::from("api"),
+                    command: command.clone(),
+                    policy: policy.clone(),
+                },
+            ],
+        );
+
+        let status =
+            super::refresh_machine_service_runtime(&config, &config, tempdir.path(), "demo", "api")
+                .expect("runtime refresh should replay the active service");
+        assert_eq!(status.runtime.state, ServiceRuntimeState::Running);
+        assert_eq!(status.runtime.pid, Some(4242));
+        assert!(
+            status
+                .detail
+                .contains("Active service replayed after the guest lost supervisor state"),
+            "{}",
+            status.detail
+        );
+
+        let runtime_record =
+            fs::read_to_string(service_runtime_dir(&paths.runtime_dir).join("api.json"))
+                .expect("runtime record should read");
+        assert!(runtime_record.contains("\"state\": \"running\""));
+        assert!(runtime_record.contains("\"pid\": 4242"));
+
+        guest.join().expect("guest sequence should complete");
     }
 
     #[test]
