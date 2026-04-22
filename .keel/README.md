@@ -243,6 +243,12 @@
 |--------|--------|
 | [Hosted Guest Recovery Fidelity](epics/VHUlA6Lhd/voyages/VHUlRjuw5/) | done |
 
+### [Repair Hosted Control-Plane Placement Resolution](epics/VHXXs1f1f/) (active)
+
+| Voyage | Status |
+|--------|--------|
+| [Recover Hosted Placement Truth Without Read-Path Stall](epics/VHXXs1f1f/voyages/VHXXxt7rF/) | in-progress |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |

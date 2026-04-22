@@ -1,0 +1,14 @@
+---
+recorded_at: 2026-04-22T10:20:23.135769819-07:00
+command: cargo test -p port-runtime list_machines_degrades_a_timed_out_route_without_failing_the_fleet -- --nocapture
+---
+
+running 1 test
+test hosted_control_plane::tests::list_machines_degrades_a_timed_out_route_without_failing_the_fleet ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 231 filtered out; finished in 0.04s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)

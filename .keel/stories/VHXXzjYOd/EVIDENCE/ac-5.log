@@ -1,0 +1,22 @@
+---
+recorded_at: 2026-04-22T10:20:22.882361159-07:00
+command: cargo test -p port-runtime control_plane_service_status_uses_live_route_without_stored_placement -- --nocapture && cargo test -p port-runtime control_plane_guest_exec_prefers_stored_placement_over_candidate_order -- --nocapture
+---
+
+running 1 test
+test hosted_control_plane::tests::control_plane_service_status_uses_live_route_without_stored_placement ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 231 filtered out; finished in 0.01s
+
+
+running 1 test
+test hosted_control_plane::tests::control_plane_guest_exec_prefers_stored_placement_over_candidate_order ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 231 filtered out; finished in 0.01s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)

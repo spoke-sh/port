@@ -16604,9 +16604,6 @@ exec sleep 30
             command: Vec<String>,
             stdout: String,
         },
-        ManagedServiceList {
-            statuses: Vec<ManagedServiceStatus>,
-        },
         ManagedServiceStart {
             name: String,
             command: Vec<String>,
@@ -16734,24 +16731,6 @@ exec sleep 30
                         expected.remove(index).expect("expected exec should exist")
                     }
                     GuestOperation::ManagedService(ManagedServiceRequest {
-                        operation: ManagedServiceOperation::List,
-                    }) => {
-                        let index = expected
-                            .iter()
-                            .position(|operation| {
-                                matches!(
-                                    operation,
-                                    HostedGuestExpectedOperation::ManagedServiceList { .. }
-                                )
-                            })
-                            .unwrap_or_else(|| {
-                                panic!("unexpected hosted guest operation: {:?}", request.operation)
-                            });
-                        expected
-                            .remove(index)
-                            .expect("expected service list should exist")
-                    }
-                    GuestOperation::ManagedService(ManagedServiceRequest {
                         operation: ManagedServiceOperation::Start { name, command, .. },
                     }) => {
                         let index = expected
@@ -16843,24 +16822,6 @@ exec sleep 30
                                         )),
                                         detail: String::from("managed process is running"),
                                     }),
-                                ),
-                            },
-                        )
-                        .expect("response should encode");
-                    }
-                    (
-                        HostedGuestExpectedOperation::ManagedServiceList { statuses },
-                        GuestOperation::ManagedService(ManagedServiceRequest {
-                            operation: ManagedServiceOperation::List,
-                        }),
-                    ) => {
-                        write_frame(
-                            &mut stream,
-                            &ResponseEnvelope::Completed {
-                                id: request_id,
-                                exit_code: 0,
-                                result: OperationResult::ManagedService(
-                                    ManagedServiceResult::List { services: statuses },
                                 ),
                             },
                         )
@@ -18777,7 +18738,7 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_machine_status_prefers_stored_placement_over_live_candidate_selection() {
+    fn hosted_machine_status_repairs_stale_placement_from_live_candidate_selection() {
         let _guard = hosted_server_lock().lock().expect("lock should work");
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = sample_multi_node_machine_config(tempdir.path());
@@ -18787,7 +18748,6 @@ exec sleep 30
 
         let stored_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
         let live_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
-        let stored_paths = RuntimePaths::for_machine(&stored_runtime_root, "cloud-aws");
         let live_paths = RuntimePaths::for_machine(&live_runtime_root, "cloud-aws");
         write_manifest(&live_paths, "cloud-aws", 424242);
 
@@ -18804,13 +18764,36 @@ exec sleep 30
         let status = machine_status(&config, tempdir.path(), "cloud-aws")
             .expect("hosted status should load");
         assert_eq!(status.machine_name, "cloud-aws");
-        assert_eq!(status.state, MachineRuntimeState::Malformed);
-        assert_eq!(status.runtime_dir, stored_paths.runtime_dir);
-        assert!(status.detail.contains("aws-linux-node-b"));
-        assert!(status.detail.contains("Stored on alternate AWS node."));
+        assert_eq!(status.state, MachineRuntimeState::Stopped);
+        assert_eq!(status.runtime_dir, live_paths.runtime_dir);
         assert!(
-            !status.detail.contains("aws-linux-node'."),
-            "status should not silently reroute to the currently live candidate"
+            status.detail.contains("control plane 'demo'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            status.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            status.detail
+        );
+        assert!(
+            !status.detail.contains("Stored on alternate AWS node."),
+            "{}",
+            status.detail
+        );
+
+        let placements: serde_json::Value = serde_json::from_slice(
+            &fs::read(hosted_placeholder_runtime_root("demo").join("machine-placements.json"))
+                .expect("machine placement state should read"),
+        )
+        .expect("machine placement state should decode");
+        assert_eq!(
+            placements["machines"]["cloud-aws"]["node_name"],
+            serde_json::Value::String(String::from("aws-linux-node"))
+        );
+        assert_eq!(
+            placements["machines"]["cloud-aws"]["runtime_root"],
+            serde_json::Value::String(live_runtime_root.display().to_string())
         );
     }
 
@@ -19035,8 +19018,7 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_machine_list_monitor_and_stop_prefer_stored_placement_over_live_candidate_selection()
-    {
+    fn hosted_machine_list_monitor_and_stop_repair_stale_placement_from_live_candidate_selection() {
         let _guard = hosted_server_lock().lock().expect("lock should work");
         let tempdir = tempdir().expect("tempdir should exist");
         let mut config = sample_multi_node_machine_config(tempdir.path());
@@ -19046,7 +19028,6 @@ exec sleep 30
 
         let stored_runtime_root = config.nodes["aws-linux-node-b"].runtime_root.clone();
         let live_runtime_root = config.nodes["aws-linux-node"].runtime_root.clone();
-        let stored_paths = RuntimePaths::for_machine(&stored_runtime_root, "cloud-aws");
         let live_paths = RuntimePaths::for_machine(&live_runtime_root, "cloud-aws");
         write_manifest(&live_paths, "cloud-aws", 424242);
 
@@ -19065,25 +19046,79 @@ exec sleep 30
             .iter()
             .find(|machine| machine.machine_name == "cloud-aws")
             .expect("hosted machine should appear in machine list");
-        assert_eq!(hosted.state, MachineRuntimeState::Malformed);
-        assert_eq!(hosted.runtime_dir, stored_paths.runtime_dir);
-        assert!(hosted.detail.contains("aws-linux-node-b"));
-        assert!(hosted.detail.contains("Stored on alternate AWS node."));
+        assert_eq!(hosted.state, MachineRuntimeState::Stopped);
+        assert_eq!(hosted.runtime_dir, live_paths.runtime_dir);
+        assert!(
+            hosted.detail.contains("control plane 'demo'"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            hosted.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            hosted.detail
+        );
+        assert!(
+            !hosted.detail.contains("Stored on alternate AWS node."),
+            "{}",
+            hosted.detail
+        );
 
         let monitor =
             machine_monitor(&config, tempdir.path(), "cloud-aws").expect("monitor should load");
-        assert_eq!(monitor.state, MachineRuntimeState::Malformed);
-        assert_eq!(monitor.node_name.as_deref(), Some("aws-linux-node-b"));
-        assert_eq!(monitor.runtime_dir, stored_paths.runtime_dir);
-        assert!(monitor.detail.contains("Stored on alternate AWS node."));
+        assert_eq!(monitor.state, MachineRuntimeState::Stopped);
+        assert_eq!(monitor.node_name.as_deref(), Some("aws-linux-node"));
+        assert_eq!(monitor.runtime_dir, live_paths.runtime_dir);
+        assert!(
+            monitor.detail.contains("control plane 'demo'"),
+            "{}",
+            monitor.detail
+        );
+        assert!(
+            monitor.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            monitor.detail
+        );
+        assert!(
+            !monitor.detail.contains("Stored on alternate AWS node."),
+            "{}",
+            monitor.detail
+        );
 
         let stop = stop_machine(&config, tempdir.path(), "cloud-aws", Duration::from_secs(1))
             .expect("stop should load");
-        assert_eq!(stop.previous_state, MachineRuntimeState::Malformed);
-        assert_eq!(stop.current_state, MachineRuntimeState::Malformed);
-        assert_eq!(stop.runtime_dir, stored_paths.runtime_dir);
-        assert!(stop.detail.contains("aws-linux-node-b"));
-        assert!(stop.detail.contains("Stored on alternate AWS node."));
+        assert_eq!(stop.previous_state, MachineRuntimeState::Stopped);
+        assert_eq!(stop.current_state, MachineRuntimeState::Stopped);
+        assert_eq!(stop.runtime_dir, live_paths.runtime_dir);
+        assert!(
+            stop.detail.contains("control plane 'demo'"),
+            "{}",
+            stop.detail
+        );
+        assert!(
+            stop.detail.contains("node 'aws-linux-node'"),
+            "{}",
+            stop.detail
+        );
+        assert!(
+            !stop.detail.contains("Stored on alternate AWS node."),
+            "{}",
+            stop.detail
+        );
+
+        let placements: serde_json::Value = serde_json::from_slice(
+            &fs::read(hosted_placeholder_runtime_root("demo").join("machine-placements.json"))
+                .expect("machine placement state should read"),
+        )
+        .expect("machine placement state should decode");
+        assert_eq!(
+            placements["machines"]["cloud-aws"]["node_name"],
+            serde_json::Value::String(String::from("aws-linux-node"))
+        );
+        assert_eq!(
+            placements["machines"]["cloud-aws"]["runtime_root"],
+            serde_json::Value::String(live_runtime_root.display().to_string())
+        );
     }
 
     #[test]
@@ -20383,9 +20418,6 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
                     ),
                 },
-                HostedGuestExpectedOperation::ManagedServiceList {
-                    statuses: vec![running_managed_service_status("k3s-server")],
-                },
                 HostedGuestExpectedOperation::Exec {
                     command: super::hosted_k3s_legacy_runtime_drift_command(),
                     stdout: String::new(),
@@ -20394,29 +20426,24 @@ exec sleep 30
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![
-                HostedGuestExpectedOperation::ManagedServiceStart {
-                    name: String::from("k3s-agent"),
-                    command: k3s_bootstrap_command(
-                        "agent",
-                        &[
-                            String::from("--node-label=role=worker"),
-                            String::from("--node-name"),
-                            String::from("cloud-aws-worker"),
-                            String::from("--node-external-ip"),
-                            String::from("127.0.0.1"),
-                            String::from("--flannel-external-ip"),
-                        ],
-                        None,
-                        Some("https://demo-k3s.internal:6443"),
-                        Some("demo-join-token"),
-                    ),
-                    policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
-                },
-                HostedGuestExpectedOperation::ManagedServiceList {
-                    statuses: vec![running_managed_service_status("k3s-agent")],
-                },
-            ],
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                        String::from("--node-external-ip"),
+                        String::from("127.0.0.1"),
+                        String::from("--flannel-external-ip"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -20655,9 +20682,6 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
                     ),
                 },
-                HostedGuestExpectedOperation::ManagedServiceList {
-                    statuses: vec![running_managed_service_status("k3s-server")],
-                },
                 HostedGuestExpectedOperation::Exec {
                     command: super::hosted_k3s_legacy_runtime_drift_command(),
                     stdout: String::from("/run/port/k3s-server.pid\n/var/log/k3s-server.log\n"),
@@ -20666,29 +20690,24 @@ exec sleep 30
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![
-                HostedGuestExpectedOperation::ManagedServiceStart {
-                    name: String::from("k3s-agent"),
-                    command: k3s_bootstrap_command(
-                        "agent",
-                        &[
-                            String::from("--node-label=role=worker"),
-                            String::from("--node-name"),
-                            String::from("cloud-aws-worker"),
-                            String::from("--node-external-ip"),
-                            String::from("127.0.0.1"),
-                            String::from("--flannel-external-ip"),
-                        ],
-                        None,
-                        Some("https://demo-k3s.internal:6443"),
-                        Some("demo-join-token"),
-                    ),
-                    policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
-                },
-                HostedGuestExpectedOperation::ManagedServiceList {
-                    statuses: vec![running_managed_service_status("k3s-agent")],
-                },
-            ],
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                        String::from("--node-external-ip"),
+                        String::from("127.0.0.1"),
+                        String::from("--flannel-external-ip"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
@@ -20953,9 +20972,6 @@ exec sleep 30
                         "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
                     ),
                 },
-                HostedGuestExpectedOperation::ManagedServiceList {
-                    statuses: vec![running_managed_service_status("k3s-server")],
-                },
                 HostedGuestExpectedOperation::Exec {
                     command: super::hosted_k3s_legacy_runtime_drift_command(),
                     stdout: String::new(),
@@ -20964,29 +20980,24 @@ exec sleep 30
         );
         let worker_guest = spawn_hosted_guest_sequence_server(
             worker_join_paths,
-            vec![
-                HostedGuestExpectedOperation::ManagedServiceStart {
-                    name: String::from("k3s-agent"),
-                    command: k3s_bootstrap_command(
-                        "agent",
-                        &[
-                            String::from("--node-label=role=worker"),
-                            String::from("--node-name"),
-                            String::from("cloud-aws-worker"),
-                            String::from("--node-external-ip"),
-                            String::from("127.0.0.1"),
-                            String::from("--flannel-external-ip"),
-                        ],
-                        None,
-                        Some("https://demo-k3s.internal:6443"),
-                        Some("demo-join-token"),
-                    ),
-                    policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
-                },
-                HostedGuestExpectedOperation::ManagedServiceList {
-                    statuses: vec![running_managed_service_status("k3s-agent")],
-                },
-            ],
+            vec![HostedGuestExpectedOperation::ManagedServiceStart {
+                name: String::from("k3s-agent"),
+                command: k3s_bootstrap_command(
+                    "agent",
+                    &[
+                        String::from("--node-label=role=worker"),
+                        String::from("--node-name"),
+                        String::from("cloud-aws-worker"),
+                        String::from("--node-external-ip"),
+                        String::from("127.0.0.1"),
+                        String::from("--flannel-external-ip"),
+                    ],
+                    None,
+                    Some("https://demo-k3s.internal:6443"),
+                    Some("demo-join-token"),
+                ),
+                policy: hosted_k3s_service_policy("agent", "cloud-aws-worker"),
+            }],
         );
 
         let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])

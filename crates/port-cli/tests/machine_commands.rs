@@ -1378,9 +1378,6 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
             },
-            HostedGuestExpectedOperation::ManagedServiceList {
-                statuses: vec![running_managed_service_status("k3s-server")],
-            },
             HostedGuestExpectedOperation::Exec {
                 command: hosted_k3s_legacy_runtime_drift_command(),
                 stdout: String::new(),
@@ -1404,9 +1401,6 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 stdout: String::from(
                     "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.2+k3s1\n",
                 ),
-            },
-            HostedGuestExpectedOperation::ManagedServiceList {
-                statuses: vec![running_managed_service_status("k3s-server")],
             },
             HostedGuestExpectedOperation::Exec {
                 command: hosted_k3s_legacy_runtime_drift_command(),
@@ -3056,7 +3050,7 @@ fn cli_machine_status_surfaces_unprepared_aws_hosted_pvm_guidance() {
 }
 
 #[test]
-fn cli_machine_status_prefers_stored_hosted_placement_over_live_candidate() {
+fn cli_machine_status_repairs_stale_hosted_placement_from_live_candidate() {
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
     let alternate_runtime_root = temp.path().join("hosted/aws-linux-node-b");
@@ -3111,12 +3105,33 @@ fn cli_machine_status_prefers_stored_hosted_placement_over_live_candidate() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("machine: cloud-aws"));
-    assert!(stdout.contains("state: malformed"));
-    assert!(stdout.contains("aws-linux-node-b"));
-    assert!(stdout.contains("Stored on alternate AWS node."));
+    assert!(stdout.contains("state: stopped"), "{stdout}");
+    assert!(stdout.contains("aws-linux-node"), "{stdout}");
     assert!(
-        !stdout.contains("control plane 'demo' resolved node 'aws-linux-node'"),
-        "status output should not reroute to the currently live candidate"
+        stdout.contains("Routed through control plane 'demo' and node 'aws-linux-node'."),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("Stored on alternate AWS node."),
+        "status output should stop surfacing stale placement detail after repair: {stdout}"
+    );
+
+    let placements: serde_json::Value = serde_json::from_slice(
+        &fs::read(hosted_state_path(
+            temp.path(),
+            "demo",
+            "machine-placements.json",
+        ))
+        .expect("placement state should read"),
+    )
+    .expect("placement state should decode");
+    assert_eq!(
+        placements["machines"]["cloud-aws"]["node_name"],
+        serde_json::Value::String(String::from("aws-linux-node"))
+    );
+    assert_eq!(
+        placements["machines"]["cloud-aws"]["runtime_root"],
+        serde_json::Value::String(hosted_runtime_root.display().to_string())
     );
 }
 

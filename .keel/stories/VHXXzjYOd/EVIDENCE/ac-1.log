@@ -1,0 +1,15 @@
+---
+recorded_at: 2026-04-22T10:19:27.362561771-07:00
+command: cargo test -p port-runtime control_plane_machine_status_falls_back_when_stored_placement_is_unusable -- --nocapture
+---
+
+running 1 test
+test hosted_control_plane::tests::control_plane_machine_status_falls_back_when_stored_placement_is_unusable ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 231 filtered out; finished in 0.01s
+
+
+--- stderr ---
+   Compiling port-runtime v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.08s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
