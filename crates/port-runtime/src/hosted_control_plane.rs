@@ -1,6 +1,6 @@
 #![allow(clippy::result_large_err)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{BufReader, BufWriter, Cursor};
 use std::os::unix::net::UnixStream;
 use std::path::{Path as FsPath, PathBuf};
@@ -16,7 +16,7 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::header::CONTENT_TYPE;
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post, put};
 use port_hosted_protocol::{
@@ -104,9 +104,50 @@ struct ControlPlaneStateInner {
     machine_placement_state_path: PathBuf,
     machine_placement_state: RwLock<MachinePlacementStateFile>,
     machine_placements: RwLock<BTreeMap<String, HostedMachinePlacementRecord>>,
+    observability: RwLock<ControlPlaneObservabilityState>,
     #[cfg(not(test))]
     placement_reconcile_in_flight: AtomicBool,
     client: Client,
+}
+
+const OBSERVABILITY_EVENT_LIMIT: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ControlPlaneObservabilityKind {
+    PlacementRepair,
+    PlacementAliasRewrite,
+    TimeoutIsolation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ControlPlaneObservabilityEvent {
+    kind: ControlPlaneObservabilityKind,
+    observed_at_unix_s: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    machine_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    node_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous_node_name: Option<String>,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ControlPlaneObservabilityState {
+    placement_repairs: u64,
+    alias_rewrites: u64,
+    timeout_isolations: u64,
+    recent_events: VecDeque<ControlPlaneObservabilityEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ControlPlaneObservabilityReport {
+    placement_repairs: u64,
+    alias_rewrites: u64,
+    timeout_isolations: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent_events: Vec<ControlPlaneObservabilityEvent>,
 }
 
 /// Per-machine wedge record produced by the detector.
@@ -2107,6 +2148,7 @@ fn build_state(config: PortConfig, request: ControlPlaneServeRequest) -> Result<
             machine_placement_state_path,
             machine_placement_state: RwLock::new(machine_placement_state),
             machine_placements: RwLock::new(machine_placements),
+            observability: RwLock::new(ControlPlaneObservabilityState::default()),
             #[cfg(not(test))]
             placement_reconcile_in_flight: AtomicBool::new(false),
             client: Client::new(),
@@ -2136,6 +2178,7 @@ fn control_plane_router(state: ControlPlaneState) -> Router {
         .route("/v1/machines/{machine}/monitor", get(machine_monitor))
         .route("/v1/machines/{machine}/top", get(machine_top))
         .route("/v1/machines/{machine}/wedge", get(machine_wedge))
+        .route("/v1/observability", get(control_plane_observability))
         .route("/v1/machines/{machine}/guest:exec", post(guest_exec))
         .route("/v1/machines/{machine}/guest:copy", post(guest_copy))
         .route(
@@ -2580,6 +2623,22 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
                         }
                     }
                     Err(message) => {
+                        if message.contains("timed out") {
+                            record_observability_event(
+                                &state,
+                                ControlPlaneObservabilityKind::TimeoutIsolation,
+                                Some(machine_name),
+                                route.node_name.as_deref(),
+                                None,
+                                format!(
+                                    "control plane '{}' isolated a timed-out machine-status route for machine '{}' on node '{}': {}",
+                                    state.inner.control_plane,
+                                    machine_name,
+                                    route.node_name.as_deref().unwrap_or("unknown"),
+                                    message
+                                ),
+                            );
+                        }
                         let status = malformed_machine_status(&summary, route.clone(), message);
                         match annotate_machine_status_with_fleet_state(
                             &state, &summary, &route, status,
@@ -2644,6 +2703,28 @@ async fn list_machines(State(state): State<ControlPlaneState>, headers: HeaderMa
             result: machines,
         },
     )
+}
+
+async fn control_plane_observability(
+    State(state): State<ControlPlaneState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = authorize(&state, &headers) {
+        return response;
+    }
+    match observability_report(&state) {
+        Ok(result) => json_response(
+            StatusCode::OK,
+            &HostedSuccess {
+                route: HostedRouteContext {
+                    control_plane: Some(state.inner.control_plane.clone()),
+                    ..HostedRouteContext::default()
+                },
+                result,
+            },
+        ),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message, None),
+    }
 }
 
 async fn machine_launch(
@@ -4201,6 +4282,61 @@ fn machine_placements_snapshot(
         .map(|placements| placements.clone())
 }
 
+fn record_observability_event(
+    state: &ControlPlaneState,
+    kind: ControlPlaneObservabilityKind,
+    machine_name: Option<&str>,
+    node_name: Option<&str>,
+    previous_node_name: Option<&str>,
+    detail: impl Into<String>,
+) {
+    let Ok(mut observability) = state.inner.observability.write() else {
+        return;
+    };
+    match kind {
+        ControlPlaneObservabilityKind::PlacementRepair => {
+            observability.placement_repairs = observability.placement_repairs.saturating_add(1);
+        }
+        ControlPlaneObservabilityKind::PlacementAliasRewrite => {
+            observability.alias_rewrites = observability.alias_rewrites.saturating_add(1);
+        }
+        ControlPlaneObservabilityKind::TimeoutIsolation => {
+            observability.timeout_isolations = observability.timeout_isolations.saturating_add(1);
+        }
+    }
+    let observed_at_unix_s = current_unix_timestamp_seconds().unwrap_or_default();
+    observability
+        .recent_events
+        .push_back(ControlPlaneObservabilityEvent {
+            kind,
+            observed_at_unix_s,
+            machine_name: machine_name.map(str::to_string),
+            node_name: node_name.map(str::to_string),
+            previous_node_name: previous_node_name.map(str::to_string),
+            detail: detail.into(),
+        });
+    while observability.recent_events.len() > OBSERVABILITY_EVENT_LIMIT {
+        observability.recent_events.pop_front();
+    }
+}
+
+fn observability_report(
+    state: &ControlPlaneState,
+) -> Result<ControlPlaneObservabilityReport, String> {
+    let observability = state.inner.observability.read().map_err(|_| {
+        format!(
+            "control plane '{}' could not inspect observability state",
+            state.inner.control_plane
+        )
+    })?;
+    Ok(ControlPlaneObservabilityReport {
+        placement_repairs: observability.placement_repairs,
+        alias_rewrites: observability.alias_rewrites,
+        timeout_isolations: observability.timeout_isolations,
+        recent_events: observability.recent_events.iter().cloned().collect(),
+    })
+}
+
 fn refresh_machine_placements(
     state: &ControlPlaneState,
 ) -> Result<BTreeMap<String, HostedMachinePlacementRecord>, String> {
@@ -4483,7 +4619,32 @@ fn reconcile_machine_placements(
         {
             PlacementReconcileDecision::Keep => {}
             PlacementReconcileDecision::Set(record) => {
-                if next_state.machines.get(&summary.machine_name) != Some(&record) {
+                let previous = next_state.machines.get(&summary.machine_name).cloned();
+                if previous.as_ref() != Some(&record) {
+                    if let Some(previous) = previous.as_ref() {
+                        let kind = if previous.runtime_root == record.runtime_root
+                            && previous.node_name != record.node_name
+                        {
+                            ControlPlaneObservabilityKind::PlacementAliasRewrite
+                        } else {
+                            ControlPlaneObservabilityKind::PlacementRepair
+                        };
+                        record_observability_event(
+                            state,
+                            kind,
+                            Some(&summary.machine_name),
+                            Some(&record.node_name),
+                            Some(&previous.node_name),
+                            format!(
+                                "control plane '{}' reconciled placement for machine '{}' from node '{}' to '{}' via {}",
+                                state.inner.control_plane,
+                                summary.machine_name,
+                                previous.node_name,
+                                record.node_name,
+                                trigger.detail()
+                            ),
+                        );
+                    }
                     next_state
                         .machines
                         .insert(summary.machine_name.clone(), record);
@@ -12299,6 +12460,9 @@ mod tests {
             placement.runtime_root,
             config.nodes["aws-linux-node"].runtime_root
         );
+        let observability = observability_report(&state).expect("observability report should load");
+        assert_eq!(observability.placement_repairs, 0);
+        assert_eq!(observability.alias_rewrites, 0);
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -12400,6 +12564,24 @@ mod tests {
             placements.machines["cloud-aws"].runtime_root,
             fallback_node.runtime_root
         );
+        let observability = observability_report(&state).expect("observability report should load");
+        assert!(observability.placement_repairs >= 1);
+        assert_eq!(observability.alias_rewrites, 0);
+        let event = observability
+            .recent_events
+            .iter()
+            .find(|event| event.kind == ControlPlaneObservabilityKind::PlacementRepair)
+            .expect("placement repair event should exist");
+        assert_eq!(event.machine_name.as_deref(), Some("cloud-aws"));
+        assert_eq!(event.node_name.as_deref(), Some("aaa-linux-node"));
+        assert_eq!(event.previous_node_name.as_deref(), Some("aws-linux-node"));
+        assert!(
+            event
+                .detail
+                .contains("reconciled placement for machine 'cloud-aws'"),
+            "{}",
+            event.detail
+        );
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -12477,6 +12659,108 @@ mod tests {
         assert_eq!(placement.node_name, "aws-linux-node-1");
         assert_eq!(placement.runtime_root, canonical_node.runtime_root);
         assert_eq!(placement.placed_at_unix_s, 7);
+        let observability = observability_report(&state).expect("observability report should load");
+        assert!(observability.alias_rewrites >= 1);
+        let event = observability
+            .recent_events
+            .iter()
+            .find(|event| event.kind == ControlPlaneObservabilityKind::PlacementAliasRewrite)
+            .expect("alias rewrite event should exist");
+        assert_eq!(event.machine_name.as_deref(), Some("cloud-aws"));
+        assert_eq!(event.node_name.as_deref(), Some("aws-linux-node-1"));
+        assert_eq!(event.previous_node_name.as_deref(), Some("aws-linux-node"));
+        assert!(event.detail.contains("startup"), "{}", event.detail);
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
+    }
+
+    #[tokio::test]
+    async fn machine_status_read_does_not_persist_machine_placement_on_read() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let mut config = sample_control_plane_config(tempdir.path());
+        let control_plane = unique_test_control_plane("no-write-on-read");
+        let token_var = unique_test_env("PORT_TEST_NO_WRITE_ON_READ_TOKEN");
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut stale_node = config
+            .nodes
+            .get("aws-linux-node")
+            .expect("aws node should exist")
+            .clone();
+        stale_node.runtime_root = tempdir.path().join("hosted/aws-linux-node-b");
+        config
+            .nodes
+            .insert(String::from("aws-linux-node-b"), stale_node.clone());
+
+        let live_state = MockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: config.nodes["aws-linux-node"].runtime_root.clone(),
+            pid: 1234,
+            headers: Arc::new(Mutex::new(Vec::new())),
+            bodies: Arc::new(Mutex::new(Vec::new())),
+        };
+        let live_addr = serve_mock_node_agent_named(live_state).await;
+        let now = current_unix_timestamp_seconds().expect("unix timestamp should resolve");
+        let state = build_state(
+            config.clone(),
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: vec![HostedNodeBinding {
+                    node_name: String::from("aws-linux-node"),
+                    endpoint: format!("http://{live_addr}"),
+                    token: String::from("node-secret"),
+                }],
+            },
+        )
+        .expect("control-plane state should build");
+        replace_machine_placement_state(
+            &state,
+            MachinePlacementStateFile {
+                control_plane: control_plane.clone(),
+                machines: BTreeMap::from([(
+                    String::from("cloud-aws"),
+                    HostedMachinePlacementRecord {
+                        node_name: String::from("aws-linux-node-b"),
+                        runtime_root: stale_node.runtime_root.clone(),
+                        placed_at_unix_s: now,
+                        placement_detail: Some(String::from("stale placement for read guard")),
+                    },
+                )]),
+            },
+        )
+        .expect("stale placement state should load");
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer demo-token"),
+        );
+        let response = machine_status(
+            State(state.clone()),
+            Path(String::from("cloud-aws")),
+            headers,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let placements =
+            machine_placement_state_snapshot(&state).expect("placement snapshot should load");
+        assert_eq!(
+            placements.machines["cloud-aws"].node_name,
+            "aws-linux-node-b"
+        );
+        assert_eq!(
+            placements.machines["cloud-aws"].runtime_root,
+            stale_node.runtime_root
+        );
 
         cleanup_registered_state(&control_plane);
         unsafe {
@@ -12824,6 +13108,27 @@ mod tests {
             .expect("cloud-aws-b status should exist");
         assert_eq!(cloud_aws.state, MachineRuntimeState::Malformed);
         assert_eq!(cloud_aws_b.state, MachineRuntimeState::Running);
+        let observability = Client::new()
+            .get(format!("http://{control_addr}/v1/observability"))
+            .header("authorization", "Bearer demo-token")
+            .send()
+            .await
+            .expect("observability request should complete");
+        assert_eq!(observability.status(), StatusCode::OK);
+        let observability: HostedSuccess<ControlPlaneObservabilityReport> = observability
+            .json()
+            .await
+            .expect("observability body should decode");
+        assert_eq!(observability.result.timeout_isolations, 1);
+        let event = observability
+            .result
+            .recent_events
+            .iter()
+            .find(|event| event.kind == ControlPlaneObservabilityKind::TimeoutIsolation)
+            .expect("timeout isolation event should exist");
+        assert_eq!(event.machine_name.as_deref(), Some("cloud-aws"));
+        assert_eq!(event.node_name.as_deref(), Some("aaa-linux-node"));
+        assert!(event.detail.contains("timed-out machine-status route"));
 
         unsafe {
             std::env::remove_var("PORT_TEST_HOSTED_MACHINE_STATUS_PROXY_TIMEOUT_MS");

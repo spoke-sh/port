@@ -457,6 +457,13 @@ pub struct HostedK3sReadinessGate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sDegradedReadinessEvent {
+    pub gate: String,
+    pub surface: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sClusterAccessReport {
     pub cluster_name: String,
     pub control_plane: String,
@@ -487,6 +494,8 @@ pub struct HostedK3sClusterAccessReport {
     pub visibility_output: String,
     pub machine_access: Vec<HostedK3sMachineAccess>,
     pub boundary_notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub degraded_readiness_events: Vec<HostedK3sDegradedReadinessEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3872,6 +3881,18 @@ pub fn hosted_k3s_cluster_access(
             machine.network_identity = identity.clone();
         }
     }
+    let api_surface = hosted_k3s_api_surface(&primary_server);
+    let kubeconfig_surface = hosted_k3s_kubeconfig_surface(&primary_server);
+    let visibility_surface = hosted_k3s_visibility_surface(&primary_server);
+    let degraded_readiness_events = hosted_k3s_degraded_readiness_events(
+        &machine_runtime_readiness,
+        &api_surface,
+        &api_probe.gate,
+        &kubeconfig_surface,
+        &kubeconfig_probe.gate,
+        &visibility_surface,
+        &visibility_probe.gate,
+    );
 
     Ok(HostedK3sClusterAccessReport {
         cluster_name: cluster_name.to_string(),
@@ -3891,18 +3912,66 @@ pub fn hosted_k3s_cluster_access(
         legacy_runtime_artifacts,
         control_plane_placements,
         machine_runtime_readiness,
-        api_surface: hosted_k3s_api_surface(&primary_server),
+        api_surface,
         api_readiness: api_probe.gate,
         api_output: api_probe.output,
-        kubeconfig_surface: hosted_k3s_kubeconfig_surface(&primary_server),
+        kubeconfig_surface,
         kubeconfig_availability: kubeconfig_probe.gate,
         kubeconfig: kubeconfig_probe.output,
-        visibility_surface: hosted_k3s_visibility_surface(&primary_server),
+        visibility_surface,
         node_visibility: visibility_probe.gate,
         visibility_output: visibility_probe.output,
         machine_access,
         boundary_notes,
+        degraded_readiness_events,
     })
+}
+
+fn hosted_k3s_degraded_readiness_events(
+    machine_runtime_readiness: &HostedK3sReadinessGate,
+    api_surface: &str,
+    api_readiness: &HostedK3sReadinessGate,
+    kubeconfig_surface: &str,
+    kubeconfig_availability: &HostedK3sReadinessGate,
+    visibility_surface: &str,
+    node_visibility: &HostedK3sReadinessGate,
+) -> Vec<HostedK3sDegradedReadinessEvent> {
+    let mut events = Vec::new();
+    if !matches!(
+        machine_runtime_readiness.state,
+        HostedK3sReadinessState::Ready
+    ) {
+        events.push(HostedK3sDegradedReadinessEvent {
+            gate: String::from("machine-runtime"),
+            surface: String::from("machine access + managed service truth"),
+            detail: machine_runtime_readiness.detail.clone(),
+        });
+    }
+    if !matches!(api_readiness.state, HostedK3sReadinessState::Ready) {
+        events.push(HostedK3sDegradedReadinessEvent {
+            gate: String::from("api-readiness"),
+            surface: api_surface.to_string(),
+            detail: api_readiness.detail.clone(),
+        });
+    }
+    if !matches!(
+        kubeconfig_availability.state,
+        HostedK3sReadinessState::Ready
+    ) {
+        events.push(HostedK3sDegradedReadinessEvent {
+            gate: String::from("kubeconfig-availability"),
+            surface: kubeconfig_surface.to_string(),
+            detail: kubeconfig_availability.detail.clone(),
+        });
+    }
+    if !matches!(node_visibility.state, HostedK3sReadinessState::Ready) {
+        events.push(HostedK3sDegradedReadinessEvent {
+            gate: String::from("node-visibility"),
+            surface: visibility_surface.to_string(),
+            detail: node_visibility.detail.clone(),
+        });
+    }
+    events
 }
 
 fn hosted_k3s_cluster_readiness_summary(report: &HostedK3sClusterAccessReport) -> String {
@@ -21089,6 +21158,11 @@ exec sleep 30
                 .iter()
                 .any(|note| note.contains("ingress"))
         );
+        assert!(
+            report.degraded_readiness_events.is_empty(),
+            "{:?}",
+            report.degraded_readiness_events
+        );
 
         let server = report
             .machine_access
@@ -21242,6 +21316,25 @@ exec sleep 30
                 .contains("could not read '/etc/rancher/k3s/k3s.yaml'"),
             "{}",
             report.kubeconfig_availability.detail
+        );
+        assert_eq!(report.degraded_readiness_events.len(), 1);
+        assert_eq!(
+            report.degraded_readiness_events[0].gate,
+            String::from("kubeconfig-availability")
+        );
+        assert!(
+            report.degraded_readiness_events[0]
+                .surface
+                .contains("port guest exec --machine cloud-aws"),
+            "{}",
+            report.degraded_readiness_events[0].surface
+        );
+        assert!(
+            report.degraded_readiness_events[0]
+                .detail
+                .contains("could not read '/etc/rancher/k3s/k3s.yaml'"),
+            "{}",
+            report.degraded_readiness_events[0].detail
         );
 
         server_guest

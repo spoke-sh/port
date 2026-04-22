@@ -1,0 +1,35 @@
+---
+recorded_at: 2026-04-22T13:05:52.778794223-07:00
+command: sh -lc 'cargo test -p port-runtime registration_reconcile_ -- --nocapture --test-threads=1 && cargo test -p port-runtime startup_reconcile_canonicalizes_legacy_node_alias_to_configured_node_identity -- --nocapture --test-threads=1 && cargo test -p port-runtime list_machines_degrades_a_timed_out_route_without_failing_the_fleet -- --nocapture --test-threads=1'
+---
+
+running 3 tests
+test hosted_control_plane::tests::registration_reconcile_persists_machine_placement_without_read_path ... ok
+test hosted_control_plane::tests::registration_reconcile_purges_stale_machine_placement_when_node_reports_missing_runtime ... ok
+test hosted_control_plane::tests::registration_reconcile_repairs_stale_machine_placement_without_read_path ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 235 filtered out; finished in 0.21s
+
+
+running 1 test
+test hosted_control_plane::tests::startup_reconcile_canonicalizes_legacy_node_alias_to_configured_node_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 237 filtered out; finished in 0.03s
+
+
+running 1 test
+test hosted_control_plane::tests::list_machines_degrades_a_timed_out_route_without_failing_the_fleet ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 237 filtered out; finished in 0.04s
+
+
+--- stderr ---
+   Compiling port-runtime v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.81s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
