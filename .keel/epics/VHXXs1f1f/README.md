@@ -22,8 +22,8 @@ mission: VHXXs0v0P
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 0/1 voyages complete, 4/4 stories done
+**Progress:** 1/1 voyages complete, 4/4 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
-| [Recover Hosted Placement Truth Without Read-Path Stall](voyages/VHXXxt7rF/) | in-progress | 4/4 |
+| [Recover Hosted Placement Truth Without Read-Path Stall](voyages/VHXXxt7rF/) | done | 4/4 |
 <!-- END GENERATED -->

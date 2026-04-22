@@ -1,7 +1,7 @@
 ---
 # system-managed
 id: VHXXxt7rF
-status: in-progress
+status: done
 epic: VHXXs1f1f
 created_at: 2026-04-22T10:01:15
 # authored
@@ -9,6 +9,7 @@ title: Recover Hosted Placement Truth Without Read-Path Stall
 index: 1
 updated_at: 2026-04-22T10:05:09
 started_at: 2026-04-22T10:05:10
+completed_at: 2026-04-22T13:08:03
 ---
 
 # Recover Hosted Placement Truth Without Read-Path Stall
@@ -22,6 +23,8 @@ started_at: 2026-04-22T10:05:10
 |----------|-------------|
 | [SRS.md](SRS.md) | Requirements and verification criteria |
 | [SDD.md](SDD.md) | Architecture and implementation details |
+| [VOYAGE_REPORT.md](VOYAGE_REPORT.md) | Narrative summary of implementation and evidence |
+| [COMPLIANCE_REPORT.md](COMPLIANCE_REPORT.md) | Traceability matrix and verification proof |
 <!-- END DOCUMENTS -->
 
 ## Stories
