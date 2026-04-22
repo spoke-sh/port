@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-04-22T12:19:48.962855181-07:00
+command: cargo test -p port-runtime hosted_k3s_cluster_kubeconfig_ -- --nocapture --test-threads=1
+---
+
+running 2 tests
+test tests::hosted_k3s_cluster_kubeconfig_failure_preserves_readiness_summary ... ok
+test tests::hosted_k3s_cluster_kubeconfig_succeeds_without_node_visibility ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 235 filtered out; finished in 12.47s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
+
+thread 'tokio-rt-worker' (2760473) panicked at /home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.50.0/src/runtime/blocking/shutdown.rs:51:21:
+Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'tokio-rt-worker' (2760474) panicked at /home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.50.0/src/runtime/blocking/shutdown.rs:51:21:
+Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.
+
+thread 'tokio-rt-worker' (2766956) panicked at /home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.50.0/src/runtime/blocking/shutdown.rs:51:21:
+Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.
+
+thread 'tokio-rt-worker' (2766956) panicked at /home/alex/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.50.0/src/runtime/blocking/shutdown.rs:51:21:
+Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.

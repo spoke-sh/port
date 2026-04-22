@@ -1,0 +1,21 @@
+---
+recorded_at: 2026-04-22T12:19:13.134543401-07:00
+command: cargo test -p port --test machine_commands cli_cluster_ -- --nocapture --test-threads=1
+---
+
+running 8 tests
+test cli_cluster_contract_rejects_hosted_aws_and_multi_node_shapes ... ok
+test cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail ... ok
+test cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down ... ok
+test cli_cluster_list_and_show_surface_local_contract ... ok
+test cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms ... ok
+test cli_cluster_stage_stages_offline_bootstrap_kit_without_live_fetch ... ok
+test cli_cluster_status_json_surfaces_legacy_detached_runtime_drift ... ok
+test cli_cluster_status_surfaces_hosted_real_ha_truth ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 9.60s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/machine_commands.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/machine_commands-17b892b92daffb2c)

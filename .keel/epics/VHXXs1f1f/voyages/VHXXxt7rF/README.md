@@ -27,12 +27,12 @@ started_at: 2026-04-22T10:05:10
 ## Stories
 
 <!-- BEGIN GENERATED -->
-**Progress:** 2/4 stories complete
+**Progress:** 3/4 stories complete
 
 | Title | Type | Status |
 |-------|------|--------|
 | [Make Hosted Machine And Service Status Live-First Under Placement Drift](../../../../stories/VHXXzjYOd/README.md) | feat | done |
 | [Move Hosted Placement Repair Out Of Read Paths And Reconcile In The Background](../../../../stories/VHXXzjuOa/README.md) | feat | done |
-| [Split Hosted Cluster Readiness From Kubeconfig Handoff](../../../../stories/VHXXzkVPt/README.md) | feat | backlog |
+| [Split Hosted Cluster Readiness From Kubeconfig Handoff](../../../../stories/VHXXzkVPt/README.md) | feat | done |
 | [Add Control-Plane Placement Stall Observability And Regression Coverage](../../../../stories/VHXXzkwR0/README.md) | fix | backlog |
 <!-- END GENERATED -->

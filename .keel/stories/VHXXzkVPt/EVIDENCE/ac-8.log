@@ -1,0 +1,38 @@
+---
+recorded_at: 2026-04-22T12:20:33.984142848-07:00
+command: sh -lc 'cargo test -p port --test machine_commands cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms -- --nocapture --test-threads=1 && cargo test -p port --test machine_commands cli_cluster_status_surfaces_hosted_real_ha_truth -- --nocapture --test-threads=1 && cargo test -p port --test machine_commands cli_cluster_status_json_surfaces_legacy_detached_runtime_drift -- --nocapture --test-threads=1 && cargo test -p port --test machine_commands cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail -- --nocapture --test-threads=1'
+---
+
+running 1 test
+test cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 3.81s
+
+
+running 1 test
+test cli_cluster_status_surfaces_hosted_real_ha_truth ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.72s
+
+
+running 1 test
+test cli_cluster_status_json_surfaces_legacy_detached_runtime_drift ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.63s
+
+
+running 1 test
+test cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.70s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/machine_commands.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/machine_commands-17b892b92daffb2c)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/machine_commands.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/machine_commands-17b892b92daffb2c)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/machine_commands.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/machine_commands-17b892b92daffb2c)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/machine_commands.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/machine_commands-17b892b92daffb2c)

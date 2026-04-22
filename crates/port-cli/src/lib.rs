@@ -1387,7 +1387,7 @@ fn run_cluster(
             }
             ResolvedClusterKind::Hosted(_) => {
                 let result =
-                    port_runtime::hosted_k3s_cluster_access(config, &runtime_root, &cluster)?;
+                    port_runtime::hosted_k3s_cluster_kubeconfig(config, &runtime_root, &cluster)?;
                 let rewritten =
                     rewrite_kubeconfig_server(&result.kubeconfig, &result.api_endpoint)?;
                 let rendered = serde_json::json!({
@@ -1399,8 +1399,15 @@ fn run_cluster(
                     "api_endpoint": result.api_endpoint,
                     "stable_endpoint_posture": result.stable_endpoint_posture,
                     "stable_endpoint_detail": result.stable_endpoint_detail,
+                    "machine_runtime_readiness": result.machine_runtime_readiness,
+                    "api_surface": result.api_surface,
+                    "api_readiness": result.api_readiness,
+                    "api_output": result.api_output,
                     "kubeconfig_surface": result.kubeconfig_surface,
+                    "kubeconfig_availability": result.kubeconfig_availability,
                     "visibility_surface": result.visibility_surface,
+                    "node_visibility": result.node_visibility,
+                    "visibility_output": result.visibility_output,
                     "boundary_notes": result.boundary_notes,
                     "kubeconfig": rewritten,
                 });
@@ -1427,7 +1434,7 @@ fn run_cluster(
                                 result.worker_machines.join(" ")
                             }
                         );
-                        println!("kubeconfig surface: {}", result.kubeconfig_surface);
+                        print_hosted_k3s_readiness(&result);
                         print_boundary_notes(&result.boundary_notes);
                         println!("kubeconfig:");
                         print!("{}", rewritten);
@@ -1664,6 +1671,49 @@ fn print_boundary_notes(notes: &[String]) {
     }
 }
 
+fn print_multiline_field(label: &str, output: &str) {
+    if output.is_empty() {
+        println!("{label}: (none)");
+    } else {
+        println!("{label}:");
+        print!("{output}");
+        if !output.ends_with('\n') {
+            println!();
+        }
+    }
+}
+
+fn print_hosted_k3s_readiness(report: &port_runtime::HostedK3sClusterAccessReport) {
+    println!(
+        "machine-runtime readiness: {}",
+        report.machine_runtime_readiness.state
+    );
+    println!(
+        "machine-runtime detail: {}",
+        report.machine_runtime_readiness.detail
+    );
+    println!("api readiness: {}", report.api_readiness.state);
+    println!("api detail: {}", report.api_readiness.detail);
+    println!("api surface: {}", report.api_surface);
+    print_multiline_field("api output", &report.api_output);
+    println!(
+        "kubeconfig availability: {}",
+        report.kubeconfig_availability.state
+    );
+    println!(
+        "kubeconfig detail: {}",
+        report.kubeconfig_availability.detail
+    );
+    println!("kubeconfig surface: {}", report.kubeconfig_surface);
+    println!(
+        "node-visibility readiness: {}",
+        report.node_visibility.state
+    );
+    println!("node-visibility detail: {}", report.node_visibility.detail);
+    println!("visibility surface: {}", report.visibility_surface);
+    print_multiline_field("visibility output", &report.visibility_output);
+}
+
 fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sClusterAccessReport) {
     println!("cluster: {}", report.cluster_name);
     println!("control plane: {}", report.control_plane);
@@ -1725,17 +1775,7 @@ fn print_hosted_k3s_cluster_access_report(report: &port_runtime::HostedK3sCluste
             placement.node_name.as_deref().unwrap_or("(unresolved)")
         );
     }
-    println!("kubeconfig surface: {}", report.kubeconfig_surface);
-    println!("visibility surface: {}", report.visibility_surface);
-    if report.visibility_output.is_empty() {
-        println!("visibility output: (none)");
-    } else {
-        println!("visibility output:");
-        print!("{}", report.visibility_output);
-        if !report.visibility_output.ends_with('\n') {
-            println!();
-        }
-    }
+    print_hosted_k3s_readiness(report);
     for machine in &report.machine_access {
         let machine_name = machine.route.machine_name.as_deref().unwrap_or("(unknown)");
         let node_name = machine.route.node_name.as_deref().unwrap_or("(unresolved)");
