@@ -571,10 +571,11 @@ pub struct MachineWedgeServiceEvidence {
 
 /// Wedge and recovery state served directly by the control plane on
 /// the dedicated `machines/<name>/wedge` route. Populated from the
-/// in-memory `wedge_state` map and on-disk recovery records — no
-/// node-agent proxy and no guest operation. Designed for consumers
-/// that poll cluster status frequently and do not want to incur a
-/// full `MachineStatus` round trip per machine.
+/// in-memory `wedge_state` map, on-disk recovery records, and a
+/// short best-effort hosted K3s service probe when the machine is
+/// part of a hosted cluster. Designed for consumers that poll
+/// cluster status frequently and do not want to incur a full
+/// `MachineStatus` round trip per machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineWedgeStatus {
     pub machine_name: String,
@@ -2878,11 +2879,10 @@ fn hosted_k3s_machine_truth(
                 .clone()
                 .unwrap_or_else(|| String::from("(unknown)"));
             // Best-effort wedge enrichment: the dedicated control-plane
-            // route is read-only and never proxies to the node agent,
-            // so a failure here means the cluster cannot reach the
-            // hosted control plane at all — leave wedge fields at
-            // serde defaults and let the existing managed_services row
-            // carry the unreachable signal.
+            // route may do a short hosted K3s service probe. If it
+            // fails, leave wedge fields at serde defaults and let the
+            // existing managed_services row carry the unreachable
+            // signal.
             let wedge = hosted_control_plane_machine_wedge(config, &machine_name).ok();
             HostedK3sMachineTruth {
                 role: machine.role.clone(),
@@ -2894,11 +2894,10 @@ fn hosted_k3s_machine_truth(
                     .cloned()
                     .unwrap_or_else(|| machine.network_identity.clone()),
                 detail: machine.detail.clone(),
-                // guest_refresh_age_seconds lives on the node-agent,
-                // not the control plane, so the wedge route does not
-                // surface it. A future enrichment story can publish
-                // it via the heartbeat path if a consumer needs it on
-                // the cluster aggregate.
+                // The wedge route can surface guest freshness, but the
+                // cluster aggregate intentionally keeps that field off
+                // this row until a consumer needs it alongside the
+                // existing wedge metadata.
                 guest_refresh_age_seconds: None,
                 wedged_since_unix_s: wedge.as_ref().and_then(|w| w.wedged_since_unix_s),
                 wedge_class: wedge.as_ref().and_then(|w| w.wedge_class.clone()),

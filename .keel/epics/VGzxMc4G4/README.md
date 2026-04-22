@@ -22,7 +22,7 @@ mission: VGzwzdKvB
 ## Voyages
 
 <!-- BEGIN GENERATED -->
-**Progress:** 3/3 voyages complete, 9/9 stories done
+**Progress:** 3/3 voyages complete, 10/10 stories done
 | Voyage | Status | Stories |
 |--------|--------|---------|
 | [Tier-1 Guest Restart And Attempt Accounting](voyages/VGzxmpqrI/) | done | 3/3 |

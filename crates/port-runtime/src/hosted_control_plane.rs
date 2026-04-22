@@ -50,12 +50,12 @@ use crate::{
     delete_machine_secret_local, execute_guest_operation, hosted_placeholder_runtime_root,
     hosted_placeholder_runtime_root_for_config, hosted_stored_service_placements, iproute_binary,
     iptables_binary, launch_local_machine, list_detached_forwards, list_machine_secrets_local,
-    machine_monitor as runtime_machine_monitor, machine_monitor_report, machine_service_status,
-    machine_status as runtime_machine_status, machine_top as runtime_machine_top,
-    machine_top_report, prepare_guest_forward, put_machine_secret_local,
-    refresh_machine_service_list, refresh_machine_service_runtime, run_network_command,
-    start_detached_forward, stop_detached_forward, stop_machine as runtime_stop_machine,
-    stop_machine_service_live,
+    machine_monitor as runtime_machine_monitor, machine_monitor_report,
+    machine_service_status_stored_local, machine_status as runtime_machine_status,
+    machine_top as runtime_machine_top, machine_top_report, prepare_guest_forward,
+    put_machine_secret_local, refresh_machine_service_list, refresh_machine_service_runtime,
+    run_network_command, start_detached_forward, stop_detached_forward,
+    stop_machine as runtime_stop_machine, stop_machine_service_live,
 };
 use port_agent_protocol::{
     CopyRequest, ForwardResult, GuestOperation, OperationResult, RequestEnvelope, ResponseEnvelope,
@@ -362,6 +362,10 @@ const NODE_AGENT_REGISTRATION_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 // Hosted K3s service apply can legitimately run for several minutes while a
 // freshly relaunched control plane settles.
 const HOSTED_NODE_PROXY_TIMEOUT: Duration = Duration::from_secs(300);
+// Wedge inspection sits on hot cluster-status paths. Keep the hosted K3s
+// service probe short and fall back to stored runtime if the live node route
+// is slow or unavailable.
+const HOSTED_WEDGE_SERVICE_STATUS_TIMEOUT: Duration = Duration::from_secs(3);
 const HOSTED_MACHINE_STATUS_PROXY_TIMEOUT: Duration = Duration::from_secs(15);
 const RECOVERY_MACHINE_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const RECOVERY_MACHINE_BOOT_WAIT: Duration = Duration::from_secs(5);
@@ -1829,14 +1833,8 @@ fn effective_recovery_wedge_snapshot(
 ) -> EffectiveRecoveryWedgeSnapshot {
     let guest_refresh_age_seconds =
         resolve_guest_refresh_age_seconds_for_machine(state, machine_name, runtime_root);
-    let hosted_k3s_service_runtime = machine_service_status(
-        &state.inner.config,
-        runtime_root,
-        machine_name,
-        k3s_service_name,
-    )
-    .ok()
-    .map(|status| status.runtime);
+    let hosted_k3s_service_runtime =
+        hosted_k3s_service_runtime_for_wedge(state, runtime_root, machine_name, k3s_service_name);
     let hosted_k3s_service = hosted_k3s_service_runtime
         .as_ref()
         .map(|runtime| machine_wedge_service_evidence(k3s_service_name, runtime));
@@ -1893,6 +1891,48 @@ fn effective_recovery_wedge_snapshot(
         wedge_signal: None,
         hosted_k3s_service,
     }
+}
+
+fn hosted_k3s_service_runtime_for_wedge(
+    state: &ControlPlaneState,
+    runtime_root: &FsPath,
+    machine_name: &str,
+    service_name: &str,
+) -> Option<ServiceRuntimeObservation> {
+    let stored_runtime = machine_service_status_stored_local(
+        &state.inner.config,
+        runtime_root,
+        machine_name,
+        service_name,
+    )
+    .ok()
+    .map(|status| status.runtime);
+
+    // Never call `machine_service_status` from inside the hosted control-plane
+    // server. That path routes back through the hosted client and can recurse
+    // into this same server, starving the control-plane runtime.
+    let live_runtime = refresh_machine_placements(state)
+        .ok()
+        .and_then(|placements| placements.get(machine_name).cloned())
+        .and_then(|placement| {
+            resolve_known_node_binding(state, &placement.node_name)
+                .ok()
+                .flatten()
+                .map(|(binding, _)| binding)
+        })
+        .and_then(|binding| {
+            blocking_hosted_node_service_status(
+                state,
+                &binding,
+                machine_name,
+                service_name,
+                HOSTED_WEDGE_SERVICE_STATUS_TIMEOUT,
+            )
+            .ok()
+        })
+        .map(|status| status.runtime);
+
+    live_runtime.or(stored_runtime)
 }
 
 fn restart_machine_for_recovery(
@@ -5148,6 +5188,64 @@ async fn proxy_json_with_timeout<T: DeserializeOwned>(
             binding.node_name
         )
     })
+}
+
+fn blocking_hosted_node_service_status(
+    state: &ControlPlaneState,
+    binding: &HostedNodeBinding,
+    machine_name: &str,
+    service_name: &str,
+    timeout: Duration,
+) -> Result<crate::ServiceDefinitionStatus, String> {
+    let route = HostedNodeRoute::Service(HostedServiceRoute::Status {
+        machine_name: machine_name.to_string(),
+        service_name: service_name.to_string(),
+    });
+    let url = format!("{}{}", binding.endpoint.trim_end_matches('/'), route.path());
+    let client = reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|error| {
+            format!(
+                "control plane '{}' could not build a blocking service-status client for node '{}': {error}",
+                state.inner.control_plane, binding.node_name
+            )
+        })?;
+    let mut request = client.get(url);
+    for (name, value) in HostedNodeAgentHeaders::new(binding.token.clone()).to_header_map() {
+        request = request.header(name, value);
+    }
+    let response = request.send().map_err(|error| {
+        format!(
+            "control plane '{}' could not reach node '{}' for hosted service '{}' on machine '{}': {error}",
+            state.inner.control_plane, binding.node_name, service_name, machine_name
+        )
+    })?;
+    let status = response.status();
+    let bytes = response.bytes().map_err(|error| {
+        format!(
+            "control plane '{}' could not read hosted service '{}' on machine '{}' from node '{}': {error}",
+            state.inner.control_plane, service_name, machine_name, binding.node_name
+        )
+    })?;
+    if !status.is_success() {
+        if let Ok(error) = serde_json::from_slice::<HostedError>(&bytes) {
+            return Err(error.message);
+        }
+        return Err(format!(
+            "node agent '{}' returned status {} for hosted service '{}' on machine '{}'",
+            binding.node_name, status, service_name, machine_name
+        ));
+    }
+
+    serde_json::from_slice::<HostedSuccess<crate::ServiceDefinitionStatus>>(&bytes)
+        .map(|success| success.result)
+        .map_err(|error| {
+            format!(
+                "node agent '{}' returned invalid JSON for hosted service '{}' on machine '{}': {error}",
+                binding.node_name, service_name, machine_name
+            )
+        })
 }
 
 async fn proxy_bytes(
@@ -8986,6 +9084,99 @@ mod tests {
         );
 
         cleanup_registered_state("demo");
+    }
+
+    #[test]
+    fn effective_recovery_wedge_uses_live_node_service_status_without_self_calling_control_plane() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let control_plane = unique_test_control_plane("recovery-live-service-status");
+        let token_var = unique_test_env("PORT_RECOVERY_LIVE_SERVICE_STATUS_TOKEN");
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+        }
+
+        let mut config = sample_control_plane_config(tempdir.path());
+        retarget_demo_control_plane(&mut config, &control_plane, &token_var);
+        config
+            .control_planes
+            .get_mut(&control_plane)
+            .expect("control plane should exist")
+            .endpoint = String::from("http://127.0.0.1:1");
+
+        let node_addr = serve_recovery_mock_node_agent(RecoveryMockNodeState {
+            node_name: String::from("aws-linux-node"),
+            runtime_root: runtime_root.clone(),
+            pid: 4321,
+            commands: Arc::new(Mutex::new(Vec::new())),
+            guest_refresh_age_seconds: None,
+            service_name: String::from("k3s-server"),
+            service_runtime: crate::ServiceRuntimeObservation {
+                state: crate::ServiceRuntimeState::Failed,
+                record_path: runtime_root.join("cloud-aws").join("k3s-server.record"),
+                restart_count: 1,
+                pid: None,
+                exit_code: Some(1),
+                last_exit_code: Some(1),
+                last_exit_detail: Some(String::from("zombie runtime")),
+                health_state: ServiceHealthState::Unhealthy,
+                health_detail: Some(String::from("runtime unhealthy")),
+                stdout_path: None,
+                stderr_path: None,
+            },
+        });
+
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: control_plane.clone(),
+                bind: reserve_test_addr(),
+                node_bindings: vec![HostedNodeBinding {
+                    node_name: String::from("aws-linux-node"),
+                    endpoint: format!("http://{node_addr}"),
+                    token: String::from("node-token"),
+                }],
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+
+        let snapshot = super::effective_recovery_wedge_snapshot(
+            &state,
+            &runtime_root,
+            "cloud-aws",
+            "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
+            None,
+            2_000,
+        );
+
+        assert_eq!(snapshot.wedge, Some((super::WedgeClass::Guest, 2_000)));
+        assert_eq!(
+            snapshot.wedge_signal,
+            Some(MachineWedgeSignal::HostedK3sServiceRuntime)
+        );
+        assert_eq!(
+            snapshot
+                .hosted_k3s_service
+                .as_ref()
+                .map(|service| service.name.as_str()),
+            Some("k3s-server")
+        );
+        assert_eq!(
+            snapshot
+                .hosted_k3s_service
+                .as_ref()
+                .and_then(|service| service.exit_code),
+            Some(1)
+        );
+
+        cleanup_registered_state(&control_plane);
+        unsafe {
+            std::env::remove_var(&token_var);
+        }
     }
 
     #[test]

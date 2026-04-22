@@ -1,0 +1,5 @@
+---
+recorded_at: 2026-04-22T00:35:50.098007575-07:00
+mode: manual
+---
+Root cause: hosted control-plane wedge evaluation called machine_service_status, which routed back through the hosted control-plane client and could self-recurse during cluster status. Fix: read hosted K3s runtime from the live node-agent service status with a short timeout and stored-runtime fallback, and lock it with targeted regression tests.
