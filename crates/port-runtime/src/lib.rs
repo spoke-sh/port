@@ -8119,19 +8119,23 @@ pub(crate) fn hosted_stored_service_placements(
     let mut placements = Vec::new();
     let mut candidate_roots = Vec::<(Option<String>, PathBuf)>::new();
     let mut seen = BTreeSet::<(Option<String>, PathBuf)>::new();
+    let inventory_roots = inventory
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.host == machine.host)
+        .map(|(node_name, node)| (Some(node_name.clone()), node.runtime_root.clone()))
+        .collect::<Vec<_>>();
 
-    if let Some(placement) = hosted_stored_machine_placement(config, machine_name)? {
-        candidate_roots.push((Some(placement.node_name), placement.runtime_root));
-    }
+    let had_stored_machine_placement =
+        if let Some(placement) = hosted_stored_machine_placement(config, machine_name)? {
+            candidate_roots.push((Some(placement.node_name), placement.runtime_root));
+            true
+        } else {
+            false
+        };
 
-    if candidate_roots.is_empty() {
-        for (node_name, node) in inventory
-            .nodes
-            .iter()
-            .filter(|(_, node)| node.host == machine.host)
-        {
-            candidate_roots.push((Some(node_name.clone()), node.runtime_root.clone()));
-        }
+    if !had_stored_machine_placement {
+        candidate_roots.extend(inventory_roots.iter().cloned());
     }
 
     for (node_name, runtime_root) in candidate_roots {
@@ -8145,6 +8149,21 @@ pub(crate) fn hosted_stored_service_placements(
             &runtime_root,
             service_name,
         )?);
+    }
+
+    if placements.is_empty() && had_stored_machine_placement {
+        for (node_name, runtime_root) in inventory_roots {
+            let dedupe_key = (node_name.clone(), runtime_root.clone());
+            if !seen.insert(dedupe_key) {
+                continue;
+            }
+            placements.extend(read_hosted_service_placements_from_runtime(
+                machine_name,
+                node_name.as_deref(),
+                &runtime_root,
+                service_name,
+            )?);
+        }
     }
 
     placements.sort_by(|left, right| {
@@ -25010,6 +25029,12 @@ exec sleep 30
         )
         .expect("secondary placement should succeed");
         assert_eq!(applied.node_name.as_deref(), Some("aws-linux-node-b"));
+        assert!(
+            service_definition_dir(&secondary_paths.runtime_dir)
+                .join("svc-secondary.json")
+                .exists(),
+            "secondary runtime should retain the applied service definition"
+        );
 
         let listed = list_machine_services(&config, tempdir.path(), "cloud-aws")
             .expect("service list should succeed");
