@@ -1,0 +1,28 @@
+---
+recorded_at: 2026-04-21T22:59:42.325533136-07:00
+command: cargo test -p port-runtime recovery_decision_ -- --nocapture && cargo test -p port-runtime reconcile_machine_recovery_clears_in_progress_when_wedge_is_gone -- --nocapture
+---
+
+running 7 tests
+test hosted_control_plane::tests::recovery_decision_escalates_straight_to_tier_3_on_node_wedge ... ok
+test hosted_control_plane::tests::recovery_decision_fires_tier_1_on_guest_wedge_when_enabled ... ok
+test hosted_control_plane::tests::recovery_decision_is_none_when_disabled ... ok
+test hosted_control_plane::tests::recovery_decision_promotes_tier_1_to_tier_2_and_tier_3 ... ok
+test hosted_control_plane::tests::recovery_decision_re_reads_wedge_state_avoiding_stale_trigger ... ok
+test hosted_control_plane::tests::recovery_decision_takes_no_further_action_in_awaiting_tier_3 ... ok
+test hosted_control_plane::tests::recovery_decision_waits_for_settle_window_while_in_progress ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 220 filtered out; finished in 0.00s
+
+
+running 1 test
+test hosted_control_plane::tests::reconcile_machine_recovery_clears_in_progress_when_wedge_is_gone ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 226 filtered out; finished in 0.01s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_runtime-a01ac35e6b3e45bd)

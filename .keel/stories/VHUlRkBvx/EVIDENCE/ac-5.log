@@ -1,0 +1,7 @@
+---
+recorded_at: 2026-04-21T23:00:49.958484412-07:00
+command: just check
+---
+
+--- stderr ---
+Command timed out

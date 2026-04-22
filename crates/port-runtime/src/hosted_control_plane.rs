@@ -43,11 +43,11 @@ use crate::{
     DetachedForwardLaunchRequest, GuestCopyRequest, GuestForwardRequest, GuestRequest,
     HostedFleetFreshnessState, HostedFleetNodeStatus, HostedFleetRoutingEligibility,
     HostedStoredServicePlacement, LaunchMetadata, LaunchRequest, MachineRuntimeState,
-    MachineStatus, RecoveryAttemptCounters, RecoveryState, RuntimePaths,
-    ServiceApplyRequest as RuntimeServiceApplyRequest, ServiceRuntimeObservation,
-    ServiceRuntimeState, ServiceSecretBinding, StopResult, apply_machine_service_live,
-    architecture_dir, copy_guest_file, copy_guest_via_endpoint, delete_machine_secret_local,
-    execute_guest_operation, hosted_placeholder_runtime_root,
+    MachineStatus, MachineWedgeServiceEvidence, MachineWedgeSignal, RecoveryAttemptCounters,
+    RecoveryState, RuntimePaths, ServiceApplyRequest as RuntimeServiceApplyRequest,
+    ServiceRuntimeObservation, ServiceRuntimeState, ServiceSecretBinding, StopResult,
+    apply_machine_service_live, architecture_dir, copy_guest_file, copy_guest_via_endpoint,
+    delete_machine_secret_local, execute_guest_operation, hosted_placeholder_runtime_root,
     hosted_placeholder_runtime_root_for_config, hosted_stored_service_placements, iproute_binary,
     iptables_binary, launch_local_machine, list_detached_forwards, list_machine_secrets_local,
     machine_monitor as runtime_machine_monitor, machine_monitor_report, machine_service_status,
@@ -113,6 +113,14 @@ struct WedgeFact {
     wedge_class: WedgeClass,
 }
 
+#[derive(Debug, Clone)]
+struct EffectiveRecoveryWedgeSnapshot {
+    wedge: Option<(WedgeClass, u64)>,
+    guest_refresh_age_seconds: Option<u64>,
+    wedge_signal: Option<MachineWedgeSignal>,
+    hosted_k3s_service: Option<MachineWedgeServiceEvidence>,
+}
+
 /// Recovery ladder action decided by the runner for a given machine.
 ///
 /// These are the possible outputs of one decision tick. Port owns
@@ -150,6 +158,9 @@ pub(crate) struct RecoveryDecisionInput<'a> {
     /// decide `Tier3AutoClear` when the machine was previously in
     /// `awaiting_tier_3_host_recycle`.
     pub heartbeats_fresh: bool,
+    /// `true` when a tier-1/tier-2 action is still within the configured
+    /// settle window and should not be immediately followed by another action.
+    pub recovery_is_settling: bool,
 }
 
 /// Pure decision function for the recovery ladder.
@@ -173,6 +184,10 @@ pub(crate) fn decide_recovery_action(input: RecoveryDecisionInput<'_>) -> Option
         return input
             .heartbeats_fresh
             .then_some(RecoveryAction::Tier3AutoClear);
+    }
+
+    if input.recovery_is_settling {
+        return None;
     }
 
     // No wedge observed: nothing to do.
@@ -1338,9 +1353,8 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 /// to the control plane (e.g. via the registration-refresh payload or a
 /// dedicated heartbeat push). Until that lands, this detector combines
 /// node-agent freshness with live hosted machine-status reads, using the
-/// node-agent's guest-heartbeat sidecar when available and falling back to the
-/// machine placement age when a live running machine has not reported any guest
-/// heartbeat since its current placement.
+/// node-agent's guest-heartbeat sidecar when available. Missing guest-heartbeat
+/// metadata is treated as unknown, not as proof of a guest wedge.
 fn reconcile_wedge_detector_tick(state: &ControlPlaneState) {
     let now_unix_s = match current_unix_timestamp_seconds() {
         Ok(value) => value,
@@ -1369,13 +1383,7 @@ fn reconcile_wedge_detector_tick(state: &ControlPlaneState) {
                 .and_then(|node| node_receipt_instants.get(&node).copied())
                 .map(|instant| now_instant.saturating_duration_since(instant).as_secs());
             let guest_age = runtime_root.as_deref().and_then(|runtime_root| {
-                resolve_guest_refresh_age_seconds_for_machine(
-                    state,
-                    machine_name,
-                    runtime_root,
-                    node_age,
-                    now_unix_s,
-                )
+                resolve_guest_refresh_age_seconds_for_machine(state, machine_name, runtime_root)
             });
             ages.insert(machine_name.clone(), (node_age, guest_age));
         }
@@ -1435,24 +1443,10 @@ fn resolve_guest_refresh_age_seconds_for_machine(
     state: &ControlPlaneState,
     machine_name: &str,
     runtime_root: &FsPath,
-    node_age_seconds: Option<u64>,
-    now_unix_s: u64,
 ) -> Option<u64> {
-    match runtime_machine_status(&state.inner.config, runtime_root, machine_name) {
-        Ok(status) => {
-            if let Some(age_seconds) = status.guest_refresh_age_seconds {
-                return Some(age_seconds);
-            }
-            if matches!(status.state, MachineRuntimeState::Running) && node_age_seconds.is_some() {
-                return resolve_machine_placement_age_seconds(state, machine_name, now_unix_s);
-            }
-            None
-        }
-        Err(_) if node_age_seconds.is_some() => {
-            resolve_machine_placement_age_seconds(state, machine_name, now_unix_s)
-        }
-        Err(_) => None,
-    }
+    runtime_machine_status(&state.inner.config, runtime_root, machine_name)
+        .ok()
+        .and_then(|status| status.guest_refresh_age_seconds)
 }
 
 /// Resolve the per-cluster recovery config for a k3s cluster by
@@ -1485,6 +1479,65 @@ fn resolve_detection_config_for_cluster(
         .get(cluster_name)
         .map(|spec| spec.detection)
         .unwrap_or_default()
+}
+
+fn hosted_k3s_cluster_membership_for_machine(
+    state: &ControlPlaneState,
+    machine_name: &str,
+) -> Option<(String, &'static str)> {
+    for (cluster_name, cluster_spec) in &state.inner.config.k3s_clusters {
+        if cluster_spec.control_plane != state.inner.control_plane {
+            continue;
+        }
+        if cluster_spec
+            .server_machines
+            .iter()
+            .any(|candidate| candidate == machine_name)
+        {
+            return Some((cluster_name.clone(), "k3s-server"));
+        }
+        if cluster_spec
+            .worker_machines
+            .iter()
+            .any(|candidate| candidate == machine_name)
+        {
+            return Some((cluster_name.clone(), "k3s-agent"));
+        }
+    }
+    None
+}
+
+fn machine_wedge_service_evidence(
+    service_name: &str,
+    runtime: &ServiceRuntimeObservation,
+) -> MachineWedgeServiceEvidence {
+    MachineWedgeServiceEvidence {
+        name: service_name.to_string(),
+        state: runtime.state,
+        health_state: runtime.health_state,
+        pid: runtime.pid,
+        exit_code: runtime.exit_code,
+        last_exit_code: runtime.last_exit_code,
+        health_detail: runtime.health_detail.clone(),
+        last_exit_detail: runtime.last_exit_detail.clone(),
+    }
+}
+
+fn recovery_is_settling(
+    record: &PersistedRecoveryRecord,
+    recovery_config: &port_model::ClusterRecoveryConfig,
+    now_unix_s: u64,
+) -> bool {
+    if !matches!(record.recovery_state, crate::RecoveryState::InProgress) {
+        return false;
+    }
+    record
+        .last_recovery_action
+        .as_ref()
+        .map(|action| {
+            now_unix_s.saturating_sub(action.timestamp_unix_s) < recovery_config.settle_seconds
+        })
+        .unwrap_or(true)
 }
 
 /// Tick interval for the live recovery runner. Slightly longer than
@@ -1618,7 +1671,7 @@ fn reconcile_machine_recovery(
             .get(machine_name)
             .map(|fact| (fact.wedge_class, fact.wedged_since_unix_s))
     });
-    let wedge = effective_recovery_wedge(
+    let wedge_snapshot = effective_recovery_wedge_snapshot(
         state,
         &runtime_root,
         machine_name,
@@ -1627,7 +1680,14 @@ fn reconcile_machine_recovery(
         observed_wedge,
         now_unix_s,
     );
+    let wedge = wedge_snapshot.wedge;
     let heartbeats_fresh = wedge.is_none();
+
+    if heartbeats_fresh && matches!(record.recovery_state, crate::RecoveryState::InProgress) {
+        clear_recovery_record(&mut record);
+        let _ = save_recovery_record(&runtime_root, machine_name, &record);
+        return;
+    }
 
     let action = decide_recovery_action(RecoveryDecisionInput {
         recovery_config,
@@ -1637,6 +1697,7 @@ fn reconcile_machine_recovery(
         recovery_state: record.recovery_state,
         recovery_attempts: record.recovery_attempts,
         heartbeats_fresh,
+        recovery_is_settling: recovery_is_settling(&record, recovery_config, now_unix_s),
     });
 
     let Some(action) = action else {
@@ -1735,6 +1796,7 @@ fn reconcile_machine_recovery(
     }
 }
 
+#[cfg(test)]
 fn effective_recovery_wedge(
     state: &ControlPlaneState,
     runtime_root: &FsPath,
@@ -1744,39 +1806,93 @@ fn effective_recovery_wedge(
     observed_wedge: Option<(WedgeClass, u64)>,
     now_unix_s: u64,
 ) -> Option<(WedgeClass, u64)> {
-    if let Some(guest_age_seconds) = resolve_guest_refresh_age_seconds_for_machine(
+    effective_recovery_wedge_snapshot(
         state,
-        machine_name,
         runtime_root,
-        resolve_placed_node_for_machine(state, machine_name).map(|_| 0),
+        machine_name,
+        k3s_service_name,
+        detection_config,
+        observed_wedge,
         now_unix_s,
-    ) {
-        if guest_age_seconds > detection_config.guest_trigger_refresh_age_seconds {
-            let wedged_since_unix_s = observed_wedge
-                .map(|(_, since)| since)
-                .unwrap_or_else(|| now_unix_s.saturating_sub(guest_age_seconds));
-            return Some((WedgeClass::Guest, wedged_since_unix_s));
-        }
-    }
+    )
+    .wedge
+}
 
-    let runtime = match machine_service_status(
+fn effective_recovery_wedge_snapshot(
+    state: &ControlPlaneState,
+    runtime_root: &FsPath,
+    machine_name: &str,
+    k3s_service_name: &str,
+    detection_config: &port_model::ClusterDetectionConfig,
+    observed_wedge: Option<(WedgeClass, u64)>,
+    now_unix_s: u64,
+) -> EffectiveRecoveryWedgeSnapshot {
+    let guest_refresh_age_seconds =
+        resolve_guest_refresh_age_seconds_for_machine(state, machine_name, runtime_root);
+    let hosted_k3s_service_runtime = machine_service_status(
         &state.inner.config,
         runtime_root,
         machine_name,
         k3s_service_name,
-    ) {
-        Ok(status) => status.runtime,
-        Err(_) => return observed_wedge,
-    };
+    )
+    .ok()
+    .map(|status| status.runtime);
+    let hosted_k3s_service = hosted_k3s_service_runtime
+        .as_ref()
+        .map(|runtime| machine_wedge_service_evidence(k3s_service_name, runtime));
 
-    if k3s_service_runtime_indicates_recoverable_guest_wedge(&runtime) {
-        return Some((
-            WedgeClass::Guest,
-            observed_wedge.map(|(_, since)| since).unwrap_or(now_unix_s),
-        ));
+    if let Some((WedgeClass::Node, wedged_since_unix_s)) = observed_wedge {
+        return EffectiveRecoveryWedgeSnapshot {
+            wedge: Some((WedgeClass::Node, wedged_since_unix_s)),
+            guest_refresh_age_seconds,
+            wedge_signal: Some(MachineWedgeSignal::NodeHeartbeatStale),
+            hosted_k3s_service,
+        };
     }
 
-    observed_wedge
+    if let Some(age_seconds) = guest_refresh_age_seconds
+        && age_seconds > detection_config.guest_trigger_refresh_age_seconds
+    {
+        let wedged_since_unix_s = observed_wedge
+            .map(|(_, since)| since)
+            .unwrap_or_else(|| now_unix_s.saturating_sub(age_seconds));
+        return EffectiveRecoveryWedgeSnapshot {
+            wedge: Some((WedgeClass::Guest, wedged_since_unix_s)),
+            guest_refresh_age_seconds,
+            wedge_signal: Some(MachineWedgeSignal::GuestHeartbeatStale),
+            hosted_k3s_service,
+        };
+    }
+
+    if let Some(runtime) = hosted_k3s_service_runtime.as_ref()
+        && k3s_service_runtime_indicates_recoverable_guest_wedge(runtime)
+    {
+        return EffectiveRecoveryWedgeSnapshot {
+            wedge: Some((
+                WedgeClass::Guest,
+                observed_wedge.map(|(_, since)| since).unwrap_or(now_unix_s),
+            )),
+            guest_refresh_age_seconds,
+            wedge_signal: Some(MachineWedgeSignal::HostedK3sServiceRuntime),
+            hosted_k3s_service,
+        };
+    }
+
+    if let Some((WedgeClass::Guest, wedged_since_unix_s)) = observed_wedge {
+        return EffectiveRecoveryWedgeSnapshot {
+            wedge: Some((WedgeClass::Guest, wedged_since_unix_s)),
+            guest_refresh_age_seconds,
+            wedge_signal: Some(MachineWedgeSignal::CachedDetectorState),
+            hosted_k3s_service,
+        };
+    }
+
+    EffectiveRecoveryWedgeSnapshot {
+        wedge: None,
+        guest_refresh_age_seconds,
+        wedge_signal: None,
+        hosted_k3s_service,
+    }
 }
 
 fn restart_machine_for_recovery(
@@ -2752,19 +2868,20 @@ async fn machine_wedge(
 
     let mut wedge_status = crate::MachineWedgeStatus {
         machine_name: machine.clone(),
+        guest_refresh_age_seconds: None,
         wedged_since_unix_s: None,
         wedge_class: None,
+        wedge_signal: None,
+        hosted_k3s_service: None,
         recovery_attempts: crate::RecoveryAttemptCounters::default(),
         last_recovery_action: None,
         recovery_state: crate::RecoveryState::default(),
     };
-
-    if let Ok(wedge_state) = state.inner.wedge_state.read() {
-        if let Some(fact) = wedge_state.get(&machine) {
-            wedge_status.wedged_since_unix_s = Some(fact.wedged_since_unix_s);
-            wedge_status.wedge_class = Some(fact.wedge_class.to_string());
-        }
-    }
+    let observed_wedge = state.inner.wedge_state.read().ok().and_then(|wedge_state| {
+        wedge_state
+            .get(&machine)
+            .map(|fact| (fact.wedge_class, fact.wedged_since_unix_s))
+    });
 
     let route = match resolve_machine_binding(&state, &summary) {
         Ok((_, route, _)) => route,
@@ -2772,11 +2889,48 @@ async fn machine_wedge(
     };
 
     if let Some(runtime_root) = route.runtime_root.as_ref() {
+        if let Some((cluster_name, k3s_service_name)) =
+            hosted_k3s_cluster_membership_for_machine(&state, &machine)
+            && let Ok(now_unix_s) = current_unix_timestamp_seconds()
+        {
+            let detection_config = resolve_detection_config_for_cluster(&state, &cluster_name);
+            let snapshot = effective_recovery_wedge_snapshot(
+                &state,
+                runtime_root,
+                &machine,
+                k3s_service_name,
+                &detection_config,
+                observed_wedge,
+                now_unix_s,
+            );
+            wedge_status.guest_refresh_age_seconds = snapshot.guest_refresh_age_seconds;
+            wedge_status.wedge_signal = snapshot.wedge_signal;
+            wedge_status.hosted_k3s_service = snapshot.hosted_k3s_service;
+            if let Some((wedge_class, wedged_since_unix_s)) = snapshot.wedge {
+                wedge_status.wedged_since_unix_s = Some(wedged_since_unix_s);
+                wedge_status.wedge_class = Some(wedge_class.to_string());
+            }
+        } else if let Some((wedge_class, wedged_since_unix_s)) = observed_wedge {
+            wedge_status.wedged_since_unix_s = Some(wedged_since_unix_s);
+            wedge_status.wedge_class = Some(wedge_class.to_string());
+            wedge_status.wedge_signal = Some(match wedge_class {
+                WedgeClass::Node => MachineWedgeSignal::NodeHeartbeatStale,
+                WedgeClass::Guest => MachineWedgeSignal::CachedDetectorState,
+            });
+        }
+
         if let Ok(Some(record)) = load_recovery_record(runtime_root, &machine) {
             wedge_status.recovery_attempts = record.recovery_attempts;
             wedge_status.last_recovery_action = record.last_recovery_action;
             wedge_status.recovery_state = record.recovery_state;
         }
+    } else if let Some((wedge_class, wedged_since_unix_s)) = observed_wedge {
+        wedge_status.wedged_since_unix_s = Some(wedged_since_unix_s);
+        wedge_status.wedge_class = Some(wedge_class.to_string());
+        wedge_status.wedge_signal = Some(match wedge_class {
+            WedgeClass::Node => MachineWedgeSignal::NodeHeartbeatStale,
+            WedgeClass::Guest => MachineWedgeSignal::CachedDetectorState,
+        });
     }
 
     json_response(
@@ -7536,6 +7690,8 @@ mod tests {
         pid: u32,
         commands: Arc<Mutex<Vec<String>>>,
         guest_refresh_age_seconds: Option<u64>,
+        service_name: String,
+        service_runtime: crate::ServiceRuntimeObservation,
     }
 
     fn sample_artifact_transfer_request(
@@ -7596,6 +7752,31 @@ mod tests {
     async fn hosted_artifact_routes_persist_and_stream_selected_variant() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let mut config = sample_control_plane_config(tempdir.path());
+        let mut worker = config
+            .machines
+            .get("cloud-aws")
+            .expect("cloud-aws machine should exist")
+            .clone();
+        worker.guest.vsock_cid = 63;
+        worker.guest.control_port = 7002;
+        worker.guest.console_log = PathBuf::from("runtime/cloud-aws-worker/console.log");
+        config
+            .machines
+            .insert(String::from("cloud-aws-worker"), worker);
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws")],
+                worker_machines: vec![String::from("cloud-aws-worker")],
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: port_model::HostedSchedulerPolicy::DeterministicFirstFit,
+                version: Some(String::from("v1.35.2+k3s1")),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: vec![String::from("--node-label=role=worker")],
+            },
+        );
         let control_plane = unique_test_control_plane("artifact-routes");
         let token_var = unique_test_env("PORT_TEST_ARTIFACT_ROUTE_TOKEN");
         retarget_demo_control_plane(&mut config, &control_plane, &token_var);
@@ -8771,7 +8952,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_recovery_wedge_marks_missing_guest_heartbeat_since_placement_as_guest_wedge() {
+    fn effective_recovery_wedge_does_not_mark_missing_guest_refresh_age_as_guest_wedge() {
         let tempdir = TempDir::new().expect("tempdir should be created");
         let runtime_root = tempdir.path().join("hosted/aws-linux-node");
         let config = sample_control_plane_config(tempdir.path());
@@ -8798,9 +8979,11 @@ mod tests {
             &port_model::ClusterDetectionConfig::default(),
             None,
             2_000,
-        )
-        .expect("cloud-aws should be marked wedged");
-        assert_eq!(wedge.0, super::WedgeClass::Guest);
+        );
+        assert!(
+            wedge.is_none(),
+            "missing guest refresh age must not classify as a guest wedge"
+        );
 
         cleanup_registered_state("demo");
     }
@@ -8816,6 +8999,20 @@ mod tests {
         }
 
         let mut config = sample_control_plane_config(tempdir.path());
+        config.k3s_clusters.insert(
+            String::from("demo"),
+            port_model::K3sClusterSpec {
+                control_plane: String::from("demo"),
+                host_group: String::from("aws-builders"),
+                server_machines: vec![String::from("cloud-aws")],
+                worker_machines: Vec::new(),
+                api_endpoint: String::from("https://demo-k3s.internal:6443"),
+                control_plane_scheduler: port_model::HostedSchedulerPolicy::DeterministicFirstFit,
+                version: Some(String::from("v1.35.2+k3s1")),
+                server_args: vec![String::from("--disable=traefik")],
+                worker_args: Vec::new(),
+            },
+        );
         retarget_demo_control_plane(&mut config, &control_plane, &token_var);
 
         let commands = Arc::new(Mutex::new(Vec::new()));
@@ -8825,6 +9022,20 @@ mod tests {
             pid: 4321,
             commands: commands.clone(),
             guest_refresh_age_seconds: None,
+            service_name: String::from("k3s-server"),
+            service_runtime: crate::ServiceRuntimeObservation {
+                state: crate::ServiceRuntimeState::Running,
+                record_path: runtime_root.join("cloud-aws").join("k3s-server.record"),
+                restart_count: 0,
+                pid: Some(4321),
+                exit_code: None,
+                last_exit_code: None,
+                last_exit_detail: None,
+                health_state: ServiceHealthState::Healthy,
+                health_detail: None,
+                stdout_path: None,
+                stderr_path: None,
+            },
         });
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener should bind");
@@ -8910,6 +9121,75 @@ mod tests {
         cleanup_registered_state(&control_plane);
         unsafe {
             std::env::remove_var(&token_var);
+        }
+    }
+
+    #[test]
+    fn reconcile_machine_recovery_clears_in_progress_when_wedge_is_gone() {
+        let tempdir = TempDir::new().expect("tempdir should be created");
+        let runtime_root = tempdir.path().join("hosted/aws-linux-node");
+        let config = sample_control_plane_config(tempdir.path());
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::set_var("PORT_DEMO_TOKEN", "demo-token");
+        }
+        let state = build_state(
+            config,
+            ControlPlaneServeRequest {
+                control_plane: String::from("demo"),
+                bind: reserve_test_addr(),
+                node_bindings: Vec::new(),
+            },
+        )
+        .expect("control-plane state should build");
+
+        place_machine_for_recovery(&state, "cloud-aws", &runtime_root);
+        super::save_recovery_record(
+            &runtime_root,
+            "cloud-aws",
+            &super::PersistedRecoveryRecord {
+                recovery_state: crate::RecoveryState::InProgress,
+                recovery_attempts: crate::RecoveryAttemptCounters {
+                    tier_1: 1,
+                    ..Default::default()
+                },
+                last_recovery_action: Some(crate::RecoveryActionRecord {
+                    tier: 1,
+                    timestamp_unix_s: 1_950,
+                    outcome: String::from("tier-1-machine-restarted-at-1"),
+                }),
+            },
+        )
+        .expect("recovery record should save");
+
+        super::reconcile_machine_recovery(
+            &state,
+            "cloud-aws",
+            "k3s-server",
+            &port_model::ClusterDetectionConfig::default(),
+            &enabled_recovery_config(),
+            2_000,
+        );
+
+        let record = super::load_recovery_record(&runtime_root, "cloud-aws")
+            .expect("recovery record should load")
+            .expect("recovery record should exist");
+        assert_eq!(record.recovery_state, crate::RecoveryState::Ok);
+        assert_eq!(
+            record.recovery_attempts,
+            crate::RecoveryAttemptCounters::default()
+        );
+        assert_eq!(
+            record
+                .last_recovery_action
+                .as_ref()
+                .map(|action| action.outcome.as_str()),
+            Some("tier-1-machine-restarted-at-1")
+        );
+
+        cleanup_registered_state("demo");
+        unsafe {
+            std::env::remove_var("PORT_DEMO_TOKEN");
         }
     }
 
@@ -9177,6 +9457,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: crate::RecoveryAttemptCounters::default(),
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         assert_eq!(decide_recovery_action(input), None);
     }
@@ -9198,6 +9479,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: crate::RecoveryAttemptCounters::default(),
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         assert_eq!(
             decide_recovery_action(input),
@@ -9223,6 +9505,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: crate::RecoveryAttemptCounters::default(),
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         assert_eq!(
             decide_recovery_action(input),
@@ -9247,6 +9530,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: attempts,
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         // tier_1 under threshold: keep firing tier-1
         let mut attempts = crate::RecoveryAttemptCounters {
@@ -9294,6 +9578,7 @@ mod tests {
                 tier_3: 1,
             },
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         // Heartbeats still stale: no action.
         assert_eq!(decide_recovery_action(base), None);
@@ -9329,6 +9614,32 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: crate::RecoveryAttemptCounters::default(),
             heartbeats_fresh: false,
+            recovery_is_settling: false,
+        };
+        assert_eq!(decide_recovery_action(input), None);
+    }
+
+    #[test]
+    fn recovery_decision_waits_for_settle_window_while_in_progress() {
+        let cfg = port_model::ClusterRecoveryConfig {
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            window_seconds: 1800,
+            enabled: true,
+            settle_seconds: 60,
+        };
+        let input = RecoveryDecisionInput {
+            recovery_config: &cfg,
+            tier_2_after_attempts: 2,
+            tier_3_after_attempts: 4,
+            wedge: Some((WedgeClass::Guest, 100)),
+            recovery_state: crate::RecoveryState::InProgress,
+            recovery_attempts: crate::RecoveryAttemptCounters {
+                tier_1: 1,
+                ..Default::default()
+            },
+            heartbeats_fresh: false,
+            recovery_is_settling: true,
         };
         assert_eq!(decide_recovery_action(input), None);
     }
@@ -9428,6 +9739,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: attempts,
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         assert_eq!(
             decide_recovery_action(input),
@@ -9449,6 +9761,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: attempts,
             heartbeats_fresh: true,
+            recovery_is_settling: false,
         };
         assert_eq!(decide_recovery_action(converge), None);
 
@@ -9486,6 +9799,7 @@ mod tests {
             recovery_state: crate::RecoveryState::Ok,
             recovery_attempts: exhausted,
             heartbeats_fresh: false,
+            recovery_is_settling: false,
         };
         assert_eq!(
             decide_recovery_action(escalate),
@@ -9501,6 +9815,7 @@ mod tests {
             recovery_state: crate::RecoveryState::AwaitingTier3HostRecycle,
             recovery_attempts: exhausted,
             heartbeats_fresh: true,
+            recovery_is_settling: false,
         };
         assert_eq!(
             decide_recovery_action(recover),
@@ -9655,6 +9970,7 @@ mod tests {
                 tier_3: 1,
             },
             heartbeats_fresh: true,
+            recovery_is_settling: false,
         };
         assert_eq!(
             decide_recovery_action(awaiting),
@@ -12603,6 +12919,61 @@ mod tests {
             })
         }
 
+        async fn service_status_handler(
+            State(state): State<RecoveryMockNodeState>,
+            Path((machine, service)): Path<(String, String)>,
+        ) -> Response {
+            if service != state.service_name {
+                return super::error_response(
+                    StatusCode::NOT_FOUND,
+                    format!("unexpected service '{service}'"),
+                    None,
+                );
+            }
+
+            super::json_response(
+                StatusCode::OK,
+                &HostedSuccess {
+                    route: HostedRouteContext {
+                        control_plane: Some(String::from("demo")),
+                        machine_name: Some(machine.clone()),
+                        node_name: Some(state.node_name.clone()),
+                        ..HostedRouteContext::default()
+                    },
+                    result: crate::ServiceDefinitionStatus {
+                        machine_name: machine.clone(),
+                        name: service.clone(),
+                        kind: crate::ServiceKind::Service,
+                        desired_state: crate::ServiceDesiredState::Active,
+                        runtime: state.service_runtime.clone(),
+                        command: vec![String::from("/usr/bin/k3s"), service.clone()],
+                        secret_bindings: Vec::new(),
+                        secret_sources: Vec::new(),
+                        policy: crate::ServicePolicy {
+                            restart: crate::ServiceRestartPolicy::Always,
+                            healthcheck: crate::ServiceHealthcheck {
+                                policy: crate::ServiceHealthPolicy::Command,
+                                command: vec![String::from("/bin/true")],
+                                restart_on_unhealthy: true,
+                            },
+                        },
+                        control: port_model::MachineControlContract::hosted_control_plane(),
+                        control_plane: Some(String::from("demo")),
+                        node_name: Some(state.node_name.clone()),
+                        host_groups: Vec::new(),
+                        host_group_policies: BTreeMap::new(),
+                        target_host_group: None,
+                        scheduler: None,
+                        manifest_path: state
+                            .runtime_root
+                            .join(&machine)
+                            .join(format!("{service}.json")),
+                        detail: String::from("mock service status"),
+                    },
+                },
+            )
+        }
+
         async fn command_handler(
             State(state): State<RecoveryMockNodeState>,
             Path(machine): Path<String>,
@@ -12701,6 +13072,10 @@ mod tests {
             .route(
                 "/v1/node/machines/{machine}",
                 get(status_handler).post(command_handler),
+            )
+            .route(
+                "/v1/node/machines/{machine}/services/{service}",
+                get(service_status_handler),
             )
             .with_state(state);
         std::thread::spawn(move || {

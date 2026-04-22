@@ -543,6 +543,32 @@ impl RecoveryAttemptCounters {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineWedgeSignal {
+    NodeHeartbeatStale,
+    GuestHeartbeatStale,
+    HostedK3sServiceRuntime,
+    CachedDetectorState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineWedgeServiceEvidence {
+    pub name: String,
+    pub state: ServiceRuntimeState,
+    pub health_state: ServiceHealthState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_exit_detail: Option<String>,
+}
+
 /// Wedge and recovery state served directly by the control plane on
 /// the dedicated `machines/<name>/wedge` route. Populated from the
 /// in-memory `wedge_state` map and on-disk recovery records — no
@@ -553,9 +579,15 @@ impl RecoveryAttemptCounters {
 pub struct MachineWedgeStatus {
     pub machine_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_refresh_age_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wedged_since_unix_s: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wedge_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wedge_signal: Option<MachineWedgeSignal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosted_k3s_service: Option<MachineWedgeServiceEvidence>,
     #[serde(default, skip_serializing_if = "RecoveryAttemptCounters::is_empty")]
     pub recovery_attempts: RecoveryAttemptCounters,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4314,7 +4346,7 @@ fn hosted_k3s_service_policy(role: &str, machine_name: &str) -> ServicePolicy {
         healthcheck: ServiceHealthcheck {
             policy: ServiceHealthPolicy::Command,
             command: hosted_k3s_service_healthcheck_command(role, machine_name),
-            restart_on_unhealthy: false,
+            restart_on_unhealthy: true,
         },
     }
 }
@@ -19857,7 +19889,7 @@ exec sleep 30
         let policy = hosted_k3s_service_policy("server", "cloud-aws");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
-        assert!(!policy.healthcheck.restart_on_unhealthy);
+        assert!(policy.healthcheck.restart_on_unhealthy);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
         assert_eq!(policy.healthcheck.command[1], "-lc");
         let shell = &policy.healthcheck.command[2];
@@ -19872,7 +19904,7 @@ exec sleep 30
         let policy = hosted_k3s_service_policy("agent", "cloud-aws-worker");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
-        assert!(!policy.healthcheck.restart_on_unhealthy);
+        assert!(policy.healthcheck.restart_on_unhealthy);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
         assert_eq!(policy.healthcheck.command[1], "-lc");
         let shell = &policy.healthcheck.command[2];
@@ -25170,8 +25202,11 @@ exec sleep 30
     fn machine_wedge_status_serde_round_trips_with_defaults_skipped_on_wire() {
         let bare = super::MachineWedgeStatus {
             machine_name: String::from("cloud-aws"),
+            guest_refresh_age_seconds: None,
             wedged_since_unix_s: None,
             wedge_class: None,
+            wedge_signal: None,
+            hosted_k3s_service: None,
             recovery_attempts: super::RecoveryAttemptCounters::default(),
             last_recovery_action: None,
             recovery_state: super::RecoveryState::default(),
@@ -25181,8 +25216,11 @@ exec sleep 30
             .as_object()
             .expect("wedge status should serialize as object");
         for absent in [
+            "guest_refresh_age_seconds",
             "wedged_since_unix_s",
             "wedge_class",
+            "wedge_signal",
+            "hosted_k3s_service",
             "recovery_attempts",
             "last_recovery_action",
             "recovery_state",
@@ -25198,8 +25236,20 @@ exec sleep 30
 
         let populated = super::MachineWedgeStatus {
             machine_name: String::from("cloud-aws-worker-2"),
+            guest_refresh_age_seconds: Some(248),
             wedged_since_unix_s: Some(1_745_000_000),
             wedge_class: Some(String::from("guest")),
+            wedge_signal: Some(super::MachineWedgeSignal::HostedK3sServiceRuntime),
+            hosted_k3s_service: Some(super::MachineWedgeServiceEvidence {
+                name: String::from("k3s-agent"),
+                state: super::ServiceRuntimeState::Running,
+                health_state: super::ServiceHealthState::Unhealthy,
+                pid: Some(4321),
+                exit_code: None,
+                last_exit_code: Some(1),
+                health_detail: Some(String::from("lease has not renewed within threshold")),
+                last_exit_detail: Some(String::from("healthcheck command exited 1")),
+            }),
             recovery_attempts: super::RecoveryAttemptCounters {
                 tier_1: 1,
                 tier_2: 0,
@@ -25215,8 +25265,20 @@ exec sleep 30
         let rendered =
             serde_json::to_value(&populated).expect("populated wedge status should serialize");
         assert_eq!(
+            rendered["guest_refresh_age_seconds"],
+            serde_json::json!(248)
+        );
+        assert_eq!(
             rendered["wedged_since_unix_s"],
             serde_json::json!(1_745_000_000)
+        );
+        assert_eq!(
+            rendered["wedge_signal"],
+            serde_json::json!("hosted-k3s-service-runtime")
+        );
+        assert_eq!(
+            rendered["hosted_k3s_service"]["name"],
+            serde_json::json!("k3s-agent")
         );
         assert_eq!(rendered["recovery_state"], serde_json::json!("in-progress"));
         let decoded: super::MachineWedgeStatus =

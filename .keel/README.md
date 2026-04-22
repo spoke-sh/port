@@ -237,6 +237,12 @@
 | [Cluster Aggregate Wedge Field Threading](epics/VH0mU3DbK/voyages/VH0mjMP8p/) | done |
 | [Live Detector And Recovery Runner Wiring](epics/VH0mU3DbK/voyages/VH0mlnCSq/) | done |
 
+### [Harden Hosted Wedge Detection And Runtime Recovery](epics/VHUlA6Lhd/) (done)
+
+| Voyage | Status |
+|--------|--------|
+| [Hosted Guest Recovery Fidelity](epics/VHUlA6Lhd/voyages/VHUlRjuw5/) | done |
+
 ### [Cloud Substrate And PVM Strategy](epics/1vz2eV000/) (done)
 
 | Voyage | Status |
