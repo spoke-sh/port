@@ -63,8 +63,23 @@ const PORT_IPTABLES_BINARY_ENV: &str = "PORT_IPTABLES_BINARY";
 const HOSTED_HTTP_TIMEOUT: Duration = Duration::from_secs(300);
 const HOSTED_MACHINE_LIST_TIMEOUT: Duration = Duration::from_secs(30);
 const HOSTED_MACHINE_STATUS_TIMEOUT: Duration = Duration::from_secs(15);
+const HOSTED_MACHINE_WEDGE_TIMEOUT: Duration = Duration::from_secs(5);
 const GUEST_TRANSPORT_IO_TIMEOUT: Duration = Duration::from_secs(300);
 const GUEST_TRANSPORT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[cfg(not(test))]
+fn hosted_machine_wedge_timeout() -> Duration {
+    HOSTED_MACHINE_WEDGE_TIMEOUT
+}
+
+#[cfg(test)]
+fn hosted_machine_wedge_timeout() -> Duration {
+    std::env::var("PORT_TEST_HOSTED_MACHINE_WEDGE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(HOSTED_MACHINE_WEDGE_TIMEOUT)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostedPvmNodePrepareRequest {
@@ -9712,7 +9727,10 @@ fn hosted_control_plane_machine_wedge(
 ) -> Result<MachineWedgeStatus> {
     let client = hosted_client_for_machine(config, machine_name)?;
     let response: HostedSuccess<MachineWedgeStatus> = client
-        .execute_json(client.machines().wedge(machine_name))
+        .execute_json_with_timeout(
+            client.machines().wedge(machine_name),
+            hosted_machine_wedge_timeout(),
+        )
         .map_err(|error| {
             anyhow!(
                 "failed to inspect wedge state for machine '{}' through the live hosted control-plane route: {error}",
@@ -26385,6 +26403,94 @@ exec sleep 30
         );
         assert_eq!(row.last_recovery_action, None);
         assert_eq!(row.recovery_state, super::RecoveryState::default());
+    }
+
+    #[test]
+    fn hosted_control_plane_machine_wedge_uses_short_status_timeout() {
+        let _guard = hosted_server_lock().lock().expect("lock should work");
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_multi_node_machine_config(tempdir.path());
+        let token_var = format!(
+            "PORT_TEST_HOSTED_MACHINE_WEDGE_TOKEN_{}",
+            std::process::id()
+        );
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .auth
+            .source = port_model::HostedAuthTokenSource::Env {
+            variable: token_var.clone(),
+        };
+        unsafe {
+            std::env::set_var(&token_var, "demo-token");
+            std::env::set_var("PORT_TEST_HOSTED_MACHINE_WEDGE_TIMEOUT_MS", "50");
+        }
+
+        let listener = StdTcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        listener
+            .set_nonblocking(true)
+            .expect("listener should become nonblocking");
+        thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build");
+            runtime.block_on(async move {
+                let listener =
+                    TcpListener::from_std(listener).expect("listener should convert to tokio");
+                let router = Router::new().route(
+                    "/v1/machines/{machine}/wedge",
+                    get(|AxumPath(machine): AxumPath<String>| async move {
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        Json(HostedSuccess {
+                            route: HostedRouteContext {
+                                control_plane: Some(String::from("demo")),
+                                machine_name: Some(machine.clone()),
+                                ..HostedRouteContext::default()
+                            },
+                            result: super::MachineWedgeStatus {
+                                machine_name: machine,
+                                guest_refresh_age_seconds: None,
+                                wedged_since_unix_s: None,
+                                wedge_class: None,
+                                wedge_signal: None,
+                                hosted_k3s_service: None,
+                                recovery_attempts: RecoveryAttemptCounters::default(),
+                                last_recovery_action: None,
+                                recovery_state: RecoveryState::default(),
+                            },
+                        })
+                    }),
+                );
+                let _ = axum::serve(listener, router).await;
+            });
+        });
+
+        config
+            .control_planes
+            .get_mut("demo")
+            .expect("demo control plane should exist")
+            .endpoint = format!("http://{addr}");
+
+        let started = Instant::now();
+        let error = super::hosted_control_plane_machine_wedge(&config, "cloud-aws")
+            .expect_err("slow wedge route should time out");
+        unsafe {
+            std::env::remove_var("PORT_TEST_HOSTED_MACHINE_WEDGE_TIMEOUT_MS");
+            std::env::remove_var(&token_var);
+        }
+
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "wedge timeout should stay short, elapsed {:?}",
+            started.elapsed()
+        );
+        assert!(
+            error.to_string().contains("timed out after 50ms"),
+            "{error}"
+        );
     }
 
     #[test]
