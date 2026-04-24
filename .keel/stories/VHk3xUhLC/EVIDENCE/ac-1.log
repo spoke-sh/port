@@ -1,0 +1,42 @@
+---
+recorded_at: 2026-04-24T13:27:21.721090437-07:00
+command: cargo test -p port-guest-agent && cargo clippy -p port-guest-agent --all-targets -- -D warnings
+---
+
+running 16 tests
+test tests::background_supervisor_allows_always_service_to_recover_during_health_grace_period ... ok
+test tests::background_supervisor_can_opt_in_to_restart_after_sustained_health_check_failure ... ok
+test tests::background_supervisor_marks_always_service_unhealthy_without_restart_by_default ... ok
+test tests::background_supervisor_restarts_crashed_service_while_health_command_is_running ... ok
+test tests::background_supervisor_restarts_failed_service_without_status_polling ... ok
+test tests::connection_streams_copy_and_forward ... ok
+test tests::connection_streams_pty_and_followed_logs ... ok
+test tests::daemon_serves_requests_over_unix_socket ... ok
+test tests::managed_process_exit_detail_reports_signal_name_for_crash ... ok
+test tests::persisted_running_record_with_live_pid_downgrades_stale_health_to_unknown ... ok
+test tests::persisted_running_record_with_zombie_pid_is_not_reported_healthy ... ok
+test tests::ping_leaves_running_managed_service_untouched ... ok
+test tests::service_answers_ping_with_pong_under_response_budget ... ok
+test tests::service_handles_exec_pty_and_logs ... ok
+test tests::service_manages_process_lifecycle_and_redacts_secret_output ... ok
+test tests::timed_out_health_command_reaps_the_full_subprocess_tree ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.08s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+--- stderr ---
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_guest_agent-1b9d51cbeffc50c5)
+     Running unittests src/main.rs (/home/alex/.cache/cargo-target/spoke-infra/debug/deps/port_guest_agent-921e5a60e50f36ed)
+   Doc-tests port_guest_agent
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s

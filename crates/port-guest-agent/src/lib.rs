@@ -993,10 +993,10 @@ fn evaluate_managed_service_health(
                 .command
                 .split_first()
                 .ok_or_else(|| anyhow!("managed service health check requires a command"))?;
-            let mut child =
+            let child =
                 spawn_managed_service_health_command(program, args, &handle.cwd, &handle.env);
             match child {
-                Ok(ref mut child) => {
+                Ok(mut child) => {
                     let started = Instant::now();
                     loop {
                         if let Some(status) = handle.child.try_wait().context(
@@ -1048,7 +1048,25 @@ fn evaluate_managed_service_health(
     }
 }
 
-fn reap_health_command_best_effort(child: &mut Child) {
+fn reap_health_command_best_effort(mut child: Child) {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    let child_pid = child.id();
+    let thread_name = format!("port-health-reaper-{child_pid}");
+    match thread::Builder::new().name(thread_name).spawn(move || {
+        reap_health_command_blocking_best_effort(&mut child);
+    }) {
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!(
+                "port-guest-agent failed to spawn health command reaper for pid {child_pid}: {error}"
+            );
+        }
+    }
+}
+
+fn reap_health_command_blocking_best_effort(child: &mut Child) {
     if matches!(child.try_wait(), Ok(Some(_))) {
         return;
     }
@@ -2860,6 +2878,103 @@ mod tests {
                 .is_some_and(|detail| detail.contains("health command timed out")),
             "{:?}",
             timed_out_status.health_detail
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn background_supervisor_restarts_crashed_service_while_health_command_is_running() {
+        let temp = tempdir().expect("tempdir should exist");
+        let guest_root = temp.path().join("guest");
+        fs::create_dir_all(guest_root.join("workspace")).expect("workspace should exist");
+        let health_started = guest_root.join("workspace/health-started");
+        let health_child_pid = guest_root.join("workspace/health-child.pid");
+        let service = AgentService::new(guest_root.clone());
+
+        let start = service.handle(RequestEnvelope {
+            id: 22,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Start {
+                    name: String::from("crashbox"),
+                    kind: ManagedServiceKind::Service,
+                    command: vec![
+                        String::from("/bin/sh"),
+                        String::from("-lc"),
+                        String::from(
+                            "count_file=crash-restarts; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; if [ \"$count\" -eq 1 ]; then while [ ! -f health-started ]; do sleep 0.01; done; kill -SEGV $$; fi; trap 'exit 0' TERM; while :; do sleep 1; done",
+                        ),
+                    ],
+                    env: BTreeMap::new(),
+                    cwd: Some(String::from("/workspace")),
+                    policy: ServicePolicy {
+                        restart: ServiceRestartPolicy::Always,
+                        healthcheck: ServiceHealthcheck {
+                            policy: ServiceHealthPolicy::Command,
+                            command: vec![
+                                String::from("/bin/sh"),
+                                String::from("-lc"),
+                                format!(
+                                    "count_file=health-count; count=$(cat \"$count_file\" 2>/dev/null || echo 0); count=$((count + 1)); printf '%s' \"$count\" > \"$count_file\"; if [ \"$count\" -eq 1 ]; then touch {}; sleep 30 & child=$!; printf '%s' \"$child\" > {}; wait \"$child\"; fi; exit 0",
+                                    health_started.display(),
+                                    health_child_pid.display()
+                                ),
+                            ],
+                            restart_on_unhealthy: false,
+                        },
+                    },
+                },
+            }),
+        });
+        assert!(matches!(
+            start,
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(_)),
+                ..
+            }
+        ));
+
+        wait_for(|| health_child_pid.exists());
+        let runtime_record = guest_root.join("run/port/services/runtime/crashbox.json");
+        wait_for_background_for(Duration::from_secs(2), || {
+            let record = read_to_string(&runtime_record);
+            record.contains("\"state\": \"running\"")
+                && record.contains("\"restart_count\": 1")
+                && record.contains("SIGSEGV")
+        });
+
+        let child_pid: u32 = fs::read_to_string(&health_child_pid)
+            .expect("health child pid should write")
+            .trim()
+            .parse()
+            .expect("health child pid should parse");
+        wait_for_background(|| !matches!(super::managed_process_pid_is_live(child_pid), Ok(true)));
+
+        let status = service.handle(RequestEnvelope {
+            id: 23,
+            operation: GuestOperation::ManagedService(ManagedServiceRequest {
+                operation: ManagedServiceOperation::Status {
+                    name: String::from("crashbox"),
+                },
+            }),
+        });
+        let status = match status {
+            ResponseEnvelope::Completed {
+                exit_code: 0,
+                result: OperationResult::ManagedService(ManagedServiceResult::Status(status)),
+                ..
+            } => status,
+            other => panic!("unexpected crash status response: {other:?}"),
+        };
+        assert_eq!(status.state, ManagedServiceRuntimeState::Running);
+        assert_eq!(status.restart_count, 1);
+        assert!(
+            status
+                .last_exit_detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("SIGSEGV")),
+            "{:?}",
+            status.last_exit_detail
         );
     }
 
