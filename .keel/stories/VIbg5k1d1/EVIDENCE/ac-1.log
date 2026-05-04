@@ -1,0 +1,8 @@
+$ bash -lc 'cd /home/alex/workspace/spoke-sh/port && ! rg -n "nixpkgs-k3s|k3sPkg" flake.nix flake.lock && nix --quiet develop --command k3s --version | rg "v1\\.35\\.4\\+k3s1"'
+k3s version v1.35.4+k3s1 (5dc8fe68)
+
+$ jq -r .nodes.nixpkgs.locked.rev flake.lock
+c23fa0ff46bbbfc4026e2f54cf4facf713dae7da
+
+$ nix eval --raw github:NixOS/nixpkgs/$(jq -r '.nodes.nixpkgs.locked.rev' flake.lock)#legacyPackages.x86_64-linux.k3s.version
+1.35.4+k3s1

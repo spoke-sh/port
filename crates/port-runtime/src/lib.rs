@@ -16094,7 +16094,7 @@ exit 23
                 worker_machines: vec![String::from("cloud-aws-worker")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: port_model::HostedSchedulerPolicy::DeterministicFirstFit,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: vec![String::from("--node-label=role=worker")],
             },
@@ -16654,7 +16654,7 @@ set -eu
 state_root="var/lib/rancher/k3s"
 state_file="${state_root}/server.started"
 node_name="demo"
-version="v1.35.2+k3s1"
+version="v1.35.4+k3s1"
 write_kubeconfig="etc/rancher/k3s/k3s.yaml"
 
 if [ "$#" -gt 0 ] && [ "$1" = "server" ]; then
@@ -21199,7 +21199,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::Exec {
@@ -21477,7 +21477,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::Exec {
@@ -21680,7 +21680,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::Exec {
@@ -21781,7 +21781,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::Exec {
@@ -21877,7 +21877,7 @@ exec sleep 30
             worker_machines: Vec::new(),
             api_endpoint: String::from("https://demo-k3s.internal:6443"),
             control_plane_scheduler: port_model::HostedSchedulerPolicy::Spread,
-            version: Some(String::from("v1.35.2+k3s1")),
+            version: Some(String::from("v1.35.4+k3s1")),
             server_args: vec![String::from("--disable=traefik")],
             worker_args: Vec::new(),
         };
@@ -22075,7 +22075,7 @@ exec sleep 30
                 HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_visibility_command(),
                     stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.2+k3s1\n",
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
                     ),
                 },
                 HostedGuestExpectedOperation::Exec {

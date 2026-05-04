@@ -2,7 +2,7 @@
   description = "Port - Agentic compute orchestration in Firecracker VMs";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/c23fa0ff46bbbfc4026e2f54cf4facf713dae7da";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     sift = {

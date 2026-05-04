@@ -784,7 +784,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.2+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.4+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -807,7 +807,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.2+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.4+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -995,7 +995,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.2+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.4+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -1018,7 +1018,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.2+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.2+k3s1\n",
+                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.4+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",

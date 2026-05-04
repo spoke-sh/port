@@ -5195,7 +5195,7 @@ api_forward_target = "127.0.0.1:6443"
                 worker_machines: vec![String::from("cloud-aws")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -5218,7 +5218,7 @@ api_forward_target = "127.0.0.1:6443"
                 worker_machines: vec![String::from("cloud-aws")],
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             }
@@ -5231,7 +5231,7 @@ api_forward_target = "127.0.0.1:6443"
         assert!(encoded.contains("worker_machines = [\"cloud-aws\"]"));
         assert!(encoded.contains("api_endpoint = \"https://demo-k3s.internal:6443\""));
         assert!(encoded.contains("control_plane_scheduler = \"spread\""));
-        assert!(encoded.contains("version = \"v1.35.2+k3s1\""));
+        assert!(encoded.contains("version = \"v1.35.4+k3s1\""));
 
         let decoded = PortConfig::from_toml_str(&encoded).expect("sample should decode");
         assert_eq!(decoded, sample);
@@ -5260,7 +5260,7 @@ api_forward_target = "127.0.0.1:6443"
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -5298,7 +5298,7 @@ api_forward_target = "127.0.0.1:6443"
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -5344,7 +5344,7 @@ api_forward_target = "127.0.0.1:6443"
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },
@@ -5384,7 +5384,7 @@ api_forward_target = "127.0.0.1:6443"
                 worker_machines: Vec::new(),
                 api_endpoint: String::from("https://demo-k3s.internal:6443"),
                 control_plane_scheduler: HostedSchedulerPolicy::Spread,
-                version: Some(String::from("v1.35.2+k3s1")),
+                version: Some(String::from("v1.35.4+k3s1")),
                 server_args: vec![String::from("--disable=traefik")],
                 worker_args: Vec::new(),
             },

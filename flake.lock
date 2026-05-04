@@ -80,11 +80,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1776357852,
-        "narHash": "sha256-MJT+m0tp0XyabDKS9111q07TmTWpiMWAePIxDuJHIGI=",
+        "lastModified": 1777014615,
+        "narHash": "sha256-yvkTxFtv0DGAr7yPZh2Q23B2SGObjtW60okK0D2gnx0=",
         "owner": "spoke-sh",
         "repo": "keel",
-        "rev": "0025107aaa17c6dea79a17aa5a5f1495cfd0cb05",
+        "rev": "eba1264fc06c20a5e0c555fb23f2e27f72d512a5",
         "type": "github"
       },
       "original": {
@@ -110,33 +110,32 @@
         ]
       },
       "locked": {
-        "lastModified": 1773100503,
-        "narHash": "sha256-YKDmgpHuO7N+fx1o3+n4KFyAL44F0zlAAQfY5vy5qpo=",
-        "owner": "rupurt",
-        "repo": "keel",
-        "rev": "3966e1cd0d48c4a0b0a0bf6074310af521d3cd80",
-        "type": "github"
+        "lastModified": 1776357852,
+        "narHash": "sha256-MJT+m0tp0XyabDKS9111q07TmTWpiMWAePIxDuJHIGI=",
+        "ref": "refs/heads/main",
+        "rev": "0025107aaa17c6dea79a17aa5a5f1495cfd0cb05",
+        "revCount": 701,
+        "type": "git",
+        "url": "ssh://git@github.com/spoke-sh/keel.git"
       },
       "original": {
-        "owner": "rupurt",
-        "repo": "keel",
-        "rev": "3966e1cd0d48c4a0b0a0bf6074310af521d3cd80",
-        "type": "github"
+        "type": "git",
+        "url": "ssh://git@github.com/spoke-sh/keel.git"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1775710090,
-        "narHash": "sha256-ar3rofg+awPB8QXDaFJhJ2jJhu+KqN/PRCXeyuXR76E=",
+        "lastModified": 1777845675,
+        "narHash": "sha256-sGHP2sE9oYjK6N4yk/DAf4pFYKef6tjBGKsjESPM9LI=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "4c1018dae018162ec878d42fec712642d214fdfa",
+        "rev": "c23fa0ff46bbbfc4026e2f54cf4facf713dae7da",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-unstable",
         "repo": "nixpkgs",
+        "rev": "c23fa0ff46bbbfc4026e2f54cf4facf713dae7da",
         "type": "github"
       }
     },
@@ -175,11 +174,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1776926913,
-        "narHash": "sha256-IdvwavGDNlvFE8G4rhX2HatomHfbTTYyyh4MD7t7fIY=",
+        "lastModified": 1777355133,
+        "narHash": "sha256-ep34hv4prpoV/FsMxYHjWG/1TWFQKUeZHvtuKnX6EGE=",
         "owner": "spoke-sh",
         "repo": "paddles",
-        "rev": "b15d81dec68d0bbdc85b929012b2ca5df12eaaad",
+        "rev": "d2294b036221069ab40c0cc683efec5aaacbc28f",
         "type": "github"
       },
       "original": {
@@ -205,11 +204,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1772775058,
-        "narHash": "sha256-i+I9RYN8kYb9/9kibkxd0avkkislD1tyWojSVgIy160=",
+        "lastModified": 1777778183,
+        "narHash": "sha256-Lqv9MZO0XAGcMbXJU+ULBSMD41Pf391uJehylUQKe7Y=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "629bbb7f9d02787a54e28398b411da849246253b",
+        "rev": "dbba5f888c82ef3ce594c451c33ac2474eb80847",
         "type": "github"
       },
       "original": {
@@ -232,11 +231,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1773259736,
-        "narHash": "sha256-xeyHiahvaf6JsV7ogll+efTZsu714SIq1gOtn4KKdlk=",
+        "lastModified": 1776466156,
+        "narHash": "sha256-lTi81DB73HTFyKP9JHinNnamtItPjS1aXTbMNTHiU+Q=",
         "owner": "rupurt",
         "repo": "sift",
-        "rev": "52f46f87527cc39cc5efe214708b77426cb12e87",
+        "rev": "df22d7db5e98a2b589ef8268eda8d94ce16b413e",
         "type": "github"
       },
       "original": {

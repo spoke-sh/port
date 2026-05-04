@@ -740,7 +740,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.2+k3s1\n",
+                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.4+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",
@@ -763,7 +763,7 @@ try:
                 {
                     "type": "exec",
                     "command": ["/bin/sh", "-lc", "k3s kubectl get nodes -o wide"],
-                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.2+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.2+k3s1\n",
+                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.4+k3s1\n",
                 },
                 {
                     "type": "managed-service-list",

@@ -1,0 +1,39 @@
+$ bash -lc 'cd /home/alex/workspace/spoke-sh/port && ! rg -n "v1\\.35\\.2\\+k3s1|1\\.35\\.2\\+k3s1" crates scripts'
+no stale K3s 1.35.2 fixtures remain under crates/ or scripts/
+
+$ rg -n "v1\\.35\\.4\\+k3s1|1\\.35\\.4\\+k3s1" crates scripts
+scripts/render-hosted-k3s-proof.sh:743:                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.4+k3s1\n",
+scripts/render-hosted-k3s-proof.sh:766:                    "stdout": "NAME           STATUS   ROLES                  AGE   VERSION\ncloud-generic   Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws       Ready    <none>                 1m    v1.35.4+k3s1\n",
+scripts/render-hosted-k3s-ha-failover-proof.sh:787:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.4+k3s1\n",
+scripts/render-hosted-k3s-ha-failover-proof.sh:810:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 1m    v1.35.4+k3s1\n",
+scripts/render-hosted-k3s-ha-failover-proof.sh:998:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.4+k3s1\n",
+scripts/render-hosted-k3s-ha-failover-proof.sh:1021:                    "stdout": "NAME             STATUS   ROLES                  AGE   VERSION\ncloud-aws        Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-b      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-c      Ready    control-plane,master   2m    v1.35.4+k3s1\ncloud-aws-worker Ready    <none>                 2m    v1.35.4+k3s1\n",
+crates/port-model/src/lib.rs:5198:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-model/src/lib.rs:5221:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-model/src/lib.rs:5234:        assert!(encoded.contains("version = \"v1.35.4+k3s1\""));
+crates/port-model/src/lib.rs:5263:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-model/src/lib.rs:5301:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-model/src/lib.rs:5347:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-model/src/lib.rs:5387:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-cli/tests/machine_commands.rs:86:demo   Ready    control-plane,master   1m    v1.35.4+k3s1
+crates/port-cli/tests/machine_commands.rs:379:            version: Some(String::from("v1.35.4+k3s1")),
+crates/port-cli/tests/machine_commands.rs:398:            version: Some(String::from("v1.35.4+k3s1")),
+crates/port-cli/tests/machine_commands.rs:1414:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-cli/tests/machine_commands.rs:1442:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-cli/tests/machine_commands.rs:1655:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-cli/tests/machine_commands.rs:1686:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-b Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-cli/tests/machine_commands.rs:1857:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-cli/tests/machine_commands.rs:2023:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-cli/tests/machine_commands.rs:2053:                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
+crates/port-runtime/src/hosted_control_plane.rs:8404:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-runtime/src/hosted_control_plane.rs:9733:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-runtime/src/hosted_control_plane.rs:13190:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-runtime/src/hosted_control_plane.rs:13348:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-runtime/src/lib.rs:16097:                version: Some(String::from("v1.35.4+k3s1")),
+crates/port-runtime/src/lib.rs:16657:version="v1.35.4+k3s1"
+crates/port-runtime/src/lib.rs:21202:                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
+crates/port-runtime/src/lib.rs:21480:                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
+crates/port-runtime/src/lib.rs:21683:                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
+crates/port-runtime/src/lib.rs:21784:                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
+crates/port-runtime/src/lib.rs:21880:            version: Some(String::from("v1.35.4+k3s1")),
+crates/port-runtime/src/lib.rs:22078:                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
