@@ -425,6 +425,19 @@ pub enum MachineCommand {
         #[arg(long, default_value_t = 3)]
         wait_secs: u64,
     },
+    #[command(
+        about = "Restart a Port-managed machine in place, preserving the rootfs overlay so in-VM state survives the swap"
+    )]
+    Restart {
+        #[arg(long)]
+        machine: String,
+        #[arg(long, default_value = "runtime")]
+        runtime_root: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        stop_wait_secs: u64,
+        #[arg(long, default_value_t = 3)]
+        boot_wait_secs: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2229,6 +2242,44 @@ fn run_machine(command: MachineCommand, config_path: Option<PathBuf>) -> Result<
                 print!("{}", format_attached_volumes(&result.attached_volumes));
             }
             println!("detail: {}", result.detail);
+        }
+        MachineCommand::Restart {
+            machine,
+            runtime_root,
+            stop_wait_secs,
+            boot_wait_secs,
+        } => {
+            let ssh_context = ssh_machine_route_context(&config, &machine)?;
+            let result = port_runtime::restart_machine(
+                &config,
+                &runtime_root,
+                &machine,
+                Duration::from_secs(stop_wait_secs),
+                Duration::from_secs(boot_wait_secs),
+            )?;
+            println!("machine: {}", result.launch.machine_name);
+            if let Some(context) = ssh_context.as_ref() {
+                print_ssh_machine_route_context(context, "restart route");
+            }
+            println!("previous state: {}", result.stop.previous_state);
+            println!("relaunched pid: {}", result.launch.pid);
+            println!("runtime dir: {}", result.launch.runtime_dir.display());
+            println!("config path: {}", result.launch.config_path.display());
+            println!(
+                "hypervisor binary: {}",
+                result.launch.firecracker_binary.display()
+            );
+            println!("hypervisor log: {}", result.launch.log_path.display());
+            println!("console stdout: {}", result.launch.stdout_path.display());
+            println!("console stderr: {}", result.launch.stderr_path.display());
+            println!("manifest: {}", result.launch.manifest_path.display());
+            output_runtime_class(&result.launch.runtime_class);
+            if !result.launch.attached_volumes.is_empty() {
+                print!(
+                    "{}",
+                    format_attached_volumes(&result.launch.attached_volumes)
+                );
+            }
         }
     }
 
@@ -4442,6 +4493,52 @@ mod tests {
                 assert_eq!(machine, "demo");
                 assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
                 assert_eq!(wait_secs, 9);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let restart = Cli::parse_from([
+            "port",
+            "machine",
+            "restart",
+            "--machine",
+            "demo",
+            "--runtime-root",
+            "/tmp/runtime",
+            "--stop-wait-secs",
+            "5",
+            "--boot-wait-secs",
+            "7",
+        ]);
+
+        match restart.command {
+            Command::Machine(MachineCommand::Restart {
+                machine,
+                runtime_root,
+                stop_wait_secs,
+                boot_wait_secs,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("/tmp/runtime"));
+                assert_eq!(stop_wait_secs, 5);
+                assert_eq!(boot_wait_secs, 7);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let restart_defaults = Cli::parse_from(["port", "machine", "restart", "--machine", "demo"]);
+
+        match restart_defaults.command {
+            Command::Machine(MachineCommand::Restart {
+                machine,
+                runtime_root,
+                stop_wait_secs,
+                boot_wait_secs,
+            }) => {
+                assert_eq!(machine, "demo");
+                assert_eq!(runtime_root, std::path::Path::new("runtime"));
+                assert_eq!(stop_wait_secs, 3);
+                assert_eq!(boot_wait_secs, 3);
             }
             other => panic!("unexpected command: {other:?}"),
         }

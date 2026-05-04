@@ -6708,6 +6708,37 @@ pub fn stop_machine(
     firecracker_local_stop_machine(runtime_root, machine_name, timeout)
 }
 
+#[derive(Debug, Clone)]
+pub struct RestartResult {
+    pub stop: StopResult,
+    pub launch: LaunchMetadata,
+}
+
+/// Stop a Port-managed machine and immediately relaunch it under the same
+/// runtime root, preserving the rootfs overlay (and therefore in-VM state).
+/// The relaunch picks up any change in the machine's guest image — making
+/// this the primitive that supports rolling guest-image upgrades (e.g. K3s
+/// patch bumps) without losing etcd, kubelet state, or pulled container
+/// images held in the overlay.
+pub fn restart_machine(
+    config: &PortConfig,
+    runtime_root: &Path,
+    machine_name: &str,
+    stop_timeout: Duration,
+    boot_wait: Duration,
+) -> Result<RestartResult> {
+    let stop = stop_machine(config, runtime_root, machine_name, stop_timeout)?;
+    let launch = launch_local_machine(
+        config,
+        &LaunchRequest {
+            machine_name,
+            runtime_root,
+            boot_wait,
+        },
+    )?;
+    Ok(RestartResult { stop, launch })
+}
+
 fn firecracker_local_stop_machine(
     runtime_root: &Path,
     machine_name: &str,
