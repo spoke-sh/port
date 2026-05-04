@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/c23fa0ff46bbbfc4026e2f54cf4facf713dae7da";
+    k3s-nixpkgs.url = "github:NixOS/nixpkgs/c23fa0ff46bbbfc4026e2f54cf4facf713dae7da";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     sift = {
@@ -38,6 +39,7 @@
   outputs = {
     self,
     nixpkgs,
+    k3s-nixpkgs,
     rust-overlay,
     flake-utils,
     sift,
@@ -66,6 +68,8 @@
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
+        k3sPkgs = import k3s-nixpkgs { inherit system; };
+        k3sPkg = k3sPkgs.k3s_1_35;
         rust = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" "llvm-tools" ];
         };
@@ -84,7 +88,7 @@
           pkgs.gzip
           pkgs.curl
         ] ++ pkgs.lib.optionals isLinux [
-          pkgs.k3s
+          k3sPkg
           awsPvmHostKitPkg
           pkgs.firecracker
           pkgs.iproute2
@@ -208,7 +212,7 @@
           keelPkg
           pkgs.curl
         ] ++ pkgs.lib.optionals isLinux [
-          pkgs.k3s
+          k3sPkg
         ];
         linuxRuntimeInputs = pkgs.lib.optionals isLinux [
           pkgs.firecracker
@@ -228,6 +232,8 @@
           keel = keelPkg;
           default = portPkg;
         } // pkgs.lib.optionalAttrs isLinux {
+          k3s = k3sPkg;
+          k3s-airgap-images = k3sPkg.airgap-images;
           firecracker-pvm = awsPvmFirecrackerPkg;
           firecracker-pvm-host-kit = awsPvmHostKitPkg;
         };

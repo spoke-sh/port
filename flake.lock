@@ -67,6 +67,22 @@
         "type": "github"
       }
     },
+    "k3s-nixpkgs": {
+      "locked": {
+        "lastModified": 1777845675,
+        "narHash": "sha256-sGHP2sE9oYjK6N4yk/DAf4pFYKef6tjBGKsjESPM9LI=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c23fa0ff46bbbfc4026e2f54cf4facf713dae7da",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c23fa0ff46bbbfc4026e2f54cf4facf713dae7da",
+        "type": "github"
+      }
+    },
     "keel": {
       "inputs": {
         "flake-utils": [
@@ -192,6 +208,7 @@
       "inputs": {
         "atxt": "atxt",
         "flake-utils": "flake-utils",
+        "k3s-nixpkgs": "k3s-nixpkgs",
         "keel": "keel",
         "nixpkgs": "nixpkgs",
         "paddles": "paddles",
