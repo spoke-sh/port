@@ -1,0 +1,10 @@
+Release boundary proof
+date-utc: 2026-05-05T15:01:33Z
+exact-head-tag: v0.1.0
+local-tag-present: v0.1.0
+remote-tag-before-push:
+
+status-before-proof-file:
+## main...origin/main [ahead 1]
+release-commit-gate: git commit hook completed fmt, clippy, nextest, doctests, and keel health before creating the release tag.
+ac-3: ok

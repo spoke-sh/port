@@ -10,6 +10,7 @@ default:
   @printf '%s\n' \
     'Common recipes:' \
     '  just test                  Run workspace tests and doctests' \
+    '  just doctest               Run workspace doctests' \
     '  just quality               Run formatting and clippy' \
     '  just docs-install          Install docs site dependencies' \
     '  just docs-dev              Run the public docs site locally' \
@@ -51,6 +52,9 @@ quality:
 
 test *args:
   @just checks::test {{args}}
+  @just checks::doctest {{args}}
+
+doctest *args:
   @just checks::doctest {{args}}
 
 build:

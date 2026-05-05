@@ -1,0 +1,32 @@
+Release metadata and support-boundary review
+date-utc: 2026-05-05T14:46:47Z
+head: 18bcdf7571bd6924e0b256925c301704b40df7fc
+status:
+## main...origin/main
+AM .keel/stories/VIl0aVbn5/README.md
+?? .keel/stories/VIl0aVbn5/EVIDENCE/
+existing v0.1.0 tags before release:
+workspace version:
+20:version = "0.1.0"
+release target matrix references:
+docs/install.md:5:command surface, and Windows remains a workstation path through WSL or a remote
+docs/install.md:47:| `x86_64-unknown-linux-gnu` | Primary release target for local Firecracker workflows and hosted control-plane demos on Linux | Local Firecracker still requires a Linux host; Firecracker/PVM remains a dedicated prepared-node lane rather than a generic fallback |
+docs/install.md:48:| `x86_64-apple-darwin` | Intel macOS release target for the AVF local lane | AVF remains a local macOS workflow and still requires an external launcher helper via `PORT_AVF_LAUNCHER` |
+docs/install.md:49:| `aarch64-apple-darwin` | Apple Silicon macOS release target for the AVF local lane | Distributed targets still need Apple's virtualization entitlement; Rosetta convenience is not part of the core package contract |
+docs/install.md:55:| Windows native install | Not shipped in the first cargo-dist release slice. Use WSL or a remote Linux host for Linux-backed workflows |
+RELEASE.md:12:| `x86_64-unknown-linux-gnu` | Primary release target for local Firecracker workflows and hosted proof lanes on Linux | Firecracker still requires a Linux host; PVM remains a prepared-node `x86_64` lane rather than a generic fallback |
+RELEASE.md:13:| `x86_64-apple-darwin` | Intel macOS release target for the AVF local lane | AVF still requires an external `PORT_AVF_LAUNCHER` helper |
+RELEASE.md:14:| `aarch64-apple-darwin` | Apple Silicon macOS release target for the AVF local lane | Distributed targets remain bounded by Apple's virtualization entitlement requirements |
+RELEASE.md:15:| Windows | No native release target in this slice | Use WSL or a remote Linux host for Linux-backed workflows |
+RELEASE.md:64:just package-proof x86_64-unknown-linux-gnu
+RELEASE.md:71:artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
+avf boundary references:
+68:- treat AVF as `standard` protection only; Port does not define an AVF/PVM lane
+76:PORT_AVF_LAUNCHER=/path/to/port-avf-launcher port --config examples/port.toml machine launch --machine demo-avf
+89:- `PORT_AVF_LAUNCHER` must point at a launcher helper that bridges AVF guest
+100:- distributed macOS app targets need Apple's virtualization entitlement
+109:- local AVF launch still requires `PORT_AVF_LAUNCHER` to point at an external
+113:- Port does not ship a bundled AVF launcher app, a macOS-only command tree, or
+132:3. The build/distribution path is bounded by Apple's virtualization entitlement
+144:- Port does not define an AVF/PVM lane
+ac-1: ok

@@ -1,0 +1,911 @@
+
+## mission context
+$ keel mission show VGzwzdKvB 
+Title:      [1mHosted Fleet Auto-Recovery For Wedged MicroVM Guests[0m
+Status:     [32machieved[39m
+Archetype:  [95m[1mStrategic[0m[39m
+[2m────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[1mGoals[0m
+  [38;2;255;244;214;48;2;112;80;0;1mMG-01[0m - Deliver epic `VGzxKV9OX` so Port introduces a guest-agent heartbeat signal and a configurable wedge detector, surfacing `wedged_since`, `wedge_class`, `recovery_attempts`, `last_recovery_action`, and `recovery_state` on `port cluster status --format json` without taking any recovery action yet. ([2mVGzxKV9OX[0m)
+  [38;2;255;244;214;48;2;112;80;0;1mMG-02[0m - Deliver epic `VGzxMc4G4` so Port owns a per-cluster opt-in recovery ladder: tier-1 guest restart and tier-2 overlay recreate fire inside Port against the runtime root; tier-3 surfaces as a structured `awaiting_tier_3_host_recycle` signal for an external consumer (spoke-sh/infra, an operator, or a systemd watcher) to act on. Port also owns serialization against in-flight human lifecycle operations, a sticky `recovery_exhausted` terminal state, and a `port machine unfence` reset path. ([2mVGzxMc4G4[0m)
+
+[1mChildren[0m
+  Epics (2):
+    [1m[36mVGzxKV9OX[39m[0m - Wedge Detection And Guest Heartbeat Surface ([2mdone[0m)
+    [1m[36mVGzxMc4G4[39m[0m - Hosted Fleet Recovery Ladder And Host Recycle ([2mdone[0m)
+
+[1mStructural Drift[0m
+  Coefficient: 0.63 (severe)
+  Coverage:    entities 336/336 | knowledge 5/45 | source 0/0 | docs 0/17
+  Context:     40 knowledge units lack source provenance; 17 project docs are unlinked
+
+[1mLatest Log Entry[0m
+    2026-04-16T18:44:19
+
+## workspace tests
+$ just test 
+cargo nextest run -j 1 
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+────────────
+ Nextest run ID d1623b23-eae0-42e4-be1b-970beb85cec0 with nextest profile: default
+    Starting 449 tests across 17 binaries (1 test skipped)
+        PASS [   0.010s] (  1/449) port tests::help_includes_machine_commands_examples
+        PASS [   0.011s] (  2/449) port tests::help_includes_primary_surfaces
+        PASS [   0.005s] (  3/449) port tests::hosted_fleet_render_distinguishes_live_stale_and_missing_nodes
+        PASS [   0.005s] (  4/449) port tests::hosted_fleet_render_includes_node_state_breakdown
+        PASS [   0.005s] (  5/449) port tests::machine_status_render_includes_promotion_runner_contract
+        PASS [   0.005s] (  6/449) port tests::machine_status_render_includes_runtime_class_contract
+        PASS [   0.006s] (  7/449) port tests::parses_artifact_list_with_json_output
+        PASS [   0.009s] (  8/449) port tests::parses_artifact_push_with_variant_selection
+        PASS [   0.011s] (  9/449) port tests::parses_cluster_contract_arguments
+        PASS [   0.008s] ( 10/449) port tests::parses_control_plane_serve_arguments
+        PASS [   0.007s] ( 11/449) port tests::parses_guest_copy_direction_and_runtime_root
+        PASS [   0.006s] ( 12/449) port tests::parses_guest_exec_trailing_command
+        PASS [   0.006s] ( 13/449) port tests::parses_machine_launch_arguments
+        PASS [   0.008s] ( 14/449) port tests::parses_machine_lifecycle_arguments
+        PASS [   0.005s] ( 15/449) port tests::parses_node_agent_serve_arguments
+        PASS [   0.006s] ( 16/449) port tests::parses_service_and_secret_arguments
+        PASS [   0.005s] ( 17/449) port tests::print_cluster_status_report_renders_wedge_fields
+        PASS [   0.006s] ( 18/449) port tests::rejects_invalid_control_plane_node_binding
+        PASS [   0.006s] ( 19/449) port upgrade::tests::compares_rust_versions
+        PASS [   0.005s] ( 20/449) port upgrade::tests::parses_rust_versions_with_missing_patch
+        PASS [  19.638s] ( 21/449) port::artifact_commands cli_artifact_build_and_validate_selected_pvm_guest_image_variant
+        PASS [   0.150s] ( 22/449) port::artifact_commands cli_artifact_build_and_validate_selected_pvm_kernel_variant
+        PASS [   7.285s] ( 23/449) port::artifact_commands cli_artifact_build_push_and_pull_round_trip_through_hosted_backend
+        PASS [   0.034s] ( 24/449) port::artifact_commands cli_artifact_list_reports_local_and_cached_variants
+        PASS [   0.038s] ( 25/449) port::artifact_commands cli_artifact_pull_oci_registry_reports_variant_and_backend_detail
+        PASS [   0.067s] ( 26/449) port::artifact_commands cli_artifact_push_and_pull_round_trip_pvm_variant_contract_for_kernel_and_guest_image
+        PASS [   0.044s] ( 27/449) port::artifact_commands cli_artifact_push_and_pull_round_trip_variant_contract
+        PASS [   0.031s] ( 28/449) port::artifact_commands cli_artifact_push_oci_registry_reports_variant_and_backend_detail
+        PASS [   0.160s] ( 29/449) port::guest_commands cli_cloud_hypervisor_guest_commands_cover_all_capabilities
+        PASS [   0.149s] ( 30/449) port::guest_commands cli_guest_commands_cover_all_capabilities
+        PASS [   0.197s] ( 31/449) port::guest_commands cli_guest_commands_cover_hosted_cloud_hypervisor_runtime
+        PASS [   0.216s] ( 32/449) port::guest_commands cli_guest_commands_cover_hosted_control_plane_runtime
+        PASS [   0.148s] ( 33/449) port::guest_commands cli_guest_forward_lists_and_stops_hosted_detached_forwards
+        PASS [   0.116s] ( 34/449) port::guest_commands cli_guest_forward_supports_hosted_detached_lifecycle
+        PASS [   0.093s] ( 35/449) port::guest_commands cli_guest_forward_supports_hosted_unix_socket_mode
+        PASS [   0.532s] ( 36/449) port::guest_commands cli_guest_logs_follow_streams_appended_output
+        PASS [   0.155s] ( 37/449) port::hosted_transport cli_routes_hosted_machine_and_guest_commands_through_live_http_transport
+        PASS [   0.032s] ( 38/449) port::machine_commands attached_volume_unsupported_lane_guidance
+        PASS [   0.030s] ( 39/449) port::machine_commands cli_attached_volume_route_context
+        PASS [   0.051s] ( 40/449) port::machine_commands cli_cluster_contract_rejects_hosted_aws_and_multi_node_shapes
+        PASS [   0.705s] ( 41/449) port::machine_commands cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail
+        PASS [   3.341s] ( 42/449) port::machine_commands cli_cluster_lifecycle_surfaces_port_owned_status_kubeconfig_and_down
+        PASS [   0.031s] ( 43/449) port::machine_commands cli_cluster_list_and_show_surface_local_contract
+        PASS [   3.815s] ( 44/449) port::machine_commands cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms
+        PASS [   0.126s] ( 45/449) port::machine_commands cli_cluster_stage_stages_offline_bootstrap_kit_without_live_fetch
+        PASS [   0.635s] ( 46/449) port::machine_commands cli_cluster_status_json_surfaces_legacy_detached_runtime_drift
+        PASS [   0.717s] ( 47/449) port::machine_commands cli_cluster_status_surfaces_hosted_real_ha_truth
+        PASS [   3.611s] ( 48/449) port::machine_commands cli_control_plane_prepare_pvm_node_enables_aws_hosted_pvm_launch
+        PASS [   0.041s] ( 49/449) port::machine_commands cli_doctor_and_launch_surface_sample_avf_workflow_boundary
+        PASS [   0.011s] ( 50/449) port::machine_commands cli_help_stays_concise_without_extra_doc_or_avf_sections
+        PASS [   0.567s] ( 51/449) port::machine_commands cli_hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+        PASS [   3.734s] ( 52/449) port::machine_commands cli_hosted_cloud_hypervisor_launch_status_and_stop_round_trip
+        PASS [   3.599s] ( 53/449) port::machine_commands cli_hosted_standard_cloud_launch_round_trip
+        PASS [   3.631s] ( 54/449) port::machine_commands cli_hosted_standard_status_and_stop_round_trip
+        PASS [   0.022s] ( 55/449) port::machine_commands cli_machine_launch_rejects_unplaceable_hosted_pvm_machine
+        PASS [   0.021s] ( 56/449) port::machine_commands cli_machine_launch_rejects_unprepared_aws_hosted_pvm_machine
+        PASS [   3.598s] ( 57/449) port::machine_commands cli_machine_launch_routes_hosted_pvm_through_live_control_plane
+        PASS [   3.064s] ( 58/449) port::machine_commands cli_machine_launch_status_and_stop_round_trip
+        PASS [   3.162s] ( 59/449) port::machine_commands cli_machine_launch_status_and_stop_route_cloud_hypervisor_locally
+        PASS [   3.635s] ( 60/449) port::machine_commands cli_machine_launch_status_and_stop_route_hosted_pvm_through_live_control_plane
+        PASS [   3.068s] ( 61/449) port::machine_commands cli_machine_launch_status_and_stop_with_attached_volume
+        PASS [   0.033s] ( 62/449) port::machine_commands cli_machine_launch_surfaces_missing_cloud_hypervisor_binary
+        PASS [   0.675s] ( 63/449) port::machine_commands cli_machine_monitor_reports_hosted_runtime_context
+        PASS [   0.045s] ( 64/449) port::machine_commands cli_machine_status_surfaces_hosted_pvm_placement_denial
+        PASS [   0.576s] ( 65/449) port::machine_commands cli_machine_status_surfaces_live_candidate_without_repairing_stale_placement
+        PASS [   0.572s] ( 66/449) port::machine_commands cli_machine_status_surfaces_unprepared_aws_hosted_pvm_guidance
+        PASS [   0.775s] ( 67/449) port::machine_commands cli_machine_top_reports_hypervisor_and_forward_entries
+        PASS [   3.109s] ( 68/449) port::machine_commands cli_ssh_machine_launch_status_and_stop_round_trip
+        PASS [   0.020s] ( 69/449) port::machine_commands cli_ssh_machine_route_context
+        PASS [   0.173s] ( 70/449) port::package_proof package_proof_installs_packaged_port_and_runs_version_and_doctor_from_prefix
+        PASS [   0.197s] ( 71/449) port::package_workflow package_determinism_keeps_archive_bytes_stable_across_repeated_runs
+        PASS [   0.018s] ( 72/449) port::package_workflow package_failure_rejects_unsupported_target_with_guidance
+        PASS [   0.016s] ( 73/449) port::package_workflow package_failure_reports_missing_required_tool_with_guidance
+        PASS [   0.092s] ( 74/449) port::package_workflow package_workflow_emits_versioned_artifact_and_reports_target_and_included_files
+        PASS [   0.241s] ( 75/449) port::service_commands cli_service_apply_and_forward_serves_hosted_external_project_payload
+        PASS [   0.032s] ( 76/449) port::service_commands cli_service_policy_invalid_combinations_reject_before_runtime_lookup
+        PASS [   1.144s] ( 77/449) port::service_commands cli_service_secret_backend_commands_cover_hosted_secret_service_and_sandbox_contracts
+        PASS [   0.625s] ( 78/449) port::service_commands cli_service_secret_status_projects_restart_health_and_provenance_for_hosted_runtime
+        PASS [   0.153s] ( 79/449) port::upgrade_commands upgrade_builds_and_installs_sha_revision_from_source_cache
+        PASS [   0.149s] ( 80/449) port::upgrade_commands upgrade_builds_and_installs_tagged_revision_from_source_cache
+        PASS [   0.018s] ( 81/449) port::upgrade_commands upgrade_runs_release_installer_for_latest_version
+        PASS [   0.007s] ( 82/449) port-agent-protocol tests::copy_request_serializes_direction_and_paths
+        PASS [   0.007s] ( 83/449) port-agent-protocol tests::managed_service_operations_round_trip_through_json
+        PASS [   0.005s] ( 84/449) port-agent-protocol tests::newline_framing_round_trips_requests_and_responses
+        PASS [   0.005s] ( 85/449) port-agent-protocol tests::parse_forward_endpoint_supports_tcp_and_unix
+        PASS [   0.005s] ( 86/449) port-agent-protocol tests::ping_request_round_trips_through_json
+        PASS [   0.006s] ( 87/449) port-agent-protocol tests::pong_response_round_trips_through_json
+        PASS [   0.005s] ( 88/449) port-agent-protocol tests::render_forward_endpoint_preserves_scheme_for_unix
+        PASS [   0.005s] ( 89/449) port-agent-protocol tests::request_round_trips_through_json
+        PASS [   0.005s] ( 90/449) port-agent-protocol tests::responses_capture_operation_results
+        PASS [   0.005s] ( 91/449) port-agent-protocol tests::stream_frames_round_trip_through_json
+        PASS [   0.005s] ( 92/449) port-agent-protocol tests::stream_session_contract_round_trips_through_json
+        PASS [   0.005s] ( 93/449) port-agent-protocol tests::stream_session_contracts_encode_expected_lifecycle
+        PASS [   0.184s] ( 94/449) port-guest-agent tests::background_supervisor_allows_always_service_to_recover_during_health_grace_period
+        PASS [   1.062s] ( 95/449) port-guest-agent tests::background_supervisor_can_opt_in_to_restart_after_sustained_health_check_failure
+        PASS [   0.109s] ( 96/449) port-guest-agent tests::background_supervisor_marks_always_service_unhealthy_without_restart_by_default
+        PASS [   1.242s] ( 97/449) port-guest-agent tests::background_supervisor_restarts_crashed_service_while_health_command_is_running
+        PASS [   0.309s] ( 98/449) port-guest-agent tests::background_supervisor_restarts_failed_service_without_status_polling
+        PASS [   0.010s] ( 99/449) port-guest-agent tests::connection_streams_copy_and_forward
+        PASS [   0.127s] (100/449) port-guest-agent tests::connection_streams_pty_and_followed_logs
+        PASS [   0.046s] (101/449) port-guest-agent tests::daemon_serves_requests_over_unix_socket
+        PASS [   1.121s] (102/449) port-guest-agent tests::managed_process_exit_detail_reports_signal_name_for_crash
+        PASS [   0.007s] (103/449) port-guest-agent tests::persisted_running_record_with_live_pid_downgrades_stale_health_to_unknown
+        PASS [   0.048s] (104/449) port-guest-agent tests::persisted_running_record_with_zombie_pid_is_not_reported_healthy
+        PASS [   0.029s] (105/449) port-guest-agent tests::ping_leaves_running_managed_service_untouched
+        PASS [   0.007s] (106/449) port-guest-agent tests::service_answers_ping_with_pong_under_response_budget
+        PASS [   0.044s] (107/449) port-guest-agent tests::service_handles_exec_pty_and_logs
+        PASS [   1.036s] (108/449) port-guest-agent tests::service_manages_process_lifecycle_and_redacts_secret_output
+        PASS [   0.591s] (109/449) port-guest-agent tests::timed_out_health_command_reaps_the_full_subprocess_tree
+        PASS [   0.006s] (110/449) port-hosted-protocol tests::canonical_shell_driver_contract_uses_port_guest_surface
+        PASS [   0.006s] (111/449) port-hosted-protocol tests::control_plane_routes_render_canonical_paths
+        PASS [   0.005s] (112/449) port-hosted-protocol tests::hosted_artifact_transfer_contract_round_trips_selector_and_store_path
+        PASS [   0.007s] (113/449) port-hosted-protocol tests::hosted_artifact_transfer_header_name_is_stable
+        PASS [   0.006s] (114/449) port-hosted-protocol tests::hosted_client_headers_follow_identity_contract
+        PASS [   0.005s] (115/449) port-hosted-protocol tests::hosted_guest_stream_protocol_serializes_stably
+        PASS [   0.006s] (116/449) port-hosted-protocol tests::hosted_prepare_pvm_request_and_import_record_serialize_stably
+        PASS [   0.006s] (117/449) port-hosted-protocol tests::hosted_registration_request_and_contract_serialize_stably
+        PASS [   0.006s] (118/449) port-hosted-protocol tests::hosted_success_serializes_inventory_with_pvm_capability_states
+        PASS [   0.005s] (119/449) port-hosted-protocol tests::node_agent_headers_use_explicit_internal_header
+        PASS [   0.005s] (120/449) port-hosted-protocol tests::node_routes_render_internal_paths
+        PASS [   0.005s] (121/449) port-hosted-protocol tests::route_context_preserves_inventory_and_guest_broker_context
+        PASS [   0.005s] (122/449) port-hosted-protocol tests::route_context_serializes_detached_forward_identity
+        PASS [   0.006s] (123/449) port-hosted-protocol tests::route_context_serializes_hosted_pvm_rejection_detail
+        PASS [   0.006s] (124/449) port-hosted-protocol tests::route_context_serializes_service_identity
+        PASS [   0.005s] (125/449) port-model tests::arm64_firecracker_pvm_contract_is_research_only
+        PASS [   0.006s] (126/449) port-model tests::artifact_catalog_reports_kernel_and_guest_image_kinds
+        PASS [   0.005s] (127/449) port-model tests::artifact_compatibility_supports_x86_pvm_and_rejects_arm64_pvm
+        PASS [   0.005s] (128/449) port-model tests::artifact_variants_cover_file_store_distribution_and_resolution
+        PASS [   0.005s] (129/449) port-model tests::avf_contract_maps_guest_transport_and_console
+        PASS [   0.013s] (130/449) port-model tests::checked_in_example_models_all_provider_variants
+        PASS [   0.006s] (131/449) port-model tests::cluster_detection_config_defaults_and_validates
+        PASS [   0.006s] (132/449) port-model tests::cluster_recovery_config_defaults_to_disabled_with_sane_settle_seconds
+        PASS [   0.012s] (133/449) port-model tests::from_path_tracks_config_directory_as_state_root
+        PASS [   0.006s] (134/449) port-model tests::hosted_artifact_store_path_is_deterministic
+        PASS [   0.016s] (135/449) port-model tests::hosted_host_group_scheduler_field_is_required
+        PASS [   0.016s] (136/449) port-model tests::hosted_host_group_scheduler_value_must_be_known
+        PASS [   0.006s] (137/449) port-model tests::hosted_k3s_cluster_accepts_pvm_control_plane_machines
+        PASS [   0.019s] (138/449) port-model tests::hosted_k3s_cluster_contract
+        PASS [   0.009s] (139/449) port-model tests::hosted_k3s_cluster_contract_regression_existing_routes
+        PASS [   0.006s] (140/449) port-model tests::hosted_k3s_spread_scheduler_requires_distinct_candidate_nodes
+        PASS [   0.006s] (141/449) port-model tests::hosted_k3s_three_control_planes_with_spread_become_ha_eligible_topology
+        PASS [   0.006s] (142/449) port-model tests::hosted_k3s_two_control_planes_with_spread_stay_non_ha_topology
+        PASS [   0.005s] (143/449) port-model tests::hosted_pvm_summary_filters_candidates_to_ready_nodes
+        PASS [   0.006s] (144/449) port-model tests::hosted_pvm_summary_keeps_aws_contract_provider_aware
+        PASS [   0.005s] (145/449) port-model tests::hosted_registered_node_contract_rejects_invalid_registration_inputs
+        PASS [   0.006s] (146/449) port-model tests::hosted_standard_summary_reports_explicit_rejection_context
+        PASS [   0.005s] (147/449) port-model tests::hosted_standard_summary_reports_missing_host_inventory_explicitly
+        PASS [   0.006s] (148/449) port-model tests::hosted_standard_summary_tracks_host_and_provider_for_each_demo_lane
+        PASS [   0.005s] (149/449) port-model tests::hybrid_route_regression_local_and_hosted
+        PASS [   0.020s] (150/449) port-model tests::local_cluster_contract
+        PASS [   0.006s] (151/449) port-model tests::local_cluster_contract_preserves_existing_machine_routes
+        PASS [   0.006s] (152/449) port-model tests::local_cluster_contract_rejects_follow_on_provider_and_count_shapes
+        PASS [   0.007s] (153/449) port-model tests::local_cluster_contract_rejects_relative_stage_root_and_empty_guest_profile_commands
+        PASS [   0.006s] (154/449) port-model tests::local_firecracker_support_resolves_serialized_pvm_lanes_by_architecture
+        PASS [   0.018s] (155/449) port-model tests::machine_contract_without_attachments_regression
+        PASS [   0.006s] (156/449) port-model tests::oci_registry_contract_derives_deterministic_remote_reference
+        PASS [   0.007s] (157/449) port-model tests::oci_registry_contract_rejects_empty_basic_auth_environment_variables
+        PASS [   0.007s] (158/449) port-model tests::promotion_runner_runtime_class_rejects_scratch_writable_roots
+        PASS [   0.006s] (159/449) port-model tests::promotion_runner_runtime_class_rejects_workspace_binding
+        PASS [   0.017s] (160/449) port-model tests::promotion_runner_runtime_class_round_trips
+        PASS [   0.006s] (161/449) port-model tests::ready_hosted_pvm_lane_requires_an_explicit_host_kit_contract
+        PASS [   0.005s] (162/449) port-model tests::ready_hosted_pvm_lane_requires_host_kit_package_identity
+        PASS [   0.006s] (163/449) port-model tests::sample_config_derives_hosted_api_identity_contract
+        PASS [   0.007s] (164/449) port-model tests::sample_config_derives_hosted_artifact_identity_contract
+        PASS [   0.007s] (165/449) port-model tests::sample_config_derives_hosted_guest_attach_contract
+        PASS [   0.006s] (166/449) port-model tests::sample_config_derives_hosted_machine_control_contract
+        PASS [   0.006s] (167/449) port-model tests::sample_config_derives_hosted_machine_lifecycle_contracts
+        PASS [   0.006s] (168/449) port-model tests::sample_config_derives_hosted_node_inventory_contract
+        PASS [   0.008s] (169/449) port-model tests::sample_config_derives_hosted_node_pvm_capability_states
+        PASS [   0.005s] (170/449) port-model tests::sample_config_derives_hosted_node_pvm_host_kit_contracts
+        PASS [   0.005s] (171/449) port-model tests::sample_config_derives_hosted_node_pvm_host_kit_package_identity
+        PASS [   0.007s] (172/449) port-model tests::sample_config_derives_local_machine_control_contract
+        PASS [   0.013s] (173/449) port-model tests::sample_config_exposes_expected_sections
+        PASS [   0.006s] (174/449) port-model tests::sample_config_includes_cloud_hypervisor_standard_variants
+        PASS [   0.006s] (175/449) port-model tests::sample_config_models_all_remote_provider_lanes
+        PASS [   0.020s] (176/449) port-model tests::sample_config_round_trips_through_toml
+        PASS [   0.005s] (177/449) port-model tests::service_policy_defaults_to_never_and_no_healthcheck
+        PASS [   0.005s] (178/449) port-model tests::service_policy_invalid_combinations_reject_restart_and_health_mismatches
+        PASS [   0.016s] (179/449) port-model tests::ssh_host_connection_contract
+        PASS [   0.006s] (180/449) port-model tests::validate_accepts_firecracker_overlay_on_x86_64_read_only_rootfs
+        PASS [   0.007s] (181/449) port-model tests::validate_accepts_local_macos_standard_avf_machine_contract
+        PASS [   0.006s] (182/449) port-model tests::validate_rejects_avf_pvm_machine_contract
+        PASS [   0.006s] (183/449) port-model tests::validate_rejects_duplicate_control_plane_endpoints
+        PASS [   0.006s] (184/449) port-model tests::validate_rejects_hosted_control_plane_avf_machine_contract
+        PASS [   0.006s] (185/449) port-model tests::validate_rejects_hosted_node_on_local_host
+        PASS [   0.005s] (186/449) port-model tests::validate_rejects_hosted_node_without_runtime_root
+        PASS [   0.005s] (187/449) port-model tests::validate_rejects_non_macos_avf_machine_contract
+        PASS [   0.007s] (188/449) port-model tests::validate_rejects_rootfs_overlay_on_non_x86_64_firecracker_guest
+        PASS [   0.007s] (189/449) port-model tests::validate_rejects_rootfs_overlay_without_read_only_base
+        PASS [   0.006s] (190/449) port-model tests::validate_rejects_unknown_control_plane_reference
+        PASS [   0.018s] (191/449) port-model tests::volume_attachment_contract
+        PASS [   0.007s] (192/449) port-model tests::workspace_scratch_runtime_class_rejects_publish_trust
+        PASS [   0.006s] (193/449) port-model tests::workspace_scratch_runtime_class_requires_declared_writable_roots
+        PASS [   0.018s] (194/449) port-model tests::workspace_scratch_runtime_class_round_trips
+        PASS [   0.006s] (195/449) port-model tests::x86_firecracker_pvm_contract_requires_host_and_artifact_kits
+        PASS [   0.008s] (196/449) port-runtime hosted_control_plane::tests::annotate_machine_status_surfaces_wedge_fields_from_state
+        PASS [   0.013s] (197/449) port-runtime hosted_control_plane::tests::control_plane_guest_exec_prefers_stored_placement_over_candidate_order
+        PASS [   0.020s] (198/449) port-runtime hosted_control_plane::tests::control_plane_launch_selects_registered_node_deterministically_and_persists_placement
+        PASS [   0.015s] (199/449) port-runtime hosted_control_plane::tests::control_plane_proxies_copy_stream_through_node_agent_guest_transport
+        PASS [   0.016s] (200/449) port-runtime hosted_control_plane::tests::control_plane_proxies_machine_and_guest_routes_to_node_agent
+        PASS [   0.008s] (201/449) port-runtime hosted_control_plane::tests::control_plane_rejects_invalid_client_token
+        PASS [   0.009s] (202/449) port-runtime hosted_control_plane::tests::control_plane_reports_missing_node_binding_with_route_context
+        PASS [   0.013s] (203/449) port-runtime hosted_control_plane::tests::control_plane_service_status_uses_live_route_without_stored_placement
+        PASS [   0.007s] (204/449) port-runtime hosted_control_plane::tests::detector_loop_does_not_block_serve_control_plane_on_spawn
+        PASS [   0.006s] (205/449) port-runtime hosted_control_plane::tests::detector_loop_panic_payload_decoder_handles_str_string_and_other
+        PASS [   0.009s] (206/449) port-runtime hosted_control_plane::tests::detector_loop_populates_wedge_state_from_live_node_receipt_instants
+        PASS [   0.007s] (207/449) port-runtime hosted_control_plane::tests::drop_machine_rootfs_overlay_is_idempotent
+        PASS [   0.010s] (208/449) port-runtime hosted_control_plane::tests::effective_recovery_wedge_does_not_mark_missing_guest_refresh_age_as_guest_wedge
+        PASS [   0.013s] (209/449) port-runtime hosted_control_plane::tests::effective_recovery_wedge_uses_live_node_service_status_without_self_calling_control_plane
+        PASS [   0.007s] (210/449) port-runtime hosted_control_plane::tests::emit_tier_3_escalation_writes_structured_signal
+        PASS [   1.114s] (211/449) port-runtime hosted_control_plane::tests::guest_heartbeat_age_uses_monotonic_clock_and_is_non_regressive
+        PASS [   0.508s] (212/449) port-runtime hosted_control_plane::tests::guest_heartbeat_probe_runs_concurrently_with_long_running_exec
+        PASS [   0.007s] (213/449) port-runtime hosted_control_plane::tests::guest_heartbeat_probe_skips_machines_without_live_socket
+        PASS [   0.008s] (214/449) port-runtime hosted_control_plane::tests::guest_heartbeat_probe_updates_sidecar_after_successful_pong
+        PASS [   0.011s] (215/449) port-runtime hosted_control_plane::tests::hosted_artifact_pull_failure_includes_backend_and_store_context
+        PASS [   0.030s] (216/449) port-runtime hosted_control_plane::tests::hosted_artifact_routes_persist_and_stream_selected_variant
+        PASS [   1.109s] (217/449) port-runtime hosted_control_plane::tests::hosted_fleet_node_status_surfaces_refresh_age_seconds_after_heartbeat
+        PASS [   0.009s] (218/449) port-runtime hosted_control_plane::tests::hosted_fleet_state_reports_merge_failures_with_control_plane_and_node_detail
+        PASS [   0.008s] (219/449) port-runtime hosted_control_plane::tests::hosted_imported_inventory_persists_and_loads_imported_node_records
+        PASS [   0.008s] (220/449) port-runtime hosted_control_plane::tests::hosted_imported_inventory_rejects_unknown_runtime_only_nodes
+        PASS [   0.008s] (221/449) port-runtime hosted_control_plane::tests::hosted_imported_inventory_surfaces_import_path_and_node_on_conflict
+        PASS [   0.019s] (222/449) port-runtime hosted_control_plane::tests::hosted_k3s_spread_scheduler_places_control_planes_on_distinct_nodes
+        PASS [   0.014s] (223/449) port-runtime hosted_control_plane::tests::hosted_k3s_spread_scheduler_rejects_reusing_an_occupied_host
+        PASS [   0.010s] (224/449) port-runtime hosted_control_plane::tests::hosted_registry_persistence_control_plane_launch_rejects_stale_registered_node_with_explicit_detail
+        PASS [   0.011s] (225/449) port-runtime hosted_control_plane::tests::hosted_registry_persistence_control_plane_registration_route_persists_and_refreshes_state
+        PASS [   1.113s] (226/449) port-runtime hosted_control_plane::tests::hosted_registry_persistence_node_agent_registers_and_refreshes_against_control_plane
+        PASS [   0.014s] (227/449) port-runtime hosted_control_plane::tests::hosted_registry_persistence_reconstructs_routes_from_durable_state_after_restart
+        PASS [   0.008s] (228/449) port-runtime hosted_control_plane::tests::hosted_registry_persistence_surfaces_control_plane_and_path_context_on_decode_failure
+        PASS [   0.006s] (229/449) port-runtime hosted_control_plane::tests::k3s_service_runtime_identifies_recoverable_guest_wedge_states
+        PASS [   0.013s] (230/449) port-runtime hosted_control_plane::tests::ladder_e2e_restart_preserves_escalation_then_unfence_rearms
+        PASS [   0.010s] (231/449) port-runtime hosted_control_plane::tests::ladder_e2e_tests_have_no_wall_clock_sleeps
+        PASS [   0.007s] (232/449) port-runtime hosted_control_plane::tests::ladder_e2e_tier_1_converges_guest_wedge
+        PASS [   0.008s] (233/449) port-runtime hosted_control_plane::tests::ladder_e2e_tier_3_escalates_and_auto_clears_on_host_return
+        PASS [   0.008s] (234/449) port-runtime hosted_control_plane::tests::launch_auto_clears_awaiting_tier_3_when_record_qualifies
+        PASS [   0.009s] (235/449) port-runtime hosted_control_plane::tests::launch_clears_awaiting_tier_3_record_via_post_launch_hook
+        PASS [   0.042s] (236/449) port-runtime hosted_control_plane::tests::list_machines_degrades_a_timed_out_route_without_failing_the_fleet
+        PASS [   0.007s] (237/449) port-runtime hosted_control_plane::tests::machine_has_rootfs_overlay_checks_machine_spec
+        PASS [   0.007s] (238/449) port-runtime hosted_control_plane::tests::machine_placement_state_path_is_scoped_under_control_plane_runtime_root
+        PASS [   0.010s] (239/449) port-runtime hosted_control_plane::tests::machine_status_read_does_not_persist_machine_placement_on_read
+        PASS [   3.028s] (240/449) port-runtime hosted_control_plane::tests::node_agent_launches_pvm_machine_from_prepared_host_kit
+        PASS [   6.616s] (241/449) port-runtime hosted_control_plane::tests::node_agent_refresh_stays_live_while_control_plane_artifact_pull_is_in_flight
+        PASS [   6.116s] (242/449) port-runtime hosted_control_plane::tests::node_agent_refresh_stays_live_while_guest_exec_is_in_flight
+        PASS [   0.011s] (243/449) port-runtime hosted_control_plane::tests::node_agent_rejects_invalid_token
+        PASS [   0.012s] (244/449) port-runtime hosted_control_plane::tests::node_agent_reports_missing_guest_socket_with_runtime_context
+        PASS [   0.014s] (245/449) port-runtime hosted_control_plane::tests::node_agent_serves_status_and_guest_exec_from_runtime_root
+        PASS [   0.020s] (246/449) port-runtime hosted_control_plane::tests::node_agent_surfaces_explicit_registration_failures
+        PASS [   0.615s] (247/449) port-runtime hosted_control_plane::tests::node_machine_response_runs_on_blocking_pool
+        PASS [   0.008s] (248/449) port-runtime hosted_control_plane::tests::node_machine_response_surfaces_full_error_chain
+        PASS [   0.008s] (249/449) port-runtime hosted_control_plane::tests::port_machine_unfence_clears_recovery_state_and_emits_event
+        PASS [   0.009s] (250/449) port-runtime hosted_control_plane::tests::prepare_pvm_rejects_generic_node_substitution_for_cloud_aws
+        PASS [   0.010s] (251/449) port-runtime hosted_control_plane::tests::proxy_bytes_does_not_purge_stale_machine_placement_when_guest_socket_is_missing
+        PASS [   0.058s] (252/449) port-runtime hosted_control_plane::tests::proxy_bytes_times_out_when_node_agent_stalls
+        PASS [   0.011s] (253/449) port-runtime hosted_control_plane::tests::reconcile_machine_recovery_clears_in_progress_when_wedge_is_gone
+        PASS [   0.006s] (254/449) port-runtime hosted_control_plane::tests::recovery_code_path_has_no_cloud_or_remote_shell_dependencies
+        PASS [   0.006s] (255/449) port-runtime hosted_control_plane::tests::recovery_decision_escalates_straight_to_tier_3_on_node_wedge
+        PASS [   0.006s] (256/449) port-runtime hosted_control_plane::tests::recovery_decision_fires_tier_1_on_guest_wedge_when_enabled
+        PASS [   0.007s] (257/449) port-runtime hosted_control_plane::tests::recovery_decision_is_none_when_disabled
+        PASS [   0.006s] (258/449) port-runtime hosted_control_plane::tests::recovery_decision_promotes_tier_1_to_tier_2_and_tier_3
+        PASS [   0.006s] (259/449) port-runtime hosted_control_plane::tests::recovery_decision_re_reads_wedge_state_avoiding_stale_trigger
+        PASS [   0.008s] (260/449) port-runtime hosted_control_plane::tests::recovery_decision_takes_no_further_action_in_awaiting_tier_3
+        PASS [   0.005s] (261/449) port-runtime hosted_control_plane::tests::recovery_decision_waits_for_settle_window_while_in_progress
+        PASS [   0.008s] (262/449) port-runtime hosted_control_plane::tests::recovery_event_sink_emits_json_lines_with_monotonic_sequence
+        PASS [   0.008s] (263/449) port-runtime hosted_control_plane::tests::recovery_lock_is_try_acquire_and_releases_on_guard_drop
+        PASS [   0.006s] (264/449) port-runtime hosted_control_plane::tests::recovery_record_persists_and_reloads_across_control_plane_restart
+        PASS [   0.010s] (265/449) port-runtime hosted_control_plane::tests::recovery_runner_executes_decided_action_when_enabled
+        PASS [   0.008s] (266/449) port-runtime hosted_control_plane::tests::recovery_runner_is_noop_when_cluster_recovery_disabled
+        PASS [   0.022s] (267/449) port-runtime hosted_control_plane::tests::recovery_runner_restarts_machine_through_live_hosted_route
+        PASS [   0.014s] (268/449) port-runtime hosted_control_plane::tests::recovery_runner_skips_locked_machine_until_lock_releases
+        PASS [   0.007s] (269/449) port-runtime hosted_control_plane::tests::registered_node_state_path_is_scoped_under_control_plane_runtime_root
+        PASS [   0.012s] (270/449) port-runtime hosted_control_plane::tests::registered_node_state_rejects_invalid_registration_detail
+        PASS [   0.006s] (271/449) port-runtime hosted_control_plane::tests::registered_node_state_validates_into_registered_contracts
+        PASS [   0.037s] (272/449) port-runtime hosted_control_plane::tests::registration_reconcile_persists_machine_placement_without_read_path
+        PASS [   0.036s] (273/449) port-runtime hosted_control_plane::tests::registration_reconcile_purges_stale_machine_placement_when_node_reports_missing_runtime
+        PASS [   0.036s] (274/449) port-runtime hosted_control_plane::tests::registration_reconcile_repairs_stale_machine_placement_without_read_path
+        PASS [   0.033s] (275/449) port-runtime hosted_control_plane::tests::startup_reconcile_canonicalizes_legacy_node_alias_to_configured_node_identity
+        PASS [   0.007s] (276/449) port-runtime hosted_control_plane::tests::tier_3_auto_clears_when_heartbeats_return_fresh
+        PASS [   0.007s] (277/449) port-runtime hosted_control_plane::tests::tier_3_signal_is_per_machine_not_per_host
+        PASS [   0.006s] (278/449) port-runtime hosted_control_plane::tests::wedge_class_prefers_node_when_both_triggers_fire
+        PASS [   0.006s] (279/449) port-runtime hosted_control_plane::tests::wedge_detector_interval_is_a_dedicated_positive_duration
+        PASS [   0.008s] (280/449) port-runtime hosted_control_plane::tests::wedge_detector_sets_and_clears_wedge_state
+        PASS [   0.008s] (281/449) port-runtime hosted_control_plane::tests::wedge_detector_tick_has_no_machine_lifecycle_side_effects
+        PASS [   0.007s] (282/449) port-runtime tests::artifact_scripts_resolve_from_packaged_root_candidates
+        PASS [   0.007s] (283/449) port-runtime tests::artifact_scripts_resolve_from_packaged_share_root_candidates
+        PASS [   0.006s] (284/449) port-runtime tests::artifact_scripts_resolve_from_repository_root
+        PASS [   0.005s] (285/449) port-runtime tests::artifact_validate_pipeline_does_not_require_a_repo_workdir
+        PASS [   0.631s] (286/449) port-runtime tests::avf_copy_and_forward_use_runtime_socket_after_launch
+        PASS [   0.531s] (287/449) port-runtime tests::avf_guest_exec_pty_and_logs_use_runtime_socket_after_launch
+        PASS [   0.007s] (288/449) port-runtime tests::avf_launch_fails_fast_on_non_macos_hosts
+        PASS [   0.527s] (289/449) port-runtime tests::avf_launch_status_and_stop_write_canonical_runtime_state
+        PASS [   0.008s] (290/449) port-runtime tests::chown_recursive_changes_ownership_of_tree
+        PASS [   0.007s] (291/449) port-runtime tests::chown_runtime_is_noop_without_sudo
+        PASS [   0.026s] (292/449) port-runtime tests::cloud_hypervisor_launch_status_and_stop_write_canonical_runtime_state
+        PASS [   0.018s] (293/449) port-runtime tests::cloud_hypervisor_launch_surfaces_missing_binary_preflight
+        PASS [   0.008s] (294/449) port-runtime tests::copy_guest_file_uses_firecracker_vsock_tunnel_in_both_directions
+        PASS [   0.006s] (295/449) port-runtime tests::default_network_activates_via_unwrap_or_default
+        PASS [   0.010s] (296/449) port-runtime tests::default_outbound_interface_prefers_iproute2_binary_over_busybox_ip_on_path
+        PASS [   0.029s] (297/449) port-runtime tests::detached_forward_status_treats_zombie_pid_as_stale
+        PASS [   0.021s] (298/449) port-runtime tests::doctor_attached_volume_guidance
+        PASS [   0.015s] (299/449) port-runtime tests::doctor_report_fails_fast_for_missing_pvm_boot_arg_and_binary
+        PASS [   0.016s] (300/449) port-runtime tests::doctor_report_fails_fast_for_unsupported_cloud_hypervisor_platform_and_protection_mode
+        PASS [   0.017s] (301/449) port-runtime tests::doctor_report_includes_hosted_pvm_host_kit_contract_checks
+        PASS [   0.018s] (302/449) port-runtime tests::doctor_report_includes_machine_lane_checks
+        PASS [   0.018s] (303/449) port-runtime tests::doctor_report_includes_provider_aware_remote_host_checks
+        PASS [   0.018s] (304/449) port-runtime tests::doctor_report_includes_pvm_host_kit_checks_for_local_contract
+        PASS [   0.018s] (305/449) port-runtime tests::doctor_report_marks_avf_checks_ready_on_macos
+        PASS [   0.019s] (306/449) port-runtime tests::doctor_report_surfaces_avf_platform_and_boundary_checks
+        PASS [   0.017s] (307/449) port-runtime tests::doctor_report_surfaces_cloud_hypervisor_platform_and_binary_checks
+        PASS [   0.007s] (308/449) port-runtime tests::doctor_report_surfaces_oci_registry_backend_dependency_and_auth_checks
+        PASS [   0.025s] (309/449) port-runtime tests::doctor_report_uses_imported_prepared_hosted_pvm_state
+        PASS [   0.018s] (310/449) port-runtime tests::doctor_ssh_remote_failure_guidance
+        PASS [   0.019s] (311/449) port-runtime tests::doctor_ssh_remote_guidance
+        PASS [   0.007s] (312/449) port-runtime tests::driver_selection_routes_avf_machine_to_local_driver
+        PASS [   0.006s] (313/449) port-runtime tests::driver_selection_routes_cloud_hypervisor_machine_to_local_driver
+        PASS [   0.007s] (314/449) port-runtime tests::driver_selection_routes_demo_machine_to_firecracker_local_driver
+        PASS [   0.006s] (315/449) port-runtime tests::driver_selection_routes_hosted_machine_to_control_plane_driver
+        PASS [   0.007s] (316/449) port-runtime tests::driver_selection_routes_ssh_machine_to_ssh_driver
+        PASS [   0.006s] (317/449) port-runtime tests::firecracker_binary_selection_uses_the_pvm_lane_without_standard_fallback
+        PASS [   0.006s] (318/449) port-runtime tests::firecracker_config_attaches_rootfs_overlay_drive_and_boot_args
+        PASS [   0.006s] (319/449) port-runtime tests::firecracker_config_contains_kernel_rootfs_and_vsock
+        PASS [   0.007s] (320/449) port-runtime tests::firecracker_config_includes_network_interface_with_default_network_spec
+        PASS [   0.006s] (321/449) port-runtime tests::firecracker_config_omits_network_when_none_is_explicitly_disabled
+        PASS [   0.007s] (322/449) port-runtime tests::firecracker_config_uses_sibling_initrd_when_present
+        PASS [   0.009s] (323/449) port-runtime tests::guest_exec_uses_cloud_hypervisor_vsock_tunnel_when_runtime_socket_is_absent
+        PASS [   0.008s] (324/449) port-runtime tests::guest_exec_uses_firecracker_vsock_tunnel_when_runtime_socket_is_absent
+        PASS [   0.008s] (325/449) port-runtime tests::guest_forward_session_proxies_through_firecracker_vsock_tunnel
+        PASS [   0.011s] (326/449) port-runtime tests::guest_operations_explain_missing_live_vm_transport_socket
+        PASS [   0.008s] (327/449) port-runtime tests::guest_streaming_operations_aggregate_pty_and_followed_logs_from_runtime_socket
+        PASS [   0.157s] (328/449) port-runtime tests::guest_vsock_tunnel_times_out_when_handshake_stalls
+        PASS [   0.016s] (329/449) port-runtime tests::hosted_aws_pvm_status_surfaces_preparation_guidance
+        PASS [   0.021s] (330/449) port-runtime tests::hosted_cloud_hypervisor_launch_rejects_firecracker_only_nodes_without_fallback
+        PASS [   3.148s] (331/449) port-runtime tests::hosted_cloud_hypervisor_launch_status_stop_route_through_live_control_plane
+        PASS [   0.059s] (332/449) port-runtime tests::hosted_control_plane_machine_wedge_uses_short_status_timeout
+        PASS [   0.010s] (333/449) port-runtime tests::hosted_copy_stream_errors_include_route_context
+        PASS [   0.011s] (334/449) port-runtime tests::hosted_copy_uses_stream_route_and_round_trips_bytes
+        PASS [   0.052s] (335/449) port-runtime tests::hosted_detached_forward_list_and_stop_use_node_runtime_state
+        PASS [   0.045s] (336/449) port-runtime tests::hosted_detached_forward_start_returns_node_owned_manifest
+        PASS [   0.027s] (337/449) port-runtime tests::hosted_fleet_state_surfaces_live_stale_and_imported_only_nodes
+        PASS [   0.012s] (338/449) port-runtime tests::hosted_guest_exec_explains_unresolved_node_routing
+        PASS [   0.018s] (339/449) port-runtime tests::hosted_guest_exec_routes_cloud_hypervisor_machine_through_node_runtime_root
+        PASS [   0.017s] (340/449) port-runtime tests::hosted_guest_exec_routes_through_node_runtime_root
+        PASS [   0.010s] (341/449) port-runtime tests::hosted_guest_forward_errors_include_route_context
+        PASS [   0.020s] (342/449) port-runtime tests::hosted_guest_forward_routes_through_live_control_plane
+        PASS [   0.021s] (343/449) port-runtime tests::hosted_guest_pty_routes_through_live_control_plane
+        PASS [   0.007s] (344/449) port-runtime tests::hosted_k3s_agent_healthcheck_uses_lease_grace_window_for_transient_failures
+        PASS [   6.141s] (345/449) port-runtime tests::hosted_k3s_bootstrap_and_join_workflow
+        PASS [   6.144s] (346/449) port-runtime tests::hosted_k3s_bootstrap_persists_placement_and_service_records
+        PASS [   6.149s] (347/449) port-runtime tests::hosted_k3s_bootstrap_uses_native_snapshotter_for_overlay_rootfs_guests
+        PASS [   0.007s] (348/449) port-runtime tests::hosted_k3s_boundary_failures
+        PASS [   7.238s] (349/449) port-runtime tests::hosted_k3s_cluster_access_contract
+        PASS [   7.239s] (350/449) port-runtime tests::hosted_k3s_cluster_access_reports_kubeconfig_handoff_separately
+        PASS [   7.215s] (351/449) port-runtime tests::hosted_k3s_cluster_access_reports_legacy_detached_runtime_drift
+        PASS [   6.234s] (352/449) port-runtime tests::hosted_k3s_cluster_kubeconfig_failure_preserves_readiness_summary
+        PASS [   6.235s] (353/449) port-runtime tests::hosted_k3s_cluster_kubeconfig_succeeds_without_node_visibility
+        PASS [   0.008s] (354/449) port-runtime tests::hosted_k3s_effective_args_use_guest_underlay_ip_for_external_identity
+        PASS [   0.007s] (355/449) port-runtime tests::hosted_k3s_ha_status_reports_spread_satisfied_across_three_hosts
+        PASS [   0.021s] (356/449) port-runtime tests::hosted_k3s_machine_access_uses_loaded_config_state_root_when_cwd_differs
+        PASS [   0.011s] (357/449) port-runtime tests::hosted_k3s_machine_external_ip_falls_back_to_imported_node_provenance_when_guest_network_is_missing
+        PASS [   0.007s] (358/449) port-runtime tests::hosted_k3s_machine_truth_leaves_wedge_fields_default_when_wedge_route_unreachable
+        PASS [   0.008s] (359/449) port-runtime tests::hosted_k3s_machine_truth_serde_round_trips_with_wedge_fields
+        PASS [   6.224s] (360/449) port-runtime tests::hosted_k3s_route_context_visibility
+        PASS [   0.007s] (361/449) port-runtime tests::hosted_k3s_server_healthcheck_requires_runtime_and_readyz
+        PASS [   0.089s] (362/449) port-runtime tests::hosted_k3s_service_start_accepts_matching_status_after_apply_timeout
+        PASS [   6.192s] (363/449) port-runtime tests::hosted_k3s_service_status_survives_from_persisted_records_after_launch
+        PASS [   0.028s] (364/449) port-runtime tests::hosted_machine_list_monitor_and_stop_prefer_live_candidate_selection_under_stale_placement
+        PASS [   0.123s] (365/449) port-runtime tests::hosted_machine_monitor_reports_node_runtime_and_detached_forward_state
+        PASS [   0.010s] (366/449) port-runtime tests::hosted_machine_resolution_keeps_stored_placement_when_live_status_is_fallback_malformed
+        PASS [   0.011s] (367/449) port-runtime tests::hosted_machine_resolution_uses_live_control_plane_status_for_remote_runtime_roots
+        PASS [   0.021s] (368/449) port-runtime tests::hosted_machine_status_prefers_live_candidate_selection_under_stale_placement
+        PASS [   0.021s] (369/449) port-runtime tests::hosted_machine_status_uses_control_plane_and_node_runtime_root
+        PASS [   0.225s] (370/449) port-runtime tests::hosted_machine_top_reports_hypervisor_and_detached_forward_processes
+        PASS [   0.008s] (371/449) port-runtime tests::hosted_pvm_launch_rejects_unplaceable_nodes_before_remote_guidance
+        PASS [   3.066s] (372/449) port-runtime tests::hosted_pvm_launch_routes_through_live_control_plane_and_prepared_node
+        PASS [   3.071s] (373/449) port-runtime tests::hosted_pvm_status_stop_route_through_live_control_plane_and_prepared_node
+        PASS [   0.017s] (374/449) port-runtime tests::hosted_pvm_status_surfaces_node_readiness_denial
+        PASS [   0.017s] (375/449) port-runtime tests::hosted_service_apply_reports_requested_host_group_rejection_detail
+        PASS [   0.057s] (376/449) port-runtime tests::hosted_service_apply_targets_requested_host_group_and_uses_deterministic_first_fit
+        PASS [   1.087s] (377/449) port-runtime tests::hosted_service_list_status_and_stop_follow_stored_placement
+        PASS [   0.060s] (378/449) port-runtime tests::hosted_service_output_surfaces_stale_stored_placement_detail
+        PASS [   0.007s] (379/449) port-runtime tests::hosted_standard_aws_launch_uses_hosted_route_context_instead_of_provider_guidance
+        PASS [   0.235s] (380/449) port-runtime tests::hosted_standard_launch_errors_surface_provider_and_selected_node_context
+        PASS [   3.057s] (381/449) port-runtime tests::hosted_standard_launch_precreates_firecracker_log_file
+        PASS [   9.092s] (382/449) port-runtime tests::hosted_standard_launch_routes_through_live_control_plane_for_each_provider
+        PASS [   3.045s] (383/449) port-runtime tests::hosted_standard_status_stop_include_provider_and_hosted_node_detail
+        PASS [   0.120s] (384/449) port-runtime tests::hosted_stop_machine_routes_through_node_runtime_root
+        PASS [   0.010s] (385/449) port-runtime tests::hosted_stored_service_placements_follow_machine_placement_even_if_machine_host_drifts
+        PASS [   0.012s] (386/449) port-runtime tests::launch_preflight_honors_explicit_iptables_binary_override
+        PASS [   0.019s] (387/449) port-runtime tests::launch_preflight_prefers_iproute2_binary_over_busybox_ip_on_path
+        PASS [   0.017s] (388/449) port-runtime tests::launch_preflight_requires_kvm_for_standard_firecracker_lane
+        PASS [   0.017s] (389/449) port-runtime tests::launch_preflight_requires_overlay_dependencies_for_rootfs_overlay
+        PASS [   0.017s] (390/449) port-runtime tests::launch_preflight_skips_kvm_for_firecracker_pvm_lane
+        PASS [   0.007s] (391/449) port-runtime tests::launch_rejects_malformed_pvm_host_kit_contract_with_explicit_detail
+        PASS [   0.007s] (392/449) port-runtime tests::launch_rejects_pvm_host_kit_when_runtime_is_not_prepared
+        PASS [   0.009s] (393/449) port-runtime tests::list_artifacts_reports_local_and_cached_variant_presence
+        PASS [   0.020s] (394/449) port-runtime tests::list_machines_includes_hosted_control_plane_statuses
+        PASS [   0.109s] (395/449) port-runtime tests::list_machines_reports_running_stale_and_malformed_runtime_entries
+        PASS [   0.008s] (396/449) port-runtime tests::list_machines_skips_hosted_control_planes_when_auth_env_is_missing
+        PASS [   1.277s] (397/449) port-runtime tests::local_cluster_lifecycle_reports_readiness_and_returns_kubeconfig
+        PASS [   0.008s] (398/449) port-runtime tests::locate_oci_pulled_artifact_prefers_preserved_relative_path
+        PASS [   0.007s] (399/449) port-runtime tests::machine_status_reports_missing_and_malformed_runtime_state
+        PASS [   0.008s] (400/449) port-runtime tests::machine_status_reports_runtime_paths_for_known_machine
+        PASS [   0.006s] (401/449) port-runtime tests::machine_wedge_status_serde_round_trips_with_defaults_skipped_on_wire
+        PASS [   0.007s] (402/449) port-runtime tests::native_artifact_build_lane_accepts_the_native_alias
+        PASS [   0.007s] (403/449) port-runtime tests::oci_registry_backend_requires_basic_auth_environment_variables
+        PASS [   0.008s] (404/449) port-runtime tests::oci_registry_backend_requires_oras_binary_with_explicit_detail
+        PASS [   0.006s] (405/449) port-runtime tests::oci_registry_cache_path_is_deterministic_across_pull_backends
+        PASS [   0.014s] (406/449) port-runtime tests::oci_registry_pull_failure_surfaces_remote_and_path_context
+        PASS [   0.024s] (407/449) port-runtime tests::oci_registry_pull_fetches_into_cache_and_local_paths
+        PASS [   0.018s] (408/449) port-runtime tests::oci_registry_push_executes_oras_and_materializes_cache
+        PASS [   0.013s] (409/449) port-runtime tests::oci_registry_push_failure_surfaces_remote_and_path_context
+        PASS [   0.006s] (410/449) port-runtime tests::path_checks_report_missing_artifacts
+        PASS [   0.007s] (411/449) port-runtime tests::prepare_runtime_state_cleans_stale_socket_and_pid_files
+        PASS [   0.109s] (412/449) port-runtime tests::prepare_runtime_state_rejects_live_matching_firecracker_process
+        PASS [   0.026s] (413/449) port-runtime tests::process_is_live_treats_zombie_pid_as_not_running
+        PASS [   0.024s] (414/449) port-runtime tests::push_and_pull_artifact_round_trip_through_live_hosted_backend
+        PASS [   0.013s] (415/449) port-runtime tests::refresh_machine_service_runtime_replays_active_service_after_detached_status
+        PASS [   0.007s] (416/449) port-runtime tests::repo_managed_guest_image_pipeline_detection_covers_relative_and_absolute_paths
+        PASS [   0.006s] (417/449) port-runtime tests::resolve_artifact_metadata_accepts_the_native_alias
+        PASS [   0.007s] (418/449) port-runtime tests::resolve_artifact_metadata_distinguishes_standard_and_pvm_paths
+        PASS [   0.006s] (419/449) port-runtime tests::resolve_artifact_metadata_reports_missing_selected_cloud_hypervisor_variant_without_fallback
+        PASS [   0.008s] (420/449) port-runtime tests::resolve_artifact_metadata_reports_missing_selected_pvm_variant_without_fallback
+        PASS [   0.007s] (421/449) port-runtime tests::resolve_artifact_store_contract_returns_hosted_transfer_contract
+        PASS [   0.006s] (422/449) port-runtime tests::resolve_guest_image_metadata_distinguishes_standard_and_pvm_paths
+        PASS [   0.010s] (423/449) port-runtime tests::resolve_service_runtime_context_skips_local_fs_gates_for_remote_hosted_runtime
+        PASS [   0.010s] (424/449) port-runtime tests::runtime_guest_materialization_refreshes_stale_copy
+        PASS [   0.008s] (425/449) port-runtime tests::runtime_guest_materialization_reuses_current_copy_without_recopy
+        PASS [   0.017s] (426/449) port-runtime tests::runtime_guest_overlay_materialization_is_idempotent
+        PASS [   0.006s] (427/449) port-runtime tests::runtime_paths_are_deterministic
+        PASS [   0.110s] (428/449) port-runtime tests::service_health_projects_local_and_hosted_status_consistently
+        PASS [   1.103s] (429/449) port-runtime tests::service_secret_backend_hosted_lifecycle_uses_runtime_file_backend
+        PASS [   0.009s] (430/449) port-runtime tests::service_secret_status_projects_runtime_owned_provenance_without_value_leak
+        PASS [   0.007s] (431/449) port-runtime tests::service_status_exposes_runtime_contract_even_before_execution
+        PASS [   0.495s] (432/449) port-runtime tests::service_supervision_restarts_local_service_and_projects_last_exit_state
+        PASS [   0.128s] (433/449) port-runtime tests::stage_local_cluster_bootstrap_copies_offline_inputs_and_proves_install
+        PASS [   0.112s] (434/449) port-runtime tests::stop_machine_terminates_live_port_owned_process
+        PASS [   0.006s] (435/449) port-runtime tests::sudo_caller_ids_returns_none_without_env
+        PASS [   0.007s] (436/449) port-sdk tests::client_from_machine_uses_hosted_identity_contract
+        PASS [   0.007s] (437/449) port-sdk tests::detached_forward_requests_use_canonical_hosted_paths
+        PASS [   0.007s] (438/449) port-sdk tests::guest_requests_preserve_existing_guest_payloads
+        PASS [   0.006s] (439/449) port-sdk tests::guest_stream_requests_follow_stream_paths_and_protocol
+        PASS [   0.009s] (440/449) port-sdk tests::hosted_client_executes_live_machine_requests
+        PASS [   0.010s] (441/449) port-sdk tests::hosted_client_surfaces_placement_detail_from_live_errors
+        PASS [   0.008s] (442/449) port-sdk tests::hosted_client_surfaces_route_context_from_live_errors
+        PASS [   0.008s] (443/449) port-sdk tests::hosted_client_surfaces_service_identity_from_live_errors
+        PASS [   0.057s] (444/449) port-sdk tests::hosted_client_times_out_slow_machine_requests
+        PASS [   0.007s] (445/449) port-sdk tests::hosted_guest_shell_driver_contract_is_machine_scoped_and_canonical
+        PASS [   0.006s] (446/449) port-sdk tests::hosted_guest_shell_driver_contract_requires_control_plane_identity
+        PASS [   0.006s] (447/449) port-sdk tests::machine_and_guest_paths_follow_canonical_operator_model
+        PASS [   0.006s] (448/449) port-sdk tests::service_policy_requests_cover_secret_sandbox_and_policy_contracts
+        PASS [   0.010s] (449/449) port-sdk tests::service_status_live_decode_preserves_restart_and_health_projection
+────────────
+     Summary [ 205.462s] 449 tests run: 449 passed, 1 skipped
+cargo test --doc 
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+   Doc-tests port
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_agent_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_guest_agent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_hosted_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_sdk
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+## doctests
+$ just doctest 
+cargo test --doc 
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+   Doc-tests port
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_agent_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_guest_agent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_hosted_protocol
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests port_sdk
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+## linux package proof
+$ just package-proof x86_64-unknown-linux-gnu 
+if command -v nix >/dev/null 2>&1 && [ -f /home/alex/workspace/spoke-sh/port/flake.nix ]; then cd /home/alex/workspace/spoke-sh/port && nix develop -c bash scripts/package-proof.sh "$@"; else cd /home/alex/workspace/spoke-sh/port && bash scripts/package-proof.sh "$@"; fi
+building '/nix/store/65c3v6y7mqv433zahiyw0ypz8dqa62np-port-0.1.0.drv'...
+building '/nix/store/gs1qm22c4fp96diqxkhzp7fxr2k9f02y-port-0.1.0.drv'...
+building '/nix/store/l4wdr4axlqbzz6dw7k95w583jwwkflrr-nix-shell-env.drv'...
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.45
+   Compiling libc v0.2.182
+   Compiling itoa v1.0.17
+   Compiling serde_core v1.0.228
+   Compiling stable_deref_trait v1.2.1
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.11.1
+   Compiling futures-core v0.3.32
+   Compiling serde v1.0.228
+   Compiling once_cell v1.21.3
+   Compiling memchr v2.8.0
+   Compiling shlex v1.3.0
+   Compiling find-msvc-tools v0.1.9
+   Compiling futures-sink v0.3.32
+   Compiling smallvec v1.15.1
+   Compiling litemap v0.8.1
+   Compiling writeable v0.6.2
+   Compiling log v0.4.29
+   Compiling cfg-if v1.0.4
+   Compiling zeroize v1.8.2
+   Compiling percent-encoding v2.3.2
+   Compiling icu_normalizer_data v2.1.1
+   Compiling tower-service v0.3.3
+   Compiling httparse v1.10.1
+   Compiling icu_properties_data v2.1.2
+   Compiling zmij v1.0.21
+   Compiling futures-task v0.3.32
+   Compiling futures-io v0.3.32
+   Compiling slab v0.4.12
+   Compiling serde_json v1.0.149
+   Compiling hashbrown v0.16.1
+   Compiling untrusted v0.9.0
+   Compiling equivalent v1.0.2
+   Compiling try-lock v0.2.5
+   Compiling bitflags v2.11.0
+   Compiling tower-layer v0.3.3
+   Compiling toml_write v0.1.2
+   Compiling pin-utils v0.1.0
+   Compiling atomic-waker v1.1.2
+   Compiling winnow v0.7.15
+   Compiling httpdate v1.0.3
+   Compiling rustls v0.23.37
+   Compiling base64 v0.22.1
+   Compiling ipnet v2.12.0
+   Compiling subtle v2.6.1
+   Compiling ryu v1.0.23
+   Compiling cc v1.2.56
+   Compiling futures-channel v0.3.32
+   Compiling sync_wrapper v1.0.2
+   Compiling want v0.3.1
+   Compiling rustix v1.1.4
+   Compiling utf8_iter v1.0.4
+   Compiling iri-string v0.7.10
+   Compiling utf8parse v0.2.2
+   Compiling tracing-core v0.1.36
+   Compiling rustls-pki-types v1.14.0
+   Compiling form_urlencoded v1.2.2
+   Compiling linux-raw-sys v0.12.1
+   Compiling anyhow v1.0.102
+   Compiling colorchoice v1.0.4
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstyle v1.0.13
+   Compiling anstyle-query v1.1.5
+   Compiling mime v0.3.17
+   Compiling matchit v0.8.4
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.0.0
+   Compiling heck v0.5.0
+   Compiling anstyle-parse v0.2.7
+   Compiling anstream v0.6.21
+   Compiling futures-util v0.3.32
+   Compiling http v1.4.0
+   Compiling webpki-roots v1.0.6
+   Compiling tracing v0.1.44
+   Compiling indexmap v2.13.0
+   Compiling ring v0.17.14
+   Compiling syn v2.0.117
+   Compiling http-body v1.0.1
+   Compiling http-body-util v0.1.3
+   Compiling mio v1.1.1
+   Compiling socket2 v0.6.3
+   Compiling getrandom v0.2.17
+   Compiling terminal_size v0.4.3
+   Compiling axum-core v0.5.6
+   Compiling clap_builder v4.5.60
+   Compiling serde_path_to_error v0.1.20
+   Compiling synstructure v0.13.2
+   Compiling zerofrom-derive v0.1.6
+   Compiling yoke-derive v0.8.1
+   Compiling zerovec-derive v0.11.2
+   Compiling displaydoc v0.2.5
+   Compiling serde_derive v1.0.228
+   Compiling tokio-macros v2.6.1
+   Compiling clap_derive v4.5.55
+   Compiling tokio v1.50.0
+   Compiling zerofrom v0.1.6
+   Compiling yoke v0.8.1
+   Compiling zerovec v0.11.5
+   Compiling zerotrie v0.2.3
+   Compiling clap v4.5.60
+   Compiling tinystr v0.8.2
+   Compiling potential_utf v0.1.4
+   Compiling icu_collections v2.1.1
+   Compiling icu_locale_core v2.1.1
+   Compiling icu_provider v2.1.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling serde_urlencoded v0.7.1
+   Compiling toml_edit v0.22.27
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling idna_adapter v1.2.1
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling hyper v1.8.1
+   Compiling tower v0.5.3
+   Compiling toml v0.8.23
+   Compiling tower-http v0.6.8
+   Compiling port-model v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-model)
+   Compiling hyper-util v0.1.20
+   Compiling axum v0.8.8
+   Compiling port-agent-protocol v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-agent-protocol)
+   Compiling port-hosted-protocol v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-hosted-protocol)
+   Compiling rustls-webpki v0.103.9
+   Compiling tokio-rustls v0.26.4
+   Compiling hyper-rustls v0.27.7
+   Compiling reqwest v0.12.28
+   Compiling port-sdk v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-sdk)
+   Compiling port-runtime v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-runtime)
+   Compiling port v0.1.0 (/home/alex/workspace/spoke-sh/port/crates/port-cli)
+    Finished `release` profile [optimized] target(s) in 29.57s
+artifact: /home/alex/workspace/spoke-sh/port/artifacts/packages/port-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+target: x86_64-unknown-linux-gnu
+version: 0.1.0
+included-files:
+  - bin/port
+  - README.md
+  - RELEASE.md
+  - docs/install.md
+  - scripts/install-local-port.sh
+  - scripts/artifacts/validate-kernel.sh
+  - scripts/artifacts/validate-guest-image.sh
+  - PACKAGE_METADATA.txt
+  - PACKAGE_MANIFEST.txt
+proof-root: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu
+prefix: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix
+binary: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port
+version-output: port 0.1.0
+doctor-command: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor
+doctor-status: ok
+doctor-output:
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/3kdz7x1bxnwb0kdf6f871jfk5m94pba2-firecracker-1.15.1/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/df79h6la9hpbvd739qzam20j2p2lqnyp-iproute2-6.19.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/rbxlbg7fib601hhvb72ibh1rlr16psz8-iptables-1.8.13/bin/iptables' with expected identity.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.
+validate-command: /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port --config /home/alex/workspace/spoke-sh/port/artifacts/package-proof/x86_64-unknown-linux-gnu/validate.toml artifacts validate --artifact demo-guest --architecture x86-64
+validate-status: ok
+validate-output:
+e2fsck 1.47.3 (8-Jul-2025)
+validated guest image: /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+guest image architecture: x86_64
+guest image protection mode: standard
+guest image K3s version: 1.35.2+k3s1
+guest image bytes: 12884901888
+validated guest-image artifact 'demo-guest' as demo-fs/port/demo-guest:v1 for x86_64/firecracker/standard at /home/alex/workspace/spoke-sh/port/artifacts/guest/demo/x86_64/firecracker/standard/rootfs.ext4
+
+## cargo-dist plan
+$ dist plan 
+announcing v0.1.0
+  port 0.1.0
+    source.tar.gz
+      [checksum] source.tar.gz.sha256
+    port-installer.sh
+    port.rb
+    sha256.sum
+    port-aarch64-apple-darwin.tar.xz
+      [bin] port
+      [misc] LICENSE, README.md, RELEASE.md, artifacts, docs, examples, install-local-port.sh
+      [checksum] port-aarch64-apple-darwin.tar.xz.sha256
+    port-x86_64-apple-darwin.tar.xz
+      [bin] port
+      [misc] LICENSE, README.md, RELEASE.md, artifacts, docs, examples, install-local-port.sh
+      [checksum] port-x86_64-apple-darwin.tar.xz.sha256
+    port-x86_64-unknown-linux-gnu.tar.xz
+      [bin] port
+      [misc] LICENSE, README.md, RELEASE.md, artifacts, docs, examples, install-local-port.sh
+      [checksum] port-x86_64-unknown-linux-gnu.tar.xz.sha256
+
+
+## packaged port doctor
+$ artifacts/package-proof/x86_64-unknown-linux-gnu/prefix/bin/port doctor 
+host_os: linux
+local_firecracker_supported: true
+check[ok]: host-platform (required=true) - Local Firecracker launch is available on Linux hosts.
+check[ok]: kvm-device (required=true) - Found /dev/kvm for KVM acceleration.
+check[ok]: firecracker-binary (required=true) - Found 'firecracker' at '/nix/store/62f9f85dnr4ycd5f66k4z38p62daixgk-firecracker-1.14.2/bin/firecracker'.
+check[ok]: iproute2 (required=true) - Found 'ip' at '/nix/store/0m39wy85kxpq81mn16bvigg5msd30mq7-iproute2-6.19.0/bin/ip' with expected identity.
+check[ok]: iptables (required=true) - Found 'iptables' at '/nix/store/lkg3nqh2d0fb6fxhak29qslspb274kcm-iptables-1.8.12/bin/iptables' with expected identity.
+note: port doctor reports the host state without mutating runtime directories.
+note: macOS operators can run Port against the AVF lane locally; Firecracker and Firecracker/PVM still require Linux host access.
+note: Windows operators should use WSL or a remote Linux host, then rely on port doctor to confirm whether local Firecracker launch is available.
+note: SSH-managed remote hosts surface separate auth and bootstrap expectations; they do not reuse hosted control-plane bearer-token auth or local runtime ownership.
+
+## board doctor
+$ keel doctor 
+[4m[1mDoctor's Laboratory Report[0m[0m
+
+[36m[1m[ SYSTEMS PATHOLOGY ][0m[39m
+  ┌─ CORE      [[1m[32mNOMINAL[39m[0m] (Vital, Pacemaker)
+  │
+  ├─ STRATEGY  [[1m[32mNOMINAL[39m[0m] (Strategic, Sensory, Skeletal)
+  │
+  ├─ EXECUTION [[1m[32mNOMINAL[39m[0m] (Motor, Neural, Autonomic)
+  │
+  └─ FLOW      [[1m[32mNOMINAL[39m[0m] (Circulatory, Kinetic)
+
+[2m[1m[ ITEMIZED PATHOLOGY ][0m[0m
+
+[36m[1mVital Subsystem (Missions)[0m[39m:
+  [32m✓[39m ID uniqueness (25 checks)
+  [32m✓[39m Goal achievement (25 checks)
+  [32m✓[39m Mission definition readiness (25 checks)
+  [32m✓[39m Active mission work coherence (25 checks)
+  [32m✓[39m Orphaned mission lineage (53 checks)
+  [32m✓[39m Mission date consistency (25 checks)
+  [32m✓[39m Mission completion evidence (25 checks)
+  [32m✓[39m Watch constraints (25 checks)
+
+[36m[1mPacemaker (Heartbeat)[0m[39m:
+  [33m![39m Pacemaker stability (1 checks)
+    [33mWarn: [39m Pacemaker has uncommitted energy. Commit worktree changes to stabilize the board.
+      Path: [2m/home/alex/workspace/spoke-sh/port/.keel/stories/VIl0aVbn5/EVIDENCE/ac-2.log[0m
+
+[36m[1mStrategic Subsystem (Epics)[0m[39m:
+  [32m✓[39m Epic structure (43 checks)
+  [32m✓[39m ID uniqueness (43 checks)
+  [32m✓[39m ID consistency (43 checks)
+  [32m✓[39m Title convention (43 checks)
+  [32m✓[39m Epic status drift (43 checks)
+  [32m✓[39m Epic completion gates (43 checks)
+  [32m✓[39m Goal lineage coherence (43 checks)
+  [32m✓[39m Press release coherence (optional) (43 checks)
+  [32m✓[39m Epic date consistency (43 checks)
+
+[36m[1mSensory Subsystem (Bearings)[0m[39m:
+  [32m✓[39m Bearing structure (10 checks)
+  [32m✓[39m ID consistency (10 checks)
+  [32m✓[39m ID format (10 checks)
+  [32m✓[39m ID uniqueness (10 checks)
+  [32m✓[39m Title convention (10 checks)
+  [32m✓[39m Bearing coherence (10 checks)
+  [32m✓[39m Bearing content completion (10 checks)
+  [32m✓[39m Bearing-Epic coherence (10 checks)
+  [32m✓[39m Bearing date consistency (10 checks)
+  [32m✓[39m Bearing decision readiness (10 checks)
+  [32m✓[39m Bearing dependency integrity (10 checks)
+  [32m✓[39m Bearing lineage epic (10 checks)
+  [32m✓[39m Bearing lineage goals (10 checks)
+
+[36m[1mSkeletal Subsystem (ADRs)[0m[39m:
+  [32m✓[39m ADR structure (0 checks)
+  [32m✓[39m ID uniqueness (0 checks)
+  [32m✓[39m ID consistency (0 checks)
+  [32m✓[39m Title convention (0 checks)
+  [32m✓[39m Proposed ADR usage (0 checks)
+  [32m✓[39m ADR content completion (0 checks)
+  [32m✓[39m ADR date consistency (0 checks)
+
+[36m[1mMotor Subsystem (Voyages)[0m[39m:
+  [32m✓[39m Voyage structure (61 checks)
+  [32m✓[39m ID uniqueness (61 checks)
+  [32m✓[39m ID consistency (61 checks)
+  [32m✓[39m Title convention (61 checks)
+  [32m✓[39m Voyage status drift (61 checks)
+  [32m✓[39m Scope authored content (61 checks)
+  [32m✓[39m SRS authored requirements (61 checks)
+  [32m✓[39m SDD authored content (61 checks)
+  [32m✓[39m PRD lineage coherence (61 checks)
+  [32m✓[39m Scope lineage coherence (61 checks)
+  [32m✓[39m Legacy scope headings (61 checks)
+  [32m✓[39m Voyage artifact contract (61 checks)
+  [32m✓[39m Evidence chains (61 checks)
+  [32m✓[39m Voyage date consistency (61 checks)
+
+[36m[1mNeural Subsystem (Stories)[0m[39m:
+  [32m✓[39m ID uniqueness (197 checks)
+  [32m✓[39m ID consistency (197 checks)
+  [32m✓[39m Title convention (197 checks)
+  [32m✓[39m Acceptance criteria completion (197 checks)
+  [32m✓[39m Verification annotations (197 checks)
+  [32m✓[39m SRS traceability (197 checks)
+  [32m✓[39m Implementation dependency cycles (197 checks)
+  [32m✓[39m Parallel conflict coherence (197 checks)
+  [32m✓[39m Scoped evidence coverage (197 checks)
+  [32m✓[39m Story frontmatter drift (197 checks)
+  [32m✓[39m Reflection coherence (197 checks)
+  [32m✓[39m Active story coherence (197 checks)
+  [32m✓[39m Terminal artifact coherence (197 checks)
+  [32m✓[39m Knowledge catalog integrity (197 checks)
+  [32m✓[39m Verification manifest integrity (197 checks)
+  [32m✓[39m Story date consistency (197 checks)
+
+[36m[1mAutonomic Subsystem (Routines)[0m[39m:
+  [32m✓[39m Routine cadence (0 checks)
+  [32m✓[39m ID consistency (0 checks)
+  [32m✓[39m Scope coherence (0 checks)
+
+[36m[1mCirculatory Subsystem (Workflow)[0m[39m:
+  [32m✓[39m Graph integrity (337 checks)
+  [32m✓[39m Workflow topology (1 checks)
+  [32m✓[39m Mission Stack protocol (1 checks)
+  [32m✓[39m Mission Stack closeout (1 checks)
+  [32m✓[39m Circuit Overload (Max Battery Packs) (0 checks)
+
+[36m[1mKinetic Subsystem (Delivery)[0m[39m:
+  [33m![39m Backlog liquidity (0 checks)
+    [33mWarn: [39m Zero delivery liquidity. No ready stories in the backlog to sustain the 7-7 window.
+      Path: [2m/home/alex/workspace/spoke-sh/port/.keel/stories[0m
+  [32m✓[39m Active blockages (1 checks)
+
+
+ac-2: ok
