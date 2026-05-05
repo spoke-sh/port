@@ -4724,7 +4724,7 @@ fn hosted_k3s_service_policy(role: &str, machine_name: &str) -> ServicePolicy {
         healthcheck: ServiceHealthcheck {
             policy: ServiceHealthPolicy::Command,
             command: hosted_k3s_service_healthcheck_command(role, machine_name),
-            restart_on_unhealthy: true,
+            restart_on_unhealthy: role != "agent",
         },
     }
 }
@@ -20745,11 +20745,11 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_k3s_agent_healthcheck_uses_lease_grace_window_for_transient_failures() {
+    fn hosted_k3s_agent_healthcheck_reports_unhealthy_without_restart() {
         let policy = hosted_k3s_service_policy("agent", "cloud-aws-worker");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
-        assert!(policy.healthcheck.restart_on_unhealthy);
+        assert!(!policy.healthcheck.restart_on_unhealthy);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
         assert_eq!(policy.healthcheck.command[1], "-lc");
         let shell = &policy.healthcheck.command[2];
