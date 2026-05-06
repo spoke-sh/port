@@ -4542,8 +4542,14 @@ fn reconcile_machine_placement_for_summary(
     let existing = existing.map(|placement| canonical_machine_placement_record(state, placement));
     let mut live_probe_nodes = Vec::new();
     for node_name in placement_probe_nodes(summary, existing.as_ref()) {
-        let Some((binding, runtime_root)) = resolve_known_node_binding(state, &node_name)? else {
-            continue;
+        // A stale or otherwise transiently-unresolvable binding for a single
+        // candidate node must not poison the whole reconcile pass — otherwise
+        // any one node ageing past `NODE_AGENT_REGISTRATION_TTL_SECONDS` wedges
+        // every other machine's placement until something external refreshes
+        // the offending node. Skip the candidate and try the next instead.
+        let (binding, runtime_root) = match resolve_known_node_binding(state, &node_name) {
+            Ok(Some(found)) => found,
+            Ok(None) | Err(_) => continue,
         };
         live_probe_nodes.push((node_name, binding, runtime_root));
     }
