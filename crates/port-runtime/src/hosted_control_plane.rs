@@ -4690,6 +4690,21 @@ fn schedule_machine_placement_reconcile(
 }
 
 #[cfg(not(test))]
+struct PlacementReconcileGuard {
+    state: ControlPlaneState,
+}
+
+#[cfg(not(test))]
+impl Drop for PlacementReconcileGuard {
+    fn drop(&mut self) {
+        self.state
+            .inner
+            .placement_reconcile_in_flight
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+#[cfg(not(test))]
 fn schedule_machine_placement_reconcile(
     state: &ControlPlaneState,
     trigger: PlacementReconcileTrigger,
@@ -4708,20 +4723,23 @@ fn schedule_machine_placement_reconcile(
         return;
     }
 
-    let state = state.clone();
+    // Construct the guard before the thread::spawn so the in-flight
+    // flag clears via Drop even if reconcile_machine_placements panics
+    // or thread::spawn itself fails. Without this, a single panic
+    // would latch the flag forever and silently disable every future
+    // reconcile for the lifetime of the process.
+    let guard = PlacementReconcileGuard {
+        state: state.clone(),
+    };
     thread::spawn(move || {
-        if let Err(error) = reconcile_machine_placements(&state, &trigger) {
+        if let Err(error) = reconcile_machine_placements(&guard.state, &trigger) {
             eprintln!(
                 "control plane '{}' placement reconcile triggered by {} failed: {}",
-                state.inner.control_plane,
+                guard.state.inner.control_plane,
                 trigger.detail(),
                 error
             );
         }
-        state
-            .inner
-            .placement_reconcile_in_flight
-            .store(false, std::sync::atomic::Ordering::Release);
     });
 }
 
