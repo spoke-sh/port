@@ -238,6 +238,10 @@
           firecracker-pvm-host-kit = awsPvmHostKitPkg;
         };
 
+        legacyPackages = pkgs.lib.optionalAttrs isLinux {
+          linuxPackages-port-guest = pkgs.callPackage ./nix/guest-kernel.nix { };
+        };
+
         checks = pkgs.lib.optionalAttrs isLinux {
           aws-pvm-host-module-eval = pkgs.writeText "aws-pvm-host-module-eval.json" (
             builtins.toJSON {

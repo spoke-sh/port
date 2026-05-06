@@ -29,9 +29,10 @@ resolve_pvm_build_flake_ref() {
 case "$output_path" in
   */x86_64/firecracker/standard/*)
     arch="x86_64"
-    kernel_source="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.dev)"
+    guest_kernel_attr="${PORT_GUEST_KERNEL_ATTR:-legacyPackages.x86_64-linux.linuxPackages-port-guest.kernel.dev}"
+    kernel_source="$(nix build --option eval-cache false --no-link --print-out-paths ".#${guest_kernel_attr}")"
     kernel_path="${kernel_source}/vmlinux"
-    kernel_origin="nixpkgs#linuxPackages_latest.kernel.dev"
+    kernel_origin=".#${guest_kernel_attr}"
     ;;
   */x86_64/firecracker/pvm/*)
     arch="x86_64"

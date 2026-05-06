@@ -321,7 +321,8 @@ EOF
 chmod 0755 "$staging_dir/opt/credential-provider/bin/ecr-credential-provider"
 
 if [[ "$copy_kernel_modules_into_guest" -eq 1 ]]; then
-  kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.modules)"
+  guest_kernel_modules_attr="${PORT_GUEST_KERNEL_MODULES_ATTR:-legacyPackages.x86_64-linux.linuxPackages-port-guest.kernel.modules}"
+  kernel_modules_store="$(nix build --option eval-cache false --no-link --print-out-paths ".#${guest_kernel_modules_attr}")"
   if [[ ! -d "${kernel_modules_store}/lib/modules" ]]; then
     echo "missing kernel modules in ${kernel_modules_store}/lib/modules" >&2
     exit 1

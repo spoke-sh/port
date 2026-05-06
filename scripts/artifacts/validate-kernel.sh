@@ -34,7 +34,8 @@ resolve_pvm_build_flake_ref() {
 case "$kernel_path" in
   */x86_64/firecracker/standard/*)
     arch="x86_64"
-    expected_path="$(nix build --option eval-cache false --no-link --print-out-paths nixpkgs#linuxPackages_latest.kernel.dev)/vmlinux"
+    guest_kernel_attr="${PORT_GUEST_KERNEL_ATTR:-legacyPackages.x86_64-linux.linuxPackages-port-guest.kernel.dev}"
+    expected_path="$(nix build --option eval-cache false --no-link --print-out-paths ".#${guest_kernel_attr}")/vmlinux"
     ;;
   */x86_64/firecracker/pvm/*)
     arch="x86_64"
