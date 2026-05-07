@@ -424,8 +424,13 @@ const WEDGE_DETECTOR_INTERVAL: Duration = Duration::from_secs(10);
 #[cfg(test)]
 const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 3;
 #[cfg(not(test))]
-const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 45;
+const NODE_AGENT_REGISTRATION_TTL_SECONDS: u64 = 120;
 const NODE_AGENT_REGISTRATION_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+// Tolerate registration `refreshed_at` regressing by up to this many seconds
+// against the previously-stored value. NTP step-corrections and modest
+// cross-host clock skew otherwise wedge a node for the remainder of its
+// freshness window every time the wall clock moves backward.
+const NODE_AGENT_REGISTRATION_REFRESHED_AT_REGRESSION_TOLERANCE_SECONDS: u64 = 60;
 
 // Hosted K3s service apply can legitimately run for several minutes while a
 // freshly relaunched control plane settles.
@@ -4189,13 +4194,20 @@ fn store_registered_node_refresh(
             )
         })?
         .clone();
-    if let Some(existing) = current_state.nodes.get(node_name)
-        && registration.refreshed_at < existing.refreshed_at
-    {
-        return Err(format!(
-            "control plane '{}' rejected stale registration refresh for node '{}': refreshed_at {} is older than current {}",
-            state.inner.control_plane, node_name, registration.refreshed_at, existing.refreshed_at
-        ));
+    if let Some(existing) = current_state.nodes.get(node_name) {
+        let regression = existing
+            .refreshed_at
+            .saturating_sub(registration.refreshed_at);
+        if regression > NODE_AGENT_REGISTRATION_REFRESHED_AT_REGRESSION_TOLERANCE_SECONDS {
+            return Err(format!(
+                "control plane '{}' rejected stale registration refresh for node '{}': refreshed_at {} is older than current {} by {regression}s (> {}s tolerance)",
+                state.inner.control_plane,
+                node_name,
+                registration.refreshed_at,
+                existing.refreshed_at,
+                NODE_AGENT_REGISTRATION_REFRESHED_AT_REGRESSION_TOLERANCE_SECONDS
+            ));
+        }
     }
 
     let mut next_state = current_state;
@@ -4829,6 +4841,52 @@ fn resolve_known_node_binding(
     Ok(None)
 }
 
+/// Read-side variant of [`resolve_known_node_binding`] that returns the
+/// stored binding regardless of registration freshness.
+///
+/// Inspector / status / service-list callers should prefer this so a brief
+/// flap in the freshness window doesn't 502 every machine-keyed query for
+/// the affected node — if the underlying node-agent is still reachable the
+/// proxy call succeeds, and if it isn't, the actual proxy failure is more
+/// informative than a synthetic stale rejection. State-changing callers
+/// (placement reconcile, machine launch) should keep using the strict
+/// freshness check via `resolve_known_node_binding`.
+fn resolve_known_node_binding_for_read(
+    state: &ControlPlaneState,
+    node_name: &str,
+) -> Option<(HostedNodeBinding, PathBuf)> {
+    if let Some(record) = state
+        .inner
+        .registered_nodes
+        .read()
+        .ok()?
+        .get(node_name)
+        .cloned()
+    {
+        return Some((record.binding, record.contract.node.runtime_root.clone()));
+    }
+    state
+        .inner
+        .static_node_bindings
+        .get(node_name)
+        .cloned()
+        .map(|binding| {
+            let runtime_root = state
+                .inner
+                .config
+                .nodes
+                .get(node_name)
+                .map(|node| node.runtime_root.clone())
+                .unwrap_or_else(|| {
+                    hosted_placeholder_runtime_root_for_config(
+                        &state.inner.config,
+                        &state.inner.control_plane,
+                    )
+                });
+            (binding, runtime_root)
+        })
+}
+
 fn resolve_machine_binding(
     state: &ControlPlaneState,
     summary: &HostedMachineSummaryContract,
@@ -4847,24 +4905,52 @@ fn resolve_machine_binding(
         let stored_route = stored_machine_route_context(summary, &placement);
         match resolve_known_node_binding(state, &placement.node_name) {
             Ok(Some((binding, _))) => return Ok((Some(binding), stored_route, None)),
-            Ok(None) | Err(_) => {
-                let stored_issue = match resolve_known_node_binding(state, &placement.node_name) {
-                    Ok(None) => machine_placement_detail(
+            Err(stale_message) => {
+                // The freshness check rejected the binding, but a stored
+                // placement record still points at this node. Hand back
+                // the stored binding optimistically — if the node-agent
+                // is reachable the proxy call succeeds, and if it isn't
+                // the proxy failure is more informative than a synthetic
+                // stale rejection. Brief TTL flaps shouldn't 502 every
+                // read for that machine.
+                if let Some((binding, _)) =
+                    resolve_known_node_binding_for_read(state, &placement.node_name)
+                {
+                    let warning = machine_placement_detail(
                         &stored_route,
                         format!(
-                            "stored placement points at node '{}' but the control plane has no live registered node-agent endpoint for it.",
+                            "stored placement on node '{}' is currently flagged stale; using stored binding optimistically: {stale_message}",
                             placement.node_name
                         ),
+                    );
+                    return Ok((Some(binding), stored_route, Some(warning)));
+                }
+                let stored_issue = machine_placement_detail(
+                    &stored_route,
+                    format!(
+                        "stored placement on node '{}' is not currently usable: {stale_message}",
+                        placement.node_name
                     ),
-                    Err(message) => machine_placement_detail(
-                        &stored_route,
-                        format!(
-                            "stored placement on node '{}' is not currently usable: {message}",
-                            placement.node_name
-                        ),
-                    ),
-                    Ok(Some(_)) => String::new(),
+                );
+                return match resolve_node_binding(state, summary) {
+                    Ok((binding, route)) => Ok((Some(binding), route, None)),
+                    Err((route, message)) => Ok((
+                        None,
+                        route,
+                        Some(format!(
+                            "{stored_issue} Fallback candidate routing also failed: {message}"
+                        )),
+                    )),
                 };
+            }
+            Ok(None) => {
+                let stored_issue = machine_placement_detail(
+                    &stored_route,
+                    format!(
+                        "stored placement points at node '{}' but the control plane has no live registered node-agent endpoint for it.",
+                        placement.node_name
+                    ),
+                );
                 return match resolve_node_binding(state, summary) {
                     Ok((binding, route)) => Ok((Some(binding), route, None)),
                     Err((route, message)) => Ok((
@@ -12110,8 +12196,14 @@ mod tests {
                         HostedNodeRegistration {
                             endpoint: String::from("http://127.0.0.1:9234"),
                             token: String::from("node-secret"),
-                            registered_at: now + 60,
-                            refreshed_at: now + 60,
+                            // Pre-existing refreshed_at sits beyond the
+                            // NODE_AGENT_REGISTRATION_REFRESHED_AT_REGRESSION_TOLERANCE_SECONDS
+                            // window so the node-agent's `now`-stamped
+                            // refresh is rejected as wildly stale rather
+                            // than silently overwriting a far-future
+                            // high-water mark.
+                            registered_at: now + 600,
+                            refreshed_at: now + 600,
                             ttl_seconds: 30,
                         },
                     )]),
