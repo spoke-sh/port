@@ -4724,7 +4724,14 @@ fn hosted_k3s_service_policy(role: &str, machine_name: &str) -> ServicePolicy {
         healthcheck: ServiceHealthcheck {
             policy: ServiceHealthPolicy::Command,
             command: hosted_k3s_service_healthcheck_command(role, machine_name),
-            restart_on_unhealthy: role != "agent",
+            // Both server and agent restart on unhealthy. The supervisor
+            // itself rate-limits via MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD
+            // (per-process) and MANAGED_PROCESS_UNHEALTHY_RESTART_MIN_INTERVAL
+            // (cross-restart), so a kubelet that has wedged into a sticky
+            // unhealthy state (e.g. invalidated service-account tokens) gets
+            // a recovery loop without re-introducing the storm risk that
+            // motivated the previous agent-only opt-out.
+            restart_on_unhealthy: true,
         },
     }
 }
@@ -20745,11 +20752,11 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_k3s_agent_healthcheck_reports_unhealthy_without_restart() {
+    fn hosted_k3s_agent_healthcheck_uses_lease_grace_window_and_rate_limited_restart() {
         let policy = hosted_k3s_service_policy("agent", "cloud-aws-worker");
         assert_eq!(policy.restart, ServiceRestartPolicy::Always);
         assert_eq!(policy.healthcheck.policy, ServiceHealthPolicy::Command);
-        assert!(!policy.healthcheck.restart_on_unhealthy);
+        assert!(policy.healthcheck.restart_on_unhealthy);
         assert_eq!(policy.healthcheck.command[0], "/bin/sh");
         assert_eq!(policy.healthcheck.command[1], "-lc");
         let shell = &policy.healthcheck.command[2];

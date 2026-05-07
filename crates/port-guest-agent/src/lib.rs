@@ -35,6 +35,17 @@ const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_sec
 const MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
 const MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD: u32 = 3;
+// Minimum wall-clock interval between successive *health-triggered* restarts
+// of the same managed service. The per-process grace period above caps how
+// quickly an unhealthy restart can fire after a fresh start, but it resets
+// every restart and so doesn't bound the long-run restart rate when a
+// service keeps flapping (e.g. a kubelet whose service-account tokens have
+// been invalidated). This separate floor throttles restart storms without
+// disabling the recovery loop entirely.
+#[cfg(not(test))]
+const MANAGED_PROCESS_UNHEALTHY_RESTART_MIN_INTERVAL: Duration = Duration::from_secs(300);
+#[cfg(test)]
+const MANAGED_PROCESS_UNHEALTHY_RESTART_MIN_INTERVAL: Duration = Duration::from_millis(50);
 #[cfg(not(test))]
 const MANAGED_PROCESS_HEALTH_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(test)]
@@ -70,6 +81,9 @@ struct ManagedProcessHandle {
     child: Child,
     started_at: Instant,
     consecutive_unhealthy_checks: u32,
+    // Persists across restart_managed_process so MANAGED_PROCESS_UNHEALTHY_RESTART_MIN_INTERVAL
+    // throttles successive health-triggered restarts even when started_at resets.
+    last_health_restart_at: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -315,6 +329,7 @@ impl AgentService {
                 child,
                 started_at: Instant::now(),
                 consecutive_unhealthy_checks: 0,
+                last_health_restart_at: None,
             };
             refresh_managed_process_handle_liveness(&self.root, &mut handle)?;
             let status = managed_service_status(&handle.record);
@@ -846,6 +861,7 @@ fn refresh_managed_process_handle(root: &Path, handle: &mut ManagedProcessHandle
                         restart_detail = append_evidence_detail(&restart_detail, &evidence_path);
                     }
                     handle.record.last_exit_detail = Some(restart_detail.clone());
+                    handle.last_health_restart_at = Some(Instant::now());
                     restart_managed_process(root, handle, restart_detail)?;
                 }
             }
@@ -918,6 +934,9 @@ fn should_restart_unhealthy_managed_service(handle: &ManagedProcessHandle) -> bo
         && matches!(handle.record.health_state, ServiceHealthState::Unhealthy)
         && handle.started_at.elapsed() >= MANAGED_PROCESS_HEALTH_RESTART_GRACE_PERIOD
         && handle.consecutive_unhealthy_checks >= MANAGED_PROCESS_UNHEALTHY_RESTART_THRESHOLD
+        && handle
+            .last_health_restart_at
+            .is_none_or(|at| at.elapsed() >= MANAGED_PROCESS_UNHEALTHY_RESTART_MIN_INTERVAL)
 }
 
 fn restart_managed_process(
