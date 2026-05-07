@@ -4663,9 +4663,16 @@ fn hosted_k3s_service_command(
     command
 }
 
-const HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS: u64 = 120;
+// Maximum age (seconds) of the kubelet's kube-node-lease renewTime
+// before the agent is considered unhealthy. Widened from 120s to 180s
+// so the cumulative cost of one slow lease renewal under load doesn't
+// flip a kubelet that has just successfully reported a node-status
+// update into the unhealthy bucket.
+const HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS: u64 = 180;
+// If the lease was healthy within this window we tolerate a brief
+// stretch of unhealthy state without triggering a restart, on the
+// assumption it's a transient hiccup rather than a wedged kubelet.
 const HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS: u64 = 300;
-const HOSTED_K3S_AGENT_BOOTSTRAP_GRACE_SECONDS: u64 = 600;
 
 fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec<String> {
     let k3s = "/usr/bin/k3s";
@@ -4677,18 +4684,17 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
         "agent" => format!(
             "state_dir=/run/port/health; \
             last_ok_file=\"$state_dir/k3s-agent-cluster-ok\"; \
-            bootstrap_start_file=\"$state_dir/k3s-agent-bootstrap-start\"; \
+            first_lease_file=\"$state_dir/k3s-agent-first-lease-seen\"; \
             mkdir -p \"$state_dir\"; \
             now_epoch=$({busybox} date -u +%s); \
-            if [ ! -f \"$bootstrap_start_file\" ]; then \
-                printf '%s\n' \"$now_epoch\" > \"$bootstrap_start_file\"; \
-            fi; \
-            bootstrap_epoch=$(cat \"$bootstrap_start_file\" 2>/dev/null); \
             {k3s} crictl info >/dev/null 2>&1 || exit 1; \
             cluster_ok=0; \
             if {k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz >/dev/null 2>&1; then \
                 lease_renew_time=$({k3s} kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s -n kube-node-lease get lease {} -o jsonpath='{{.spec.renewTime}}' 2>/dev/null); \
                 if [ -n \"$lease_renew_time\" ]; then \
+                    if [ ! -f \"$first_lease_file\" ]; then \
+                        printf '%s\n' \"$now_epoch\" > \"$first_lease_file\"; \
+                    fi; \
                     lease_epoch=$({busybox} date -u -D '%Y-%m-%dT%H:%M:%S' -d \"$lease_renew_time\" +%s 2>/dev/null); \
                     if [ -n \"$lease_epoch\" ]; then \
                         if test $((now_epoch - lease_epoch)) -le {HOSTED_K3S_AGENT_LEASE_MAX_AGE_SECONDS}; then \
@@ -4701,14 +4707,14 @@ fn hosted_k3s_service_healthcheck_command(role: &str, machine_name: &str) -> Vec
                 {busybox} date -u +%s > \"$last_ok_file\"; \
                 exit 0; \
             fi; \
+            if [ ! -f \"$first_lease_file\" ]; then \
+                exit 0; \
+            fi; \
             if [ -f \"$last_ok_file\" ]; then \
                 last_ok_epoch=$(cat \"$last_ok_file\" 2>/dev/null); \
-                if [ -n \"$last_ok_epoch\" ]; then \
-                    test $((now_epoch - last_ok_epoch)) -le {HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS}; \
+                if [ -n \"$last_ok_epoch\" ] && test $((now_epoch - last_ok_epoch)) -le {HOSTED_K3S_AGENT_TRANSIENT_FAILURE_GRACE_SECONDS}; then \
+                    exit 0; \
                 fi; \
-            fi; \
-            if [ ! -f \"$last_ok_file\" ] && [ -n \"$bootstrap_epoch\" ]; then \
-                test $((now_epoch - bootstrap_epoch)) -le {HOSTED_K3S_AGENT_BOOTSTRAP_GRACE_SECONDS} && exit 0; \
             fi; \
             exit 1",
             shell_single_quote(machine_name)
@@ -20765,20 +20771,38 @@ exec sleep 30
             "/usr/bin/k3s kubectl --kubeconfig /var/lib/rancher/k3s/agent/kubelet.kubeconfig --request-timeout=10s get --raw=/readyz"
         ));
         assert!(shell.contains("last_ok_file=\"$state_dir/k3s-agent-cluster-ok\""));
-        assert!(shell.contains("bootstrap_start_file=\"$state_dir/k3s-agent-bootstrap-start\""));
+        // Bootstrap grace is now event-bounded by the existence of the
+        // first-lease-seen sentinel rather than time-bounded by a process
+        // start timestamp, so kubelet has unlimited room to render its
+        // first node-status update before staleness checks engage.
+        assert!(shell.contains("first_lease_file=\"$state_dir/k3s-agent-first-lease-seen\""));
+        // The first-lease-seen sentinel gets written the first time the
+        // kube-node-lease can be fetched, regardless of its freshness.
+        assert!(shell.contains("if [ ! -f \"$first_lease_file\" ]; then"));
+        assert!(shell.contains("> \"$first_lease_file\""));
+        // After the cluster_ok success path, the script exits 0 if the
+        // first-lease sentinel is missing (event-bounded bootstrap grace).
+        assert!(shell.contains("if [ ! -f \"$first_lease_file\" ]; then exit 0; fi;"));
         assert!(shell.contains("cluster_ok=0"));
         assert!(shell.contains("lease_renew_time="));
         assert!(shell.contains("-n kube-node-lease get lease 'cloud-aws-worker'"));
         assert!(shell.contains(".spec.renewTime"));
         assert!(shell.contains("if [ \"$cluster_ok\" -eq 1 ]"));
         assert!(shell.contains("if [ -f \"$last_ok_file\" ]"));
-        assert!(shell.contains("bootstrap_epoch=$(cat \"$bootstrap_start_file\" 2>/dev/null)"));
         assert!(shell.contains("/bin/busybox date -u -D '%Y-%m-%dT%H:%M:%S'"));
         assert!(shell.contains("now_epoch=$(/bin/busybox date -u +%s)"));
-        assert!(shell.contains("test $((now_epoch - lease_epoch)) -le 120"));
-        assert!(shell.contains("test $((now_epoch - last_ok_epoch)) -le 300"));
-        assert!(shell.contains("if [ ! -f \"$last_ok_file\" ] && [ -n \"$bootstrap_epoch\" ]"));
-        assert!(shell.contains("test $((now_epoch - bootstrap_epoch)) -le 600"));
+        // Lease staleness window widened from 120s to 180s to absorb
+        // legitimate cross-AZ jitter without flipping kubelet to unhealthy.
+        assert!(shell.contains("test $((now_epoch - lease_epoch)) -le 180"));
+        // Transient failure grace is now actually wired to exit 0 (was
+        // dead code in the previous shell layout — the bare `test` result
+        // was discarded and the script always fell through to `exit 1`).
+        assert!(shell.contains(
+            "if [ -n \"$last_ok_epoch\" ] && test $((now_epoch - last_ok_epoch)) -le 300; then"
+        ));
+        // The previous time-bounded bootstrap_epoch grace is gone.
+        assert!(!shell.contains("bootstrap_start_file"));
+        assert!(!shell.contains("bootstrap_epoch"));
     }
 
     #[test]
