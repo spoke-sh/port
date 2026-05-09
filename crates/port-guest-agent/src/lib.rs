@@ -1222,13 +1222,38 @@ fn spawn_managed_process(
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .current_dir(cwd)
+        // GOTRACEBACK=crash escalates Go runtime panics to abort() so the
+        // process produces a SIGABRT (and a core dump) instead of exiting
+        // cleanly. Set as a managed-service default; the caller's `env`
+        // map is applied next and can override.
+        .env("GOTRACEBACK", "crash")
         .envs(env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Allow unlimited core file size so kernel can write a core when the
+    // process is killed by SIGABRT/SIGSEGV/SIGBUS. The actual write path
+    // is determined by /proc/sys/kernel/core_pattern, set in the guest
+    // /init script. Inside the guest the supervisor runs as root, so we
+    // can raise both soft and hard limits.
+    #[cfg(unix)]
+    unsafe {
+        command.pre_exec(|| {
+            let rlim = libc::rlimit {
+                rlim_cur: libc::RLIM_INFINITY,
+                rlim_max: libc::RLIM_INFINITY,
+            };
+            if libc::setrlimit(libc::RLIMIT_CORE, &rlim) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to spawn managed service '{name}'"))?;
 

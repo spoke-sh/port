@@ -475,6 +475,14 @@ mount_if_needed sysfs sysfs /sys
 mkdir -p /run/port /tmp /var/log /sys/fs/cgroup
 mount_if_needed cgroup2 cgroup2 /sys/fs/cgroup
 mkdir -p /etc/rancher/k3s /opt/cni/bin /var/lib/cni /var/lib/kubelet /var/lib/rancher/k3s /var/lib/rancher/k3s/agent/images
+# Capture core dumps from managed services on SIGABRT/SIGSEGV/SIGBUS.
+# RLIMIT_CORE is raised per-process by the supervisor (port-guest-agent's
+# spawn_managed_process pre_exec), GOTRACEBACK=crash promotes Go runtime
+# panics to abort, and core_pattern routes the resulting core to a stable
+# absolute path under /var/log/cores so it survives in the writable
+# overlay and can be pulled off the guest via guest:copy after a crash.
+mkdir -p /var/log/cores
+echo '/var/log/cores/core.%e.%p.%t' > /proc/sys/kernel/core_pattern 2>/dev/null || true
 /bin/ip link set lo up 2>/dev/null || true
 /bin/ip addr add 127.0.0.1/8 dev lo 2>/dev/null || true
 /bin/ip -6 addr add ::1/128 dev lo 2>/dev/null || true
