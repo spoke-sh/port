@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/c23fa0ff46bbbfc4026e2f54cf4facf713dae7da";
-    k3s-nixpkgs.url = "github:NixOS/nixpkgs/c23fa0ff46bbbfc4026e2f54cf4facf713dae7da";
+    k3s-nixpkgs.url = "github:NixOS/nixpkgs/173d0ad7a974f8543a9ab01d2271b2e290341b33";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     sift = {
