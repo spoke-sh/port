@@ -394,6 +394,7 @@ pub struct HostedK3sLegacyRuntimeArtifact {
 pub enum HostedK3sLegacyRuntimeDriftState {
     Clear,
     DetachedRuntimeDetected,
+    Unknown,
 }
 
 impl std::fmt::Display for HostedK3sLegacyRuntimeDriftState {
@@ -401,6 +402,7 @@ impl std::fmt::Display for HostedK3sLegacyRuntimeDriftState {
         match self {
             Self::Clear => f.write_str("clear"),
             Self::DetachedRuntimeDetected => f.write_str("detached-runtime-detected"),
+            Self::Unknown => f.write_str("unknown"),
         }
     }
 }
@@ -3880,11 +3882,26 @@ pub fn hosted_k3s_cluster_access(
     let ha_status_detail = hosted_k3s_ha_status_detail(&cluster, &control_plane_placements);
     let stable_endpoint_posture = hosted_k3s_access_stable_endpoint_posture(ha_status);
     let stable_endpoint_detail = hosted_k3s_access_stable_endpoint_detail(&cluster, ha_status);
-    let legacy_runtime_artifacts =
-        hosted_k3s_legacy_runtime_artifacts(config, runtime_root, cluster_name, &primary_server)?;
-    let legacy_runtime_drift = hosted_k3s_legacy_runtime_drift_state(&legacy_runtime_artifacts);
-    let legacy_runtime_drift_detail =
-        hosted_k3s_legacy_runtime_drift_detail(&legacy_runtime_artifacts);
+    let (legacy_runtime_artifacts, legacy_runtime_drift, legacy_runtime_drift_detail) =
+        match hosted_k3s_legacy_runtime_artifacts(
+            config,
+            runtime_root,
+            cluster_name,
+            &primary_server,
+        ) {
+            Ok(artifacts) => {
+                let drift = hosted_k3s_legacy_runtime_drift_state(&artifacts);
+                let detail = hosted_k3s_legacy_runtime_drift_detail(&artifacts);
+                (artifacts, drift, detail)
+            }
+            Err(error) => (
+                Vec::new(),
+                HostedK3sLegacyRuntimeDriftState::Unknown,
+                format!(
+                    "Hosted AWS x86_64 PVM legacy-runtime drift is unknown: failed to inspect detached K3s server PID/log artifacts outside the canonical managed-service runtime path (/run/port/services/*) on primary control-plane machine '{primary_server}': {error:#}"
+                ),
+            ),
+        };
     let network_identities = hosted_k3s_machine_network_identities(config, &machine_access);
     for machine in &mut machine_access {
         let machine_name = machine
@@ -21684,6 +21701,100 @@ exec sleep 30
         assert_eq!(
             report.node_visibility.state,
             super::HostedK3sReadinessState::Unavailable
+        );
+        assert!(report.kubeconfig.contains("apiVersion: v1"));
+
+        server_guest
+            .join()
+            .expect("server guest thread should complete");
+        worker_guest
+            .join()
+            .expect("worker guest thread should complete");
+
+        let _ = Command::new("kill")
+            .arg(bootstrap.server_launches[0].pid.to_string())
+            .status();
+        for metadata in bootstrap.worker_launches {
+            let _ = Command::new("kill").arg(metadata.pid.to_string()).status();
+        }
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+    }
+
+    #[test]
+    fn hosted_k3s_cluster_kubeconfig_succeeds_when_legacy_runtime_drift_probe_fails() {
+        let _guard = hosted_server_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = fs::remove_dir_all(hosted_placeholder_runtime_root("demo"));
+        let tempdir = tempdir().expect("tempdir should exist");
+        let mut config = sample_hosted_k3s_config(tempdir.path());
+        write_fake_standard_firecracker_artifacts(&mut config, tempdir.path());
+        let _binary = write_fake_firecracker_binary(tempdir.path(), "firecracker");
+        write_fake_network_binaries(tempdir.path());
+        let _path_guard = ScopedPathEnv::prepend(tempdir.path());
+
+        let server_paths =
+            RuntimePaths::for_machine(&config.nodes["aws-linux-node"].runtime_root, "cloud-aws");
+        let worker_paths = RuntimePaths::for_machine(
+            &config.nodes["aws-linux-node"].runtime_root,
+            "cloud-aws-worker",
+        );
+        let server_guest = spawn_hosted_guest_sequence_server(
+            server_paths,
+            vec![
+                hosted_demo_server_start(),
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_join_token_command(),
+                    stdout: String::from("demo-join-token\n"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_api_readiness_command(),
+                    stdout: String::from("ok\n"),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_kubeconfig_command(),
+                    stdout: String::from(
+                        "apiVersion: v1\nclusters:\n- cluster:\n    server: https://demo-k3s.internal:6443\n",
+                    ),
+                },
+                HostedGuestExpectedOperation::Exec {
+                    command: hosted_k3s_visibility_command(),
+                    stdout: String::from(
+                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
+                    ),
+                },
+                HostedGuestExpectedOperation::ExecFailure {
+                    command: super::hosted_k3s_legacy_runtime_drift_command(),
+                    stderr: String::from("hosted request timed out"),
+                    exit_code: 124,
+                },
+            ],
+        );
+        let worker_guest =
+            spawn_hosted_guest_sequence_server(worker_paths, vec![hosted_demo_worker_start()]);
+
+        let config = start_named_live_hosted_servers_inner(&config, &["aws-linux-node"])
+            .expect("hosted servers should start");
+        let bootstrap = bootstrap_hosted_k3s_cluster(&config, tempdir.path(), "demo")
+            .expect("hosted k3s bootstrap should succeed");
+        let report = hosted_k3s_cluster_kubeconfig(&config, tempdir.path(), "demo")
+            .expect("kubeconfig handoff should not depend on legacy drift telemetry");
+
+        assert_eq!(
+            report.kubeconfig_availability.state,
+            super::HostedK3sReadinessState::Ready
+        );
+        assert_eq!(
+            report.legacy_runtime_drift,
+            super::HostedK3sLegacyRuntimeDriftState::Unknown
+        );
+        assert!(report.legacy_runtime_artifacts.is_empty());
+        assert!(
+            report
+                .legacy_runtime_drift_detail
+                .contains("legacy-runtime drift is unknown"),
+            "{}",
+            report.legacy_runtime_drift_detail
         );
         assert!(report.kubeconfig.contains("apiVersion: v1"));
 
