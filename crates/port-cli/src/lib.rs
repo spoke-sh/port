@@ -1412,15 +1412,8 @@ fn run_cluster(
                     "api_endpoint": result.api_endpoint,
                     "stable_endpoint_posture": result.stable_endpoint_posture,
                     "stable_endpoint_detail": result.stable_endpoint_detail,
-                    "machine_runtime_readiness": result.machine_runtime_readiness,
-                    "api_surface": result.api_surface,
-                    "api_readiness": result.api_readiness,
-                    "api_output": result.api_output,
                     "kubeconfig_surface": result.kubeconfig_surface,
                     "kubeconfig_availability": result.kubeconfig_availability,
-                    "visibility_surface": result.visibility_surface,
-                    "node_visibility": result.node_visibility,
-                    "visibility_output": result.visibility_output,
                     "boundary_notes": result.boundary_notes,
                     "kubeconfig": rewritten,
                 });
@@ -1447,7 +1440,15 @@ fn run_cluster(
                                 result.worker_machines.join(" ")
                             }
                         );
-                        print_hosted_k3s_readiness(&result);
+                        println!("kubeconfig surface: {}", result.kubeconfig_surface);
+                        println!(
+                            "kubeconfig availability: {}",
+                            result.kubeconfig_availability.state
+                        );
+                        println!(
+                            "kubeconfig detail: {}",
+                            result.kubeconfig_availability.detail
+                        );
                         print_boundary_notes(&result.boundary_notes);
                         println!("kubeconfig:");
                         print!("{}", rewritten);

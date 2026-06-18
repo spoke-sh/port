@@ -516,6 +516,23 @@ pub struct HostedK3sClusterAccessReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedK3sClusterKubeconfigReport {
+    pub cluster_name: String,
+    pub control_plane: String,
+    pub host_group: String,
+    pub server_machines: Vec<String>,
+    pub worker_machines: Vec<String>,
+    pub api_endpoint: String,
+    pub stable_endpoint_posture: HostedK3sStableEndpointPosture,
+    pub stable_endpoint_detail: String,
+    pub kubeconfig_surface: String,
+    pub kubeconfig_availability: HostedK3sReadinessGate,
+    #[serde(default)]
+    pub boundary_notes: Vec<String>,
+    pub kubeconfig: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostedK3sDownResult {
     pub cluster_name: String,
     pub control_plane: String,
@@ -4006,38 +4023,42 @@ fn hosted_k3s_degraded_readiness_events(
     events
 }
 
-fn hosted_k3s_cluster_readiness_summary(report: &HostedK3sClusterAccessReport) -> String {
-    format!(
-        "machine-runtime={} ({}) ; api={} ({}) ; node-visibility={} ({}) ; kubeconfig={} ({})",
-        report.machine_runtime_readiness.state,
-        report.machine_runtime_readiness.detail,
-        report.api_readiness.state,
-        report.api_readiness.detail,
-        report.node_visibility.state,
-        report.node_visibility.detail,
-        report.kubeconfig_availability.state,
-        report.kubeconfig_availability.detail
-    )
-}
-
 pub fn hosted_k3s_cluster_kubeconfig(
     config: &PortConfig,
     runtime_root: &Path,
     cluster_name: &str,
-) -> Result<HostedK3sClusterAccessReport> {
-    let report = hosted_k3s_cluster_access(config, runtime_root, cluster_name)?;
-    if !matches!(
-        report.kubeconfig_availability.state,
-        HostedK3sReadinessState::Ready
-    ) || report.kubeconfig.trim().is_empty()
+) -> Result<HostedK3sClusterKubeconfigReport> {
+    let cluster = load_hosted_k3s_cluster(config, cluster_name)?;
+    let primary_server = hosted_k3s_primary_server_machine(cluster_name, &cluster)?.to_string();
+    let kubeconfig_probe =
+        hosted_k3s_kubeconfig_probe(config, runtime_root, cluster_name, &primary_server);
+    if !matches!(kubeconfig_probe.gate.state, HostedK3sReadinessState::Ready)
+        || kubeconfig_probe.output.trim().is_empty()
     {
         bail!(
             "hosted k3s cluster '{}' kubeconfig handoff is unavailable: {}",
             cluster_name,
-            hosted_k3s_cluster_readiness_summary(&report)
+            kubeconfig_probe.gate.detail
         );
     }
-    Ok(report)
+
+    let stable_endpoint_posture = hosted_k3s_bootstrap_stable_endpoint_posture(&cluster);
+    let stable_endpoint_detail = hosted_k3s_bootstrap_stable_endpoint_detail(&cluster);
+    let boundary_notes = hosted_k3s_cluster_boundary_notes(&cluster);
+    Ok(HostedK3sClusterKubeconfigReport {
+        cluster_name: cluster_name.to_string(),
+        control_plane: cluster.control_plane,
+        host_group: cluster.host_group,
+        server_machines: cluster.server_machines,
+        worker_machines: cluster.worker_machines,
+        api_endpoint: cluster.api_endpoint,
+        stable_endpoint_posture,
+        stable_endpoint_detail,
+        kubeconfig_surface: hosted_k3s_kubeconfig_surface(&primary_server),
+        kubeconfig_availability: kubeconfig_probe.gate,
+        boundary_notes,
+        kubeconfig: kubeconfig_probe.output,
+    })
 }
 
 pub fn bootstrap_hosted_k3s_cluster(
@@ -21664,23 +21685,10 @@ exec sleep 30
                     stdout: String::from("demo-join-token\n"),
                 },
                 HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_api_readiness_command(),
-                    stdout: String::from("ok\n"),
-                },
-                HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_kubeconfig_command(),
                     stdout: String::from(
                         "apiVersion: v1\nclusters:\n- cluster:\n    server: https://demo-k3s.internal:6443\n",
                     ),
-                },
-                HostedGuestExpectedOperation::ExecFailure {
-                    command: hosted_k3s_visibility_command(),
-                    stderr: String::from("timed out waiting for node list"),
-                    exit_code: 1,
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: super::hosted_k3s_legacy_runtime_drift_command(),
-                    stdout: String::new(),
                 },
             ],
         );
@@ -21698,9 +21706,10 @@ exec sleep 30
             report.kubeconfig_availability.state,
             super::HostedK3sReadinessState::Ready
         );
-        assert_eq!(
-            report.node_visibility.state,
-            super::HostedK3sReadinessState::Unavailable
+        assert!(
+            report
+                .kubeconfig_surface
+                .contains("port guest exec --machine cloud-aws")
         );
         assert!(report.kubeconfig.contains("apiVersion: v1"));
 
@@ -21748,25 +21757,10 @@ exec sleep 30
                     stdout: String::from("demo-join-token\n"),
                 },
                 HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_api_readiness_command(),
-                    stdout: String::from("ok\n"),
-                },
-                HostedGuestExpectedOperation::Exec {
                     command: hosted_k3s_kubeconfig_command(),
                     stdout: String::from(
                         "apiVersion: v1\nclusters:\n- cluster:\n    server: https://demo-k3s.internal:6443\n",
                     ),
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_visibility_command(),
-                    stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
-                    ),
-                },
-                HostedGuestExpectedOperation::ExecFailure {
-                    command: super::hosted_k3s_legacy_runtime_drift_command(),
-                    stderr: String::from("hosted request timed out"),
-                    exit_code: 124,
                 },
             ],
         );
@@ -21784,17 +21778,10 @@ exec sleep 30
             report.kubeconfig_availability.state,
             super::HostedK3sReadinessState::Ready
         );
-        assert_eq!(
-            report.legacy_runtime_drift,
-            super::HostedK3sLegacyRuntimeDriftState::Unknown
-        );
-        assert!(report.legacy_runtime_artifacts.is_empty());
         assert!(
             report
-                .legacy_runtime_drift_detail
-                .contains("legacy-runtime drift is unknown"),
-            "{}",
-            report.legacy_runtime_drift_detail
+                .kubeconfig_surface
+                .contains("port guest exec --machine cloud-aws")
         );
         assert!(report.kubeconfig.contains("apiVersion: v1"));
 
@@ -21815,7 +21802,7 @@ exec sleep 30
     }
 
     #[test]
-    fn hosted_k3s_cluster_kubeconfig_failure_preserves_readiness_summary() {
+    fn hosted_k3s_cluster_kubeconfig_failure_reports_kubeconfig_boundary() {
         let _guard = hosted_server_lock()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -21841,24 +21828,10 @@ exec sleep 30
                     command: hosted_k3s_join_token_command(),
                     stdout: String::from("demo-join-token\n"),
                 },
-                HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_api_readiness_command(),
-                    stdout: String::from("ok\n"),
-                },
                 HostedGuestExpectedOperation::ExecFailure {
                     command: hosted_k3s_kubeconfig_command(),
                     stderr: String::from("cat: /etc/rancher/k3s/k3s.yaml: No such file"),
                     exit_code: 1,
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: hosted_k3s_visibility_command(),
-                    stdout: String::from(
-                        "NAME              STATUS   ROLES                  AGE   VERSION\ncloud-aws         Ready    control-plane,master   1m    v1.35.4+k3s1\ncloud-aws-worker  Ready    <none>                 1m    v1.35.4+k3s1\n",
-                    ),
-                },
-                HostedGuestExpectedOperation::Exec {
-                    command: super::hosted_k3s_legacy_runtime_drift_command(),
-                    stdout: String::new(),
                 },
             ],
         );
@@ -21877,10 +21850,10 @@ exec sleep 30
             message.contains("kubeconfig handoff is unavailable"),
             "{message}"
         );
-        assert!(message.contains("machine-runtime=ready"), "{message}");
-        assert!(message.contains("api=ready"), "{message}");
-        assert!(message.contains("node-visibility=ready"), "{message}");
-        assert!(message.contains("kubeconfig=unavailable"), "{message}");
+        assert!(
+            message.contains("could not read '/etc/rancher/k3s/k3s.yaml'"),
+            "{message}"
+        );
 
         server_guest
             .join()

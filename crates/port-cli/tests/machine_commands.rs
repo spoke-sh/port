@@ -1391,10 +1391,6 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 stdout: String::from("demo-join-token\n"),
             },
             HostedGuestExpectedOperation::Exec {
-                command: hosted_k3s_api_readiness_command(),
-                stdout: String::from("ok\n"),
-            },
-            HostedGuestExpectedOperation::Exec {
                 command: vec![
                     String::from("/bin/sh"),
                     String::from("-lc"),
@@ -1431,20 +1427,6 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
                 stdout: String::from(
                     "apiVersion: v1\nclusters:\n- cluster:\n    server: https://cloud-aws:6443\n",
                 ),
-            },
-            HostedGuestExpectedOperation::Exec {
-                command: vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from("k3s kubectl get nodes -o wide"),
-                ],
-                stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
-                ),
-            },
-            HostedGuestExpectedOperation::Exec {
-                command: hosted_k3s_legacy_runtime_drift_command(),
-                stdout: String::new(),
             },
         ],
     );
@@ -1527,9 +1509,11 @@ fn cli_cluster_show_and_lifecycle_surface_hosted_k3s_microvms() {
             "stable-endpoint detail: Hosted AWS x86_64 PVM stable endpoint posture is manual-rewrite-required"
         )
     );
-    assert!(kubeconfig_stdout.contains("machine-runtime readiness: ready"));
-    assert!(kubeconfig_stdout.contains("api readiness: ready"));
+    assert!(kubeconfig_stdout.contains("kubeconfig surface: port guest exec --machine cloud-aws"));
     assert!(kubeconfig_stdout.contains("kubeconfig availability: ready"));
+    assert!(!kubeconfig_stdout.contains("machine-runtime readiness:"));
+    assert!(!kubeconfig_stdout.contains("api readiness:"));
+    assert!(!kubeconfig_stdout.contains("node-visibility readiness:"));
     assert!(kubeconfig_stdout.contains("server: https://demo-k3s.internal:6443"));
 
     let down = Command::new(port_bin())
@@ -1948,7 +1932,7 @@ fn cli_cluster_status_json_surfaces_legacy_detached_runtime_drift() {
 }
 
 #[test]
-fn cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail() {
+fn cli_cluster_kubeconfig_failure_reports_kubeconfig_boundary() {
     cleanup_hosted_registration_state();
     let temp = tempdir().expect("tempdir should exist");
     let hosted_runtime_root = temp.path().join("hosted/aws-linux-node");
@@ -2000,10 +1984,6 @@ fn cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail() {
     let server_guest = spawn_hosted_guest_sequence_server(
         server_paths,
         vec![
-            HostedGuestExpectedOperation::Exec {
-                command: hosted_k3s_api_readiness_command(),
-                stdout: String::from("ok\n"),
-            },
             HostedGuestExpectedOperation::ExecFailure {
                 command: vec![
                     String::from("/bin/sh"),
@@ -2042,23 +2022,6 @@ fn cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail() {
                 ],
                 stderr: String::from("cat: /etc/rancher/k3s/k3s.yaml: No such file"),
                 exit_code: 1,
-            },
-            HostedGuestExpectedOperation::Exec {
-                command: vec![
-                    String::from("/bin/sh"),
-                    String::from("-lc"),
-                    String::from("k3s kubectl get nodes -o wide"),
-                ],
-                stdout: String::from(
-                    "NAME        STATUS   ROLES                  AGE   VERSION\ncloud-aws   Ready    control-plane,master   1m    v1.35.4+k3s1\n",
-                ),
-            },
-            HostedGuestExpectedOperation::ManagedServiceList {
-                statuses: vec![running_managed_service_status("k3s-server")],
-            },
-            HostedGuestExpectedOperation::Exec {
-                command: hosted_k3s_legacy_runtime_drift_command(),
-                stdout: String::new(),
             },
         ],
     );
@@ -2112,10 +2075,10 @@ fn cli_cluster_kubeconfig_failure_preserves_hosted_readiness_detail() {
         stderr.contains("kubeconfig handoff is unavailable"),
         "{stderr}"
     );
-    assert!(stderr.contains("machine-runtime=unavailable"), "{stderr}");
-    assert!(stderr.contains("api=ready"), "{stderr}");
-    assert!(stderr.contains("node-visibility=ready"), "{stderr}");
-    assert!(stderr.contains("kubeconfig=unavailable"), "{stderr}");
+    assert!(
+        stderr.contains("could not read '/etc/rancher/k3s/k3s.yaml'"),
+        "{stderr}"
+    );
 
     server_guest
         .join()
