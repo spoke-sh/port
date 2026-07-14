@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/c23fa0ff46bbbfc4026e2f54cf4facf713dae7da";
-    k3s-nixpkgs.url = "github:NixOS/nixpkgs/173d0ad7a974f8543a9ab01d2271b2e290341b33";
+    k3s-nixpkgs.url = "github:NixOS/nixpkgs/6cdc7fc76e8bf7fde9fa43a849fcaaa70e230dee";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     sift = {
@@ -103,6 +103,8 @@
           nativeBuildInputs = [ pkgs.makeWrapper ];
           postBuild = ''
             wrapProgram $out/bin/port \
+              --set PORT_K3S_NIXPKGS_FLAKE ${k3s-nixpkgs} \
+              --set PORT_K3S_PACKAGE_ATTR k3s_1_35 \
               --prefix PATH : ${pkgs.lib.makeBinPath portRuntimeDeps}
           '';
         };
